@@ -369,6 +369,25 @@ openttd-agent/
 5. **ServerDate 轮询**: 订阅 Date (Monthly) + Poll Date → 收到 `ServerDate` raw date，解码正确。
 6. **新地图无公司**: 纯净图没有 company → `CompanyEconomy` 不会出现，直到客户端加入或 `start_ai`。这是预期行为。
 
+### 10.7 M1 实测结果（v0.1.0 完成）
+以下事实经真机 (OpenTTD 15.0, dedicated, seed 可控) 验证：
+1. **`start_ai` 经 RCON 可创建公司**: `rcon start_ai "CPU"` → `ServerCompanyNew(id=0)` → `ServerCompanyInfo`（`isAi:true`, `inauguratedYear:1950`）→ poll `CompanyEconomy` **即时返回**（无需等季度翻转）。
+2. **economy payload 含 u64 金额**: money/loan/income/companyValue 是 `uint64`，JS 需 BigInt；开局 CPU AI `money=100000 loan=100000`（贷款开工）。
+3. **本地 AI 包位置**: 用户级 `~/Documents/OpenTTD/content_download/ai/*.tar`（OpenTTD 15 以 tar 下载包存储，运行时解包）；app 内置 `Resources/ai` 只有 compat shim。→ AI 可用性探测不能用文件系统（tar 未解包查不到），用「已知集 + OPENTTD_AI_LIST 覆盖」。
+4. **CPU AI 行为**: 一家道路公司（road AI），开局即贷款 10 万，会自行买/跑公交或货车。
+5. **ServerError payload = 单 NUL 字符串**（非 cstr 对）—— decode 需用单 cstr 读取。
+6. **WS/HTTP 广播链路**: `--watch` 下 WS snapshot（连接即全量）+ 增量事件（seq 单调递增）；poll 节奏 5s 保持曲线新鲜，date 按月推。
+7. **SIGINT 优雅关闭**: pause → close client/web → stop server，无残留进程/端口。
+
+## 10.8 里程碑进度
+| 里程碑 | 状态 | 证据 |
+|---|---|---|
+| M0 环境钉死 | ✅ | v0.0.1 probe 真机通过; §10.6 |
+| M1 观测闭环 | ✅ | v0.1.0: AdminClient+WorldState+Web dashboard+`--watch` 真机通过; §10.7 |
+| M2 最小决策闭环 | ⬜ | 下一版 (Executor AI + Pi Agent) |
+| M3 进化闭环 | ⬜ | |
+| M4 打磨 | ⬜ | |
+
 ---
 
 ## 附录 A — 关键事实来源
