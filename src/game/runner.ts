@@ -63,26 +63,21 @@ export async function runWatch(
 	let web: WebServer | null = null;
 	let companiesSeen = 0;
 	let stopRequested = false;
+	let resolveStopped: (() => void) | null = null;
 
-	// Control-C / SIGTERM handling: pause, save, clean shutdown.
-	const shutdown = async (code: number) => {
+	// Control-C / SIGTERM handling. IMPORTANT: the signal handlers only flip a
+	// flag / resolve a promise — they must NOT run async shutdown directly.
+	// Empirically (OpenTTD 15.0) invoking socket writes/close as an async
+	// continuation of a signal callback races the server's admin receive loop
+	// and aborts it (SPEC §10.8). Shutdown runs in normal event-loop flow below.
+	const requestStop = (_code: number) => {
 		if (stopRequested) return;
 		stopRequested = true;
 		console.log("[watch] shutting down…");
-		try {
-			client?.rcon("pause");
-			client?.rcon("save");
-		} catch {
-			/* best-effort */
-		}
-		await sleep(300);
-		client?.close();
-		if (web) await web.stop();
-		await mgr.stop();
-		process.exit(code);
+		resolveStopped?.();
 	};
-	process.once("SIGINT", () => void shutdown(0));
-	process.once("SIGTERM", () => void shutdown(0));
+	process.once("SIGINT", () => requestStop(0));
+	process.once("SIGTERM", () => requestStop(0));
 	mgr.onExit = (code) => {
 		if (!stopRequested && code !== 0) {
 			console.error(`[watch] server exited unexpectedly code=${code}`);
@@ -148,8 +143,10 @@ export async function runWatch(
 
 	console.log(`[watch] observing… (Ctrl-C to stop)`);
 
-	// Wait forever until shutdown.
+	// Wait for a stop request. The signal handler only flips stopRequested; the
+	// actual teardown runs here in normal event-loop flow (see requestStop note).
 	await new Promise<void>((resolve) => {
+		resolveStopped = resolve;
 		const check = () => {
 			if (stopRequested) resolve();
 			else setTimeout(check, 300);
@@ -157,7 +154,19 @@ export async function runWatch(
 		check();
 	});
 
+	// --- graceful teardown (normal flow, NOT from a signal callback) ---
 	clearInterval(pollTimer);
+	try {
+		client?.rcon("pause");
+		client?.rcon("save");
+	} catch {
+		/* best-effort */
+	}
+	await sleep(300);
+	client?.close();
+	if (web) await web.stop();
+	await mgr.stop();
+
 	const durationMs = Date.now() - started;
 	return {
 		exitCode: 0,

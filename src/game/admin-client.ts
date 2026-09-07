@@ -78,7 +78,6 @@ export class AdminClient {
 	private sock: net.Socket | null = null;
 	private parser = new FrameStreamParser();
 	private status: ClientStatus = "idle";
-	private welcomed = false;
 	private joined = false;
 	private seq = 0;
 	private reconnectAttempts = 0;
@@ -201,14 +200,19 @@ export class AdminClient {
 		}
 	}
 
-	/** Graceful teardown: quit + destroy socket; disable reconnect. */
+	/** Graceful teardown: destroy socket + disable reconnect.
+	 *
+	 * NOTE: we deliberately do NOT send AdminQuit. Empirically (OpenTTD 15.0,
+	 * SPEC §10.7/§10.8) sending AdminQuit then destroying triggers an abort in
+	 * the server's ServerNetworkAdminSocketHandler::OTTD_CloseConnection path
+	 * (use-after-free in the admin receive loop). The server detects the TCP EOF
+	 * from socket destroy and cleans up cleanly. */
 	close(): void {
 		this.closing = true;
 		if (this.reconnectTimer) {
 			clearTimeout(this.reconnectTimer);
 			this.reconnectTimer = null;
 		}
-		this.quit();
 		this.sock?.destroy();
 		this.sock = null;
 		this.setStatus("closed");
@@ -244,7 +248,6 @@ export class AdminClient {
 			case AdminPacketType.ServerWelcome: {
 				const info = decodeWelcome(pkt.payload);
 				this.joined = true;
-				this.welcomed = true;
 				this.reconnectAttempts = 0;
 				if (info) this.callbacks.onWelcome?.(info);
 				// initial snapshot

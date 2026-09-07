@@ -328,11 +328,8 @@ class AdminProbeClient {
 	}
 
 	close(): void {
-		try {
-			this.send(AdminPacketType.AdminQuit, () => {});
-		} catch {
-			/* ignore */
-		}
+		// No AdminQuit: OpenTTD 15.0 aborts in the server's admin-socket close
+		// path if we send Quit then destroy (SPEC §10.7). EOF from destroy is safe.
 		this.sock?.destroy();
 		this.sock = null;
 	}
