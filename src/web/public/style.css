@@ -1,0 +1,50 @@
+/* Minimal dashboard stylesheet. */
+:root {
+  --bg: #101418;
+  --panel: #182027;
+  --ink: #dde5ea;
+  --muted: #7f929e;
+  --accent: #ffb347;
+  --pos: #7bc96f;
+  --neg: #e06c75;
+  --line: #26323a;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font: 14px/1.45 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+header { display:flex; flex-wrap:wrap; gap:14px; align-items:baseline; justify-content:space-between;
+  padding: 14px 20px; background: linear-gradient(180deg,#15202a,#101418); border-bottom:1px solid var(--line); }
+h1 { font-size:17px; margin:0; }
+.dim { color: var(--muted); font-weight: normal; font-size: 12px; }
+.stats { display:flex; gap:26px; }
+.stat .lbl { display:block; font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); }
+.stat .val { font-variant-numeric: tabular-nums; font-size:16px; }
+main { padding: 18px 20px; max-width: 1080px; margin: 0 auto; display:flex; flex-direction:column; gap:18px; }
+
+/* company cards */
+#companies { display:grid; grid-template-columns: repeat(auto-fill,minmax(260px,1fr)); gap:12px; }
+.ccard { background: var(--panel); border:1px solid var(--line); border-radius:10px; padding:12px 14px; }
+.ccard h3 { margin:0 0 4px; font-size:15px; display:flex; justify-content:space-between; gap:8px;}
+.ccard .tag { font-size:10px; padding:1px 7px; border-radius:9px; background:#2a3945; color:#b9ccd8; align-self:center; }
+.ccard table { width:100%; border-collapse:collapse; font-variant-numeric: tabular-nums; }
+.ccard td { padding:2px 0; color:var(--ink); }
+.ccard td:first-child { color: var(--muted); width:42%; }
+.ccard .money { text-align:right; font-weight:600; }
+.pos { color: var(--pos); } .neg { color: var(--neg); }
+.empty { color: var(--muted); grid-column: 1 / -1; padding: 30px; text-align:center; border:1px dashed var(--line); border-radius:10px;}
+
+/* panels */
+.panel { background: var(--panel); border:1px solid var(--line); border-radius:10px; padding: 14px 16px; }
+.panel h2 { margin:0 0 10px; font-size:13px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); font-weight:600; }
+canvas { width:100%; height:auto; background:#0d1216; border-radius:6px; }
+
+/* event stream */
+ol.events { list-style:none; margin:0; padding:0; max-height:360px; overflow-y:auto; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size:12px;}
+ol.events li { padding:3px 6px; border-bottom:1px solid #202b33; display:flex; gap:10px; }
+ol.events li .seq { color:var(--muted); min-width:34px; text-align:right;}
+ol.events li .tag { min-width:110px; }
+ol.events .date { color:#5fb3ff; } ol.events .company_info,ol.events .company_new{ color:#c3a6ff; }
+ol.events .company_economy{ color:var(--pos); } ol.events .console{ color:#e5c07b; }
+ol.events li .payload{ color:var(--muted); word-break:break-all; }

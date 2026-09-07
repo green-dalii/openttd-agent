@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>openttd-agent · dashboard</title>
+<link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+<header>
+  <h1>openttd-agent <span class="dim">v0.1.0 observation loop</span></h1>
+  <div class="stats">
+    <div class="stat"><span class="lbl">Game date</span><span id="g-date" class="val">—</span></div>
+    <div class="stat"><span class="lbl">Companies</span><span id="g-companies" class="val">—</span></div>
+    <div class="stat"><span class="lbl">Events</span><span id="g-events" class="val">0</span></div>
+    <div class="stat"><span class="lbl">Link</span><span id="g-link" class="val dim">…</span></div>
+  </div>
+</header>
+
+<main>
+  <section id="companies"></section>
+
+  <section class="panel">
+    <h2>Cash history (per company, per poll/quarter)</h2>
+    <canvas id="chart" width="900" height="260"></canvas>
+  </section>
+
+  <section class="panel">
+    <h2>Event stream <span class="dim">(newest last)</span></h2>
+    <ol id="events" class="events"></ol>
+  </section>
+</main>
+
+<script src="/app.js"></script>
+</body>
+</html>

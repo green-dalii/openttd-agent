@@ -22,12 +22,15 @@ import {
 	FrameStreamParser,
 } from "../game/admin-protocol.js";
 import { handleServerPacket } from "../game/observer.js";
+import { runWatch } from "../game/runner.js";
 
 interface CliArgs {
-	mode: "probe" | "dry-run" | "help";
+	mode: "probe" | "dry-run" | "watch" | "help";
 	year?: number;
 	seed?: number;
 	timeoutMs: number;
+	aiName?: string;
+	webPort?: number;
 }
 
 function parseArgs(argv: string[]): CliArgs {
@@ -35,11 +38,16 @@ function parseArgs(argv: string[]): CliArgs {
 	let year: number | undefined;
 	let seed: number | undefined;
 	let timeoutMs = 15_000;
+	let aiName: string | undefined;
+	let webPort: number | undefined;
 	for (let i = 0; i < argv.length; i++) {
 		const a = argv[i]!;
 		switch (a) {
 			case "--probe":
 				mode = "probe";
+				break;
+			case "--watch":
+				mode = "watch";
 				break;
 			case "--dry-run":
 				mode = "dry-run";
@@ -53,6 +61,12 @@ function parseArgs(argv: string[]): CliArgs {
 			case "--timeout-ms":
 				timeoutMs = parseIntNum(argv[++i], "--timeout-ms");
 				break;
+			case "--ai":
+				aiName = argv[++i];
+				break;
+			case "--web-port":
+				webPort = parseIntNum(argv[++i], "--web-port");
+				break;
 			case "-h":
 			case "--help":
 				mode = "help";
@@ -61,7 +75,7 @@ function parseArgs(argv: string[]): CliArgs {
 				throw new ConfigError(`unknown option: ${a}`);
 		}
 	}
-	return { mode, year, seed, timeoutMs };
+	return { mode, year, seed, timeoutMs, aiName, webPort };
 }
 
 function parseIntNum(v: string | undefined, label: string): number {
@@ -73,17 +87,22 @@ function parseIntNum(v: string | undefined, label: string): number {
 const USAGE = `openttd-agent — OpenTTD Admin Port probe / runner
 
 Usage:
-  ppnpm run cli --dry-run                Print resolved config, exit (no spawn)
-  ppnpm run cli --probe [opts]           Start dedicated server, admin-join,
-                                          poll date + company economy, rcon pause,
-                                          print normalized events, exit.
+  pnpm run cli --dry-run                Print resolved config, exit (no spawn)
+  pnpm run cli --probe [opts]           Start dedicated server, admin-join,
+                                         poll date + company economy, rcon pause,
+                                         print normalized events, exit.
+  pnpm run cli --watch [opts]           Start server + AI, long-lived observer
+                                         with live Web dashboard, Ctrl-C to stop.
   --year N           start year (default 1950)
   --seed N           map seed (default random)
-  --timeout-ms N     max wait for first economy (default 15000)
+  --timeout-ms N     probe: max wait for first economy (default 15000)
+  --ai NAME          watch: AI to start as observed company (default CPU)
+  --web-port N       watch: dashboard port (default ephemeral)
   --help             this help
 
 Env: OPENTTD_BINARY, OPENTTD_DATA_DIR, OPENTTD_ADMIN_PORT/PASSWORD,
-     OPENTTD_GAME_PORT, OPENTTD_START_YEAR, OPENTTD_SEED, OPENTTD_MAP_SIZE.
+     OPENTTD_GAME_PORT, OPENTTD_START_YEAR, OPENTTD_SEED, OPENTTD_MAP_SIZE,
+     OPENTTD_AI_LIST.
 `;
 
 async function main(): Promise<number> {
@@ -100,6 +119,18 @@ async function main(): Promise<number> {
 	if (args.mode === "dry-run") {
 		console.log(JSON.stringify(redact(cfg), null, 2));
 		return 0;
+	}
+	if (args.mode === "watch") {
+		try {
+			await runWatch(cfg, {
+				aiName: args.aiName,
+				webPort: args.webPort,
+			});
+			return 0;
+		} catch (e) {
+			console.error("[watch] ERROR:", e instanceof Error ? e.message : e);
+			return 1;
+		}
 	}
 	return runProbe(cfg, args.timeoutMs);
 }

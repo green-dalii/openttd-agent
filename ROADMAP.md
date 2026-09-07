@@ -39,18 +39,18 @@
 - economy payload 含 **BigInt**（money/loan/income，开局 £100k 贷款）→ JSON 序列化需 BigInt-safe
 
 **交付物**
-1. `util/json.ts`: BigInt-safe `stringify`/`parse`（事件/日志/审计通用）
-2. `game/admin-client.ts`: 完整 AdminClient 类（connect/join/auth/subscribe/poll/rcon/GS 通道/断线重连/事件回调）——从 run.ts probe 内联逻辑抽离
-3. `game/observer.ts` 扩展 + `world-state.ts`: 内存态累计（公司表/日期/最近经济快照）+ 轮询节奏
-4. `web/server.ts` + `web/hub.ts` + `web/public/*`: HTTP(静态) + WS 扇出；原生 HTML+Canvas 仪表盘 v1（现金/贷款/年份曲线 + 公司列表 + 事件流）
-5. CLI: `--watch` 模式（spawn + start_ai + 长驻采集 + WS 广播）+ `--probe-ai`（一次性验证含公司观测）
-6. 单元测试（json/codec 往返/observer/state）+ `@live` integration 标记
-7. GS `PushState` 模板 v1（bridge-gs Squirrel 骨架 + 部署脚本，本版仅骨架）
+1. `util/json.ts`: BigInt-safe `stringify`/`parse`（事件/日志/审计通用）✅
+2. `game/admin-client.ts`: 完整 AdminClient 类（connect/join/auth/subscribe/poll/rcon/GS 通道/断线重连/事件回调）——从 run.ts probe 内联逻辑抽离 ✅
+3. `game/observer.ts` 扩展 + `world-state.ts`: 内存态累计（公司表/日期/最近经济快照）+ 轮询节奏 ✅
+4. `web/server.ts` + `web/public/*`: HTTP(静态) + WS 扇出；原生 HTML+Canvas 仪表盘 v1（现金/贷款/年份曲线 + 公司列表 + 事件流）✅
+5. CLI: `--watch` 模式（spawn + start_ai + 长驻采集 + WS 广播）+ 真机 live integration 测试 ✅
+6. 单元测试（json/codec 往返/observer/state/web-server）+ `@live` integration 标记 ✅
+7. GS `PushState` 模板 v1（bridge-gs Squirrel 骨架）—— 移到 v0.2.0（与 Bridge GS 一同落地更合理）
 
 **验收**
-- [ ] 浏览器 live 看到公司现金/年份曲线 + 事件流
-- [ ] `@live` integration 绿（真机: start_ai → economy 事件到达）
-- [ ] `pnpm run gate` 全绿（新增测试覆盖）
+- [x] 浏览器 live 看到公司现金/年份曲线 + 事件流（真机 `--watch` 实测: WS snapshot + 增量 economy/date 事件）
+- [x] `@live` integration 绿（真机: start_ai CPU → company_economy 到达，5s 内）
+- [x] `pnpm run gate` 全绿（59 单测 + 1 live skip）
 
 **里程碑映射**: M1 观测闭环（AdminClient 订阅 company/date/economy + 基础仪表盘）。
 

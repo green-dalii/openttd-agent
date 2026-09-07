@@ -1,6 +1,6 @@
 {
 	"name": "openttd-agent",
-	"version": "0.0.1",
+	"version": "0.1.0",
 	"description": "LLM agent framework that autonomously plays and self-evolves inside OpenTTD via Admin Port + in-game Bridge GS/Executor AI",
 	"type": "module",
 	"private": true,
@@ -17,9 +17,12 @@
 		"gate": "pnpm run typecheck && pnpm run lint && pnpm test",
 		"cli": "tsx src/cli/run.ts"
 	},
-	"dependencies": {},
+	"dependencies": {
+		"ws": "^8.21.3"
+	},
 	"devDependencies": {
 		"@types/node": "^22.10.0",
+		"@types/ws": "^8.18.1",
 		"eslint": "^9.17.0",
 		"tsx": "^4.23.13",
 		"typescript": "^5.7.2",

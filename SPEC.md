@@ -1,7 +1,7 @@
 # SPEC — OpenTTD LLM Agent Framework
 
-> 状态: **v0.2 — 用户已拍板（D1-D10）+ 已固化两轮可行性调研**
-> 版本: 2026-09-07
+> 状态: **v0.2 — 用户已拍板（D1-D10）+ 已固化两轮可行性调研 + M0/M1 实测闭环**
+> 版本: 2026-09-08
 > 作者: Pi (pi-shift-router SMART tier)
 
 ---
