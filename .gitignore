@@ -1,0 +1,10 @@
+node_modules/
+dist/
+coverage/
+*.log
+.DS_Store
+
+# OpenTTD sandbox data dirs (runtime-created)
+data/
+.sandbox/
+*.sav
