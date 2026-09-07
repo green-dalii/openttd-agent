@@ -13,7 +13,7 @@
 **交付物**
 1. **工程脚手架**（TDD 先行）
    - `package.json` / `tsconfig.json` / vitest / eslint 基线
-   - 门禁脚本 `npm run gate`（typecheck + lint + test 一键绿）
+   - 门禁脚本 `pnpm run gate`（typecheck + lint + test 一键绿）
    - AGENTS.md 开发规范落地
 2. **MVP 代码**（纯 TS，零外部游戏依赖，可单测）
    - `admin-protocol.ts`: Admin Port **包编解码**（完整枚举 + frame 读写 + 解析器）
@@ -30,7 +30,7 @@
 4. **文档**: README（快速开始）、CHANGELOG（v0.0.1）
 
 **验收门禁**
-- [ ] `npm run gate` 全绿（typecheck + lint + test）
+- [ ] `pnpm run gate` 全绿（typecheck + lint + test）
 - [ ] unit 覆盖 codec/config/blueprint/event 规范化
 - [ ] CLI `--dry-run`（不起真机）可用
 - [ ] `@live` smoke 在用户机器可跑（含真 OpenTTD）
@@ -77,7 +77,7 @@
 
 ## 开发纪律（见 AGENTS.md 细则）
 1. **TDD**: 先写失败测试 → 实现 → 绿；`@live` 标测试默认跳过，CI/手动 `--live` 跑
-2. **门禁**: 每次提交前 `npm run gate` 必须绿（typecheck + lint + test）
+2. **门禁**: 每次提交前 `pnpm run gate` 必须绿（typecheck + lint + test）
 3. **小步**: 每 PR 一个可验证目标；保持主干始终可运行
 4. **零屎山**: 纯函数分离/类型单一事实源/模块职责+禁止项注释
 5. **事实驱动**: 任何协议/行为假设先有源码/实测依据，写进 SPEC/ADR

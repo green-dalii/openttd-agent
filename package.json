@@ -14,12 +14,10 @@
 		"test": "vitest --run",
 		"test:watch": "vitest",
 		"test:live": "LIVE_TESTS=1 vitest --run",
-		"gate": "npm run typecheck && npm run lint && npm test",
+		"gate": "pnpm run typecheck && pnpm run lint && pnpm test",
 		"cli": "tsx src/cli/run.ts"
 	},
-	"dependencies": {
-		"zod": "^3.23.8"
-	},
+	"dependencies": {},
 	"devDependencies": {
 		"@types/node": "^22.10.0",
 		"eslint": "^9.17.0",
@@ -27,5 +25,11 @@
 		"typescript": "^5.7.2",
 		"typescript-eslint": "^8.18.0",
 		"vitest": "^2.1.8"
+	},
+	"pnpm": {
+		"onlyBuiltDependencies": [
+			"esbuild",
+			"@esbuild/darwin-arm64"
+		]
 	}
 }

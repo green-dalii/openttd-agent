@@ -11,7 +11,7 @@
 ## 它能做什么（v0.0.1）
 
 ```
-npm run cli -- --probe
+pnpm run cli --probe
 ```
 
 起一个**隔离的** OpenTTD 15.0 dedicated server（不碰你 `~/Documents/OpenTTD` 的配置），然后：
@@ -29,27 +29,29 @@ npm run cli -- --probe
 
 ### 前置
 - Node.js ≥ 22.19
+- **pnpm ≥ 10**（本项目用 pnpm 管理依赖：快、省磁盘。
+  `npm install -g pnpm`；npm 兼容层不维护）
 - 本机 OpenTTD 15.x（Steam 安装路径已知；可用 `OPENTTD_BINARY` 覆盖）
 
 ### 安装
 ```bash
-npm install
+pnpm install
 ```
 
 ### 开发门禁（提交前必跑）
 ```bash
-npm run gate          # typecheck + lint + test 一键
-npm test              # 仅单测
-npm run test:live     # 含真机集成 (需本机 OpenTTD)
+pnpm run gate          # typecheck + lint + test 一键
+pnpm test              # 仅单测
+pnpm run test:live     # 含真机集成 (需本机 OpenTTD)
 ```
 
 ### CLI
 ```bash
 # 打印解析后的配置（不起服）—— CI/快速检查用
-npm run cli -- --dry-run
+pnpm run cli --dry-run
 
 # 真机最小闭环探测
-npm run cli -- --probe [--year 1950] [--seed 42] [--timeout-ms 15000]
+pnpm run cli --probe [--year 1950] [--seed 42] [--timeout-ms 15000]
 ```
 
 ### 环境变量（全可配）

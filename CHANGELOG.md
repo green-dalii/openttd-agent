@@ -12,8 +12,14 @@
 
 ## [0.0.1] - 2026-09-07
 
+### Changed
+- **包管理器切换到 pnpm**: 移除 `node_modules`/`package-lock.json`；改用 `pnpm-lock.yaml`；
+  脚本从 `npm run *` 改为 `pnpm *`；移除未使用的 `zod` 依赖；声明
+  `pnpm.onlyBuiltDependencies`（esbuild）允许构建脚本。磁盘占用更小、安装更快。
+  （注：pnpm 传递 CLI 参数不需要 `--`，如 `pnpm run cli --probe`）
+
 ### Added (MVP — 脚手架 + Admin Port 最小闭环)
-- **工程脚手架**: TypeScript strict + ESM + vitest + eslint flat config；`npm run gate`（typecheck+lint+test 一键门禁）
+- **工程脚手架**: TypeScript strict + ESM + vitest + eslint flat config；`pnpm run gate`（typecheck+lint+test 一键门禁）
 - **开发规范**: `AGENTS.md`（TDD 先行 / 门禁铁律 / 职责与禁止项）；`ROADMAP.md`（渐进式计划）
 - **Admin Port 协议层** (`src/game/admin-protocol.ts`)
   - 完整 packet 类型枚举（值对齐 `tcp_admin.h`）+ UpdateType/Frequency 枚举

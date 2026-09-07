@@ -73,8 +73,8 @@ function parseIntNum(v: string | undefined, label: string): number {
 const USAGE = `openttd-agent — OpenTTD Admin Port probe / runner
 
 Usage:
-  npm run cli -- --dry-run                Print resolved config, exit (no spawn)
-  npm run cli -- --probe [opts]           Start dedicated server, admin-join,
+  ppnpm run cli --dry-run                Print resolved config, exit (no spawn)
+  ppnpm run cli --probe [opts]           Start dedicated server, admin-join,
                                           poll date + company economy, rcon pause,
                                           print normalized events, exit.
   --year N           start year (default 1950)

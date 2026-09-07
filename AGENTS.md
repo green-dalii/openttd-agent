@@ -17,7 +17,7 @@ TypeScript/Node (ESM, `type: module`) 单体框架：外部进程通过 **Admin 
 1. **TDD 先行**：任何功能先写会失败的测试 → 再实现 → 全绿。
    - `test/unit/*` 纯单测（不碰真机/网络）。
    - 真机测试必须带 `@live` 标签并默认 skip（见 §5）。
-2. **门禁必须绿**：提交/PR 前跑 `npm run gate`（typecheck + lint + test 一键）。任何人不得在红门禁下提交。
+2. **门禁必须绿**：提交/PR 前跑 `pnpm run gate`（typecheck + lint + test 一键）。任何人不得在红门禁下提交。
 3. **不动用户全局 OpenTTD 配置**：游戏一律用**隔离 data dir**（`-c <dir>/openttd.cfg`，目录自建）。禁止读写 `~/Documents/OpenTTD`（除非是用户显式要求的共享场景）。
 4. **协议有事实依据**：Admin Port 字节布局/枚举以 `SPEC.md` §2 + OpenTTD 源码为准；不确定先查源码/实测，禁止猜。改动协议层必须有对应 unit 测试锁定。
 5. **类型单一事实源**：共享事件/消息类型定义在 `src/types.ts`（或对应 `types.ts`），禁止各处重复声明。
@@ -55,9 +55,9 @@ scripts/       # dev 辅助 (gen-squirrel, setup-sandbox)
 
 ## 5. 测试与门禁
 
-- `npm test` — unit（快，纯）。
-- `npm run test:live` — 含 `@live` 真机集成（需要本机 OpenTTD 二进制 + 可写临时 data dir）。
-- `npm run gate` = `typecheck && lint && test`。**红=停**。
+- `pnpm test` — unit（快，纯）。
+- `pnpm run test:live` — 含 `@live` 真机集成（需要本机 OpenTTD 二进制 + 可写临时 data dir）。
+- `pnpm run gate` = `typecheck && lint && test`。**红=停**。
 - 新增测试命名：`*.test.ts`。协议 golden 字节样张放 `test/fixtures/`。
 
 ## 6. 事实记录（重要）
@@ -68,8 +68,8 @@ scripts/       # dev 辅助 (gen-squirrel, setup-sandbox)
 ## 7. 完成定义 (Definition of Done)
 
 一个任务/版本算完成，当且仅当：
-- [ ] 代码有测试且 `npm test` 绿
-- [ ] `npm run gate` 绿
+- [ ] 代码有测试且 `pnpm test` 绿
+- [ ] `pnpm run gate` 绿
 - [ ] README/CHANGELOG 已更新（行为/命令/配置变化）
 - [ ] 涉及协议/API 行为的新事实已固化进 SPEC/docs
 - [ ] 没有留下 TODO 假代码、死代码、`console.log` 调试残留
