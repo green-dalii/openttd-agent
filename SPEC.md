@@ -388,6 +388,22 @@ openttd-agent/
 | M3 进化闭环 | ⬜ | |
 | M4 打磨 | ⬜ | |
 
+## 10.9 M1.5 崩溃调查（重要工程事实, 2026-09-08）
+真机发现 OpenTTD 15.0 dedicated 在关机时高概率 abort（`Abort trap: 6`），栈顶为
+`ServerNetworkAdminSocketHandler::~ServerNetworkAdminSocketHandler` +
+`OTTD_CloseConnection`（admin receive 路径 use-after-free）。逐项隔离后定位：
+
+1. **触发条件**: 在 **SIGINT/SIGTERM 信号回调里直接跑 async 收尾**（pause→save→
+   client.close()）。信号上下文里的 socket write/close 与服务器 admin receive 循环竞态
+   → abort。
+2. **不是原因**（全部实测排除）: AdminQuit 包、save 命令本身、poll 节奏、Web 服务、
+   运行时长、进程组信号传播、AI 类型（CPU/CivilAI 均崩）。
+3. **修复**: 信号 handler **只翻 flag + resolve promise**；真实收尾（pause/save/close/
+   web.stop/mgr.stop）在正常事件循环流程执行。修复后 3/3 干净关机（此前 0/3）。
+4. **附带**: `AdminClient.close()` 不发 AdminQuit（EOF destroy 足够且安全）。
+5. **教训**: 任何信号处理里不得做 async I/O；OpenTTD 15.0 的 admin socket 关闭路径
+   对时序敏感。
+
 ---
 
 ## 附录 A — 关键事实来源
