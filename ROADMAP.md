@@ -7,47 +7,54 @@
 
 ## 版本规划
 
-### v0.0.1 — 脚手架 + MVP（当前）
-**目标**: 可运行的 TypeScript 工程骨架 + 首个**可验证的最小闭环**，证明「外部进程↔OpenTTD Admin Port」双向通道真实可用，并且 LLM agent 能跑起来。
-
-**交付物**
-1. **工程脚手架**（TDD 先行）
-   - `package.json` / `tsconfig.json` / vitest / eslint 基线
-   - 门禁脚本 `pnpm run gate`（typecheck + lint + test 一键绿）
-   - AGENTS.md 开发规范落地
-2. **MVP 代码**（纯 TS，零外部游戏依赖，可单测）
-   - `admin-protocol.ts`: Admin Port **包编解码**（完整枚举 + frame 读写 + 解析器）
-   - `admin-client.ts`: TCP 连接/认证(明文 v0.1)/订阅/poll/rcon/GS 通道 + 断线重连
-   - `config.ts`: 配置 schema（二进制路径/data-dir/端口/seed/模型）
-   - `process-manager.ts`: 起停 OpenTTD dedicated（隔离 data dir, `-D -G seed`）
-   - `observer.ts`: admin 事件 → 规范化 `GameEvent`（date/company/economy/stats）
-   - `blueprint.ts`: 高层动作 → GS 蓝图 JSON 编解码（纯函数, 复用 arena 语法）
-   - `types.ts`: 共享事件/类型（单一事实源）
-   - CLI: `run.ts` — `spawn` → `join` → `poll` → `rcon pause/save` → 打印状态快照 → 退出
-3. **测试**
-   - unit: codec 往返、frame 边界、payload 解析（用 arena 抓到的真实字节样张）
-   - integration(smoke, 标记 `@live` 可选): 真机起 OpenTTD → join → rcon
-4. **文档**: README（快速开始）、CHANGELOG（v0.0.1）
-
-**验收门禁**
-- [ ] `pnpm run gate` 全绿（typecheck + lint + test）
-- [ ] unit 覆盖 codec/config/blueprint/event 规范化
-- [ ] CLI `--dry-run`（不起真机）可用
-- [ ] `@live` smoke 在用户机器可跑（含真 OpenTTD）
-- [ ] README/CHANGELOG 完成
-
-**里程碑映射**: M0（环境钉死）的部分 —— admin auth/进程/协议打通的前半段。
+### 进度速览
+- ✅ v0.0.1 — 脚手架 + MVP（Admin Port 最小闭环，真机验证通过）
+- 🔵 **v0.1.0 — 观测闭环（M1）（当前）**
+- ⬜ v0.2.0 — 最小决策闭环（M2）
+- ⬜ v0.3.0 — 进化闭环（M3）
+- ⬜ v0.4.0 — 打磨与广度（M4）
 
 ---
 
-### v0.1.0 — 观测闭环（M1）
+### v0.0.1 — 脚手架 + MVP（✅ 已完成，2026-09-07）
+**目标**: 可运行的 TypeScript 工程骨架 + 首个**可验证的最小闭环**，证明「外部进程↔OpenTTD Admin Port」双向通道真实可用。
+
+**已完成交付**
+1. 工程脚手架: pnpm + TS strict ESM + vitest + eslint；`pnpm run gate` 门禁
+2. `admin-protocol.ts`（帧编解码/枚举/reader/writer）+ `observer.ts`（事件规范化）+ `config.ts` + `process-manager.ts`（generate-then-patch 配置）+ `blueprint.ts`
+3. CLI `--probe`: spawn → join → subscribe → poll → rcon → 打印规范化事件
+4. 40 单测 + 真机 probe 通过（date raw 712223 = 1950-01-01 锚点验证）
+5. pnpm 迁移完成（05a7541）
+
+**里程碑映射**: M0（环境钉死）—— admin auth/进程/协议打通。
+
+---
+
+### v0.1.0 — 观测闭环（M1）（当前）
 **目标**: Runner 长驻，实时接收 admin+GS 状态 → 规范事件 → Web 仪表盘可看现金/年份/公司。
 
-- `GameEnvAdapter`（admin 原生 + GS rich state 合并）
-- WebServer（HTTP + WS 扇出）
-- 原生 HTML/Canvas 仪表盘 v1（现金/年份/公司价值曲线 + 事件流）
-- GS `PushState` 模板 v1（bridge-gs Squirrel 骨架 + 部署脚本）
-- 验收: 浏览器 live 看到曲线；`@live` integration 绿
+**前置 spike 实证（2026-09-07, 真机验证）**
+- `start_ai` 经 RCON 可创建公司: company_new → company_info（isAi:true, inauguratedYear）→ company_economy（poll 即时返回，无需等季度翻转）
+- 本地无用户 AI 包，但 OpenTTD.app 内置 4 个 AI: AAAHogEx / CityLifeAI / CivilAI / CPU（`ai` 目录）；sandbox `-c` 目录自带空 `ai/` 子目录
+- economy payload 含 **BigInt**（money/loan/income，开局 £100k 贷款）→ JSON 序列化需 BigInt-safe
+
+**交付物**
+1. `util/json.ts`: BigInt-safe `stringify`/`parse`（事件/日志/审计通用）
+2. `game/admin-client.ts`: 完整 AdminClient 类（connect/join/auth/subscribe/poll/rcon/GS 通道/断线重连/事件回调）——从 run.ts probe 内联逻辑抽离
+3. `game/observer.ts` 扩展 + `world-state.ts`: 内存态累计（公司表/日期/最近经济快照）+ 轮询节奏
+4. `web/server.ts` + `web/hub.ts` + `web/public/*`: HTTP(静态) + WS 扇出；原生 HTML+Canvas 仪表盘 v1（现金/贷款/年份曲线 + 公司列表 + 事件流）
+5. CLI: `--watch` 模式（spawn + start_ai + 长驻采集 + WS 广播）+ `--probe-ai`（一次性验证含公司观测）
+6. 单元测试（json/codec 往返/observer/state）+ `@live` integration 标记
+7. GS `PushState` 模板 v1（bridge-gs Squirrel 骨架 + 部署脚本，本版仅骨架）
+
+**验收**
+- [ ] 浏览器 live 看到公司现金/年份曲线 + 事件流
+- [ ] `@live` integration 绿（真机: start_ai → economy 事件到达）
+- [ ] `pnpm run gate` 全绿（新增测试覆盖）
+
+**里程碑映射**: M1 观测闭环（AdminClient 订阅 company/date/economy + 基础仪表盘）。
+
+---
 
 ### v0.2.0 — 最小决策闭环（M2）
 **目标**: LLM 真正「玩」第一步 —— 观察→决策→施工→盈利回灌。
