@@ -404,6 +404,34 @@ openttd-agent/
 5. **教训**: 任何信号处理里不得做 async I/O；OpenTTD 15.0 的 admin socket 关闭路径
    对时序敏感。
 
+## 10.10 v0.2 spike: 自定义 Squirrel AI/GS 加载 + 标牌邮箱（2026-09-08）
+以下事实经真机 (OpenTTD 15.0 dedicated) 逐项验证：
+
+1. **自定义 AI 加载**: 把 `<Name>/` 包（info.nut + main.nut）放进 **sandbox `ai/` 目录**
+   （在 openttd.cfg 已建立的数据目录内）→ `rcon rescan_ai` → `rcon start_ai "<Name>"`
+   即建公司（实测 company_new + company_info isAi:true）。
+   - info.nut 类 extends **`AIInfo`**（不是 `AIControllerInfo`）；方法需含 GetName/
+     GetVersion/CreateInstance/GetShortName；文件尾必须 **`RegisterAI(Xxx());`**（漏了
+     就不出现在 list_ai，start_ai 报 Failed to load）。
+   - main.nut 类 extends **`AIController`**，Start() 需 while(true)+Sleep 常驻。
+   - 扫描仅发生在 config dir 已建立（第二次运行起）；首次生成配置后再放包需 rescan。
+2. **自定义 GS 加载**: `<Name>/` 放进 **sandbox `game/` 目录** → `rcon rescan_game` →
+   `rcon list_game` 可见。**attach 到新图**: openttd.cfg 的 `[game_scripts]` 段写
+   `<Name> = `（替换默认 `none = `）→ 下次 `-G` 生成地图即加载。
+   - GS info.nut 类 extends **`GSInfo`**，**必须含 `GetAPIVersion()`**（否则编译失败
+     "doesn't have the method 'GetAPIVersion'"），文件尾 `RegisterGS(Xxx());`。
+   - main.nut extends **`GSController`**，Start() 必须 while(true)+Sleep 常驻，否则
+     地图生成时 "The script died unexpectedly"。
+3. **AILog 在 dedicated/macOS 不可达 console**（再证 SPEC §10.2）；用 arena 方案：
+   **SetPhase 公司名编码**（`"<phase> j<job> r<routes>"`）经 admin poll COMPANY_INFO
+   读回。
+4. **Executor AI 标牌邮箱**: arena `nutz_executor/main.nut` 模式确认——`AISignList()`
+   轮询 `NUTZ:bp:<job>:...` 标牌 → 按 S/E/W/D 槽位组装 job → 施工 → 记 failed/
+   succeeded_jobs。标牌由 GS 放（GSSign），AI 只读消费。
+5. **尚无 GS-only 施工证据**: GS 收 AdminGameScript 走 `ScriptEventAdminPort`（事件
+   队列 GetEvent + GetObject() 取 JSON）；GS→Admin 走 `GSAdmin.Send(table)`。双向
+   通道字节级已由协议文档确认，端到端 GS 回声待 v0.2 正式实现验证。
+
 ---
 
 ## 附录 A — 关键事实来源
