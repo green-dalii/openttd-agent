@@ -178,8 +178,48 @@ export async function runV02(cfg: Config, opts: V02Options = {}): Promise<number
 	}
 	console.log(`[v02] executor reacted to blueprint: ${sawWork ? "✅ phase=work" : "(no phase change)"}`);
 
-	// --- 6. run until stop (or demoSeconds auto-stop) ---
+	// --- 5b. S2: wait for both stations built (stB_ok), then confirm the world
+	// changed by polling economy: building 2 bus stops must have spent money. ---
+	const buildDeadline = Date.now() + 40_000;
+	while (!executorPhase.startsWith("EX stB_ok") && Date.now() < buildDeadline && !stopRequested) {
+		client?.poll(AdminUpdateType.CompanyInfo, ALL_COMPANIES);
+		await sleep(500);
+	}
+	if (executorPhase.startsWith("EX stB_ok")) {
+		// Poll economy for company 0 (executor). Building costs money vs the
+		// initial loan-funded balance.
+		let money = -1n;
+		let loan = -1n;
+		const econDeadline = Date.now() + 8_000;
+		while (Date.now() < econDeadline && money < 0n) {
+			client?.poll(AdminUpdateType.CompanyEconomy, 0);
+			await sleep(600); // let the poll response arrive before reading
+			const st = world.snapshot().companies.get(0);
+			money = st?.economy?.money ?? -1n;
+			loan = st?.economy?.loan ?? -1n;
+		}
+		// Building 2 bus stops must reduce cash vs the £100k loan-funded start.
+		console.log(
+			`[v02] S2 station build confirmed; company money=${money} loan=${loan}` +
+				(money > 0n && money < 100_000n ? " (cash spent ✅)" : " (money unchanged — investigate)"),
+		);
+	} else {
+		console.log(`[v02] S2 WARN: stations not built (last phase "${executorPhase}")`);
+	}
+
+	// --- 6. observe until stop (or demoSeconds auto-stop) ---
+	// Poll company info during observation so executor SetPhase renames are
+	// seen (Automatic company_info push only fires on change, and even then
+	// only while we have a live subscription — poll to be safe).
 	console.log(`[v02] observing… (Ctrl-C to stop)`);
+	const obsPoll = setInterval(() => {
+		if (stopRequested) return;
+		try {
+			client?.poll(AdminUpdateType.CompanyInfo, ALL_COMPANIES);
+		} catch {
+			/* client may be closed at teardown */
+		}
+	}, 500);
 	const stopPromise = new Promise<void>((resolve) => {
 		resolveStopped = resolve;
 		const check = () => (stopRequested ? resolve() : setTimeout(check, 300));
@@ -191,6 +231,7 @@ export async function runV02(cfg: Config, opts: V02Options = {}): Promise<number
 		await stopPromise;
 	}
 
+	clearInterval(obsPoll);
 	// report
 	const ackFinal: Record<string, unknown> | null = routeAck as Record<string, unknown> | null;
 	console.log(`[v02] RESULT: gsStates=${gsStates} routeAck=${ackFinal !== null ? "yes" : "no"} executorPhase="${executorPhase}"`);
