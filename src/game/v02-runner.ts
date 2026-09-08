@@ -68,6 +68,7 @@ export async function runV02(cfg: Config, opts: V02Options = {}): Promise<number
 	// --- 2. AdminClient ---
 	let gsStates = 0;
 	let executorPhase = "";
+	let routeAck: Record<string, unknown> | null = null;
 	const companiesByName = new Map<string, number>(); // name -> id
 
 	client = new AdminClient({
@@ -83,6 +84,7 @@ export async function runV02(cfg: Config, opts: V02Options = {}): Promise<number
 							console.log(`[v02] GS state #${gsStates}: tick=${p.tick} towns=${p.towns} signs=${p.signs}`);
 						}
 					} else {
+						if (p.kind === "ack" && p.cmd === "build_bus_route") routeAck = p;
 						console.log(`[v02] GS msg: ${stringifyJson(p)}`);
 					}
 				}
@@ -141,15 +143,29 @@ export async function runV02(cfg: Config, opts: V02Options = {}): Promise<number
 	}
 	console.log(`[v02] executor boot phase: ${bootSeen ? executorPhase || "EX boot j-1" : "(not seen — still waiting)"}`);
 
-	// --- 5. send a demo command (GS places a real sign; executor reacts) ---
-	console.log(`[v02] sending demo job command…`);
-	// BridgeV1 picks a town tile, places a NUTZ:bp:7:S sign in company 0's
-	// (executor's) company mode; ExecutorV1 reads it, funds via loan, reports
-	// phase "work". Executor company id comes from company_new (fresh map = 0).
-	client.gameScript(stringifyJson({ cmd: "demo", company: 0 }));
-	console.log(`[v02] waiting for executor to react…`);
+	// --- 5. send build_bus_route (S1: GS plans a 2-town bus route + places
+	// S/E station signs in the executor's company mode; executor reads them) ---
+	console.log(`[v02] sending build_bus_route…`);
+	client.gameScript(stringifyJson({ cmd: "build_bus_route", company: 0, job: 101 }));
+	console.log(`[v02] waiting for GS route ack…`);
 
-	// Poll company info to observe the executor's phase transition to work.
+	// Wait for the ack: company_signs >= 2 (S + E placed in executor mode).
+	const ackDeadline = Date.now() + 15_000;
+	while (routeAck === null && Date.now() < ackDeadline && !stopRequested) {
+		client?.poll(AdminUpdateType.CompanyInfo, ALL_COMPANIES);
+		await sleep(300);
+	}
+	// TS control-flow can't see the closure assignment; re-widen explicitly.
+	const ackView: Record<string, unknown> | null = routeAck as Record<string, unknown> | null;
+	const signsPlaced = ackView !== null && Number(ackView.company_signs) >= 2;
+	console.log(
+		`[v02] GS route ack: ${
+			ackView ? `company_signs=${ackView.company_signs} job=${ackView.job}` : "(no ack)"
+		}`,
+	);
+	console.log(`[v02] S1 accept: ${signsPlaced ? "✅ S+E signs in executor mode" : "❌ missing signs"}`);
+
+	// The executor should pick up job 101 and report phase work.
 	let sawWork = false;
 	const workDeadline = Date.now() + 15_000;
 	while (Date.now() < workDeadline && !stopRequested) {
@@ -176,9 +192,10 @@ export async function runV02(cfg: Config, opts: V02Options = {}): Promise<number
 	}
 
 	// report
-	console.log(`[v02] RESULT: gsStates=${gsStates} executorPhase="${executorPhase}"`);
+	const ackFinal: Record<string, unknown> | null = routeAck as Record<string, unknown> | null;
+	console.log(`[v02] RESULT: gsStates=${gsStates} routeAck=${ackFinal !== null ? "yes" : "no"} executorPhase="${executorPhase}"`);
 	await teardown();
-	return executorPhase.length > 0 ? 0 : 1;
+	return ackFinal !== null && executorPhase.length > 0 ? 0 : 1;
 
 	async function teardown() {
 		if (stopRequested) return;

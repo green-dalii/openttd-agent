@@ -13,6 +13,7 @@ class BridgeV1 extends GSController {
     _admin_seen = 0;
     _last_cmd = "";
     _sign_count = 0;
+    _route_seq = 0;
 
     function Start() {
         while (true) {
@@ -98,6 +99,8 @@ class BridgeV1 extends GSController {
             GSAdmin.Send({ kind = "ack", cmd = "demo", job = job, placed = placed,
                            town = towns[0], tile = tA, company = exec,
                            company_signs = names.len(), names = names });
+        } else if (cmd == "build_bus_route") {
+            this.BuildBusRoute(obj);
         } else if (cmd == "blueprint") {
             this.PlaceBlueprint(obj);
         } else if (cmd == "status") {
@@ -201,5 +204,136 @@ class BridgeV1 extends GSController {
             }
         }
         return center;
+    }
+
+    /* S1: v0.2 decision-loop — plan a bus route between two towns.
+     * Picks the two most-populated towns (or explicit town ids from the
+     * command), finds a [station, front] build-site pair near each town
+     * center, and places S/E signs in the executor's company mode. The
+     * Executor AI (S2+) reads the signs, fine-scans pax production, builds
+     * the stops, then roads (Pathfinder.Road), a depot, a bus and orders.
+     * Sign grammar (arena): NUTZ:bp:<job>:S:fr=<front>:eg=<engine> (station
+     * A, sign tile = stop tile) and NUTZ:bp:<job>:E:fr=<front> (station B).
+     * NOTE: building signs requires GSCompanyMode(company) so the executor's
+     * AISignList can see them (SPEC 10.12). */
+    function BuildBusRoute(obj) {
+        if (!obj.rawin("company")) {
+            GSAdmin.Send({ kind = "err", cmd = "build_bus_route", reason = "no company" });
+            return;
+        }
+        local exec = obj["company"];
+        // Job id: explicit or auto-increment (demo used 7; keep new ids clear).
+        local job = obj.rawin("job") ? obj["job"] : (100 + this._route_seq);
+        this._route_seq++;
+        // Towns: explicit ids win, else two most-populated.
+        local townA = obj.rawin("townA") ? obj["townA"] : -1;
+        local townB = obj.rawin("townB") ? obj["townB"] : -1;
+        if (townA < 0 || townB < 0) {
+            local top = this.PickBiggestTowns(2);
+            if (top.len() < 2) {
+                GSAdmin.Send({ kind = "err", cmd = "build_bus_route", reason = "<2 towns" });
+                return;
+            }
+            if (townA < 0) townA = top[0];
+            if (townB < 0) townB = top[1];
+        }
+        local cA = GSTown.GetLocation(townA);
+        local cB = GSTown.GetLocation(townB);
+        // A route needs two *different* town centers.
+        if (cA == cB) {
+            GSAdmin.Send({ kind = "err", cmd = "build_bus_route", reason = "same town" });
+            return;
+        }
+        local siteA = this.FindStationSite(cA, 12);
+        local siteB = this.FindStationSite(cB, 12);
+        if (siteA == null || siteB == null) {
+            GSAdmin.Send({ kind = "err", cmd = "build_bus_route", job = job,
+                           reason = "no buildable site near " +
+                                     (siteA == null ? "A" : "B") });
+            return;
+        }
+        local tA = siteA[0]; local fA = siteA[1];
+        local tB = siteB[0]; local fB = siteB[1];
+        local job_str = "" + job;
+        local mode = GSCompanyMode(exec);
+        // Clear stale signs for this job first.
+        this.ClearJobSigns(job_str);
+        local countBefore = this.CountSignsWithPrefix("NUTZ:bp:" + job_str + ":");
+        GSSign.BuildSign(tA, "NUTZ:bp:" + job_str + ":S:fr=" + fA + ":eg=-1");
+        GSSign.BuildSign(tB, "NUTZ:bp:" + job_str + ":E:fr=" + fB);
+        // Recount INSIDE company mode (deity GSSignList hides co-owned signs).
+        local names = [];
+        local sl = GSSignList();
+        local company_signs = 0;
+        foreach (sid, _ in sl) {
+            local nm = GSSign.GetName(sid);
+            if (nm != null && nm.len() >= 5 && nm.slice(0, 5) == "NUTZ:") {
+                company_signs++;
+                if (names.len() < 4) names.push(nm);
+            }
+        }
+        GSAdmin.Send({ kind = "ack", cmd = "build_bus_route", job = job,
+                       townA = townA, townB = townB, popA = GSTown.GetPopulation(townA),
+                       popB = GSTown.GetPopulation(townB),
+                       tileA = tA, frontA = fA, tileB = tB, frontB = fB,
+                       company = exec, company_signs = company_signs,
+                       names = names });
+    }
+
+    /* Remove all NUTZ signs carrying job `job_str`. */
+    function ClearJobSigns(job_str) {
+        local sl = GSSignList();
+        foreach (s, _ in sl) {
+            local n = GSSign.GetName(s);
+            if (n != null && n.len() > (7 + job_str.len()) &&
+                n.slice(0, 8) == "NUTZ:bp:" + job_str + ":") {
+                GSSign.RemoveSign(s);
+            }
+        }
+    }
+
+    /* Two towns with the largest population (GSTownList iteration order is
+     * unspecified, so collect + sort). Returns up to `n` town ids. */
+    function PickBiggestTowns(n) {
+        local out = [];
+        local all = [];
+        local tl = GSTownList();
+        foreach (tid, _ in tl) all.push([GSTown.GetPopulation(tid), tid]);
+        all.sort(function(a, b) { return b[0] - a[0]; });
+        for (local i = 0; i < all.len() && i < n; i++) out.push(all[i][1]);
+        return out;
+    }
+
+    /* Find [station_tile, front_tile] near `center`: a buildable, non-water
+     * tile (future bus stop) plus an adjacent buildable, non-water tile
+     * (future road / vehicle approach). Rings outward from the center so the
+     * anchor lands near town housing. */
+    function FindStationSite(center, maxR) {
+        local cx = GSMap.GetTileX(center);
+        local cy = GSMap.GetTileY(center);
+        local dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+        for (local r = 1; r <= maxR; r++) {
+            for (local dx = -r; dx <= r; dx++) {
+                for (local dy = -r; dy <= r; dy++) {
+                    if (dx != -r && dx != r && dy != -r && dy != r) continue; // ring only
+                    local x = cx + dx; local y = cy + dy;
+                    if (x < 0 || y < 0) continue;
+                    if (x >= GSMap.GetMapSizeX() || y >= GSMap.GetMapSizeY()) continue;
+                    local tile = GSMap.GetTileIndex(x, y);
+                    if (GSTile.IsWaterTile(tile)) continue;
+                    if (!GSTile.IsBuildable(tile)) continue;
+                    foreach (d in dirs) {
+                        local fx = x + d[0]; local fy = y + d[1];
+                        if (fx < 0 || fy < 0) continue;
+                        if (fx >= GSMap.GetMapSizeX() || fy >= GSMap.GetMapSizeY()) continue;
+                        local front = GSMap.GetTileIndex(fx, fy);
+                        if (GSTile.IsWaterTile(front)) continue;
+                        if (!GSTile.IsBuildable(front)) continue;
+                        return [tile, front];
+                    }
+                }
+            }
+        }
+        return null;
     }
 }
