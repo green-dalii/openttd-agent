@@ -5,6 +5,8 @@ import { AdminClient, type ClientStatus } from "../../src/game/admin-client.js";
 import { loadConfig } from "../../src/config.js";
 import {
 	AdminPacketType,
+	AdminUpdateType,
+	AdminUpdateFrequency,
 	FrameWriter,
 	FrameStreamParser,
 	packCStr,
@@ -118,7 +120,14 @@ describe("AdminClient", () => {
 		expect(joinIdx).toBeGreaterThanOrEqual(0);
 		const afterJoin = fake.received.slice(joinIdx + 1);
 		const freqTypes = afterJoin.filter((r) => r.type === AdminPacketType.AdminUpdateFrequency);
-		expect(freqTypes.length).toBeGreaterThanOrEqual(4); // date/company/economy/stats/console
+		expect(freqTypes.length).toBeGreaterThanOrEqual(5); // date/company/economy/stats/console/gs
+		// Bridge GS channel requires the Gamescript subscription (SPE §10.11).
+		const gsFreq = freqTypes.find(
+			(r) =>
+				r.payload[0] === AdminUpdateType.Gamescript &&
+				(r.payload[2]! | (r.payload[3]! << 8)) === AdminUpdateFrequency.Automatic,
+		);
+		expect(gsFreq, "AdminClient must subscribe Gamescript/Automatic by default").toBeTruthy();
 		client.close();
 	});
 

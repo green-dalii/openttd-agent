@@ -432,6 +432,24 @@ openttd-agent/
    队列 GetEvent + GetObject() 取 JSON）；GS→Admin 走 `GSAdmin.Send(table)`。双向
    通道字节级已由协议文档确认，端到端 GS 回声待 v0.2 正式实现验证。
 
+## 10.11 v0.2 spike: Bridge GS 双向通道打通（2026-09-08）
+真机逐项验证（sandbox BridgeTest GS + AdminClient）：
+
+1. **GS 事件 API（squirrel 侧）**:
+   - 轮询: `GSEventController.IsEventWaiting()` + `GSEventController.GetNextEvent()`
+   - 事件类型: `ev.GetEventType() == GSEvent.ET_ADMIN_PORT`（常量前缀 ET_）
+   - **取 JSON 必须 `GSEventAdminPort.Convert(ev).GetObject()`**，不能 `ev.GetObject()`
+     （直接调在非 admin 事件会崩/吞）
+2. **GS→Admin**: `GSAdmin.Send({...})` → 客户端收到 `SERVER_GAMESCRIPT`（gamescript 事件）。
+   **前提: AdminClient 必须订阅 `UpdateType.Gamescript`**（此前默认订阅漏了它 → 收不到）
+3. **Admin→GS**: `AdminGameScript` 包(str JSON) → GS 收到 admin 事件 → 回 echo。
+   **端到端实测**: ping → `{kind:"pong",cmd:"ping",ok:true}` 返回；心跳带 admin_seen/last_cmd 佐证。
+4. **GSLog.Info 不进 dedicated server.log 也不进 admin console**（需靠 GSAdmin.Send
+   回传状态；script 崩溃错误会以 console origin=script 事件到达）。
+5. **蓝图→标牌**: arena `bridge_gs.py` 模式——`GSSign.BuildSign(tile, "NUTZ:bp:<job>:S:fr=..:eg=..")`
+   S/E/D/W 槽位；Executor AI `AISignList` 消费（§10.10-4）。
+6. **GS 心跳节奏**: while(true){HandleEvents(); 每~100 tick GSAdmin.Send 状态; Sleep(20)}。
+
 ---
 
 ## 附录 A — 关键事实来源

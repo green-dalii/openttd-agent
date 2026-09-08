@@ -61,6 +61,8 @@ const DEFAULT_SUBSCRIBE: Array<[AdminUpdateType, AdminUpdateFrequency]> = [
 	[AdminUpdateType.CompanyEconomy, AdminUpdateFrequency.Quarterly],
 	[AdminUpdateType.CompanyStats, AdminUpdateFrequency.Quarterly],
 	[AdminUpdateType.Console, AdminUpdateFrequency.Automatic],
+	// Bridge GS 双向通道: GS 的 GSAdmin.Send 状态推送。
+	[AdminUpdateType.Gamescript, AdminUpdateFrequency.Automatic],
 ];
 
 const MIN_AUTO_POLL_INTERVAL = 2_000; // don't hammer poll faster than this
