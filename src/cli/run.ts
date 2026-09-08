@@ -23,14 +23,16 @@ import {
 } from "../game/admin-protocol.js";
 import { handleServerPacket } from "../game/observer.js";
 import { runWatch } from "../game/runner.js";
+import { runV02 } from "../game/v02-runner.js";
 
 interface CliArgs {
-	mode: "probe" | "dry-run" | "watch" | "help";
+	mode: "probe" | "dry-run" | "watch" | "v02" | "help";
 	year?: number;
 	seed?: number;
 	timeoutMs: number;
 	aiName?: string;
 	webPort?: number;
+	demoSeconds?: number;
 }
 
 function parseArgs(argv: string[]): CliArgs {
@@ -40,6 +42,7 @@ function parseArgs(argv: string[]): CliArgs {
 	let timeoutMs = 15_000;
 	let aiName: string | undefined;
 	let webPort: number | undefined;
+	let demoSeconds: number | undefined;
 	for (let i = 0; i < argv.length; i++) {
 		const a = argv[i]!;
 		switch (a) {
@@ -48,6 +51,12 @@ function parseArgs(argv: string[]): CliArgs {
 				break;
 			case "--watch":
 				mode = "watch";
+				break;
+			case "--v02":
+				mode = "v02";
+				break;
+			case "--demo-seconds":
+				demoSeconds = parseIntNum(argv[++i], "--demo-seconds");
 				break;
 			case "--dry-run":
 				mode = "dry-run";
@@ -75,7 +84,7 @@ function parseArgs(argv: string[]): CliArgs {
 				throw new ConfigError(`unknown option: ${a}`);
 		}
 	}
-	return { mode, year, seed, timeoutMs, aiName, webPort };
+	return { mode, year, seed, timeoutMs, aiName, webPort, demoSeconds };
 }
 
 function parseIntNum(v: string | undefined, label: string): number {
@@ -93,6 +102,9 @@ Usage:
                                          print normalized events, exit.
   pnpm run cli --watch [opts]           Start server + AI, long-lived observer
                                          with live Web dashboard, Ctrl-C to stop.
+  pnpm run cli --v02 [opts]             v0.2 decision-loop demo: deploy BridgeV1 GS
+                                         + ExecutorV1 AI, drive a demo blueprint,
+                                         Ctrl-C or --demo-seconds N to stop.
   --year N           start year (default 1950)
   --seed N           map seed (default random)
   --timeout-ms N     probe: max wait for first economy (default 15000)
@@ -129,6 +141,14 @@ async function main(): Promise<number> {
 			return 0;
 		} catch (e) {
 			console.error("[watch] ERROR:", e instanceof Error ? e.message : e);
+			return 1;
+		}
+	}
+	if (args.mode === "v02") {
+		try {
+			return await runV02(cfg, { demoSeconds: args.demoSeconds });
+		} catch (e) {
+			console.error("[v02] ERROR:", e instanceof Error ? e.message : e);
 			return 1;
 		}
 	}

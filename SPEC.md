@@ -450,6 +450,38 @@ openttd-agent/
    S/E/D/W 槽位；Executor AI `AISignList` 消费（§10.10-4）。
 6. **GS 心跳节奏**: while(true){HandleEvents(); 每~100 tick GSAdmin.Send 状态; Sleep(20)}。
 
+## 10.12 v0.2 实现: 标牌邮箱可见性 + 决策链路打通（2026-09-08）
+端到端真机验证「外部 → GS → 标牌 → Executor → 可观测动作」：
+
+1. **标牌可见性模型（核心坑）**: 引擎标牌有 `owner`（signs_base.h）。GS 默认
+   deity 模式放的标牌，executor 的 **AISignList 看不到**（其语义 = "signs your
+   company has created"）。**修复**: GS 必须以目标公司身份放标牌 ——
+   `local mode = GSCompanyMode(company_id); GSSign.BuildSign(...)`。
+2. **GS 无法枚举公司**: GS API 无公司列表（无 GSCompanyList）。executor 公司 id
+   必须由外部传入命令（`{cmd, company:0}`）；GS 侧不校验（IsValid 不存在于
+   GSCompany 静态 API）。
+3. **GSSign.BuildSign 返回 SignID 非 bool**: 首个标牌 SignID=0（SignID::Begin()），
+   Squirrel 里 `if(0)` 为 false → `placed:0` 是误读。应放后数 GSSignList 差值。
+   （注: deity 模式的 GSSignList 看不到 company-mode 放的标牌 —— 要在 company
+   mode 内复查。）
+4. **决策链路全通**: `--v02` demo: boot(j-1) → GS demo 放标牌 → executor 读
+   `NUTZ:bp:7` → 借贷 → phase=work(j7)。外部经 admin poll COMPANY_INFO 实时可见。
+
+## 10.13 OpenTTD Squirrel 字符串语义（血泪教训, 2026-09-08）
+调试标牌解析消耗大量时间，根因全是字符串处理。必须钉死：
+
+1. **`s[i]` 返回 integer**（该字符的数值/字节），不是单字符字符串！
+   逐字符拼接 `acc += c` 会把数字拼进去（实测 "NUTZ" 首字符拼出 78...）。
+2. **单引号字面量是 integer**：`':'` 是整数 58，不是字符串。传给 `find()`
+   报 "parameter 1 invalid type integer"。
+3. **正确做法**: 全部用双引号字符串 + `s.find(sep)`/`s.slice(a,b)` 切分；
+   不用 `s[i]` 逐字符；字符串比较用双引号（如 `ch < "0" || ch > "9"`）。
+4. **`"7".tointeger() == 7`**（数值），不是 ASCII 55。字符转数直接用
+   `ch.tointeger()`。
+5. **判空/遍历**: `AISignList()` 用 `foreach (sid, _ in sl)`；`AISign.GetName`
+   可能返回 null（需判空）。标牌文本有长度上限（MAX_LENGTH_SIGN_NAME_CHARS），
+   demo 名 "NUTZ:bp:7:S:fr=0:eg=-1" 22 字符安全。
+
 ---
 
 ## 附录 A — 关键事实来源
