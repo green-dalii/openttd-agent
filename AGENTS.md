@@ -11,6 +11,9 @@ TypeScript/Node (ESM, `type: module`) 单体框架：外部进程通过 **Admin 
 
 - 完整架构见 `SPEC.md`；渐进计划见 `ROADMAP.md`。
 - 必须读 `SPEC.md` §2/§10（已验证协议事实）再动通信相关代码。
+- **进度快查**: 当前开发阶段/验证状态/下一步见 `ROADMAP.md` 顶部「进度速览」+ 对应版本段；
+  真机实测事实（含 OpenTTD Squirrel 字符串坑、标牌可见性）见 `SPEC.md` §10.x；
+  Squirrel 可复用 helper（Split/ToInt/SetPhase）的规范实现以 `src/game/squirrel/executor-ai/main.nut` 为准。
 
 ## 2. 铁律（不可违反）
 

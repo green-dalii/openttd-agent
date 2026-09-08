@@ -56,14 +56,65 @@
 
 ---
 
-### v0.2.0 — 最小决策闭环（M2）
+### v0.2.0 — 最小决策闭环（M2）（当前）
 **目标**: LLM 真正「玩」第一步 —— 观察→决策→施工→盈利回灌。
+**当前阶段状态**: 通信地基已全部打通（见下方「已验证」），正在做 Executor 施工（"手"）。
 
-- Executor AI（Squirrel 施工 v0.1: bus route）
-- Bridge GS 蓝图消费 → GSSign → executor
-- Pi Agent Core 装配（tool: `observe/build_bus_route/add_vehicles/pause`）+ 自定义 AgentMessage
-- `transformContext` 记忆注入 v1
-- 验收: 一局 1950 地图跑通第一条盈利公交线；LLM 决策全量落审计
+**已验证（2026-09-08, 真机; 细节全在 SPEC §10.9-§10.13）**
+- ✅ shutdown abort 修复（信号 handler 只翻 flag，不在回调里跑 async 收尾）§10.9
+- ✅ 自定义 AI/GS 装入 sandbox + start_ai/list_game/attach GS 规则 §10.10
+- ✅ Admin↔GS 双向 JSON 通道（AdminGameScript → GS ScriptEventAdminPort；GSAdmin.Send → TS）§10.11
+- ✅ AdminClient 默认订阅含 Gamescript（GS 推送前提）§10.11
+- ✅ **标牌邮箱可见性**: GS 必须以 `GSCompanyMode(executor公司id)` 放标牌，executor 的 AISignList 才看得到 §10.12
+- ✅ 决策链路骨架全通: `pnpm run cli --v02` → boot(j-1) → GS demo 放标牌 → executor 读 NUTZ:bp:7 → 借贷 → phase=work(j7) §10.12
+- ✅ `import("pathfinder.road", "Road", 4)` 库解析成功（铺路可用）；本地库 Graph.AyStar-6 等齐全
+- ⚠️ **AI 公司没有 HQ**: `AICompany.GetCompanyHQ` 对 AI 无效 → 施工坐标必须来自标牌/外部，不能靠 HQ 选址
+- 🔑 OpenTTD Squirrel 字符串语义（血泪）§10.13: `s[i]`=integer、单引号=integer、用双引号+find/slice、`"7".tointeger()==7`
+
+**关键架构决策（已与用户对齐）**
+- 施工坐标来源 = **方案 A（外部/GS 算坐标，executor 纯执行）**；v0.2 内由 GS（deity 全图视野）代选址填蓝图
+- Executor = 纯"手"：读标牌 → 执行 DoCommand → SetPhase 汇报，不做选址决策
+- 完整盈利线分多步子落地（每步真机可验），不一次冲 700 行 arena 移植
+
+**实施分步（按依赖顺序，每步验收必须真机跑通才进下一步）**
+
+- **S1. GS 选址 + 放站标牌（当前）**
+  - BridgeV1 新增 `build_bus_route` cmd: 入参 {cmd, fromTown, toTown, company} → 用 GS API
+    （GSTownList/GSMap/AITile 等价 GS 侧 API）找 A/B 镇边缘**既有道路旁的合法站址** + front
+    → 放 `NUTZ:bp:<job>:S:fr=<front>` 和 `:E:fr=<front>` 标牌（**必须在 GSCompanyMode(company) 内**）
+  - 验收: `--v02` 改为发 build_bus_route；GS ack 带 company_signs≥2；executor 收到 job
+  - 文件: `src/game/squirrel/bridge-gs/main.nut` + `v02-runner.ts`
+
+- **S2. Executor 建出第一个真实物件（bus station）**
+  - ExecutorV1 解析 S 标牌得 {tile,front} → `AIRoad.BuildRoadStation(tile, front, ROADVEHTYPE_BUS, STATION_NEW)`
+  - 处理 DoCommand 异步/错误码（AIError.GetLastError → SetPhase 编码）；成功则 phase=station_ok
+  - 验收: 真机 economy/company_info 确认世界变了（station 建出、钱减少、phase=station_ok）
+  - 文件: `executor-ai/main.nut`
+
+- **S3. 完整双站 + 铺路（Pathfinder.Road）**
+  - GS 放 S/E/D/W 全套标牌（两站 front + depot + 路径锚点）；Executor 用 Pathfinder.Road v4
+    铺两站间 road（参照 arena PhaseRoad: pf.cost 调参 + FindPath(50) 循环）
+  - 验收: 两站间 road 建成（可经 GS state / tile 查询确认）
+  - 风险: pathfinder 可能失败（地形/资金）→ 需 abort 路径与重试
+
+- **S4. 买 bus + 订单 + 跑起来**
+  - Executor: BuildVehicle(bus) → depot → orders A→B→A → start
+  - 验收: 车在跑（company_stats vehicles≥1）；跑若干月 economy 收入为正
+
+- **S5. 盈利线闭环 + 观测确认（v0.2.0 验收）**
+  - 完整链路脚本化跑通一条盈利公交线；Web/CLI 可见 cash 曲线向上
+  - 文件: 端到端 @live 测试（test/live/）+ 文档
+
+- **S6. Pi Agent（LLM）接线（v0.2.1）**
+  - Pi Agent Core 装配 tool: observe/build_bus_route/add_vehicles/pause + AgentMessage
+  - `transformContext` 记忆注入 v1；LLM 决策全量落审计
+
+**验收（v0.2.0 总）**
+- [ ] S1-S5 全过: 一局 1950 地图脚本化跑通第一条盈利公交线（可观测: cash 向上）
+- [ ] v0.2.1: LLM 决策驱动同一条线（人工 prompt 验证一次）
+- [ ] `pnpm run gate` 全绿；@live 集成绿
+
+**里程碑映射**: M2 最小决策闭环。
 
 ### v0.3.0 — 进化闭环（M3）
 **目标**: 多局对比实验 + lessons 蒸馏注入 + 指标可视化。
