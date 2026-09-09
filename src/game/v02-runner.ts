@@ -226,6 +226,30 @@ export async function runV02(cfg: Config, opts: V02Options = {}): Promise<number
 			/* client may be closed at teardown */
 		}
 	}, 500);
+	// S5: track the cash curve over in-game time. Every ~3s take a
+	// (date, money, income) snapshot so we can tell whether the bus route
+	// is earning (cash rising / quarterly income positive).
+	const econSeries: Array<{ date: string; money: bigint; income: bigint }> = [];
+	const econPoll = setInterval(async () => {
+		if (stopRequested) return;
+		try {
+			client?.poll(AdminUpdateType.Date, 0);
+			client?.poll(AdminUpdateType.CompanyEconomy, 0);
+			await sleep(1200); // let poll responses land
+			const snap = world.snapshot();
+			const st = snap.companies.get(0);
+			const d = snap.date;
+			if (!st?.economy) return;
+			econSeries.push({
+				date: d ? `${d.year}-${String(d.month).padStart(2, "0")}` : "????-??",
+				money: st.economy.money,
+				// income is a signed 64-bit value stored as u64 by the codec.
+				income: BigInt.asIntN(64, st.economy.income),
+			});
+		} catch {
+			/* ignore */
+		}
+	}, 3000);
 	const stopPromise = new Promise<void>((resolve) => {
 		resolveStopped = resolve;
 		const check = () => (stopRequested ? resolve() : setTimeout(check, 300));
@@ -238,6 +262,27 @@ export async function runV02(cfg: Config, opts: V02Options = {}): Promise<number
 	}
 
 	clearInterval(obsPoll);
+	clearInterval(econPoll);
+
+	// S5 report: show the tail of the cash curve and a profitability guess
+	// (last income positive OR money at end > money at series start).
+	if (econSeries.length >= 2) {
+		const first = econSeries[0]!;
+		const last = econSeries[econSeries.length - 1]!;
+		const earned = last.money - first.money;
+		console.log(`[v02] S5 economy: ${econSeries.length} snapshots, ${first.date}->${last.date}`);
+		for (const e of econSeries.slice(-6)) {
+			console.log(`[v02]   ${e.date} money=${e.money} income=${e.income}`);
+		}
+		console.log(
+			`[v02] S5 profit: cash delta=${earned} last income=${last.income} => ${
+				earned > 0n ? "✅ earning" : last.income > 0n ? "✅ income positive" : "❌ not yet profitable"
+			}`,
+		);
+	} else {
+		console.log(`[v02] S5 WARN: too few economy snapshots to judge profitability`);
+	}
+
 	// report
 	const ackFinal: Record<string, unknown> | null = routeAck as Record<string, unknown> | null;
 	console.log(`[v02] RESULT: gsStates=${gsStates} routeAck=${ackFinal !== null ? "yes" : "no"} executorPhase="${executorPhase}"`);

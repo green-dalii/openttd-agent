@@ -21,7 +21,10 @@ class ExecutorV1 extends AIController {
     _reportDone = false;
     _slotD = { label = "D", bp = null, tried = 0 };
     _vehicle = -1;
-    _busReported = false;
+    _paxCargo = -1;
+    _radius = -1;
+    _dumpSeq = 0;
+    _hbSeq = 0;
     // Pathfinder.Road class (library, imported once at load). Local sandbox
     // has v4 (needs graph.aystar v6); arena used v3 — API is compatible:
     //  pf = Road(); pf.cost.*; pf.InitializePath([from],[to]); pf.FindPath(n)
@@ -30,7 +33,6 @@ class ExecutorV1 extends AIController {
     _pfInst = null;      // active Road instance
     _searchIters = 0;
     _builtRoad = null;   // list of [from,to] road pairs built
-    _roadReported = false;
 
     function Start() {
         AILog.Info("ExecutorV1 starting");
@@ -46,15 +48,23 @@ class ExecutorV1 extends AIController {
     function Tick() {
         try {
             this.TickInner();
+            // Periodic alive-heartbeat INSIDE the try so a reporting bug
+            // cannot kill the script (earlier: GetOrderIndex crash here
+            // silently stopped all phase reporting while the engine kept
+            // charging the bus maintenance).
+            if (AIController.GetTick() - this._lastBeat > 300) {
+                this._lastBeat = AIController.GetTick();
+                this._hbSeq++;
+                if (this._stage == "done" && this._vehicle >= 0) {
+                    this.DumpBus();
+                } else {
+                    this.SetPhase("hb " + this._stage + " #" + this._hbSeq);
+                }
+            }
         } catch (e) {
             local es = "" + e;
             if (es.len() > 16) es = es.slice(0, 16);
             this.SetPhase("exc:" + es);
-        }
-        // Heartbeat: prove the loop is alive every ~30 loops (~900 ticks).
-        if (this._job >= 0 && AIController.GetTick() - this._lastBeat > 600) {
-            this._lastBeat = AIController.GetTick();
-            this.SetPhase("beat " + this._stage);
         }
     }
 
@@ -129,6 +139,15 @@ class ExecutorV1 extends AIController {
      *  needs no prebuilt road; the connecting road lands on `front` in the S3
      *  road phase). If the exact sign site is blocked (town ownership,
      *  terrain, cost), scan a small ring for an alternative pair nearby. */
+    /* Build one bus station near its blueprint sign. Two attempts:
+     *  1. Pax scan: walk a 7x7 grid around the sign anchor, rank candidates
+     *     by passenger PRODUCTION in the stop's catchment (AITile
+     *     GetCargoProduction — arena's proven profitability gate), try to
+     *     build in descending order. This is what makes the route earn.
+     *  2. Plain fallback: any buildable pair near the anchor (route still
+     *     builds, may not carry passengers).
+     * Arena's TryBuildStation also enforced MIN_PROD and aborted the pair —
+     * here we keep it soft (fall back) so the skeleton still completes. */
     function TryBuildStation(slot) {
         if (slot.bp == null) {
             local found = this.FindSign(slot.label);
@@ -138,23 +157,97 @@ class ExecutorV1 extends AIController {
             }
             slot.bp = found;
         }
-        local tile = slot.bp[0];
-        local front = slot.bp[1];
-        if (this.TryPlaceStop(tile, front)) {
-            this.SetPhase("st" + slot.label + "_ok");
-            if (slot.label == "A") { this._stage = "buildB"; }
-            else { this._stage = "road"; }
+        local anchor = slot.bp[0];  // sign tile = original station site
+        local anchorF = slot.bp[1];
+        // 1. Pax-ranked scan (try up to 12 candidates per tick slice).
+        if (slot.tried < 24) {
+            local cand = this.BestPaxCandidate(anchor, anchorF, slot.tried);
+            if (cand != null) {
+                slot.bp = cand;
+                if (this.TryPlaceStop(cand[0], cand[1])) {
+                    this.SetPhase("st" + slot.label + "_ok");
+                    if (slot.label == "A") { this._stage = "buildB"; }
+                    else { this._stage = "road"; }
+                    return;
+                }
+            }
+            slot.tried++;
+            this.SetPhase("st" + slot.label + "_scan");
             return;
         }
-        // Fallback: scan outward for another buildable pair (bounded).
+        // 2. Plain fallback: any buildable pair (bounded).
         if (slot.tried > 24) {
             this.SetPhase("st" + slot.label + "_giveup");
             return;
         }
-        local alt = this.FindAltSite(tile, front, 1 + (slot.tried % 6), 4);
+        local alt = this.FindAltSite(anchor, anchorF, 1 + (slot.tried % 6), 4);
         slot.tried++;
         if (alt != null) slot.bp = alt;
         else this.SetPhase("st" + slot.label + "_retry");
+    }
+
+    /* Next pax-ranked candidate for a station anchored at `anchor`. Returns
+     * [tile, front] or null when the (bounded) candidate list is exhausted.
+     * Ring order: step outward from the anchor; within each ring prefer the
+     * neighbour that points toward the town centre is unnecessary — the
+     * anchor already sits near the town — so we just take the best
+     * production tile in each ring slice and let the caller advance. */
+    function BestPaxCandidate(anchor, anchorF, step) {
+        local pax = this.GetPaxCargoId();
+        if (pax < 0) return null;
+        local ax = AIMap.GetTileX(anchor);
+        local ay = AIMap.GetTileY(anchor);
+        // Keep the GS-chosen front DIRECTION (front - tile offset). The GS
+        // picked a pair on flat terrain; translating both tiles together
+        // stays on compatible terrain, so the later road connect won't hit
+        // ERR_LAND_SLOPED (the bug that stranded the first bus).
+        local fdx = 1; local fdy = 0; // default east
+        if (anchorF >= 0 && AIMap.IsValidTile(anchorF)) {
+            fdx = AIMap.GetTileX(anchorF) - ax;
+            fdy = AIMap.GetTileY(anchorF) - ay;
+            if (fdx < -1 || fdx > 1 || fdy < -1 || fdy > 1) { fdx = 1; fdy = 0; }
+        }
+        local r = this.StationRadius();
+        local ring = step % 5;
+        local best = null;
+        local bestProd = -1;
+        for (local dy = -ring; dy <= ring; dy++) {
+            for (local dx = -ring; dx <= ring; dx++) {
+                if (ring > 0 && (dx != -ring && dx != ring && dy != -ring && dy != ring)) continue;
+                local x = ax + dx; local y = ay + dy;
+                if (x < 0 || y < 0) continue;
+                if (x >= AIMap.GetMapSizeX() || y >= AIMap.GetMapSizeY()) continue;
+                local tile = AIMap.GetTileIndex(x, y);
+                if (AITile.IsWaterTile(tile)) continue;
+                if (!AITile.IsBuildable(tile)) continue;
+                // front must also be valid/buildable (translated direction)
+                local fx = x + fdx; local fy = y + fdy;
+                if (fx < 0 || fy < 0) continue;
+                if (fx >= AIMap.GetMapSizeX() || fy >= AIMap.GetMapSizeY()) continue;
+                local front = AIMap.GetTileIndex(fx, fy);
+                if (AITile.IsWaterTile(front)) continue;
+                if (!AITile.IsBuildable(front)) continue;
+                // production within the catchment this stop would cover
+                local prod = AITile.GetCargoProduction(tile, pax, 1, 1, r);
+                if (prod > bestProd) {
+                    bestProd = prod;
+                    best = tile;
+                }
+            }
+        }
+        if (best == null) return null;
+        local bfx = AIMap.GetTileX(best) + fdx;
+        local bfy = AIMap.GetTileY(best) + fdy;
+        return [best, AIMap.GetTileIndex(bfx, bfy)];
+    }
+
+    /* Station coverage radius (cached); bus stops normally cover 4 (or 3
+     * with modified_catchment). Ask the game. */
+    function StationRadius() {
+        if (this._radius > 0) return this._radius;
+        this._radius = AIStation.GetCoverageRadius(AIStation.STATION_BUS_STOP);
+        if (this._radius <= 0) this._radius = 3;
+        return this._radius;
     }
 
     /* S3: build a road between station A's front and station B's front using
@@ -272,7 +365,19 @@ class ExecutorV1 extends AIController {
         this.SetPhase("road_built");
         // 4. Connect each stop to its front (so buses can pull in).
         this.ConnectStop(tA, fA);
+        if (!AIRoad.AreRoadTilesConnected(fA, tA)) {
+            local es = AIError.GetLastErrorString();
+            if (es == null) es = "" + AIError.GetLastError();
+            if (es.len() > 10) es = es.slice(0, 10);
+            this.SetPhase("noconnA_" + es);
+        }
         this.ConnectStop(tB, fB);
+        if (!AIRoad.AreRoadTilesConnected(fB, tB)) {
+            local es = AIError.GetLastErrorString();
+            if (es == null) es = "" + AIError.GetLastError();
+            if (es.len() > 10) es = es.slice(0, 10);
+            this.SetPhase("noconnB_" + es);
+        }
         // 5. Verify connectivity A-front -> B-front with the library (cost
         //    on new road so it only passes over what we built).
         if (this.VerifyRoad(fA, fB)) {
@@ -316,8 +421,17 @@ class ExecutorV1 extends AIController {
             else this.SetPhase("dpt_retry");
             return;
         }
-        // Depot built. Connect its front to the nearer station front.
+        // Depot built. Ensure the depot tile connects to its own front
+        // (a depot whose door faces an unconnected front strands the bus
+        // forever inside - seen live), then road from that front to the
+        // nearer station front.
         this.SetPhase("dpt_ok");
+        this.ConnectStop(tile, front);
+        if (!AIRoad.AreRoadTilesConnected(front, tile)) {
+            this.SetPhase("dpt_door_e");
+            this._stage = "done";
+            return;
+        }
         this.ConnectDepotToStation(tile, front);
         this._stage = "bus";
     }
@@ -421,6 +535,13 @@ class ExecutorV1 extends AIController {
         if (!AIVehicle.StartStopVehicle(v)) {
             this.SetPhase("bus_start_e");
         }
+        // Fleet scaling (arena-verified): one bus cannot clear the queue a
+        // healthy route builds; clone to 3 sharing the same orders.
+        for (local i = 1; i < 3; i++) {
+            local cv = AIVehicle.CloneVehicle(this._slotD.bp[0], v, true);
+            if (!AIVehicle.IsValidVehicle(cv)) break;
+            AIVehicle.StartStopVehicle(cv);
+        }
         this.SetPhase("bus_live");
         this._stage = "done";
     }
@@ -442,6 +563,7 @@ class ExecutorV1 extends AIController {
     function ConnectStop(stop_tile, front_tile) {
         if (stop_tile == null || front_tile == null) return;
         if (AIRoad.AreRoadTilesConnected(front_tile, stop_tile)) return;
+        AIRoad.SetCurrentRoadType(AIRoad.ROADTYPE_ROAD);
         local ok = AIRoad.BuildRoad(front_tile, stop_tile);
         if (!ok && AIError.GetLastError() == AIError.ERR_ALREADY_BUILT) ok = true;
         if (!ok) {
@@ -506,13 +628,26 @@ class ExecutorV1 extends AIController {
         local ok = AIRoad.BuildRoadStation(tile, front,
                                            AIRoad.ROADVEHTYPE_BUS,
                                            AIStation.STATION_NEW);
-        if (!ok) {
-            local es = AIError.GetLastErrorString();
-            if (es == null) es = "" + AIError.GetLastError();
-            if (es.len() > 14) es = es.slice(0, 14);
-            this.SetPhase("st_place_e" + es);
+        if (ok) {
+            // Best-effort immediate connection; report-only on failure. The
+            // real fix for sloped pairs is keeping the GS-chosen front
+            // direction during the pax scan (BestPaxCandidate), which stays
+            // on the same terrain as the anchor the GS validated.
+            AIRoad.SetCurrentRoadType(AIRoad.ROADTYPE_ROAD);
+            if (!AIRoad.AreRoadTilesConnected(front, tile)) {
+                local c1 = AIRoad.BuildRoad(front, tile);
+                if (!c1 && AIError.GetLastError() == AIError.ERR_ALREADY_BUILT) c1 = true;
+                if (!c1) c1 = AIRoad.BuildRoad(tile, front);
+                if (!c1 && AIError.GetLastError() == AIError.ERR_ALREADY_BUILT) c1 = true;
+                if (!c1) this.SetPhase("st_slope_warn");
+            }
+            return true;
         }
-        return ok;
+        local es = AIError.GetLastErrorString();
+        if (es == null) es = "" + AIError.GetLastError();
+        if (es.len() > 14) es = es.slice(0, 14);
+        this.SetPhase("st_place_e" + es);
+        return false;
     }
 
     /* Scan a square ring of radius `radius` around `center` for an alternative
@@ -581,5 +716,64 @@ class ExecutorV1 extends AIController {
             v = v * 10 + ch.tointeger();
         }
         return neg ? -v : v;
+    }
+
+    /* Find the passenger cargo id (cached). */
+    function GetPaxCargoId() {
+        if (this._paxCargo >= 0) return this._paxCargo;
+        local cl = AICargoList();
+        foreach (c, _ in cl) {
+            if (AICargo.HasCargoClass(c, AICargo.CC_PASSENGERS)) {
+                this._paxCargo = c;
+                return c;
+            }
+        }
+        return -1;
+    }
+
+    /* Live bus diagnostic encoded into the company name (31 chars):
+     *   EX [R|S|D|@|B|X]<speed> a<waitA> b<waitB> j<job>
+     * R=running, S=stopped, D=depot, @=at station, B=broken, X=crashed.
+     * a/b = passengers waiting at station A/B — distinguishes a working
+     * route from one where nobody boards. */
+    function DumpBus() {
+        if (!AIVehicle.IsValidVehicle(this._vehicle)) return;
+        local stA = this._slotA.bp == null ? -1 : this._slotA.bp[0];
+        local stB = this._slotB.bp == null ? -1 : this._slotB.bp[0];
+        local st = AIVehicle.GetState(this._vehicle);
+        local ch = "?";
+        if      (st == AIVehicle.VS_RUNNING)  ch = "R";
+        else if (st == AIVehicle.VS_STOPPED)  ch = "S";
+        else if (st == AIVehicle.VS_IN_DEPOT) ch = "D";
+        else if (st == AIVehicle.VS_AT_STATION) ch = "@";
+        else if (st == AIVehicle.VS_BROKEN)   ch = "B";
+        else if (st == AIVehicle.VS_CRASHED)  ch = "X";
+        local sp = AIVehicle.GetCurrentSpeed(this._vehicle);
+        local loc = AIVehicle.GetLocation(this._vehicle);
+        local dA = AIMap.DistanceManhattan(loc, stA);
+        // On every 3rd dump, also report the bus tile coords + whether the
+        // road continues from the bus tile toward station A (for stuck debug).
+        if (this._dumpSeq % 3 == 0) {
+            local lx = AIMap.GetTileX(loc) % 1000;
+            local ly = AIMap.GetTileY(loc) % 1000;
+            local rd = AIRoad.IsRoadTile(loc);
+            local dep = AIRoad.IsRoadDepotTile(loc);
+            local sta = AIRoad.IsRoadStationTile(loc);
+            local obj = "?";
+            if (dep) obj = "depot";
+            else if (sta) obj = "station";
+            else if (rd) obj = "road";
+            else obj = "other";
+            this.SetPhase("@" + lx + "," + ly + " " + obj + " d" + dA);
+            this._dumpSeq++;
+            return;
+        }
+        local pax = this.GetPaxCargoId();
+        local sa = AIStation.GetStationID(stA);
+        local wA = (pax >= 0 && AIStation.IsValidStation(sa))
+            ? AIStation.GetCargoWaiting(sa, pax) : -1;
+        this._dumpSeq++;
+        // "R37 d6 a3 #4" - running 37, 6 tiles from A, 3 waiting at A.
+        this.SetPhase(ch + sp + " d" + dA + " a" + wA + " #" + this._dumpSeq);
     }
 }
