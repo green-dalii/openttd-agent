@@ -255,12 +255,19 @@ class BridgeV1 extends GSController {
         local tA = siteA[0]; local fA = siteA[1];
         local tB = siteB[0]; local fB = siteB[1];
         local job_str = "" + job;
+        // S4: find a depot site roughly midway between the two stations so the
+        // bus has a short hop to either stop. Best-effort: if no site is
+        // found we still place S/E (executor can build a depot itself later).
+        local siteD = this.FindDepotSite(tA, tB);
         local mode = GSCompanyMode(exec);
         // Clear stale signs for this job first.
         this.ClearJobSigns(job_str);
         local countBefore = this.CountSignsWithPrefix("NUTZ:bp:" + job_str + ":");
         GSSign.BuildSign(tA, "NUTZ:bp:" + job_str + ":S:fr=" + fA + ":eg=-1");
         GSSign.BuildSign(tB, "NUTZ:bp:" + job_str + ":E:fr=" + fB);
+        if (siteD != null) {
+            GSSign.BuildSign(siteD[0], "NUTZ:bp:" + job_str + ":D:fr=" + siteD[1]);
+        }
         // Recount INSIDE company mode (deity GSSignList hides co-owned signs).
         local names = [];
         local sl = GSSignList();
@@ -276,8 +283,44 @@ class BridgeV1 extends GSController {
                        townA = townA, townB = townB, popA = GSTown.GetPopulation(townA),
                        popB = GSTown.GetPopulation(townB),
                        tileA = tA, frontA = fA, tileB = tB, frontB = fB,
+                       depot = (siteD == null ? -1 : siteD[0]),
                        company = exec, company_signs = company_signs,
                        names = names });
+    }
+
+    /* Find a depot site between station tiles `ta` and `tb`: scans around
+     * the midpoint for a buildable, non-water [tile, front] pair where both
+     * tiles are buildable (road depot + its approach). Returns [tile, front]
+     * or null. Front chosen as the neighbour pointing back toward station A
+     * so the depot connector road heads the right way. */
+    function FindDepotSite(ta, tb) {
+        local ax = GSMap.GetTileX(ta); local ay = GSMap.GetTileY(ta);
+        local bx = GSMap.GetTileX(tb); local by = GSMap.GetTileY(tb);
+        local mx = (ax + bx) / 2; local my = (ay + by) / 2;
+        local dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+        for (local r = 0; r <= 8; r++) {
+            for (local dx = -r; dx <= r; dx++) {
+                for (local dy = -r; dy <= r; dy++) {
+                    if (dx != -r && dx != r && dy != -r && dy != r) continue;
+                    local x = mx + dx; local y = my + dy;
+                    if (x < 0 || y < 0) continue;
+                    if (x >= GSMap.GetMapSizeX() || y >= GSMap.GetMapSizeY()) continue;
+                    local tile = GSMap.GetTileIndex(x, y);
+                    if (GSTile.IsWaterTile(tile)) continue;
+                    if (!GSTile.IsBuildable(tile)) continue;
+                    foreach (d in dirs) {
+                        local fx = x + d[0]; local fy = y + d[1];
+                        if (fx < 0 || fy < 0) continue;
+                        if (fx >= GSMap.GetMapSizeX() || fy >= GSMap.GetMapSizeY()) continue;
+                        local front = GSMap.GetTileIndex(fx, fy);
+                        if (GSTile.IsWaterTile(front)) continue;
+                        if (!GSTile.IsBuildable(front)) continue;
+                        return [tile, front];
+                    }
+                }
+            }
+        }
+        return null;
     }
 
     /* Remove all NUTZ signs carrying job `job_str`. */

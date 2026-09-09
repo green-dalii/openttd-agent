@@ -178,33 +178,39 @@ export async function runV02(cfg: Config, opts: V02Options = {}): Promise<number
 	}
 	console.log(`[v02] executor reacted to blueprint: ${sawWork ? "✅ phase=work" : "(no phase change)"}`);
 
-	// --- 5b. S2: wait for both stations built (stB_ok), then confirm the world
-	// changed by polling economy: building 2 bus stops must have spent money. ---
-	const buildDeadline = Date.now() + 40_000;
-	while (!executorPhase.startsWith("EX stB_ok") && Date.now() < buildDeadline && !stopRequested) {
+	// --- 5b. S2-S4: wait for the executor to finish construction (done phase),
+	// then confirm the world changed: >=1 road vehicle in stats, cash spent. ---
+	const buildDeadline = Date.now() + 120_000;
+	while (!executorPhase.startsWith("EX done") && Date.now() < buildDeadline && !stopRequested) {
 		client?.poll(AdminUpdateType.CompanyInfo, ALL_COMPANIES);
 		await sleep(500);
 	}
-	if (executorPhase.startsWith("EX stB_ok")) {
-		// Poll economy for company 0 (executor). Building costs money vs the
-		// initial loan-funded balance.
+	if (executorPhase.startsWith("EX done")) {
+		console.log(`[v02] S4 construction done: phase="${executorPhase}"`);
+		// Stats: company 0 should now own >=1 road vehicle + 2 stations.
+		let vehicles = -1;
+		let stations = -1;
+		const statsDeadline = Date.now() + 10_000;
+		while (Date.now() < statsDeadline && vehicles < 0) {
+			client?.poll(AdminUpdateType.CompanyStats, 0);
+			await sleep(600); // let the poll response arrive before reading
+			const st = world.snapshot().companies.get(0);
+			vehicles = st?.stats?.vehicles ?? -1;
+			stations = st?.stats?.stations ?? -1;
+		}
+		console.log(`[v02] S4 live route: vehicles=${vehicles} stations=${stations}`);
+		// Economy snapshot for the report.
 		let money = -1n;
-		let loan = -1n;
 		const econDeadline = Date.now() + 8_000;
 		while (Date.now() < econDeadline && money < 0n) {
 			client?.poll(AdminUpdateType.CompanyEconomy, 0);
-			await sleep(600); // let the poll response arrive before reading
+			await sleep(600);
 			const st = world.snapshot().companies.get(0);
 			money = st?.economy?.money ?? -1n;
-			loan = st?.economy?.loan ?? -1n;
 		}
-		// Building 2 bus stops must reduce cash vs the £100k loan-funded start.
-		console.log(
-			`[v02] S2 station build confirmed; company money=${money} loan=${loan}` +
-				(money > 0n && money < 100_000n ? " (cash spent ✅)" : " (money unchanged — investigate)"),
-		);
+		console.log(`[v02] company money=${money}`);
 	} else {
-		console.log(`[v02] S2 WARN: stations not built (last phase "${executorPhase}")`);
+		console.log(`[v02] S2-S4 WARN: construction not done (last phase "${executorPhase}")`);
 	}
 
 	// --- 6. observe until stop (or demoSeconds auto-stop) ---

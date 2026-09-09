@@ -19,6 +19,9 @@ class ExecutorV1 extends AIController {
     _slotB = { label = "B", bp = null, tried = 0 };
     _lastBeat = -1;
     _reportDone = false;
+    _slotD = { label = "D", bp = null, tried = 0 };
+    _vehicle = -1;
+    _busReported = false;
     // Pathfinder.Road class (library, imported once at load). Local sandbox
     // has v4 (needs graph.aystar v6); arena used v3 — API is compatible:
     //  pf = Road(); pf.cost.*; pf.InitializePath([from],[to]); pf.FindPath(n)
@@ -67,6 +70,10 @@ class ExecutorV1 extends AIController {
             this.TryBuildStation(this._slotB);
         } else if (this._stage == "road") {
             this.PhaseRoad();
+        } else if (this._stage == "depot") {
+            this.PhaseDepot();
+        } else if (this._stage == "bus") {
+            this.PhaseBus();
         } else if (this._stage == "done" && !this._reportDone) {
             this._reportDone = true;
             // Count our own road stations (ground-truth that we built stops).
@@ -74,9 +81,10 @@ class ExecutorV1 extends AIController {
             local n = 0;
             foreach (sid, _ in stl) n++;
             local segs = this._builtRoad == null ? 0 : this._builtRoad.len();
-            this.SetPhase("done stN" + n + " r" + segs);
+            local v = (this._vehicle >= 0 && AIVehicle.IsValidVehicle(this._vehicle)) ? "bus" : "nobus";
+            this.SetPhase("done stN" + n + " r" + segs + " " + v);
         }
-        // stage "done": all S3 construction finished; loop idle (S4 extends).
+        // stage "done": all S4 construction finished; loop idle.
     }
 
     /* SetPhase: 公司名编码汇报; ≤31 字符 (OpenTTD 公司名上限). */
@@ -268,13 +276,165 @@ class ExecutorV1 extends AIController {
         // 5. Verify connectivity A-front -> B-front with the library (cost
         //    on new road so it only passes over what we built).
         if (this.VerifyRoad(fA, fB)) {
-            this._stage = "done";
+            this._stage = "depot";
             this._pfInst = null;
         } else {
             this.SetPhase("road_gap");
             this._stage = "done";
             this._pfInst = null;
         }
+    }
+
+    /* S4a: build a road depot. Uses the GS-placed D sign when available;
+     * otherwise scans near station A for a buildable pair. Mirrors arena
+     * PhaseDepot: clear both tiles, BuildRoadDepot, connect depot front to
+     * the nearest station front with a Pathfinder road so a bus can leave. */
+    function PhaseDepot() {
+        if (this._slotD.bp == null) {
+            // No D sign (GS best-effort) -> find near station A's front.
+            if (this._slotA.bp != null) {
+                local site = this.FindAltSite(this._slotA.bp[0], this._slotA.bp[1], 3, 6);
+                if (site != null) this._slotD.bp = site;
+            }
+        }
+        if (this._slotD.bp == null) {
+            this.SetPhase("dpt_nowhere");
+            this._stage = "done";
+            return;
+        }
+        local tile = this._slotD.bp[0];
+        local front = this._slotD.bp[1];
+        if (!this.TryPlaceDepot(tile, front)) {
+            if (this._slotD.tried > 20) {
+                this.SetPhase("dpt_giveup");
+                this._stage = "done";
+                return;
+            }
+            local alt = this.FindAltSite(tile, front, 1 + (this._slotD.tried % 5), 6);
+            this._slotD.tried++;
+            if (alt != null) this._slotD.bp = alt;
+            else this.SetPhase("dpt_retry");
+            return;
+        }
+        // Depot built. Connect its front to the nearer station front.
+        this.SetPhase("dpt_ok");
+        this.ConnectDepotToStation(tile, front);
+        this._stage = "bus";
+    }
+
+    /* One BuildRoadDepot attempt (clear land first). */
+    function TryPlaceDepot(tile, front) {
+        AITile.DemolishTile(tile);
+        AITile.DemolishTile(front);
+        if (!AITile.IsBuildable(tile)) return false;
+        AIRoad.SetCurrentRoadType(AIRoad.ROADTYPE_ROAD);
+        local ok = AIRoad.BuildRoadDepot(tile, front);
+        if (!ok) {
+            local es = AIError.GetLastErrorString();
+            if (es == null) es = "" + AIError.GetLastError();
+            if (es.len() > 14) es = es.slice(0, 14);
+            this.SetPhase("dpt_e" + es);
+        }
+        return ok;
+    }
+
+    /* Road from the depot front to the nearer station front so buses can
+     * actually drive out. Bidirectional BuildRoad per segment. */
+    function ConnectDepotToStation(depotTile, depotFront) {
+        local near = null;
+        local tA = this._slotA.bp == null ? -1 : this._slotA.bp[1];
+        local tB = this._slotB.bp == null ? -1 : this._slotB.bp[1];
+        local dA = (tA < 0) ? 999999 : AIMap.DistanceManhattan(depotFront, tA);
+        local dB = (tB < 0) ? 999999 : AIMap.DistanceManhattan(depotFront, tB);
+        near = (dA <= dB) ? tA : tB;
+        if (near < 0) return;
+        local pf = this._PF();
+        pf.cost.tile = 100;
+        pf.cost.turn = 50;
+        pf.cost.no_existing_road = 40;
+        pf.cost.slope = 200;
+        pf.InitializePath([depotFront], [near]);
+        local dpath = false;
+        local di = 0;
+        while (dpath == false && di < 300) {
+            dpath = pf.FindPath(1000);
+            di++;
+            if (di % 10 == 0) this.Sleep(1);
+        }
+        if (dpath == null || dpath == false) {
+            this.SetPhase("dpt_noconn");
+            return;
+        }
+        local okSegs = 0;
+        while (dpath != null) {
+            local par = dpath.GetParent();
+            if (par != null) {
+                local from = dpath.GetTile();
+                local to = par.GetTile();
+                if (AIMap.DistanceManhattan(from, to) == 1) {
+                    AIRoad.BuildRoad(from, to);
+                    AIRoad.BuildRoad(to, from);
+                    this._builtRoad.append([from, to]);
+                    okSegs++;
+                }
+            }
+            dpath = par;
+        }
+        if (okSegs > 0) this.SetPhase("dpt_conn");
+    }
+
+    /* S4b: buy a passenger road vehicle at the depot, refit, give it orders
+     * A -> B -> A, and start it. Mirrors arena PhaseBus (engine pick by
+     * CC_PASSENGERS + ROADTYPE_ROAD, best speed). */
+    function PhaseBus() {
+        local cl = AICargoList();
+        cl.Valuate(AICargo.HasCargoClass, AICargo.CC_PASSENGERS);
+        cl.KeepValue(1);
+        if (cl.IsEmpty()) {
+            this.SetPhase("bus_nocargo");
+            this._stage = "done";
+            return;
+        }
+        local cargo = cl.Begin();
+        local engine = this.PickBusEngine(cargo);
+        if (engine < 0) {
+            this.SetPhase("bus_noeng");
+            this._stage = "done";
+            return;
+        }
+        local depotTile = this._slotD.bp[0];
+        local v = AIVehicle.BuildVehicle(depotTile, engine);
+        if (!AIVehicle.IsValidVehicle(v)) {
+            local es = AIError.GetLastErrorString();
+            if (es == null) es = "" + AIError.GetLastError();
+            if (es.len() > 14) es = es.slice(0, 14);
+            this.SetPhase("bus_buy_e" + es);
+            this._stage = "done";
+            return;
+        }
+        this._vehicle = v;
+        AIVehicle.RefitVehicle(v, cargo);
+        local stA = this._slotA.bp[0];
+        local stB = this._slotB.bp[0];
+        AIOrder.AppendOrder(v, stA, AIOrder.OF_NON_STOP_INTERMEDIATE);
+        AIOrder.AppendOrder(v, stB, AIOrder.OF_NON_STOP_INTERMEDIATE);
+        if (!AIVehicle.StartStopVehicle(v)) {
+            this.SetPhase("bus_start_e");
+        }
+        this.SetPhase("bus_live");
+        this._stage = "done";
+    }
+
+    /* Pick the fastest buildable passenger road vehicle available. */
+    function PickBusEngine(cargo) {
+        local el = AIEngineList(AIVehicle.VT_ROAD);
+        el.Valuate(AIEngine.IsBuildable);          el.KeepValue(1);
+        el.Valuate(AIEngine.GetRoadType);          el.KeepValue(AIRoad.ROADTYPE_ROAD);
+        el.Valuate(AIEngine.CanRefitCargo, cargo); el.KeepValue(1);
+        el.Valuate(AIEngine.GetMaxSpeed);
+        el.Sort(AIList.SORT_BY_VALUE, false);
+        if (el.IsEmpty()) return -1;
+        return el.Begin();
     }
 
     /* Connect a bus stop tile to its front with a road stub (bidirectional),
@@ -315,7 +475,7 @@ class ExecutorV1 extends AIController {
     /* Locate the blueprint sign for station `label` ("A"/"B" -> sign slot
      * "S"/"E"). Returns [tile, front] or null. */
     function FindSign(label) {
-        local slot = (label == "A") ? "S" : "E";
+        local slot = (label == "A") ? "S" : ((label == "B") ? "E" : "D");
         local sl = AISignList();
         foreach (sid, _ in sl) {
             local txt = AISign.GetName(sid);
