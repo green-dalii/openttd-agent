@@ -225,17 +225,17 @@ class BridgeV1 extends GSController {
         // Job id: explicit or auto-increment (demo used 7; keep new ids clear).
         local job = obj.rawin("job") ? obj["job"] : (100 + this._route_seq);
         this._route_seq++;
-        // Towns: explicit ids win, else two most-populated.
+        // Towns: explicit ids win, else auto-pick a viable pair.
         local townA = obj.rawin("townA") ? obj["townA"] : -1;
         local townB = obj.rawin("townB") ? obj["townB"] : -1;
         if (townA < 0 || townB < 0) {
-            local top = this.PickBiggestTowns(2);
-            if (top.len() < 2) {
-                GSAdmin.Send({ kind = "err", cmd = "build_bus_route", reason = "<2 towns" });
+            local pair = this.PickTownPair();
+            if (pair == null) {
+                GSAdmin.Send({ kind = "err", cmd = "build_bus_route", reason = "no town pair" });
                 return;
             }
-            if (townA < 0) townA = top[0];
-            if (townB < 0) townB = top[1];
+            if (townA < 0) townA = pair[0];
+            if (townB < 0) townB = pair[1];
         }
         local cA = GSTown.GetLocation(townA);
         local cB = GSTown.GetLocation(townB);
@@ -292,16 +292,39 @@ class BridgeV1 extends GSController {
         }
     }
 
-    /* Two towns with the largest population (GSTownList iteration order is
-     * unspecified, so collect + sort). Returns up to `n` town ids. */
-    function PickBiggestTowns(n) {
-        local out = [];
+    /* Pick a viable town pair for a first bus route. Pathfinder.Road v4 +
+     * AyStar v6 (2012) dead-locks on long searches (>~60 tile manhattan in
+     * real tests), so this prefers SHORT pairs. Uses all towns (not only the
+     * biggest): nearest-pair stats on a 256x256 map show plenty of pairs in
+     * the 15..60 band. Within [15, 60] tiles pick the pair with the largest
+     * combined population; if none qualifies, widen to [15, 90].
+     * Returns [townA, townB] or null. */
+    function PickTownPair() {
         local all = [];
         local tl = GSTownList();
-        foreach (tid, _ in tl) all.push([GSTown.GetPopulation(tid), tid]);
-        all.sort(function(a, b) { return b[0] - a[0]; });
-        for (local i = 0; i < all.len() && i < n; i++) out.push(all[i][1]);
-        return out;
+        foreach (tid, _ in tl) {
+            local c = GSTown.GetLocation(tid);
+            all.push([GSTown.GetPopulation(tid), tid, GSMap.GetTileX(c), GSMap.GetTileY(c)]);
+        }
+        local best = null;
+        local bestScore = -1;
+        foreach (lim in [60, 90]) {
+            for (local i = 0; i < all.len(); i++) {
+                for (local j = i + 1; j < all.len(); j++) {
+                    local ddx = all[i][2] - all[j][2]; if (ddx < 0) ddx = -ddx;
+                    local ddy = all[i][3] - all[j][3]; if (ddy < 0) ddy = -ddy;
+                    local d = ddx + ddy;
+                    if (d < 15 || d > lim) continue;
+                    local score = all[i][0] + all[j][0];
+                    if (score > bestScore) {
+                        bestScore = score;
+                        best = [all[i][1], all[j][1]];
+                    }
+                }
+            }
+            if (best != null) return best;
+        }
+        return best;
     }
 
     /* Find [station_tile, front_tile] near `center`: a buildable, non-water

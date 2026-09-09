@@ -14,11 +14,20 @@
 class ExecutorV1 extends AIController {
     _phase = "boot";
     _job = -1;
-    _stage = "boot";   // boot -> buildA -> buildB -> done (linear, S2/S3 grow here)
+    _stage = "boot";   // boot -> buildA -> buildB -> road -> done
     _slotA = { label = "A", bp = null, tried = 0 };
     _slotB = { label = "B", bp = null, tried = 0 };
     _lastBeat = -1;
     _reportDone = false;
+    // Pathfinder.Road class (library, imported once at load). Local sandbox
+    // has v4 (needs graph.aystar v6); arena used v3 — API is compatible:
+    //  pf = Road(); pf.cost.*; pf.InitializePath([from],[to]); pf.FindPath(n)
+    //  -> node with GetTile()/GetParent(), or false (more iterations), null (none).
+    _PF = import("pathfinder.road", "Road", 4);
+    _pfInst = null;      // active Road instance
+    _searchIters = 0;
+    _builtRoad = null;   // list of [from,to] road pairs built
+    _roadReported = false;
 
     function Start() {
         AILog.Info("ExecutorV1 starting");
@@ -26,7 +35,7 @@ class ExecutorV1 extends AIController {
         this.SetPhase("boot");
         while (true) {
             this.Tick();
-            this.Sleep(30);
+            this.Sleep(5);
         }
     }
 
@@ -56,15 +65,18 @@ class ExecutorV1 extends AIController {
             this.TryBuildStation(this._slotA);
         } else if (this._stage == "buildB") {
             this.TryBuildStation(this._slotB);
+        } else if (this._stage == "road") {
+            this.PhaseRoad();
         } else if (this._stage == "done" && !this._reportDone) {
             this._reportDone = true;
             // Count our own road stations (ground-truth that we built stops).
             local stl = AIStationList(AIStation.STATION_BUS_STOP);
             local n = 0;
             foreach (sid, _ in stl) n++;
-            this.SetPhase("done stN" + n);
+            local segs = this._builtRoad == null ? 0 : this._builtRoad.len();
+            this.SetPhase("done stN" + n + " r" + segs);
         }
-        // stage "done": all S2 construction finished; loop idle (S3 extends).
+        // stage "done": all S3 construction finished; loop idle (S4 extends).
     }
 
     /* SetPhase: 公司名编码汇报; ≤31 字符 (OpenTTD 公司名上限). */
@@ -123,7 +135,7 @@ class ExecutorV1 extends AIController {
         if (this.TryPlaceStop(tile, front)) {
             this.SetPhase("st" + slot.label + "_ok");
             if (slot.label == "A") { this._stage = "buildB"; }
-            else { this._stage = "done"; }
+            else { this._stage = "road"; }
             return;
         }
         // Fallback: scan outward for another buildable pair (bounded).
@@ -135,6 +147,169 @@ class ExecutorV1 extends AIController {
         slot.tried++;
         if (alt != null) slot.bp = alt;
         else this.SetPhase("st" + slot.label + "_retry");
+    }
+
+    /* S3: build a road between station A's front and station B's front using
+     * the Pathfinder.Road library (imported as _PF). Mirrors arena PhaseRoad:
+     * cost tuning + FindPath(50) loop, walk path emitting BuildRoad both
+     * directions per segment, then connect both stops to their fronts.
+     * Runs once per tick slice; stage advances to "done" only when the road
+     * and both stop connections are in place (or abort after bounded retries).
+     * Report every road action via SetPhase so the runner sees progress. */
+    function PhaseRoad() {
+        // Need both station fronts from the cached slots.
+        if (this._slotA.bp == null || this._slotB.bp == null) {
+            this.SetPhase("road_nofront");
+            this._stage = "done"; // cannot proceed without cached sites
+            return;
+        }
+        local fA = this._slotA.bp[1];
+        local fB = this._slotB.bp[1];
+        local tA = this._slotA.bp[0];
+        local tB = this._slotB.bp[0];
+        if (this._pfInst == null) {
+            this._builtRoad = [];
+            this.SetPhase("road_start");
+            // ROAD TYPE PRECONDITION: Pathfinder.Road probes tile reachability
+            // with AIRoad.BuildRoad inside AITestMode; if the company's current
+            // road type isn't ROAD every probe fails -> empty neighbours ->
+            // NOPATH forever. Same root cause as S2's BuildRoadStation failure.
+            AIRoad.SetCurrentRoadType(AIRoad.ROADTYPE_ROAD);
+            this._pfInst = this._PF();
+            local pf = this._pfInst;
+            // Cost tuning per arena (see nutz_executor PhaseRoad comments).
+            pf.cost.tile = 100;
+            pf.cost.turn = 50;
+            pf.cost.no_existing_road = 120;
+            pf.cost.slope = 200;
+            pf.cost.bridge_per_tile = 100;
+            pf.cost.tunnel_per_tile = 100;
+            pf.cost.coast = 20;
+            pf.cost.max_bridge_length = 12;
+            pf.cost.max_tunnel_length = 10;
+            // Arena ignores InitializePath's return; FindPath drives the run.
+            pf.InitializePath([fA], [fB]);
+            this.SetPhase("road_search");
+        }
+        // 2. Run the search with a bounded iteration budget that yields to
+        //    ticks periodically. FindPath(-1) can spin forever on an
+        //    impossible route, so cap total expansions and report progress
+        //    (probe: FindPath(1000) x ~N returns null when no route exists).
+        local path = false;
+        local iters = 0;
+        while (path == false && iters < 100) {
+            path = this._pfInst.FindPath(1000);
+            iters++;
+            if (iters % 5 == 0) {
+                this._searchIters++;
+                this.SetPhase("rs i" + this._searchIters); // keep observer alive
+            }
+            if (path == false && iters % 5 == 0) this.Sleep(1);
+        }
+        if (path == null) {
+            this.SetPhase("road_nopath");
+            this._stage = "done";
+            this._pfInst = null;
+            return;
+        }
+        if (path == false) {
+            this.SetPhase("road_timeout");
+            this._stage = "done";
+            this._pfInst = null;
+            return;
+        }
+        // 3. Walk the found path building roads segment by segment.
+        local segs = 0;
+        while (path != null) {
+            local par = path.GetParent();
+            if (par != null) {
+                local from = path.GetTile();
+                local to = par.GetTile();
+                if (AIMap.DistanceManhattan(from, to) == 1) {
+                    local ok1 = AIRoad.BuildRoad(from, to);
+                    if (!ok1 && AIError.GetLastError() != AIError.ERR_ALREADY_BUILT) {
+                        this.SetPhase("road_bldfail");
+                        this._stage = "done";
+                        this._pfInst = null;
+                        return;
+                    }
+                    AIRoad.BuildRoad(to, from);
+                    this._builtRoad.append([from, to]);
+                } else if (!AIBridge.IsBridgeTile(from) && !AITunnel.IsTunnelTile(from)) {
+                    if (AIRoad.IsRoadTile(from)) AITile.DemolishTile(from);
+                    if (AITunnel.GetOtherTunnelEnd(from) == to) {
+                        if (!AITunnel.BuildTunnel(AIVehicle.VT_ROAD, from)) {
+                            this.SetPhase("road_tunnelfail");
+                            this._stage = "done";
+                            this._pfInst = null;
+                            return;
+                        }
+                    } else {
+                        local bl = AIBridgeList_Length(AIMap.DistanceManhattan(from, to) + 1);
+                        bl.Valuate(AIBridge.GetMaxSpeed);
+                        bl.Sort(AIList.SORT_BY_VALUE, false);
+                        if (!AIBridge.BuildBridge(AIVehicle.VT_ROAD, bl.Begin(), from, to)) {
+                            this.SetPhase("road_bridgefail");
+                            this._stage = "done";
+                            this._pfInst = null;
+                            return;
+                        }
+                    }
+                    this._builtRoad.append([from, to]);
+                }
+                segs++;
+            }
+            path = par;
+        }
+        this.SetPhase("road_built");
+        // 4. Connect each stop to its front (so buses can pull in).
+        this.ConnectStop(tA, fA);
+        this.ConnectStop(tB, fB);
+        // 5. Verify connectivity A-front -> B-front with the library (cost
+        //    on new road so it only passes over what we built).
+        if (this.VerifyRoad(fA, fB)) {
+            this._stage = "done";
+            this._pfInst = null;
+        } else {
+            this.SetPhase("road_gap");
+            this._stage = "done";
+            this._pfInst = null;
+        }
+    }
+
+    /* Connect a bus stop tile to its front with a road stub (bidirectional),
+     * unless already connected. */
+    function ConnectStop(stop_tile, front_tile) {
+        if (stop_tile == null || front_tile == null) return;
+        if (AIRoad.AreRoadTilesConnected(front_tile, stop_tile)) return;
+        local ok = AIRoad.BuildRoad(front_tile, stop_tile);
+        if (!ok && AIError.GetLastError() == AIError.ERR_ALREADY_BUILT) ok = true;
+        if (!ok) {
+            ok = AIRoad.BuildRoad(stop_tile, front_tile);
+            if (!ok && AIError.GetLastError() == AIError.ERR_ALREADY_BUILT) ok = true;
+        }
+        if (ok && this._builtRoad != null) this._builtRoad.append([front_tile, stop_tile]);
+    }
+
+    /* Run a fresh pathfinder with huge no_existing_road penalty: if it finds
+     * a route it means the tiles we built form a connected road. */
+    function VerifyRoad(fA, fB) {
+        local pf = this._PF();
+        pf.cost.tile = 100;
+        pf.cost.turn = 50;
+        pf.cost.no_existing_road = 100000;
+        pf.cost.slope = 200;
+        pf.cost.bridge_per_tile = 100000;
+        pf.cost.tunnel_per_tile = 100000;
+        pf.InitializePath([fA], [fB]);
+        local vpath = false;
+        local viters = 0;
+        while (vpath == false && viters < 300) {
+            vpath = pf.FindPath(50);
+            viters++;
+            if (viters % 20 == 0) this.Sleep(1);
+        }
+        return vpath != null && vpath != false;
     }
 
     /* Locate the blueprint sign for station `label` ("A"/"B" -> sign slot
