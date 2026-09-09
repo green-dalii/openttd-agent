@@ -482,6 +482,46 @@ openttd-agent/
    可能返回 null（需判空）。标牌文本有长度上限（MAX_LENGTH_SIGN_NAME_CHARS），
    demo 名 "NUTZ:bp:7:S:fr=0:eg=-1" 22 字符安全。
 
+## 10.14 v0.2 实现: Executor 全量施工（S2-S5, 2026-09-09, 真机）
+从「收到 job」到「3 辆 bus 跑起路线」的真机实证。每项都是调试定位的根因。
+
+1. **road type 前置条件（S2/S3 双卡死的同一根因）**: `BuildRoadStation` 和
+   Pathfinder.Road 的邻居探测都在 **AITestMode 测试模式**内用 `AIRoad.BuildRoad`
+   试建；若公司当前 road type 不是 ROAD，所有试建恒 false：
+   - `BuildRoadStation` → `ERR_PRECONDITION_FAILED`
+   - Pathfinder 邻居集为空 → 永远 `NOPATH`
+   **修复**: 每次施工前 `AIRoad.SetCurrentRoadType(AIRoad.ROADTYPE_ROAD)`。
+   隔离 probe 对照: 加一行后 25-tile 路线从 NOPATH → ROUTE。
+
+2. **Pathfinder.Road v4 + AyStar v6 (2012) 长路死锁**: `FindPath(1000)` 对
+   >~110 tile 曼哈顿缺口**单次调用 90s+ 不返回**（隔离 probe 实测），25 tile
+   秒回。非迭代慢，是 AyStar 内部对不可达/超长目标的行为问题。**约束**:
+   路径必须 ≤~60 tile。**解除办法（S6 前置）**: 分段铺路（每段 ≤60 拼接）。
+   另: v3 用 `FindPath(50)` 循环让出（arena）；v4 语义同但长距仍死锁。
+
+3. **normal bus stop 的入口方向 = BuildRoadStation 的 front 参数**。铺路后
+   站若与 front 无法 `BuildRoad` 连通（`ERR_LAND_SLOPED`），车永远到不了站台。
+   **修复**: pax 精扫移动站址时**保持 GS 给的 front 相对方向**（front−tile
+   偏移整体平移），与 GS 已选的地形兼容。
+
+4. **road depot 门连接**: `BuildRoadDepot(tile, front)` 建 depot 后必须
+   `ConnectStop(tile, front)` 确保门前有路，否则车**永远卡在 depot 里**
+   （真实症状: 状态 RUNNING、距站 6 tile、永不进站）。之后再用 Pathfinder
+   从 front 铺到最近站 front。
+
+5. **正常观测前提（runner 踩坑）**: company name 的 SetPhase 只在**名字变化**
+   时产生 CompanyInfo push；观察期必须**轮询** CompanyInfo/Date/Economy。
+   且任何报告路径的 API 调用都要在 try/catch 内（`AIOrder.GetOrderIndex`
+   不存在 → 崩溃 → 所有 phase 报告静默停止，而引擎继续扣维护费 → 误判"手
+   不动"）。诊断代码叠加会掩盖此类崩溃，保持单一路径。
+
+6. **income 是 signed 64-bit**（协议按 u64 传）: 负利润读成巨大 u64。JS 侧
+   `BigInt.asIntN(64, income)` 还原符号，否则永远误报 income>0。
+
+7. **车队规模**: 单 bus 无法消化健康路线的客流（站 waiting 97→121 积压）；
+   3 辆共享订单后排队降到 26-52。盈利与否在此阶段属决策质量（脑的职责），
+   机械闭环验收 = 车跑/站载客/经济数据回灌（§ROADMAP v0.2.0 范围修正）。
+
 ---
 
 ## 附录 A — 关键事实来源
