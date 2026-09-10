@@ -10,7 +10,8 @@
 ### 进度速览
 - ✅ v0.0.1 — 脚手架 + MVP（Admin Port 最小闭环，真机验证通过）
 - ✅ **v0.1.0 — 观测闭环（M1）（2026-09-08 完成）**
-- 🔵 **v0.2.0 — 最小决策闭环（M2）（当前）**
+- ✅ **v0.2.0 — 通信 + Executor「手」（M2 前半）（2026-09-09 完成）**
+- 🔵 **v0.2.1 — Pi Agent「脑」接线（M2 后半）（接线完成，盈利验收待真实 LLM）**
 - ⬜ v0.3.0 — 进化闭环（M3）
 - ⬜ v0.4.0 — 打磨与广度（M4）
 
@@ -92,12 +93,14 @@
 
 **里程碑映射**: M2 前半（通信 + 手施工）；脑接线与盈利归 v0.2.1。
 
-### v0.2.1 — Pi Agent（LLM）接线（M2 后半）（下一步）
-- Pi Agent Core 装配 tool: observe/build_bus_route/add_vehicles/pause + AgentMessage
-- ~~前置技术债: 分段铺路~~ ✅ 完成（SPEC §10.15）—— 现在 LLM 可选远/长路线
-- LLM 决策选镇对/路线/车队/贷款 → 复用已验证命令通道 → 结果回灌
-- `transformContext` 记忆注入 v1；LLM 决策全量落审计
-- **验收**: LLM（人工 prompt）驱动一条**盈利**公交线（SPEC §10.8 M2 完整验收）
+### v0.2.1 — Pi Agent（LLM）接线（M2 后半）（✅ 接线完成, 2026-09-09）
+- ✅ Pi Agent Core 装配 tool: `observe`/`build_bus_route`/`add_vehicles`/`set_pause` + `CustomAgentMessages`（`game_observation`/`action_result`）
+- ✅ 前置技术债: 分段铺路（SPEC §10.15）—— LLM 可选远/长路线
+- ✅ LLM 决策 → 复用已验证命令通道 → 结果回灌（真机: 真实 HTTP provider 驱动一条线）
+- ✅ `transformContext` v1（历史剪枝 + lessons 注入 hook）；✅ 决策/动作 **JSONL 审计**
+- ✅ **Provider 配置**: env / CLI flags / **Web dashboard 面板**（Base URL / Model / key / API），持久化 `<dataDir>/llm.json`，key 脱敏
+- ⬜ **验收（未完成）**: 真实 LLM 驱动一条**盈利**公交线 —— 需用户提供 provider key + 更长观察期；架构与通道已就绪
+- ⬜ 后置: 其余 tools（train/orders/reflection）、事件镜像给 Web、决策点绑定游戏月份、session 分支
 
 ### v0.3.0 — 进化闭环（M3）
 **目标**: 多局对比实验 + lessons 蒸馏注入 + 指标可视化。

@@ -23,6 +23,7 @@ class ExecutorV1 extends AIController {
     _vehicle = -1;
     _paxCargo = -1;
     _radius = -1;
+    _fleetApplied = -1;  // last applied fleet size from a V sign
     _roadCur = -1;       // segmented-road: current front reached
     _roadSeg = 0;
     _roadSegStep = 0;
@@ -85,7 +86,10 @@ class ExecutorV1 extends AIController {
             this.PhaseDepot();
         } else if (this._stage == "bus") {
             this.PhaseBus();
-        } else if (this._stage == "done" && !this._reportDone) {
+        } else if (this._stage == "done" && this._vehicle >= 0) {
+            this.CheckAddVehicles();
+        }
+        if (this._stage == "done" && !this._reportDone) {
             this._reportDone = true;
             // Count our own road stations (ground-truth that we built stops).
             local stl = AIStationList(AIStation.STATION_BUS_STOP);
@@ -780,6 +784,55 @@ class ExecutorV1 extends AIController {
      * R=running, S=stopped, D=depot, @=at station, B=broken, X=crashed.
      * a/b = passengers waiting at station A/B — distinguishes a working
      * route from one where nobody boards. */
+    /* S6: apply a `NUTZ:bp:<job>:V:<count>` fleet-size sign from the GS
+     * (placed by the agent's add_vehicles tool). Grows by cloning the lead
+     * vehicle (clones share orders); shrinks by selling the newest vehicles.
+     * Acts only when the requested count differs from what we last applied. */
+    function CheckAddVehicles() {
+        local sl = AISignList();
+        local want = -1;
+        foreach (sid, _ in sl) {
+            local txt = AISign.GetName(sid);
+            if (txt == null || txt.len() < 5) continue;
+            if (txt.slice(0, 5) != "NUTZ:") continue;
+            local parts = this.Split(txt.slice(5), ":");
+            if (parts.len() < 4) continue;
+            if (parts[0] != "bp") continue;
+            local job = this.ToInt(parts[1]);
+            if (job != this._job) continue;
+            if (parts[2] != "V") continue;
+            want = this.ToInt(parts[3]);
+            break;
+        }
+        if (want < 1) return;
+        if (want == this._fleetApplied) return; // already satisfied
+        local cur = 0;
+        local vl = AIVehicleList();
+        foreach (v, _ in vl) cur++;
+        if (cur < want) {
+            if (!AIVehicle.IsValidVehicle(this._vehicle)) return;
+            while (cur < want) {
+                local cv = AIVehicle.CloneVehicle(this._slotD.bp[0], this._vehicle, true);
+                if (!AIVehicle.IsValidVehicle(cv)) break;
+                AIVehicle.StartStopVehicle(cv);
+                cur++;
+            }
+            this._fleetApplied = want;
+            this.SetPhase("fleet" + cur);
+        } else if (cur > want) {
+            // Sell vehicles that are not the lead vehicle.
+            foreach (v, _ in vl) {
+                if (cur <= want) break;
+                if (v == this._vehicle) continue;
+                if (AIVehicle.SellVehicle(v)) cur--;
+            }
+            this._fleetApplied = want;
+            this.SetPhase("fleet" + cur);
+        } else {
+            this._fleetApplied = want;
+        }
+    }
+
     function DumpBus() {
         if (!AIVehicle.IsValidVehicle(this._vehicle)) return;
         local stA = this._slotA.bp == null ? -1 : this._slotA.bp[0];

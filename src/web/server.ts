@@ -37,6 +37,16 @@ export interface WebServerOptions {
 	/** Called when a client subscribes; return the current snapshot payload. */
 	getSnapshot?: () => unknown;
 	onFirstClient?: () => void;
+	/**
+	 * LLM settings read/write hooks (SPEC §4). Injected so this module stays
+	 * agnostic of the agent layer. When absent, /api/llm returns 404.
+	 */
+	llm?: {
+		/** Safe view (never includes the raw key). */
+		get: () => unknown;
+		/** Validate + persist; returns the new safe view. Throws on bad input. */
+		save: (body: unknown) => unknown;
+	};
 }
 
 export class WebServer {
@@ -47,6 +57,7 @@ export class WebServer {
 	private wss: WebSocketServer;
 	private getSnapshot: () => unknown;
 	private onFirstClient?: () => void;
+	private llmHooks?: WebServerOptions["llm"];
 	private clients = new Set<WebSocket>();
 	private started = false;
 
@@ -55,6 +66,7 @@ export class WebServer {
 		this.port = opts.port ?? 0; // 0 = OS-assigned
 		this.getSnapshot = opts.getSnapshot ?? (() => ({}));
 		this.onFirstClient = opts.onFirstClient;
+		this.llmHooks = opts.llm;
 
 		this.httpServer = http.createServer((req, res) => this.serveStatic(req, res));
 		this.wss = new WebSocketServer({ noServer: true });
@@ -132,6 +144,10 @@ export class WebServer {
 	private async serveStatic(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
 		try {
 			const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+			if (url.pathname === "/api/llm") {
+				await this.handleLlmApi(req, res);
+				return;
+			}
 			let p = decodeURIComponent(url.pathname);
 			if (p === "/") p = "/index.html";
 			// Prevent path traversal.
@@ -148,4 +164,48 @@ export class WebServer {
 			res.writeHead(404).end("not found");
 		}
 	}
+
+	/**
+	 * GET  /api/llm -> current settings (key redacted)
+	 * POST /api/llm -> save settings { baseUrl, model, apiKey?, api?, provider? }
+	 * Localhost-only by construction (server binds 127.0.0.1). The raw key is
+	 * never returned.
+	 */
+	private async handleLlmApi(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+		if (!this.llmHooks) {
+			res.writeHead(404, { "content-type": "application/json" }).end('{"error":"llm api disabled"}');
+			return;
+		}
+		const json = (code: number, body: unknown) => {
+			res.writeHead(code, { "content-type": "application/json" }).end(stringifyJson(body));
+		};
+		try {
+			if (req.method === "GET") {
+				json(200, this.llmHooks.get());
+				return;
+			}
+			if (req.method === "POST") {
+				const raw = await readBody(req);
+				const parsed: unknown = raw.length ? JSON.parse(raw) : {};
+				json(200, this.llmHooks.save(parsed));
+				return;
+			}
+			json(405, { error: "method not allowed" });
+		} catch (e) {
+			json(400, { error: e instanceof Error ? e.message : String(e) });
+		}
+	}
+}
+
+/** Read a small request body (bounded). */
+async function readBody(req: http.IncomingMessage, maxBytes = 64 * 1024): Promise<string> {
+	const chunks: Buffer[] = [];
+	let total = 0;
+	for await (const c of req) {
+		const buf = c as Buffer;
+		total += buf.length;
+		if (total > maxBytes) throw new Error("request body too large");
+		chunks.push(buf);
+	}
+	return Buffer.concat(chunks).toString("utf8");
 }

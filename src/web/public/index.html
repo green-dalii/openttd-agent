@@ -20,6 +20,34 @@
 <main>
   <section id="companies"></section>
 
+  <section class="panel" id="llm-panel">
+    <h2>LLM provider <span class="dim" id="llm-status">…</span></h2>
+    <form id="llm-form" class="llm-form" autocomplete="off">
+      <label>Base URL
+        <input id="llm-base" type="text" placeholder="https://api.openai.com/v1" />
+      </label>
+      <label>Model
+        <input id="llm-model" type="text" placeholder="gpt-4o-mini / deepseek-chat" />
+      </label>
+      <label>API key
+        <input id="llm-key" type="password" placeholder="(unchanged)" />
+      </label>
+      <label>API
+        <select id="llm-api">
+          <option value="openai-completions">openai-completions</option>
+          <option value="anthropic-messages">anthropic-messages</option>
+        </select>
+      </label>
+      <label>Provider id
+        <input id="llm-provider" type="text" placeholder="openttd-llm" />
+      </label>
+      <div class="llm-actions">
+        <button type="submit">Save</button>
+        <span id="llm-msg" class="dim"></span>
+      </div>
+    </form>
+  </section>
+
   <section class="panel">
     <h2>Cash history (per company, per poll/quarter)</h2>
     <canvas id="chart" width="900" height="260"></canvas>

@@ -187,3 +187,54 @@ function compact(v) {
 }
 
 connect();
+
+/* ---- LLM provider settings (SPEC §4) -------------------------------- */
+const llmBase = $("llm-base"), llmModel = $("llm-model"), llmKey = $("llm-key"),
+      llmApi = $("llm-api"), llmProvider = $("llm-provider"),
+      llmForm = $("llm-form"), llmMsg = $("llm-msg"), llmStatus = $("llm-status");
+
+function renderLlm(v) {
+  if (!v) { llmStatus.textContent = "(api disabled)"; return; }
+  llmBase.value = v.baseUrl || "";
+  llmModel.value = v.model || "";
+  llmApi.value = v.api || "openai-completions";
+  llmProvider.value = v.providerId || "";
+  llmKey.value = "";
+  llmKey.placeholder = v.hasApiKey ? "(stored — leave blank to keep)" : "(no key set)";
+  llmStatus.textContent = v.configured ? "configured ✅" : "not configured";
+  llmStatus.className = v.configured ? "ok" : "bad";
+}
+
+async function loadLlm() {
+  try {
+    const r = await fetch("/api/llm");
+    if (!r.ok) { renderLlm(null); return; }
+    renderLlm(await r.json());
+  } catch { renderLlm(null); }
+}
+
+if (llmForm) {
+  llmForm.addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    llmMsg.textContent = "saving…";
+    const body = {
+      baseUrl: llmBase.value.trim(),
+      model: llmModel.value.trim(),
+      api: llmApi.value,
+      providerId: llmProvider.value.trim() || "openttd-llm",
+    };
+    if (llmKey.value.trim()) body.apiKey = llmKey.value.trim();
+    try {
+      const r = await fetch("/api/llm", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const out = await r.json();
+      if (!r.ok) { llmMsg.textContent = "error: " + (out.error || r.status); return; }
+      renderLlm(out);
+      llmMsg.textContent = "saved ✅ (applies on next agent run)";
+    } catch (e) { llmMsg.textContent = "error: " + e; }
+  });
+  loadLlm();
+}

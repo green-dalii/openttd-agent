@@ -542,6 +542,31 @@ openttd-agent/
    -52k/季 含建设摊销），但客流旺盛（waiting a109-185）。选多长线/投多少车/观察
    多久 = 脑(LLM)的决策，非"手"的机械验收（呼应 ROADMAP v0.2.0 范围修正）。
 
+## 10.16 v0.2.1 实现: Pi Agent「脑」接线 + Provider 配置（2026-09-09）
+把 LLM 决策接入已验证的命令通道。**使用官方组件，不自行实现 provider。**
+
+1. **官方 provider 组件**: `@earendil-works/pi-ai@0.85.1`（= pi 仓库 `packages/ai`）
+   提供 `createProvider` + `openAICompletionsApi`/`anthropicMessagesApi`（子路径
+   `@earendil-works/pi-ai/api/*.lazy`，顶层 index 不导出这两个函数）。
+   本地/自建端点用 `createProvider({ id, baseUrl, auth.apiKey, models, api })` 装配。
+2. **pi-agent-core Agent 装配要点**: `AgentOptions.streamFn` 必填；`initialState.tools`
+   需为 `AgentTool<TSchema, TDetails>[]`（typebox schema，泛型参数必须写全，
+   否则 `execute` 的 params 被推断为 unknown）；`beforeToolCall` 返回用 `block`
+   （不是 `blocked`）；`CustomAgentMessages` 声明合并的 module 名 = 包名。
+3. **配置优先级**: env(显式) > `<dataDir>/llm.json`(dashboard) > 未配置。
+   `providerId` 在 env 未显式设置时留空字符串，交给文件/默认兜底（否则默认值会
+   把文件值永久压住）。
+4. **密钥安全**: 对外视图/日志/审计一律脱敏（`redactKey`、audit `sanitize`），
+   `GET /api/llm` 绝不回显 key；POST 留空 key = 保持原值（不误清）。
+5. **faux ≠ 真 LLM**: pi-ai 的 faux provider 是脚本桩，只能验证接线，**不能**
+   验证决策质量。真实验证用**本地 OpenAI 兼容 stub + 真实 HTTP**
+   （test/unit/agent-provider-http.test.ts + scripts/llm-stub.ts），
+   或由用户配置真实 key。
+6. **决策循环的非阻塞契约**: 施工是分钟级异步过程，工具**发出即返回**
+   （ack 语义），LLM 靠 `observe` 轮询进展；禁止在工具内等待施工完成。
+7. **审计**: 决策点 + 动作结果落 `<dataDir>/agent-audit.jsonl`（append-only、
+   密钥脱敏、写失败不影响循环）。
+
 ---
 
 ## 附录 A — 关键事实来源

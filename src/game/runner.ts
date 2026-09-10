@@ -15,6 +15,7 @@ import { OpenTTDProcessManager } from "../game/process-manager.js";
 import { AdminClient } from "../game/admin-client.js";
 import { WorldState } from "../game/world-state.js";
 import { WebServer } from "../web/server.js";
+import { applyLlmSettingsFile, saveLlmSettingsFile, toSettingsView } from "../agent/llm-settings.js";
 import { AdminUpdateType } from "../game/admin-protocol.js";
 import { aiInstalledNames, isAiInstalled } from "./ai-registry.js";
 
@@ -125,6 +126,29 @@ export async function runWatch(
 		getSnapshot: () => toWireSnapshot(world),
 		onFirstClient: () => {
 			web?.publishSnapshot(toWireSnapshot(world));
+		},
+		// LLM provider settings (SPEC §4): dashboard read/write -> <dataDir>/llm.json
+		llm: {
+			get: () => toSettingsView(applyLlmSettingsFile(cfg).llm),
+			save: (body) => {
+				const cur = applyLlmSettingsFile(cfg).llm;
+				const b = (body ?? {}) as Record<string, unknown>;
+				const next = {
+					providerId: typeof b.providerId === "string" && b.providerId.trim() ? b.providerId.trim() : cur.providerId,
+					baseUrl: typeof b.baseUrl === "string" ? b.baseUrl.trim() : cur.baseUrl,
+					model: typeof b.model === "string" ? b.model.trim() : cur.model,
+					api:
+						b.api === "openai-completions" || b.api === "anthropic-messages"
+							? b.api
+							: cur.api,
+					// Blank key => keep the stored one (never clear by accident).
+					apiKey: typeof b.apiKey === "string" && b.apiKey.trim() ? b.apiKey.trim() : cur.apiKey,
+					contextWindow: cur.contextWindow,
+					maxTokens: cur.maxTokens,
+				};
+				saveLlmSettingsFile(cfg.dataDir, next);
+				return toSettingsView(next);
+			},
 		},
 	});
 	await web.start();

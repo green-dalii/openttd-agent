@@ -24,15 +24,21 @@ import {
 import { handleServerPacket } from "../game/observer.js";
 import { runWatch } from "../game/runner.js";
 import { runV02 } from "../game/v02-runner.js";
+import { runAgent } from "../agent/runner.js";
+import { applyLlmSettingsFile } from "../agent/llm-settings.js";
 
 interface CliArgs {
-	mode: "probe" | "dry-run" | "watch" | "v02" | "help";
+	mode: "probe" | "dry-run" | "watch" | "v02" | "agent" | "help";
 	year?: number;
 	seed?: number;
 	timeoutMs: number;
 	aiName?: string;
 	webPort?: number;
 	demoSeconds?: number;
+	llmBaseUrl?: string;
+	llmApiKey?: string;
+	llmModel?: string;
+	llmApi?: string;
 }
 
 function parseArgs(argv: string[]): CliArgs {
@@ -43,6 +49,10 @@ function parseArgs(argv: string[]): CliArgs {
 	let aiName: string | undefined;
 	let webPort: number | undefined;
 	let demoSeconds: number | undefined;
+	let llmBaseUrl: string | undefined;
+	let llmApiKey: string | undefined;
+	let llmModel: string | undefined;
+	let llmApi: string | undefined;
 	for (let i = 0; i < argv.length; i++) {
 		const a = argv[i]!;
 		switch (a) {
@@ -55,8 +65,23 @@ function parseArgs(argv: string[]): CliArgs {
 			case "--v02":
 				mode = "v02";
 				break;
+			case "--agent":
+				mode = "agent";
+				break;
 			case "--demo-seconds":
 				demoSeconds = parseIntNum(argv[++i], "--demo-seconds");
+				break;
+			case "--llm-base-url":
+				llmBaseUrl = argv[++i];
+				break;
+			case "--llm-key":
+				llmApiKey = argv[++i];
+				break;
+			case "--llm-model":
+				llmModel = argv[++i];
+				break;
+			case "--llm-api":
+				llmApi = argv[++i];
 				break;
 			case "--dry-run":
 				mode = "dry-run";
@@ -84,7 +109,7 @@ function parseArgs(argv: string[]): CliArgs {
 				throw new ConfigError(`unknown option: ${a}`);
 		}
 	}
-	return { mode, year, seed, timeoutMs, aiName, webPort, demoSeconds };
+	return { mode, year, seed, timeoutMs, aiName, webPort, demoSeconds, llmBaseUrl, llmApiKey, llmModel, llmApi };
 }
 
 function parseIntNum(v: string | undefined, label: string): number {
@@ -105,11 +130,19 @@ Usage:
   pnpm run cli --v02 [opts]             v0.2 decision-loop demo: deploy BridgeV1 GS
                                          + ExecutorV1 AI, drive a demo blueprint,
                                          Ctrl-C or --demo-seconds N to stop.
+  pnpm run cli --agent [opts]           v0.2.1 agent brain: boot game + BridgeV1 GS
+                                         + ExecutorV1, then let the pi-agent-core
+                                         brain decide (faux provider by default) and
+                                         observe construction (--demo-seconds N).
   --year N           start year (default 1950)
   --seed N           map seed (default random)
   --timeout-ms N     probe: max wait for first economy (default 15000)
   --ai NAME          watch: AI to start as observed company (default CPU)
   --web-port N       watch: dashboard port (default ephemeral)
+  --llm-base-url U   agent: OpenAI-compatible base URL (e.g. https://api.openai.com/v1)
+  --llm-key K        agent: API key (also LLM_API_KEY / OPENAI_API_KEY)
+  --llm-model M      agent: model id (e.g. gpt-4o-mini, deepseek-chat)
+  --llm-api A        agent: streaming API (openai-completions|anthropic-messages)
   --help             this help
 
 Env: OPENTTD_BINARY, OPENTTD_DATA_DIR, OPENTTD_ADMIN_PORT/PASSWORD,
@@ -126,7 +159,11 @@ async function main(): Promise<number> {
 	const overrides: Record<string, string> = {};
 	if (args.year !== undefined) overrides.OPENTTD_START_YEAR = String(args.year);
 	if (args.seed !== undefined) overrides.OPENTTD_SEED = String(args.seed);
-	const cfg = loadConfig({ ...process.env, ...overrides });
+	if (args.llmBaseUrl !== undefined) overrides.LLM_BASE_URL = args.llmBaseUrl;
+	if (args.llmApiKey !== undefined) overrides.LLM_API_KEY = args.llmApiKey;
+	if (args.llmModel !== undefined) overrides.LLM_MODEL = args.llmModel;
+	if (args.llmApi !== undefined) overrides.LLM_API = args.llmApi;
+	const cfg = applyLlmSettingsFile(loadConfig({ ...process.env, ...overrides }));
 
 	if (args.mode === "dry-run") {
 		console.log(JSON.stringify(redact(cfg), null, 2));
@@ -149,6 +186,14 @@ async function main(): Promise<number> {
 			return await runV02(cfg, { demoSeconds: args.demoSeconds });
 		} catch (e) {
 			console.error("[v02] ERROR:", e instanceof Error ? e.message : e);
+			return 1;
+		}
+	}
+	if (args.mode === "agent") {
+		try {
+			return await runAgent(cfg, { seconds: args.demoSeconds ?? 180 });
+		} catch (e) {
+			console.error("[agent] ERROR:", e instanceof Error ? e.message : e);
 			return 1;
 		}
 	}

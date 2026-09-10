@@ -101,6 +101,8 @@ class BridgeV1 extends GSController {
                            company_signs = names.len(), names = names });
         } else if (cmd == "build_bus_route") {
             this.BuildBusRoute(obj);
+        } else if (cmd == "add_vehicles") {
+            this.AddVehicles(obj);
         } else if (cmd == "blueprint") {
             this.PlaceBlueprint(obj);
         } else if (cmd == "status") {
@@ -321,6 +323,39 @@ class BridgeV1 extends GSController {
             }
         }
         return null;
+    }
+
+    /* AddVehicles: ask the Executor to scale the active route's fleet to
+     * `count` vehicles. Placed as a `NUTZ:bp:<job>:V:<count>` sign in the
+     * executor's company mode (same mailbox as S/E/D). job defaults to the
+     * most recent route job this GS issued. */
+    function AddVehicles(obj) {
+        if (!obj.rawin("company")) {
+            GSAdmin.Send({ kind = "err", cmd = "add_vehicles", reason = "no company" });
+            return;
+        }
+        local exec = obj["company"];
+        local count = obj.rawin("count") ? obj["count"] : 1;
+        if (count < 1) count = 1;
+        if (count > 20) count = 20;
+        local job = obj.rawin("job") ? obj["job"] : (100 + this._route_seq - 1);
+        local job_str = "" + job;
+        local mode = GSCompanyMode(exec);
+        // Clear any previous V sign for this job, then place the new one.
+        local sl = GSSignList();
+        foreach (s, _ in sl) {
+            local n = GSSign.GetName(s);
+            if (n != null && n.len() > (7 + job_str.len()) &&
+                n.slice(0, 8) == "NUTZ:bp:" + job_str + ":V:") {
+                GSSign.RemoveSign(s);
+            }
+        }
+        // Anchor the sign on any free tile near company 0's first station area.
+        local anchor = this.FindFreeTileNear(GSTown.GetLocation(GSTownList().Begin()), 10);
+        local placed = 0;
+        if (GSSign.BuildSign(anchor, "NUTZ:bp:" + job_str + ":V:" + count)) placed = 1;
+        GSAdmin.Send({ kind = "ack", cmd = "add_vehicles", job = job,
+                       count = count, company = exec, placed = placed });
     }
 
     /* Remove all NUTZ signs carrying job `job_str`. */

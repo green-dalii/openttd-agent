@@ -26,6 +26,32 @@ export interface Config {
 	mapSizeX: number;
 	mapSizeY: number;
 	companyName: string;
+	/** LLM provider settings (SPEC §4 — brain wiring). */
+	llm: LlmConfig;
+}
+
+/** LLM provider configuration (OpenAI-compatible by default). */
+export interface LlmConfig {
+	/** Provider id used internally (also the models registry key). */
+	providerId: string;
+	/** OpenAI-compatible base URL, e.g. https://api.openai.com/v1. */
+	baseUrl: string;
+	/** API key (bearer). */
+	apiKey: string;
+	/** Model id, e.g. gpt-4o-mini / deepseek-chat. */
+	model: string;
+	/** Which pi-ai streaming API to use. */
+	api: LlmApi;
+	contextWindow: number;
+	maxTokens: number;
+}
+
+/** Supported streaming APIs (pi-ai built-ins we may point at). */
+export type LlmApi = "openai-completions" | "anthropic-messages";
+
+/** True when the LLM config has the minimum needed to make a request. */
+export function isLlmConfigured(llm: LlmConfig): boolean {
+	return llm.baseUrl.trim().length > 0 && llm.model.trim().length > 0;
 }
 
 const DEFAULT_BINARY =
@@ -74,6 +100,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
 	const dims = MAP_SIZES[mapSize];
 	if (!dims) throw new ConfigError(`OPENTTD_MAP_SIZE: unknown "${mapSize}" (small|medium|large)`);
 	const companyName = env.OPENTTD_COMPANY_NAME?.trim() || "openttd-agent";
+	const llm = loadLlmConfig(env);
 
 	return {
 		openttdBinary: binary,
@@ -88,5 +115,29 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
 		mapSizeX: dims[0],
 		mapSizeY: dims[1],
 		companyName,
+		llm,
+	};
+}
+
+/**
+ * Resolve LLM provider settings from env. Accepts common aliases so an existing
+ * key (OPENAI_API_KEY etc.) works without renaming. Empty base/model = not
+ * configured (the agent falls back to the offline faux provider for demos).
+ */
+export function loadLlmConfig(env: NodeJS.ProcessEnv): LlmConfig {
+	const apiRaw = (env.LLM_API ?? "openai-completions").trim();
+	if (apiRaw !== "openai-completions" && apiRaw !== "anthropic-messages") {
+		throw new ConfigError(`LLM_API: unknown "${apiRaw}" (openai-completions|anthropic-messages)`);
+	}
+	return {
+		// Blank when not explicitly set: lets llm.json (dashboard) supply it and
+		// applyLlmSettingsFile() apply the final default.
+		providerId: env.LLM_PROVIDER?.trim() || "",
+		baseUrl: (env.LLM_BASE_URL ?? "").trim(),
+		apiKey: (env.LLM_API_KEY ?? env.OPENAI_API_KEY ?? env.ANTHROPIC_API_KEY ?? "").trim(),
+		model: (env.LLM_MODEL ?? "").trim(),
+		api: apiRaw,
+		contextWindow: intEnv(env, "LLM_CONTEXT_WINDOW", 128_000, { min: 1024, max: 10_000_000 }, "LLM context window"),
+		maxTokens: intEnv(env, "LLM_MAX_TOKENS", 4096, { min: 16, max: 1_000_000 }, "LLM max tokens"),
 	};
 }

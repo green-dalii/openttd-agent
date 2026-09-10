@@ -67,7 +67,35 @@ pnpm run cli --probe [--year 1950] [--seed 42] [--timeout-ms 15000]
 
 # 长驻观测 + Web 仪表盘 (v0.1.0)
 pnpm run cli --watch [--seed 42] [--ai CPU] [--web-port 8080]
+
+# v0.2 决策闭环（手）：Bridge GS + Executor AI 自动建一条公交线
+pnpm run cli --v02 --demo-seconds 150
+
+# v0.2.1 决策闭环（脑）：pi-agent-core LLM 决策 → 命令通道 → 施工 → 回灌
+pnpm run cli --agent --demo-seconds 240 \
+  --llm-base-url https://api.openai.com/v1 --llm-model gpt-4o-mini --llm-key "$OPENAI_API_KEY"
 ```
+
+### LLM Provider 配置（v0.2.1）
+脑（LLM）通过 **pi-ai 官方 provider 组件**接入，支持任意 OpenAI 兼容端点
+（OpenAI / DeepSeek / 本地 llama.cpp·vLLM / 网关）。三种配置方式，优先级
+**环境变量 > `<dataDir>/llm.json` > 未配置**：
+
+1. **环境变量 / CLI 参数**
+   ```bash
+   export LLM_BASE_URL=https://api.deepseek.com/v1
+   export LLM_MODEL=deepseek-chat
+   export LLM_API_KEY=sk-...
+   pnpm run cli --agent
+   # 或: pnpm run cli --agent --llm-base-url ... --llm-model ... --llm-key ...
+   ```
+2. **Web Dashboard 面板**：`pnpm run cli --watch` 打开 `http://127.0.0.1:<port>/`，
+   在「LLM provider」面板填写 Base URL / Model / API key / API 类型并 Save
+   （写入 `<dataDir>/llm.json`，下次 agent 运行生效；key 不会回显）。
+3. **未配置时**：`--agent` 回退到离线 faux provider（脚本化，仅演示接线，**不是真 LLM**）。
+
+> 离线开发：`pnpm exec tsx scripts/llm-stub.ts 8787` 起一个本地 OpenAI 兼容 stub，
+> 再用 `LLM_BASE_URL=http://127.0.0.1:8787/v1 LLM_MODEL=stub LLM_API_KEY=stub pnpm run cli --agent` 验证接线。
 
 ### 环境变量（全可配）
 | 变量 | 默认 | 说明 |
@@ -78,6 +106,11 @@ pnpm run cli --watch [--seed 42] [--ai CPU] [--web-port 8080]
 | `OPENTTD_ADMIN_PASSWORD` | `openttd-admin` | Admin 密码（写入 sandbox `secrets.cfg`） |
 | `OPENTTD_GAME_PORT` | `3979` | 游戏端口 |
 | `OPENTTD_START_YEAR` | `1950` | 开局年份 |
+| `LLM_BASE_URL` | *(空)* | LLM provider base URL（OpenAI 兼容）；空=未配置 |
+| `LLM_MODEL` | *(空)* | 模型 id（如 `gpt-4o-mini` / `deepseek-chat`） |
+| `LLM_API_KEY` | *(空)* | API key（别名：`OPENAI_API_KEY` / `ANTHROPIC_API_KEY`） |
+| `LLM_PROVIDER` | `openttd-llm` | provider id（写入 pi-ai 注册表） |
+| `LLM_API` | `openai-completions` | 流式 API（`openai-completions` \| `anthropic-messages`） |
 | `OPENTTD_SEED` | 随机 | 地图种子（可复现） |
 | `OPENTTD_MAP_SIZE` | `small` | `small\|medium\|large` = 256/512/1024 |
 | `OPENTTD_SERVER_NAME` | `openttd-agent` | 服务器名 |
