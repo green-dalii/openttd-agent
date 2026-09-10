@@ -72,7 +72,9 @@
 - ✅ 世界级验收: `vehicles=3 stations=2`；车 R42-56 往返、@到站停靠、站排队被消化
 - ✅ 经济反馈回灌: money/income 持续经 CompanyEconomy 观测（含 signed income 解析修复）
 - ⚠️ **AI 公司无 HQ**: 施工坐标必须来自标牌/外部，不能靠 HQ 选址
-- ⚠️ **Pathfinder.Road v4 + AyStar v6 (2012) 长路(>~60 tile)死锁/超慢**: FindPath 单次调用不返回；隔离 probe 证实。短距(<25 tile)秒回。→ GS 只能选短镇对。**脑阶段需分段铺路解除此限制（S6 前置技术债）**
+- ✅ **分段贪心铺路已实现并真机验证**（SPEC §10.15）: AyStar v6 长路死锁解除——
+  PhaseRoad 每 tick 只搜 ~20 tile 短段、probe 回退、末段直达 fB；GS 选镇放宽到
+  [25..260]。真机: 109-tile 路线 103 段铺成 + bus 跑起（commit 见 §10.15 前）
 
 **S1-S5 实施（全部 ✅ 真机通过, commits 744f626→2194305）**
 - S1 GS 选址 + S/E 站标牌（company_signs=2）✅
@@ -85,13 +87,14 @@
 - [x] S1-S5: 一局 1950 地图脚本化跑通一条**真实 bus route**（2站+路+depot+3车在跑, stats 可查）
 - [x] 经济反馈可观测: CompanyEconomy money/income 持续回灌（runner S5 快照 + signed 解析）
 - [x] `pnpm run gate` 全绿
-- [ ] （移到 S6）"开始盈利" — 需脑决策 + 分段铺路解除长路线限制
+- [x] 分段铺路解除长路线限制（v0.2.1 前置技术债, SPEC §10.15）
+- [ ] （移到 S6）"开始盈利" — 需脑决策选择路线/投资规模
 
 **里程碑映射**: M2 前半（通信 + 手施工）；脑接线与盈利归 v0.2.1。
 
 ### v0.2.1 — Pi Agent（LLM）接线（M2 后半）（下一步）
 - Pi Agent Core 装配 tool: observe/build_bus_route/add_vehicles/pause + AgentMessage
-- **前置技术债: 分段铺路**（每段 ≤60 tile 拼接）解除 AyStar 长路死锁，让 LLM 可选远/长路线（票费高才有盈利）
+- ~~前置技术债: 分段铺路~~ ✅ 完成（SPEC §10.15）—— 现在 LLM 可选远/长路线
 - LLM 决策选镇对/路线/车队/贷款 → 复用已验证命令通道 → 结果回灌
 - `transformContext` 记忆注入 v1；LLM 决策全量落审计
 - **验收**: LLM（人工 prompt）驱动一条**盈利**公交线（SPEC §10.8 M2 完整验收）
