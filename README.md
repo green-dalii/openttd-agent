@@ -91,11 +91,51 @@ pnpm run cli --agent --demo-seconds 240 \
    ```
 2. **Web Dashboard 面板**：`pnpm run cli --watch` 打开 `http://127.0.0.1:<port>/`，
    在「LLM provider」面板填写 Base URL / Model / API key / API 类型并 Save
-   （写入 `<dataDir>/llm.json`，下次 agent 运行生效；key 不会回显）。
+   （写入 `<OPENTTD_DATA_DIR>/llm.json`，下次 agent 运行生效；key 不会回显）。
+   > 面板只在 `--watch` 模式存在（`--agent` 不起 WebServer）；
+   > `LLM_*` 环境变量仍然**优先于**面板保存的文件值。
 3. **未配置时**：`--agent` 回退到离线 faux provider（脚本化，仅演示接线，**不是真 LLM**）。
 
-> 离线开发：`pnpm exec tsx scripts/llm-stub.ts 8787` 起一个本地 OpenAI 兼容 stub，
-> 再用 `LLM_BASE_URL=http://127.0.0.1:8787/v1 LLM_MODEL=stub LLM_API_KEY=stub pnpm run cli --agent` 验证接线。
+**配置文件落盘位置**（dashboard / 后续 CLI 保存都写这里）：
+
+```
+<OPENTTD_DATA_DIR>/llm.json        # 默认: /tmp/openttd-agent-data/llm.json
+├─ providerId / baseUrl / model / api
+└─ apiKey                          # 明文存储（仅本机 127.0.0.1，勿提交/勿共享）
+```
+同一目录还落 `agent-audit.jsonl`（决策/动作审计）。
+
+### 端到端验证（真机，两种方式）
+
+**方式 A — 纯 CLI（最快）**
+```bash
+pnpm exec tsx scripts/llm-stub.ts 8787 &              # 本地 OpenAI 兼容 stub
+LLM_BASE_URL=http://127.0.0.1:8787/v1 LLM_MODEL=stub LLM_API_KEY=stub \
+  pnpm run cli --agent --demo-seconds 150
+# 期望: [agent] brain: REAL provider ... → tool build_bus_route: ok=true
+#       → GS ack → executor 施工 → 经济回灌
+```
+
+**方式 B — dashboard 保存 → 文件生效（验证持久化链路）**
+```bash
+export OPENTTD_DATA_DIR=/tmp/e2e-data OPENTTD_SEED=7
+pnpm exec tsx scripts/llm-stub.ts 8787 &
+pnpm run cli --watch --seed 7 --web-port 8187 &
+
+curl -s http://127.0.0.1:8187/api/llm              # 初始: configured=false
+curl -s -X POST http://127.0.0.1:8187/api/llm -H 'content-type: application/json' \
+  -d '{"baseUrl":"http://127.0.0.1:8787/v1","model":"stub","apiKey":"sk-x"}'
+cat $OPENTTD_DATA_DIR/llm.json                     # ← 配置文件就落在这里
+
+# Ctrl-C 停掉 watch，然后用**另一个进程**验证文件真的生效（清空所有 LLM env）
+env -u LLM_BASE_URL -u LLM_MODEL -u LLM_API_KEY -u LLM_PROVIDER -u LLM_API \
+    -u OPENAI_API_KEY -u ANTHROPIC_API_KEY \
+  pnpm run cli --agent --demo-seconds 150
+# 期望: [agent] brain: REAL provider ... (key=sk-x…xxxx 已脱敏)
+#       [agent] audit: <dataDir>/agent-audit.jsonl
+```
+真机实测结论（2026-09-09）：dashboard 保存→文件→另一个进程 `--agent` 读到并走
+REAL provider、真发 HTTP、产生 `build_bus_route` 调用（SPEC §10.16-8）。
 
 ### 环境变量（全可配）
 | 变量 | 默认 | 说明 |
@@ -111,6 +151,9 @@ pnpm run cli --agent --demo-seconds 240 \
 | `LLM_API_KEY` | *(空)* | API key（别名：`OPENAI_API_KEY` / `ANTHROPIC_API_KEY`） |
 | `LLM_PROVIDER` | `openttd-llm` | provider id（写入 pi-ai 注册表） |
 | `LLM_API` | `openai-completions` | 流式 API（`openai-completions` \| `anthropic-messages`） |
+
+> LLM 面板保存的设置文件位置 = `<OPENTTD_DATA_DIR>/llm.json`（默认
+> `/tmp/openttd-agent-data/llm.json`）；env 显式设置时**覆盖**该文件。
 | `OPENTTD_SEED` | 随机 | 地图种子（可复现） |
 | `OPENTTD_MAP_SIZE` | `small` | `small\|medium\|large` = 256/512/1024 |
 | `OPENTTD_SERVER_NAME` | `openttd-agent` | 服务器名 |

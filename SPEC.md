@@ -566,6 +566,21 @@ openttd-agent/
    （ack 语义），LLM 靠 `observe` 轮询进展；禁止在工具内等待施工完成。
 7. **审计**: 决策点 + 动作结果落 `<dataDir>/agent-audit.jsonl`（append-only、
    密钥脱敏、写失败不影响循环）。
+8. **真机 E2E 验证（2026-09-09）**: dashboard 保存 → `llm.json` 落盘 → **另一个进程**
+   `--agent`（显式 `env -u` 清空所有 `LLM_*`/`OPENAI_API_KEY`）读到该文件并走
+   **REAL provider** 分支，真发 HTTP 到本地 OpenAI 兼容 stub 并产生
+   `build_bus_route` 工具调用（audit JSONL 有 decision + action_result）。
+   落盘路径 = `<OPENTTD_DATA_DIR>/llm.json`（默认 `/tmp/openttd-agent-data/llm.json`），
+   dashboard 面板仅存在于 `--watch`（`--agent` 不起 WebServer）。
+9. **合并不可烘焙默认值（本次真机暴露的 bug，root cause）**: `applyLlmSettingsFile()`
+   曾把 `"openttd-llm"` 作为 providerId 兜底写进合并结果，而 CLI 启动时就已经
+   `applyLlmSettingsFile(loadConfig())` 烘焙过一次 → watch 进程内再次合并时，
+   **烘焙后的非空值反过来压住了刚保存的文件值**（现象: `POST /api/llm` 返回
+   `e2e-file`，同一进程随后 `GET` 却回 `openttd-llm`；新起的 `--agent` 进程反而正常）。
+   修法: 合并层 providerId 兜底改为 `""`（不烘焙），默认值只在**使用点**
+   （`buildProvider`，具名常量 `DEFAULT_LLM_PROVIDER_ID`）应用；合并因此**幂等**
+   （`apply(apply(x)) === apply(x)`，已用单测锁定）。原则: 合并函数只做
+   「env > file > 空」，默认值永远在使用点解析。
 
 ---
 

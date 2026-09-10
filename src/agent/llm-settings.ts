@@ -15,6 +15,9 @@ import { isLlmConfigured } from "../config.js";
 
 export const LLM_SETTINGS_FILE = "llm.json";
 
+/** Default provider id when neither env, CLI nor the settings file supplies one. */
+export const DEFAULT_LLM_PROVIDER_ID = "openttd-llm";
+
 export function settingsPath(dataDir: string): string {
 	return path.join(dataDir, LLM_SETTINGS_FILE);
 }
@@ -48,11 +51,15 @@ export function saveLlmSettingsFile(dataDir: string, s: LlmConfig): void {
 /**
  * Merge settings file into a config's llm section. Env-provided values win;
  * the file fills anything env left blank.
+ *
+ * providerId deliberately has **no fallback here**: the default is applied at
+ * use time (buildProvider) so a merge never bakes a non-empty value that would
+ * then shadow the file on a later re-merge (dashboard GET after Save).
  */
 export function applyLlmSettingsFile(cfg: Config): Config {
 	const file = loadLlmSettingsFile(cfg.dataDir);
 	const merged: LlmConfig = {
-		providerId: cfg.llm.providerId || file.providerId || "openttd-llm",
+		providerId: cfg.llm.providerId || file.providerId || "",
 		baseUrl: cfg.llm.baseUrl || file.baseUrl || "",
 		apiKey: cfg.llm.apiKey || file.apiKey || "",
 		model: cfg.llm.model || file.model || "",

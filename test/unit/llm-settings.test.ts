@@ -106,6 +106,32 @@ describe("applyLlmSettingsFile", () => {
 		}
 	});
 
+	it("keeps the file's providerId when re-applied (dashboard GET after Save)", () => {
+		const dir = tmp();
+		try {
+			// CLI startup before any file exists: this merge must NOT bake a
+			// non-empty providerId, or it would shadow the file on re-merge.
+			const once = applyLlmSettingsFile(baseCfg(dir));
+			// The dashboard panel then saves a provider (POST /api/llm).
+			saveLlmSettingsFile(dir, {
+				...once.llm,
+				providerId: "dash",
+				baseUrl: "http://127.0.0.1:8787/v1",
+				apiKey: "k",
+				model: "stub",
+			});
+			// The *same* process re-reads it (this is what GET /api/llm does).
+			const twice = applyLlmSettingsFile(once);
+			expect(twice.llm.providerId).toBe("dash");
+			expect(twice.llm.baseUrl).toBe("http://127.0.0.1:8787/v1");
+			expect(twice.llm.model).toBe("stub");
+			// ...and repeated merges converge (idempotent).
+			expect(applyLlmSettingsFile(twice).llm).toEqual(twice.llm);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
 	it("file supplies everything when env is blank", () => {
 		const dir = tmp();
 		try {
@@ -180,6 +206,19 @@ describe("buildProvider", () => {
 				maxTokens: 1,
 			}),
 		).rejects.toThrow(/not configured/);
+	});
+
+	it("falls back to the default provider id when config omits one", async () => {
+		const built = await buildProvider({
+			providerId: "",
+			baseUrl: "http://127.0.0.1:9/v1",
+			apiKey: "k",
+			model: "test-model",
+			api: "openai-completions",
+			contextWindow: 8000,
+			maxTokens: 512,
+		});
+		expect(built.model.provider).toBe("openttd-llm");
 	});
 
 	it("builds a model + streamFn for an OpenAI-compatible endpoint (no request made)", async () => {

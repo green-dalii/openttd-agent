@@ -26,6 +26,11 @@
 - **`scripts/llm-stub.ts`**: 本地 OpenAI 兼容 stub（离线端到端验证接线，非 faux）
 
 ### Fixed
+- **Dashboard LLM 面板 providerId 回读不一致**: `applyLlmSettingsFile()` 会把默认
+  `"openttd-llm"` 烘焙进合并结果，而 CLI 启动时已合并过一次 → watch 进程内
+  `POST /api/llm` 保存后，同一进程 `GET /api/llm` 仍回旧 providerId（新起的
+  `--agent` 进程正常）。现合并层不再烘焙默认值（兜底改为 `""`），默认值只在
+  使用点 `buildProvider()` 应用（具名常量 `DEFAULT_LLM_PROVIDER_ID`），合并幂等。
 - **Executor 长路死锁**：Pathfinder.Road v4 + AyStar v6 对 >~60 tile 单次 FindPath 不返回 → 改**分段贪心铺路**（每段 ~20 tile + probe 回退 + 末段直达目标）
 - **road type 前置条件**：`BuildRoadStation` 与 pathfinder 邻居探测都需 `AIRoad.SetCurrentRoadType(ROADTYPE_ROAD)`，否则恒失败
 - **depot 门未接路**：车永远卡在 depot 内 → 补 `ConnectStop(depotTile, front)`
@@ -37,6 +42,9 @@
 - **手**：`boot→work→stA_ok→stB_ok→road_built(r103)→dpt_ok→dpt_conn→bus_live→done stN2 r103 bus`；`vehicles=3 stations=2`；站队列被消化
 - **脑**：真实 HTTP provider（`--agent` + 本地 OpenAI 兼容端点）→ LLM 工具调用 → 命令通道 → 施工 → 经济回灌；审计 JSONL 落盘
 - **单测**：90 passed / 1 skipped（含本地 HTTP stub 的真实 provider 链路测试）
+- **真机 E2E**（2026-09-09）: dashboard 保存 → `<dataDir>/llm.json` → **另一进程**
+  `--agent`（显式清空所有 `LLM_*` env）读到该文件并走 REAL provider、真发 HTTP、
+  产生 `build_bus_route` 工具调用；`GET /api/llm` 全程不回显 key（SPEC §10.16-8/9）
 
 ### Notes
 - **"盈利"验收未完成**：属带脑决策质量（选镇/投资规模），需真实 LLM + 更长观察期（见 ROADMAP v0.2.1）

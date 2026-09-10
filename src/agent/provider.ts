@@ -13,6 +13,7 @@
 import { createModels, createProvider } from "@earendil-works/pi-ai";
 import type { Model, ProviderStreams } from "@earendil-works/pi-ai";
 import type { LlmConfig } from "../config.js";
+import { DEFAULT_LLM_PROVIDER_ID } from "./llm-settings.js";
 
 /** Lazily loaded streaming API impls (subpath exports; heavy modules). */
 async function loadApi(api: LlmConfig["api"]): Promise<ProviderStreams> {
@@ -38,6 +39,9 @@ export async function buildProvider(llm: LlmConfig): Promise<BuiltProvider> {
 	if (!llm.baseUrl || !llm.model) {
 		throw new Error("LLM not configured: set LLM_BASE_URL and LLM_MODEL (or use the dashboard/CLI).");
 	}
+	// providerId may be blank (no env/file id): apply the default here, at use
+	// time, instead of baking it during a merge (see applyLlmSettingsFile).
+	llm = { ...llm, providerId: llm.providerId || DEFAULT_LLM_PROVIDER_ID };
 	const models = createModels();
 	const provider = createProvider({
 		id: llm.providerId,
