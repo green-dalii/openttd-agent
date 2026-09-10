@@ -11,6 +11,7 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { buildProvider } from "../../src/agent/provider.js";
 import { createAgent } from "../../src/agent/runtime.js";
+import { Telemetry } from "../../src/agent/telemetry.js";
 import type { AgentDeps, CommandSink, StateReader } from "../../src/agent/types.js";
 
 /** Scripted OpenAI-compatible SSE server: 1st call = tool call, 2nd = text. */
@@ -45,6 +46,21 @@ function startStub(): Promise<{
 					model: "stub-model",
 					choices: [{ index: 0, delta, finish_reason: finish }],
 				})}\n\n`;
+			// OpenAI stream_options.include_usage shape (choices: [] + usage).
+			const usageChunk = (prompt: number, completion: number) =>
+				`data: ${JSON.stringify({
+					id: "stub-1",
+					object: "chat.completion.chunk",
+					created: 0,
+					model: "stub-model",
+					choices: [],
+					usage: {
+						prompt_tokens: prompt,
+						completion_tokens: completion,
+						total_tokens: prompt + completion,
+						completion_tokens_details: { reasoning_tokens: 7 },
+					},
+				})}\n\n`;
 			if (callIndex === 1) {
 				// tool call: build_bus_route({ from_town: 6, to_town: 18 })
 				res.write(chunk({ role: "assistant", content: "" }));
@@ -66,9 +82,11 @@ function startStub(): Promise<{
 					}),
 				);
 				res.write(chunk({}, "tool_calls"));
+				res.write(usageChunk(120, 30));
 			} else {
 				res.write(chunk({ role: "assistant", content: "Route requested." }));
 				res.write(chunk({}, "stop"));
+				res.write(usageChunk(200, 10));
 			}
 			res.write("data: [DONE]\n\n");
 			res.end();
@@ -125,6 +143,10 @@ describe("real HTTP provider (openai-completions) drives a tool call", () => {
 			model: built.model as never,
 		});
 
+		// Subscribe before prompting so no event is missed.
+		const telemetry = new Telemetry();
+		agent.subscribe((ev) => telemetry.ingestAgentEvent(ev));
+
 		await agent.prompt("build a route");
 
 		// The real HTTP round-trip happened (>=1 request) with our key.
@@ -138,5 +160,11 @@ describe("real HTTP provider (openai-completions) drives a tool call", () => {
 			townA: 6,
 			townB: 18,
 		});
+
+		// Token usage from the provider reaches telemetry (dashboard accounting).
+		const snap = telemetry.snapshot();
+		expect(snap.totals.messages).toBeGreaterThanOrEqual(1);
+		expect(snap.usage.total.input).toBeGreaterThan(0);
+		expect(snap.usage.total.reasoning).toBeGreaterThan(0);
 	});
 });

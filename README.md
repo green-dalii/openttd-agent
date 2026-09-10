@@ -3,7 +3,8 @@
 > LLM agent framework that autonomously plays — and self-evolves inside — OpenTTD.
 > External brain (Pi `@earendil-works/pi-agent-core`) ↔ Admin Port TCP ↔ in-game Bridge GS / Executor AI.
 
-**当前状态: v0.1.0 (观测闭环)** — 长驻采集 + 实时 Web 仪表盘；真机验证含公司经济观测。
+**当前状态: v0.3.0 (Dashboard 打磨)** — 观测 + 决策闭环 + 三页式 Dashboard（Live / Providers / Sessions）、
+39 个内置 provider 目录、token 计量与历史局复盘。**盈利验收待真实 LLM key**。
 完整设计见 [`SPEC.md`](SPEC.md)，开发计划见 [`ROADMAP.md`](ROADMAP.md)，开发规范见 [`AGENTS.md`](AGENTS.md)。
 
 ---
@@ -151,6 +152,7 @@ REAL provider、真发 HTTP、产生 `build_bus_route` 调用（SPEC §10.16-8�
 | `LLM_API_KEY` | *(空)* | API key（别名：`OPENAI_API_KEY` / `ANTHROPIC_API_KEY`） |
 | `LLM_PROVIDER` | `openttd-llm` | provider id（写入 pi-ai 注册表） |
 | `LLM_API` | `openai-completions` | 流式 API（`openai-completions` \| `anthropic-messages`） |
+| `LLM_SOURCE` | *(自动)* | `catalog`（内置 provider，只需 provider+model）\| `custom`（自建端点） |
 
 > LLM 面板保存的设置文件位置 = `<OPENTTD_DATA_DIR>/llm.json`（默认
 > `/tmp/openttd-agent-data/llm.json`）；env 显式设置时**覆盖**该文件。
@@ -207,17 +209,61 @@ src/
     blueprint.ts            # 高层动作 → GS 蓝图 JSON (校验)
     process-manager.ts      # 服务器生命周期 (generate-then-patch 配置)
   web/
-    server.ts               # HTTP 静态 + WS 扇出
-    public/                 # 原生仪表盘 (index.html/app.js/style.css)
-  cli/run.ts                # CLI: --probe / --dry-run / --watch
+    server.ts               # HTTP 路由表(PAGES) + REST + WS 扇出
+    public/
+      pages/                # 一页一个 HTML
+        live.html           #   Live     ：实时游戏 + agent 遥测
+        llm.html            #   Providers：provider 目录选型 + 密钥
+        sessions.html       #   Sessions ：历史局管理 / 复盘
+      assets/css/style.css  # 全部样式
+      assets/js/
+        common.js           # 共享工具（格式化/事件分类/WS/绘图/导航）
+        live.js             # 页面脚本：live.html
+        providers.js        # 页面脚本：llm.html
+        sessions.js         # 页面脚本：sessions.html
+  cli/run.ts                # CLI: --probe / --dry-run / --watch / --v02 / --agent
 test/
-  unit/                     # 纯单测 (vitest), 59 用例
+  unit/                     # 纯单测 (vitest), 151 用例
   live/                     # 真机集成 (LIVE_TESTS=1 才跑)
   helpers/                  # live skip helper
+docs/
+  DASHBOARD-API.md          # dashboard 前后端**冻结契约**（改前必读）
 ```
 
-## 已知边界 (v0.1.0)
-- 观测到的是 **AI 公司**（start_ai 创建）；尚无 LLM agent 接线（v0.2）
-- 仪表盘只读：WS 上行被忽略（v0.1 不做远程控制）
+## Dashboard（v0.3.0）
+
+三个独立子页（原生 HTML/JS/CSS，**无构建链**）：
+
+| 页面 | URL | 内容 |
+|---|---|---|
+| **Live** | `/` | 顶部 KPI（日期/公司/事件/session）、**Agent 遥测**（token 总量·按 turn·按 tool、思考流、每步 log）、公司卡片 + 现金曲线、**事件流（按类别 Tag + 人类可读摘要**，可展开原始 JSON）、阶段性总结时间线 |
+| **Providers** | `/llm` | **pi-ai 内置 39 个 provider / ~1900 个模型**：选一个 provider → 选模型（API/上下文/价格来自目录）→ 填密钥。自动检测环境变量（如 `DEEPSEEK_API_KEY`、`HF_TOKEN`、`GEMINI_API_KEY`）。也支持自建 OpenAI 兼容端点 |
+| **Sessions** | `/sessions` | 历史局列表（模式/状态/耗时/token/成本）+ 单局复盘（成绩单、阶段性总结、agent 步骤、事件流） |
+
+```bash
+pnpm run cli --watch --web-port 8080      # Live + Providers + Sessions
+pnpm run cli --agent --web-port 8080      # 同上 + Agent 遥测（token/思考/步骤）
+```
+
+**落盘位置**（全部在 `<OPENTTD_DATA_DIR>`，默认 `/tmp/openttd-agent-data`）:
+
+```
+llm.json                     # dashboard 选中的 provider/model/endpoint 选择
+credentials.json             # catalog 密钥（0600；绝不回显、绝不在日志里）
+agent-audit.jsonl            # 决策/动作审计（append-only）
+sessions/index.json          # 历史局索引
+sessions/<id>/meta.json      #   局元数据 + 成绩单 + 阶段性总结
+sessions/<id>/events.jsonl   #   该局游戏事件
+sessions/<id>/audit.jsonl    #   该局决策/步骤/动作
+sessions/<id>/telemetry.json #   该局末次遥测（token/步骤）
+```
+
+> 详情见 [`docs/DASHBOARD-API.md`](docs/DASHBOARD-API.md)（前后端冻结契约，含 WS 协议与 Tag 分类规则）。
+
+## 已知边界 (v0.3.0)
+- **盈利验收仍未完成**：需要真实 LLM key + 更长观察期（见 ROADMAP v0.2.1）
 - Admin 认证为明文 + 仅 127.0.0.1（SPEC D11 权衡）
 - AI 可用性探测是「已知集」而非文件系统扫描（tar 未解包时文件系统不可靠，见 ai-registry）
+- OAuth 类 provider（github-copilot / openai-codex / amazon-bedrock / google-vertex）
+  在 dashboard 里**只能看到提示**，尚不支持交互式登录流程
+- 费用（cost）为 0 时显示 `$0`：本地端点/目录未提供价格时属正常

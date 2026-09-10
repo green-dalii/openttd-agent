@@ -15,7 +15,14 @@ import { OpenTTDProcessManager } from "../game/process-manager.js";
 import { AdminClient } from "../game/admin-client.js";
 import { WorldState } from "../game/world-state.js";
 import { WebServer } from "../web/server.js";
-import { applyLlmSettingsFile, saveLlmSettingsFile, toSettingsView } from "../agent/llm-settings.js";
+import { createLlmApi } from "../agent/llm-api.js";
+import {
+	SessionStore,
+	buildStageSummary,
+	listSessions,
+	newSessionId,
+	readSession,
+} from "../agent/session-store.js";
 import { AdminUpdateType } from "../game/admin-protocol.js";
 import { aiInstalledNames, isAiInstalled } from "./ai-registry.js";
 
@@ -41,6 +48,12 @@ export interface WatchResult {
 
 const DEFAULT_AI = "CPU";
 const DEFAULT_POLL_MS = 5_000;
+
+/** Format a game date for checkpoints ("unknown" when not yet observed). */
+function formatGameDate(d: { year: number; month: number; day: number } | null): string {
+	if (!d) return "unknown";
+	return `${d.year}-${String(d.month).padStart(2, "0")}-${String(d.day).padStart(2, "0")}`;
+}
 
 export async function runWatch(
 	cfg: Config,
@@ -101,6 +114,7 @@ export async function runWatch(
 			onEvent: (ev) => {
 				world.ingest(ev);
 				web?.publishEvent(ev);
+				session?.appendEvent(ev);
 				if (ev.kind === "company_new") {
 					companiesSeen++;
 					console.log(`[watch] company created: id=${(ev.payload as { id: number }).id}`);
@@ -120,6 +134,24 @@ export async function runWatch(
 	await client.connect(10_000);
 
 	// --- web server (dashboard) ---
+	// --- session record (dashboard: historical sessions page) ---
+	const session = new SessionStore(cfg.dataDir);
+	session.create({
+		id: newSessionId(cfg.seed),
+		mode: "watch",
+		status: "running",
+		startedAt: Date.now(),
+		seed: cfg.seed,
+		startYear: cfg.startYear,
+		mapSize: [cfg.mapSizeX, cfg.mapSizeY],
+		serverName: cfg.serverName,
+		companyName: cfg.companyName,
+		llm: { providerId: "", model: "", api: "", kind: "faux" },
+	});
+	console.log(`[watch] session: ${session.id}`);
+
+	// --- web server (dashboard) ---
+	const llmApi = createLlmApi({ dataDir: cfg.dataDir, cfg, envLlm: cfg.llm });
 	web = new WebServer({
 		host: opts.webHost ?? "127.0.0.1",
 		port: opts.webPort ?? 0,
@@ -127,28 +159,13 @@ export async function runWatch(
 		onFirstClient: () => {
 			web?.publishSnapshot(toWireSnapshot(world));
 		},
-		// LLM provider settings (SPEC §4): dashboard read/write -> <dataDir>/llm.json
-		llm: {
-			get: () => toSettingsView(applyLlmSettingsFile(cfg).llm),
-			save: (body) => {
-				const cur = applyLlmSettingsFile(cfg).llm;
-				const b = (body ?? {}) as Record<string, unknown>;
-				const next = {
-					providerId: typeof b.providerId === "string" && b.providerId.trim() ? b.providerId.trim() : cur.providerId,
-					baseUrl: typeof b.baseUrl === "string" ? b.baseUrl.trim() : cur.baseUrl,
-					model: typeof b.model === "string" ? b.model.trim() : cur.model,
-					api:
-						b.api === "openai-completions" || b.api === "anthropic-messages"
-							? b.api
-							: cur.api,
-					// Blank key => keep the stored one (never clear by accident).
-					apiKey: typeof b.apiKey === "string" && b.apiKey.trim() ? b.apiKey.trim() : cur.apiKey,
-					contextWindow: cur.contextWindow,
-					maxTokens: cur.maxTokens,
-				};
-				saveLlmSettingsFile(cfg.dataDir, next);
-				return toSettingsView(next);
-			},
+		// LLM provider settings + built-in provider catalog (SPEC §4).
+		llm: llmApi.llm,
+		catalog: llmApi.catalog,
+		// Historical sessions (read-only).
+		sessions: {
+			list: () => listSessions(cfg.dataDir),
+			read: (id, limit) => readSession(cfg.dataDir, id, limit ? { limit } : {}),
 		},
 	});
 	await web.start();
@@ -190,6 +207,27 @@ export async function runWatch(
 	client?.close();
 	if (web) await web.stop();
 	await mgr.stop();
+
+	// Finalize the session record so the dashboard can list/replay it.
+	try {
+		const snap = world.snapshot();
+		const c0 = snap.companies.get(0);
+		session.update({ totals: { ...session.current().totals, events: snap.totalEvents } });
+		session.addCheckpoint(
+			buildStageSummary(session.current(), formatGameDate(snap.date), 0),
+		);
+		session.finalize({
+			status: "completed",
+			outcome: {
+				vehicles: c0?.stats?.vehicles ?? undefined,
+				stations: c0?.stats?.stations ?? undefined,
+				money: c0?.economy ? String(c0.economy.money) : undefined,
+				totalEvents: snap.totalEvents,
+			},
+		});
+	} catch {
+		/* a failed session write must not break shutdown */
+	}
 
 	const durationMs = Date.now() - started;
 	return {

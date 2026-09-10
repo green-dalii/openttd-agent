@@ -582,6 +582,51 @@ openttd-agent/
    （`apply(apply(x)) === apply(x)`，已用单测锁定）。原则: 合并函数只做
    「env > file > 空」，默认值永远在使用点解析。
 
+## 10.17 v0.3.0 实现: Dashboard 三页化 + 多 Provider 目录 + Agent 遥测（2026-09-10）
+把 dashboard 从「极客 log 面板」做成可用的 Agent 控制台。**契约冻结在
+`docs/DASHBOARD-API.md`（前后端并行开发的单一事实源）。**
+
+1. **页面结构（无构建链）**: `public/pages/*.html` + `public/assets/{css,js}/*`，
+   路由表 `PAGES` 在 `src/web/server.ts`（URL 保持扁平 `/llm`、`/sessions`）。
+   Live 页与 LLM 配置**解耦**：provider 配置独立成 Providers 子页。
+2. **pi-ai 内置 provider 目录（实测）**: `@earendil-works/pi-ai/providers/all` 的
+   `getBuiltinProviders()` = **39** 个静态 provider，`builtinModels()` 注册 40 个
+   （多出纯动态 `radius`），合计 ~1900 模型。**catalog 路径不再手建 provider**：
+   `builtinModels({credentials}).getModel(id, model)` + `models.stream(...)` 即可，
+   baseUrl/认证由 pi-ai 自行解析。
+3. **环境变量名必须“探测”而非猜测（重要坑）**: pi-ai **不**在 provider 对象暴露
+   env 变量清单（`envApiKeyAuth(name, envVars)` 闭包掉了；anthropic/google 用自写
+   `resolve()` 读非约定名如 `ANTHROPIC_AUTH_TOKEN`/`GEMINI_API_KEY`）。
+   且 `findEnvKeys(id)` 返回的是**当前环境已设置**的名字，不是“期望的名字”
+   （local 下直接调用恒为 `undefined`，极易误判）。
+   正确做法: 对候选名逐个 `findEnvKeys(id, { [候选名]: "probe" })`（**合成 env，不碰
+   process.env**），只有 pi-ai 真正接受的名字才会返回。命名约定 + 核实过的例外表
+   （moonshotai→`MOONSHOT_API_KEY`、huggingface→`HF_TOKEN`、kimi-coding→`KIMI_API_KEY`、
+   vercel-ai-gateway→`AI_GATEWAY_API_KEY`、azure-openai-responses→`AZURE_OPENAI_API_KEY`、
+   anthropic→`ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN`/`ANTHROPIC_OAUTH_TOKEN`）
+   → **31/39 解析成功**；其余 8 个（bedrock/vertex/copilot/codex/cloudflare×2/opencode-go/
+   qwen-token-plan-individual）无 API-key env，改为返回 `hint` 文案。
+4. **凭据持久化**: pi-ai 的 `CredentialStore` 是**应用注入**的（默认 `InMemoryCredentialStore`
+   仅内存）→ 自建 `FileCredentialStore`（`<dataDir>/credentials.json`，0600，原子写）。
+   catalog 密钥存这里、**绝不**写进 `llm.json`；`llm.json` 只存选择（source/provider/model/api/baseUrl）。
+5. **`models.getAvailable(id)` 不能用于列目录**: 无 auth 时返回 `[]`（只列可认证模型）→
+   浏览目录必须用 `getBuiltinModels(id)`（全量）。
+6. **遥测**: 消费 pi-agent-core `AgentEvent`（`message_update` 累积
+   `thinking_delta`/`text_delta`；`message_end` 落 `AssistantMessage.usage`；
+   `tool_execution_start/end` 算耗时），聚合成 token 总量 / 按 turn / 按 tool。
+   **`Agent.subscribe()` 的监听器必须 await（subscribe 的返回不是 api）**，且必须在
+   `submitMessage` **之前**注册，否则丢事件。WS 遥测帧必须**节流 ≥250ms**（thinking delta
+   会刷爆连接）。
+7. **合并函数不得烘焙默认值（真机暴露的 bug）**: `applyLlmSettingsFile()` 曾把
+   `"openttd-llm"` 兜底写进合并结果，而 CLI 启动已合并过一次 → watch 进程内再次合并时
+   烘焙值反过来压住刚保存的文件值（POST 返回新 id、同进程 GET 回旧 id；新进程正常）。
+   修法: 合并层兜底 `""`，默认值只在**使用点**（`buildProvider`）解析，合并因此幂等。
+8. **同步写入 vs pi-ai 异步 `modify()`**: dashboard 保存密钥若走 `modify()`（微任务队列），
+   同一 tick 回读会 stale（`hasStoredKey:false`）→ 提供同步 `set/remove/has` 路径。
+9. **无构建链前端的门禁**: `tsc`/eslint **看不到** `public/**` 的 JS。新增
+   `test/unit/web-assets.test.ts`：`node --check` 全部脚本、校验每个 `href/src` 指向真实文件、
+   `PAGES` 目标存在、页面脚本不得使用 `common.js` 未导出的符号、public 根目录不得有散落文件。
+
 ---
 
 ## 附录 A — 关键事实来源

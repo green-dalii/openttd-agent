@@ -40,18 +40,32 @@ export interface LlmConfig {
 	apiKey: string;
 	/** Model id, e.g. gpt-4o-mini / deepseek-chat. */
 	model: string;
-	/** Which pi-ai streaming API to use. */
-	api: LlmApi;
+	/** Which pi-ai streaming API to use (custom path; catalog derives it from the model). */
+	api: string;
+	/**
+	 * Where the provider comes from (see docs/DASHBOARD-API.md §6.6):
+	 * - "catalog": a pi-ai **built-in** provider (39 of them) — id+model only,
+	 *   auth resolved from the credential store / environment by pi-ai itself.
+	 * - "custom": a user-defined OpenAI-compatible endpoint (baseUrl/apiKey).
+	 * Absent (legacy files) → inferred: no baseUrl + known id ⇒ catalog.
+	 */
+	source?: LlmSource;
 	contextWindow: number;
 	maxTokens: number;
 }
 
-/** Supported streaming APIs (pi-ai built-ins we may point at). */
-export type LlmApi = "openai-completions" | "anthropic-messages";
+/** Which provider path is in use. */
+export type LlmSource = "catalog" | "custom";
+
+/** APIs the **custom** path can speak (catalog models carry their own api id). */
+export const CUSTOM_LLM_APIS = ["openai-completions", "anthropic-messages"] as const;
 
 /** True when the LLM config has the minimum needed to make a request. */
 export function isLlmConfigured(llm: LlmConfig): boolean {
-	return llm.baseUrl.trim().length > 0 && llm.model.trim().length > 0;
+	if (!llm.model.trim()) return false;
+	// Catalog providers resolve their own baseUrl + auth (store/env).
+	if (llm.source === "catalog") return llm.providerId.trim().length > 0;
+	return llm.baseUrl.trim().length > 0;
 }
 
 const DEFAULT_BINARY =
@@ -126,8 +140,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
  */
 export function loadLlmConfig(env: NodeJS.ProcessEnv): LlmConfig {
 	const apiRaw = (env.LLM_API ?? "openai-completions").trim();
-	if (apiRaw !== "openai-completions" && apiRaw !== "anthropic-messages") {
-		throw new ConfigError(`LLM_API: unknown "${apiRaw}" (openai-completions|anthropic-messages)`);
+	if (!CUSTOM_LLM_APIS.includes(apiRaw as (typeof CUSTOM_LLM_APIS)[number])) {
+		throw new ConfigError(
+			`LLM_API: unknown "${apiRaw}" (${CUSTOM_LLM_APIS.join("|")})`,
+		);
+	}
+	const sourceRaw = env.LLM_SOURCE?.trim();
+	if (sourceRaw && sourceRaw !== "catalog" && sourceRaw !== "custom") {
+		throw new ConfigError(`LLM_SOURCE: unknown "${sourceRaw}" (catalog|custom)`);
 	}
 	return {
 		// Blank when not explicitly set: lets llm.json (dashboard) supply it and
@@ -137,6 +157,7 @@ export function loadLlmConfig(env: NodeJS.ProcessEnv): LlmConfig {
 		apiKey: (env.LLM_API_KEY ?? env.OPENAI_API_KEY ?? env.ANTHROPIC_API_KEY ?? "").trim(),
 		model: (env.LLM_MODEL ?? "").trim(),
 		api: apiRaw,
+		source: sourceRaw ? (sourceRaw as LlmSource) : undefined,
 		contextWindow: intEnv(env, "LLM_CONTEXT_WINDOW", 128_000, { min: 1024, max: 10_000_000 }, "LLM context window"),
 		maxTokens: intEnv(env, "LLM_MAX_TOKENS", 4096, { min: 16, max: 1_000_000 }, "LLM max tokens"),
 	};

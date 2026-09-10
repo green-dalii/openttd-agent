@@ -2,6 +2,62 @@
 
 本文件遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.3.0] - 2026-09-10
+
+### Added (Dashboard 打磨)
+**多页仪表盘（无构建链，按角色分目录）**
+- `src/web/public/pages/{live,llm,sessions}.html` + `assets/css/style.css` + `assets/js/{common,live,providers,sessions}.js`
+- `WebServer` 导出 `PAGES` 路由表（URL → 文件，单一事实源）；`/` `/llm` `/sessions` 三个独立子页
+- LLM 配置从 Live 页**解耦为独立 Providers 子页**
+
+**多 Provider 接入（发挥 pi-ai 内置目录，不再手填）**
+- `provider-catalog.ts`: 暴露 pi-ai **39 个内置 provider / ~1900 个模型**（`providers/all` 的
+  `getBuiltinProviders`/`getBuiltinModels`），含 API 形态、上下文窗口、价格、认证方式
+- **环境变量自动检测**：用「合成 env 探测」求出每个 provider **真正接受**的变量名
+  （31/39 已解析；如 huggingface→`HF_TOKEN`、google→`GEMINI_API_KEY`、moonshotai→`MOONSHOT_API_KEY`），
+  不触碰真实 process.env；剩余 8 个 OAuth/云凭证 provider 给出明确 hint
+- `file-credential-store.ts`: **文件版 `CredentialStore`**（`credentials.json`, 0600），
+  密钥重启不丢（pi-ai 默认 store 仅在内存）
+- `provider.ts` 新增 `buildBrain()`：catalog 路径直接用 `builtinModels()` 选中模型
+  （baseUrl/认证由 pi-ai 解析），custom 路径保留原 `createProvider` 行为
+- `llm-api.ts` + REST: `GET|POST /api/llm`、`GET /api/llm/catalog[/:id]`、`DELETE /api/llm/credentials/:id`
+
+**Agent 遥测（token / 思考 / 每步）**
+- `telemetry.ts`: 消费 pi-agent-core `AgentEvent` → 累计 `AssistantMessage.usage`
+  （input/output/cache/reasoning/total/cost），**按 turn 与按 tool 分组**，捕获
+  `thinking_delta` 思考流与每步 log（含工具耗时/成功失败）
+- CLI `--agent` 现在也起 dashboard（`--web-port`）；`agent.subscribe()` → 遥测 → WS（≥250ms 节流）
+- Live 页新增：KPI 卡、tokens-per-turn 图、tool 统计、思考列表、Agent 步骤流、阶段性总结时间线
+
+**多 Session（局）管理与复盘**
+- `session-store.ts`: 每局落 `<dataDir>/sessions/<id>/{meta,events,audit,telemetry}` +
+  `index.json`；`--watch`/`--agent` 均自动建局并在结束时写入**成绩单 + 阶段性总结**
+- Sessions 页：历史局列表（状态/耗时/token/成本）+ 单局复盘
+
+**事件呈现（从「极客 JSON」到结构化）**
+- 前端 `categoryOf()` 分类 + Tag 配色 + `briefOf()` **人类可读摘要**
+  （如 `£297.8k cash · loan £100k · income £1.2k`），类别过滤 chips，
+  原始 JSON 保留但**默认折叠**（满足「保留原始 log 形态」）
+- `scripts/llm-stub.ts` 现在按 OpenAI 规范返回 usage chunk，使 token 计量可离线验证
+
+### Fixed
+- **密钥写入后 `hasStoredKey` 仍为 false**：dashboard 保存走 pi-ai 的异步 `modify()`，
+  同一 tick 内回读会 stale → 改用同步 `set/remove/has` 路径（新增 `llm-api.test.ts` 锁定）
+- **重构丢掉 `providers.js` 的 else 分支**导致浏览器语法错误 → 新增
+  `web-assets.test.ts`（`node --check` 全部脚本、校验 href/src 与 `window.UI` 符号）
+  作为**无构建链前端**的永久门禁
+
+### Docs
+- 新增 `docs/DASHBOARD-API.md`：dashboard 前后端**冻结契约**（路由/类型/REST/WS/Tag 规则/module 契约）
+- SPEC §10.16 增补真机 E2E 事实与「合并不得烘焙默认值」原则
+
+### Verified
+- `pnpm run gate` 全绿：**151 passed / 1 skipped**
+- 真机：`--watch` 三页 200、WS snapshot/event、session 落盘；
+  `--agent`（仅靠 llm.json，无任何 `LLM_*` env）走 REAL provider →
+  `tokens: in=1738 out=52 reasoning=13 total=1790`、`tools: 1 calls, 0 failed`、
+  meta.json 阶段性总结与成绩单写入。
+
 ## [0.2.0] - 2026-09-09
 
 ### Added (决策闭环 M2)

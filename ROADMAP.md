@@ -12,7 +12,8 @@
 - ✅ **v0.1.0 — 观测闭环（M1）（2026-09-08 完成）**
 - ✅ **v0.2.0 — 通信 + Executor「手」（M2 前半）（2026-09-09 完成）**
 - 🔵 **v0.2.1 — Pi Agent「脑」接线（M2 后半）（接线完成，盈利验收待真实 LLM）**
-- ⬜ v0.3.0 — 进化闭环（M3）
+- ✅ **v0.3.0 — Dashboard 打磨（观测/配置/复盘三页）（2026-09-10 完成）**
+- ⬜ v0.3.1 — 进化闭环（M3）
 - ⬜ v0.4.0 — 打磨与广度（M4）
 
 ---
@@ -102,7 +103,27 @@
 - ⬜ **验收（未完成）**: 真实 LLM 驱动一条**盈利**公交线 —— 需用户提供 provider key + 更长观察期；架构与通道已就绪
 - ⬜ 后置: 其余 tools（train/orders/reflection）、事件镜像给 Web、决策点绑定游戏月份、session 分支
 
-### v0.3.0 — 进化闭环（M3）
+### v0.3.0 — Dashboard 打磨（✅ 完成, 2026-09-10）
+**目标**: 把 dashboard 从「极客 log 面板」做成能用的 Agent 控制台；
+发挥 pi-ai 内置多 Provider 能力；引入多 Session 与遥测。
+
+**已完成交付**
+1. 三页式独立子页（Live `/` / Providers `/llm` / Sessions `/sessions`），
+   按角色分目录 `pages/` + `assets/{css,js}/`，`PAGES` 路由表为单一事实源 ✅
+2. **多 Provider**：pi-ai 内置 39 provider / ~1900 模型目录 + 环境变量自动检测
+   （合成 env 探测出真实变量名，31/39）+ 文件版凭证存储（重启不丢）✅
+3. **Agent 遥测**：token（总量/按 turn/按 tool）、思考流、每步 log、工具耗时/失败 ✅
+4. **多 Session**：每局落盘（meta/events/audit/telemetry + index），含成绩单与阶段性总结 ✅
+5. **事件结构化**：类别 Tag + 人类可读摘要 + 过滤；原始 JSON 默认折叠保留 ✅
+6. 冻结契约 `docs/DASHBOARD-API.md` + 无构建链前端的门禁测试（`web-assets.test.ts`）✅
+
+**验收**
+- [x] `pnpm run gate` 全绿（151 passed / 1 skipped）
+- [x] 真机 `--watch` 三页 200 + WS snapshot/event + session 落盘
+- [x] 真机 `--agent`（仅 llm.json）REAL provider → token 计量 1790、步骤/审计/成绩单落盘
+- [x] 无构建链前端不再有「看不见的语法错误」风险（`node --check` 门禁）
+
+### v0.3.1 — 进化闭环（M3）
 **目标**: 多局对比实验 + lessons 蒸馏注入 + 指标可视化。
 
 - 局终结算/反思/lessons 蒸馏/注入下局

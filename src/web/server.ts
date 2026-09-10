@@ -29,7 +29,27 @@ const MIME: Record<string, string> = {
 
 export type WireMessage =
 	| { type: "snapshot"; data: unknown }
-	| { type: "event"; data: unknown };
+	| { type: "event"; data: unknown }
+	| { type: "telemetry"; data: unknown }
+	| { type: "step"; data: unknown };
+
+/** Provider catalog access (docs/DASHBOARD-API.md §3.1). */
+export interface CatalogHooks {
+	/** Catalog generation timestamp (ms) or null. */
+	generatedAt: () => number | null;
+	/** Providers annotated with credential status (sync: file + env reads only). */
+	providers: () => unknown[];
+	/** Models for one provider, or null when the provider is unknown. */
+	models: (providerId: string) => unknown | null;
+	/** Forget a stored credential (logout). */
+	deleteCredential: (providerId: string) => void;
+}
+
+/** Session history access (docs/DASHBOARD-API.md §3.3). */
+export interface SessionHooks {
+	list: () => unknown[];
+	read: (id: string, limit?: number) => unknown | null;
+}
 
 export interface WebServerOptions {
 	host?: string;
@@ -47,7 +67,30 @@ export interface WebServerOptions {
 		/** Validate + persist; returns the new safe view. Throws on bad input. */
 		save: (body: unknown) => unknown;
 	};
+	/** Live agent telemetry snapshot. Absent => 404. */
+	telemetry?: () => unknown;
+	/** Built-in provider directory. Absent => 404. */
+	catalog?: CatalogHooks;
+	/** Past sessions. Absent => 404. */
+	sessions?: SessionHooks;
 }
+
+/**
+ * Page routes: URL -> file under `public/`. The tree is split by role so the
+ * layout stays obvious as pages grow (docs/DASHBOARD-API.md §1):
+ *
+ *   public/pages/*.html        one file per page
+ *   public/assets/css/*.css    styles
+ *   public/assets/js/*.js      shared + per-page scripts
+ *
+ * URLs stay flat (`/llm`, not `/pages/llm.html`) so links keep working even if
+ * files move. Add a page by adding one row here + one file in `pages/`.
+ */
+export const PAGES: Record<string, string> = {
+	"/": "pages/live.html",
+	"/llm": "pages/llm.html",
+	"/sessions": "pages/sessions.html",
+};
 
 export class WebServer {
 	readonly port: number;
@@ -58,6 +101,9 @@ export class WebServer {
 	private getSnapshot: () => unknown;
 	private onFirstClient?: () => void;
 	private llmHooks?: WebServerOptions["llm"];
+	private telemetryHook?: WebServerOptions["telemetry"];
+	private catalogHooks?: CatalogHooks;
+	private sessionHooks?: SessionHooks;
 	private clients = new Set<WebSocket>();
 	private started = false;
 
@@ -67,6 +113,9 @@ export class WebServer {
 		this.getSnapshot = opts.getSnapshot ?? (() => ({}));
 		this.onFirstClient = opts.onFirstClient;
 		this.llmHooks = opts.llm;
+		this.telemetryHook = opts.telemetry;
+		this.catalogHooks = opts.catalog;
+		this.sessionHooks = opts.sessions;
 
 		this.httpServer = http.createServer((req, res) => this.serveStatic(req, res));
 		this.wss = new WebSocketServer({ noServer: true });
@@ -115,6 +164,18 @@ export class WebServer {
 		for (const ws of this.clients) this.send(ws, msg);
 	}
 
+	/** Push an agent telemetry snapshot (docs §4). Callers must throttle. */
+	publishTelemetry(data: unknown): void {
+		const msg: WireMessage = { type: "telemetry", data };
+		for (const ws of this.clients) this.send(ws, msg);
+	}
+
+	/** Push one agent step (message/tool) for immediate UI append. */
+	publishStep(data: unknown): void {
+		const msg: WireMessage = { type: "step", data };
+		for (const ws of this.clients) this.send(ws, msg);
+	}
+
 	clientCount(): number {
 		return this.clients.size;
 	}
@@ -148,8 +209,14 @@ export class WebServer {
 				await this.handleLlmApi(req, res);
 				return;
 			}
+			if (url.pathname.startsWith("/api/")) {
+				await this.handleApi(req, res, url);
+				return;
+			}
 			let p = decodeURIComponent(url.pathname);
-			if (p === "/") p = "/index.html";
+			// Page route table first (see PAGES); then plain static files.
+			const route = PAGES[p.endsWith("/") && p !== "/" ? p.slice(0, -1) : p];
+			if (route) p = `/${route}`;
 			// Prevent path traversal.
 			const filePath = path.normalize(path.join(PUBLIC_DIR, p));
 			if (!filePath.startsWith(PUBLIC_DIR)) {
@@ -162,6 +229,74 @@ export class WebServer {
 			res.end(data);
 		} catch {
 			res.writeHead(404).end("not found");
+		}
+	}
+
+	/**
+	 * Dispatch the non-LLM API routes (docs §3). Every hook is optional: a
+	 * disabled feature answers 404 rather than 500.
+	 */
+	private async handleApi(
+		req: http.IncomingMessage,
+		res: http.ServerResponse,
+		url: URL,
+	): Promise<void> {
+		const json = (code: number, body: unknown) => {
+			res.writeHead(code, { "content-type": "application/json" }).end(stringifyJson(body));
+		};
+		const segments = url.pathname.split("/").filter(Boolean); // ["api", ...]
+		try {
+			// GET /api/telemetry
+			if (url.pathname === "/api/telemetry" && req.method === "GET") {
+				if (!this.telemetryHook) return json(404, { error: "telemetry disabled" });
+				return json(200, this.telemetryHook());
+			}
+
+			// /api/llm/catalog[...]
+			if (segments[1] === "llm" && segments[2] === "catalog") {
+				if (!this.catalogHooks) return json(404, { error: "catalog disabled" });
+				if (req.method !== "GET") return json(405, { error: "method not allowed" });
+				if (segments.length === 3) {
+					return json(200, {
+						generatedAt: this.catalogHooks.generatedAt(),
+						providers: this.catalogHooks.providers(),
+					});
+				}
+				const id = decodeURIComponent(segments[3] ?? "");
+				const models = this.catalogHooks.models(id);
+				if (models === null) return json(404, { error: `unknown provider "${id}"` });
+				const provider = this.catalogHooks
+					.providers()
+					.find((p) => (p as { id?: string }).id === id);
+				return json(200, { provider: provider ?? null, models });
+			}
+
+			// /api/llm/credentials/:id
+			if (segments[1] === "llm" && segments[2] === "credentials") {
+				if (!this.catalogHooks) return json(404, { error: "catalog disabled" });
+				if (req.method !== "DELETE") return json(405, { error: "method not allowed" });
+				const id = decodeURIComponent(segments[3] ?? "");
+				if (!id) return json(400, { error: "missing provider id" });
+				this.catalogHooks.deleteCredential(id);
+				return json(200, { ok: true });
+			}
+
+			// /api/sessions[/:id]
+			if (segments[1] === "sessions") {
+				if (!this.sessionHooks) return json(404, { error: "sessions disabled" });
+				if (req.method !== "GET") return json(405, { error: "method not allowed" });
+				if (segments.length === 2) return json(200, { sessions: this.sessionHooks.list() });
+				const id = decodeURIComponent(segments[2] ?? "");
+				const limitRaw = Number(url.searchParams.get("limit"));
+				const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : undefined;
+				const one = this.sessionHooks.read(id, limit);
+				if (!one) return json(404, { error: `unknown session "${id}"` });
+				return json(200, one);
+			}
+
+			return json(404, { error: "not found" });
+		} catch (e) {
+			json(500, { error: e instanceof Error ? e.message : String(e) });
 		}
 	}
 

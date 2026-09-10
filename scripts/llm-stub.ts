@@ -3,7 +3,9 @@
  * LLM stub — a minimal OpenAI-compatible server for offline development.
  *
  * 职责: 在本机暴露 /v1/chat/completions，按脚本返回"工具调用 → 文本"两步响应，
- *   用于在**没有真实 LLM key** 时端到端验证 agent 接线（真实 HTTP，非 faux）。
+ *   用于在**没有真实 LLM key** 时端到端验证 agent 接线（真实 HTTP，非 faux）；
+ *   并按 OpenAI 规范在末尾发 usage chunk（含 prompt/completion tokens +
+ *   reasoning breakdown），使 dashboard 的 token 计量可离线验证。
  *   这是 dev tool，不是产品路径；真实 provider 由 dashboard/CLI 配置。
  * 用法:
  *   pnpm exec tsx scripts/llm-stub.ts [port]
@@ -28,6 +30,28 @@ function sse(res: http.ServerResponse, delta: unknown, finish: string | null = n
 	);
 }
 
+/**
+ * Final usage chunk (OpenAI `stream_options.include_usage` shape). Without it,
+ * token accounting cannot be exercised offline (it would always read 0).
+ */
+function usageChunk(res: http.ServerResponse, promptTokens: number, completionTokens: number): void {
+	res.write(
+		`data: ${JSON.stringify({
+			id: "stub",
+			object: "chat.completion.chunk",
+			created: 0,
+			model: "stub-model",
+			choices: [],
+			usage: {
+				prompt_tokens: promptTokens,
+				completion_tokens: completionTokens,
+				total_tokens: promptTokens + completionTokens,
+				completion_tokens_details: { reasoning_tokens: Math.floor(completionTokens / 4) },
+			},
+		})}\n\n`,
+	);
+}
+
 const server = http.createServer((req, res) => {
 	if (req.method !== "POST" || !req.url?.endsWith("/chat/completions")) {
 		res.writeHead(404).end("not found");
@@ -39,9 +63,12 @@ const server = http.createServer((req, res) => {
 		// Turn 2 is identified by the tool result being present in the request.
 		const hasToolResult = raw.includes('"role":"tool"');
 		res.writeHead(200, { "content-type": "text/event-stream" });
+		// Deterministic, request-size-aware token counts so the dashboard shows
+		// non-zero accounting without a real model.
+		const promptTokens = Math.max(1, Math.ceil(raw.length / 4));
 		if (!hasToolResult) {
 			// Turn 1: request a bus route (planner picks towns).
-			sse(res, { role: "assistant", content: "" });
+			sse(res, { role: "assistant", content: "Planning a first route." });
 			sse(res, {
 				tool_calls: [
 					{
@@ -53,10 +80,12 @@ const server = http.createServer((req, res) => {
 				],
 			});
 			sse(res, {}, "tool_calls");
+			usageChunk(res, promptTokens, 40);
 		} else {
 			// Turn 2: nothing further to do.
 			sse(res, { role: "assistant", content: "Route requested; awaiting construction." });
 			sse(res, {}, "stop");
+			usageChunk(res, promptTokens, 12);
 		}
 		res.write("data: [DONE]\n\n");
 		res.end();

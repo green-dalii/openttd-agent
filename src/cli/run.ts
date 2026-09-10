@@ -138,7 +138,7 @@ Usage:
   --seed N           map seed (default random)
   --timeout-ms N     probe: max wait for first economy (default 15000)
   --ai NAME          watch: AI to start as observed company (default CPU)
-  --web-port N       watch: dashboard port (default ephemeral)
+  --web-port N       watch/agent: dashboard port (default ephemeral)
   --llm-base-url U   agent: OpenAI-compatible base URL (e.g. https://api.openai.com/v1)
   --llm-key K        agent: API key (also LLM_API_KEY / OPENAI_API_KEY)
   --llm-model M      agent: model id (e.g. gpt-4o-mini, deepseek-chat)
@@ -191,7 +191,12 @@ async function main(): Promise<number> {
 	}
 	if (args.mode === "agent") {
 		try {
-			return await runAgent(cfg, { seconds: args.demoSeconds ?? 180 });
+			return await runAgent(cfg, {
+				seconds: args.demoSeconds ?? 180,
+				// Agent mode also serves the live dashboard (telemetry). Undefined
+				// when not requested => CLI-only run.
+				webPort: args.webPort,
+			});
 		} catch (e) {
 			console.error("[agent] ERROR:", e instanceof Error ? e.message : e);
 			return 1;

@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>openttd-agent · live</title>
+<link rel="stylesheet" href="/assets/css/style.css" />
+</head>
+<body>
+<header>
+  <div class="brand">
+    <h1>openttd-agent <span class="dim">live</span></h1>
+    <div id="nav"></div>
+  </div>
+  <div class="stats">
+    <div class="stat"><span class="lbl">Game date</span><span id="g-date" class="val">—</span></div>
+    <div class="stat"><span class="lbl">Companies</span><span id="g-companies" class="val">—</span></div>
+    <div class="stat"><span class="lbl">Events</span><span id="g-events" class="val">0</span></div>
+    <div class="stat"><span class="lbl">Session</span><span id="g-session" class="val dim">—</span></div>
+    <div class="stat"><span class="lbl">Link</span><span id="g-link" class="val dim">…</span></div>
+  </div>
+</header>
+
+<main>
+  <!-- agent telemetry -->
+  <section class="panel" id="telem-panel">
+    <h2>Agent brain <span class="dim" id="t-brain">no brain (observer only)</span></h2>
+    <div class="cards" id="t-cards"></div>
+    <div class="grid-2">
+      <div>
+        <h3>Tokens per turn</h3>
+        <canvas id="t-chart" width="560" height="180"></canvas>
+        <div id="t-turn-table" class="mini-table"></div>
+      </div>
+      <div>
+        <h3>Tools</h3>
+        <div id="t-tools" class="mini-table"></div>
+        <h3>Recent thinking</h3>
+        <ol id="t-thinking" class="thinking-list"></ol>
+      </div>
+    </div>
+  </section>
+
+  <section id="companies"></section>
+
+  <section class="panel">
+    <h2>Cash history <span class="dim">(per company)</span></h2>
+    <canvas id="chart" width="900" height="240"></canvas>
+  </section>
+
+  <section class="grid-2">
+    <section class="panel">
+      <h2>Agent steps <span class="dim" id="steps-count">(0)</span></h2>
+      <label class="check"><input id="steps-autoscroll" type="checkbox" checked /> <span>auto-scroll</span></label>
+      <ol id="steps" class="steps"></ol>
+    </section>
+
+    <section class="panel">
+      <h2>Event stream <span class="dim">(newest last)</span></h2>
+      <div class="filters" id="ev-filters"></div>
+      <label class="check"><input id="ev-raw" type="checkbox" /> <span>show raw JSON inline</span></label>
+      <ol id="events" class="events"></ol>
+    </section>
+  </section>
+
+  <section class="panel">
+    <h2>Staged summaries <span class="dim">(阶段性总结)</span></h2>
+    <ol id="stages" class="timeline"><li class="empty">Checkpoints appear as decision turns complete.</li></ol>
+  </section>
+</main>
+
+<script src="/assets/js/common.js"></script>
+<script src="/assets/js/live.js"></script>
+</body>
+</html>
