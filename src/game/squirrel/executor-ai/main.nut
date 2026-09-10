@@ -23,6 +23,9 @@ class ExecutorV1 extends AIController {
     _vehicle = -1;
     _paxCargo = -1;
     _radius = -1;
+    _roadCur = -1;       // segmented-road: current front reached
+    _roadSeg = 0;
+    _roadSegStep = 0;
     _dumpSeq = 0;
     _hbSeq = 0;
     // Pathfinder.Road class (library, imported once at load). Local sandbox
@@ -30,8 +33,6 @@ class ExecutorV1 extends AIController {
     //  pf = Road(); pf.cost.*; pf.InitializePath([from],[to]); pf.FindPath(n)
     //  -> node with GetTile()/GetParent(), or false (more iterations), null (none).
     _PF = import("pathfinder.road", "Road", 4);
-    _pfInst = null;      // active Road instance
-    _searchIters = 0;
     _builtRoad = null;   // list of [from,to] road pairs built
 
     function Start() {
@@ -257,69 +258,150 @@ class ExecutorV1 extends AIController {
      * Runs once per tick slice; stage advances to "done" only when the road
      * and both stop connections are in place (or abort after bounded retries).
      * Report every road action via SetPhase so the runner sees progress. */
+    /* S3: build a road from station A's front to station B's front in
+     * GREEDY SEGMENTS. Pathfinder.Road v4 + AyStar v6 (2012) deadlocks on
+     * long single searches (>~60 manhattan; probe: FindPath(1000) never
+     * returns for a 111-tile gap while a 25-tile one returns instantly).
+     * So each PhaseRoad tick searches only a SHORT segment (~18 tiles)
+     * toward B with a small probe-goal, lays it, and advances _roadCur.
+     * The probe auto-retreats on failure so we always make progress or
+     * abort cleanly. Final segment (<~25 tiles) goes straight to fB. */
     function PhaseRoad() {
-        // Need both station fronts from the cached slots.
-        if (this._slotA.bp == null || this._slotB.bp == null) {
-            this.SetPhase("road_nofront");
-            this._stage = "done"; // cannot proceed without cached sites
-            return;
-        }
-        local fA = this._slotA.bp[1];
-        local fB = this._slotB.bp[1];
-        local tA = this._slotA.bp[0];
-        local tB = this._slotB.bp[0];
-        if (this._pfInst == null) {
-            this._builtRoad = [];
-            this.SetPhase("road_start");
-            // ROAD TYPE PRECONDITION: Pathfinder.Road probes tile reachability
-            // with AIRoad.BuildRoad inside AITestMode; if the company's current
-            // road type isn't ROAD every probe fails -> empty neighbours ->
-            // NOPATH forever. Same root cause as S2's BuildRoadStation failure.
-            AIRoad.SetCurrentRoadType(AIRoad.ROADTYPE_ROAD);
-            this._pfInst = this._PF();
-            local pf = this._pfInst;
-            // Cost tuning per arena (see nutz_executor PhaseRoad comments).
-            pf.cost.tile = 100;
-            pf.cost.turn = 50;
-            pf.cost.no_existing_road = 120;
-            pf.cost.slope = 200;
-            pf.cost.bridge_per_tile = 100;
-            pf.cost.tunnel_per_tile = 100;
-            pf.cost.coast = 20;
-            pf.cost.max_bridge_length = 12;
-            pf.cost.max_tunnel_length = 10;
-            // Arena ignores InitializePath's return; FindPath drives the run.
-            pf.InitializePath([fA], [fB]);
-            this.SetPhase("road_search");
-        }
-        // 2. Run the search with a bounded iteration budget that yields to
-        //    ticks periodically. FindPath(-1) can spin forever on an
-        //    impossible route, so cap total expansions and report progress
-        //    (probe: FindPath(1000) x ~N returns null when no route exists).
-        local path = false;
-        local iters = 0;
-        while (path == false && iters < 100) {
-            path = this._pfInst.FindPath(1000);
-            iters++;
-            if (iters % 5 == 0) {
-                this._searchIters++;
-                this.SetPhase("rs i" + this._searchIters); // keep observer alive
+        // 1. Initialize per-route state once.
+        if (this._roadCur < 0) {
+            if (this._slotA.bp == null || this._slotB.bp == null) {
+                this.SetPhase("road_nofront");
+                this._stage = "done";
+                return;
             }
-            if (path == false && iters % 5 == 0) this.Sleep(1);
+            this._builtRoad = [];
+            AIRoad.SetCurrentRoadType(AIRoad.ROADTYPE_ROAD);
+            this._roadCur = this._slotA.bp[1]; // station A front
+            this._roadSeg = 0;
+            this.SetPhase("road_start");
         }
-        if (path == null) {
-            this.SetPhase("road_nopath");
-            this._stage = "done";
-            this._pfInst = null;
+        local fB = this._slotB.bp[1];
+        local dist = AIMap.DistanceManhattan(this._roadCur, fB);
+        if (dist <= 0) {
+            // Already at B (degenerate); just connect stops.
+            this.FinishRoad();
             return;
         }
-        if (path == false) {
-            this.SetPhase("road_timeout");
-            this._stage = "done";
-            this._pfInst = null;
+        // 2. Pick this segment's probe goal (retreating on failure). When the
+        //    remaining distance is short, aim straight at fB so the final
+        //    segment terminates ON the destination (never past it).
+        local step = this._roadSegStep;
+        local segLen = (dist <= 22) ? dist : 20;
+        local direct = (dist <= 22);
+        while (segLen >= 4) {
+            local goal = direct ? fB : this.SegmentProbe(this._roadCur, fB, segLen);
+            if (!direct && goal < 0) { segLen -= 4; continue; }
+            local path = this.FindSegment(this._roadCur, goal);
+            if (path == null) {
+                // No route to this probe: shorten and retry (rate-limited).
+                if (step >= 3) {
+                    segLen -= 4;
+                    if (direct && segLen < dist) { direct = false; segLen = 20; }
+                    step = 0;
+                } else {
+                    this._roadSegStep = step + 1;
+                    this.SetPhase("rd retry" + (step + 1));
+                    return;
+                }
+                continue;
+            }
+            if (path == false) {
+                this._roadSegStep = step + 1;
+                if (step > 8) { segLen -= 4; step = 0; }
+                this.SetPhase("rd s" + this._roadSeg + " r" + step);
+                return; // more search iterations next tick
+            }
+            // 3. Lay this segment's path.
+            local built = this.LayPath(path);
+            if (built <= 0) {
+                // Lay failure (terrain/funds): retry a shorter probe next
+                // tick instead of aborting the whole route.
+                if (step >= 6) {
+                    this.SetPhase("road_stuck");
+                    this._stage = "done";
+                    return;
+                }
+                this._roadSegStep = step + 1;
+                this.SetPhase("rd layr" + (step + 1));
+                return;
+            }
+            // Advance to the reached goal tile (end of this segment).
+            this._roadCur = this.LastTileOf(path);
+            this._roadSeg++;
+            this._roadSegStep = 0;
+            local nd = AIMap.DistanceManhattan(this._roadCur, fB);
+            this.SetPhase("road seg" + this._roadSeg + " d" + nd);
+            // 4. Route complete when the last segment ended on fB.
+            if (this._roadCur == fB) {
+                this.FinishRoad();
+            }
             return;
         }
-        // 3. Walk the found path building roads segment by segment.
+        // Probe could not advance even at short range -> give up cleanly.
+        this.SetPhase("road_stuck");
+        this._stage = "done";
+    }
+
+    /* Pick a probe tile ~`len` tiles from `cur` in the direction of `goal`,
+     * preferring buildable non-water land. Returns tile or -1. */
+    function SegmentProbe(cur, goal, len) {
+        local cx = AIMap.GetTileX(cur); local cy = AIMap.GetTileY(cur);
+        local gx = AIMap.GetTileX(goal); local gy = AIMap.GetTileY(goal);
+        local dx = 0; local dy = 0;
+        if (gx > cx) dx = 1; else if (gx < cx) dx = -1;
+        if (gy > cy) dy = 1; else if (gy < cy) dy = -1;
+        // walk outward up to len along the primary axis, then relax on failure
+        local tries = [ [dx,dy], [dx,0], [0,dy], [dx,-dy] ];
+        for (local t = 0; t < 4; t++) {
+            local px = cx + tries[t][0] * len;
+            local py = cy + tries[t][1] * len;
+            // keep in bounds
+            if (px < 0) px = 0; if (py < 0) py = 0;
+            if (px >= AIMap.GetMapSizeX()) px = AIMap.GetMapSizeX() - 1;
+            if (py >= AIMap.GetMapSizeY()) py = AIMap.GetMapSizeY() - 1;
+            local tile = AIMap.GetTileIndex(px, py);
+            if (AITile.IsWaterTile(tile)) continue;
+            if (AIRoad.IsRoadTile(tile)) return tile; // existing road is fine
+            if (!AITile.IsBuildable(tile)) continue;
+            // also check we're actually closer than current
+            if (AIMap.DistanceManhattan(tile, goal) >=
+                AIMap.DistanceManhattan(cur, goal)) continue;
+            return tile;
+        }
+        return -1;
+    }
+
+    /* Run Pathfinder.Road from `from` to a single probe `to`. Returns a
+     * path node, false (needs more iterations) or null (no path). */
+    function FindSegment(from, to) {
+        local pf = this._PF();
+        pf.cost.tile = 100;
+        pf.cost.turn = 50;
+        pf.cost.no_existing_road = 120;
+        pf.cost.slope = 200;
+        pf.cost.bridge_per_tile = 100;
+        pf.cost.tunnel_per_tile = 100;
+        pf.cost.coast = 20;
+        pf.cost.max_bridge_length = 12;
+        pf.cost.max_tunnel_length = 10;
+        pf.InitializePath([from], [to]);
+        local p = false;
+        local i = 0;
+        while (p == false && i < 40) {
+            p = pf.FindPath(50);
+            i++;
+        }
+        return p; // node, false (still searching), or null
+    }
+
+    /* Build road/bridge/tunnel along a path node chain. Returns count of
+     * segments laid. */
+    function LayPath(path) {
         local segs = 0;
         while (path != null) {
             local par = path.GetParent();
@@ -329,71 +411,52 @@ class ExecutorV1 extends AIController {
                 if (AIMap.DistanceManhattan(from, to) == 1) {
                     local ok1 = AIRoad.BuildRoad(from, to);
                     if (!ok1 && AIError.GetLastError() != AIError.ERR_ALREADY_BUILT) {
-                        this.SetPhase("road_bldfail");
-                        this._stage = "done";
-                        this._pfInst = null;
-                        return;
+                        return segs > 0 ? segs : -1;
                     }
                     AIRoad.BuildRoad(to, from);
                     this._builtRoad.append([from, to]);
+                    segs++;
                 } else if (!AIBridge.IsBridgeTile(from) && !AITunnel.IsTunnelTile(from)) {
                     if (AIRoad.IsRoadTile(from)) AITile.DemolishTile(from);
                     if (AITunnel.GetOtherTunnelEnd(from) == to) {
-                        if (!AITunnel.BuildTunnel(AIVehicle.VT_ROAD, from)) {
-                            this.SetPhase("road_tunnelfail");
-                            this._stage = "done";
-                            this._pfInst = null;
-                            return;
-                        }
+                        if (!AITunnel.BuildTunnel(AIVehicle.VT_ROAD, from)) return segs;
                     } else {
                         local bl = AIBridgeList_Length(AIMap.DistanceManhattan(from, to) + 1);
                         bl.Valuate(AIBridge.GetMaxSpeed);
                         bl.Sort(AIList.SORT_BY_VALUE, false);
-                        if (!AIBridge.BuildBridge(AIVehicle.VT_ROAD, bl.Begin(), from, to)) {
-                            this.SetPhase("road_bridgefail");
-                            this._stage = "done";
-                            this._pfInst = null;
-                            return;
-                        }
+                        if (!AIBridge.BuildBridge(AIVehicle.VT_ROAD, bl.Begin(), from, to)) return segs;
                     }
                     this._builtRoad.append([from, to]);
+                    segs++;
                 }
-                segs++;
             }
             path = par;
         }
-        this.SetPhase("road_built");
-        // 4. Connect each stop to its front (so buses can pull in).
-        this.ConnectStop(tA, fA);
-        if (!AIRoad.AreRoadTilesConnected(fA, tA)) {
-            local es = AIError.GetLastErrorString();
-            if (es == null) es = "" + AIError.GetLastError();
-            if (es.len() > 10) es = es.slice(0, 10);
-            this.SetPhase("noconnA_" + es);
-        }
-        this.ConnectStop(tB, fB);
-        if (!AIRoad.AreRoadTilesConnected(fB, tB)) {
-            local es = AIError.GetLastErrorString();
-            if (es == null) es = "" + AIError.GetLastError();
-            if (es.len() > 10) es = es.slice(0, 10);
-            this.SetPhase("noconnB_" + es);
-        }
-        // 5. Verify connectivity A-front -> B-front with the library (cost
-        //    on new road so it only passes over what we built).
-        if (this.VerifyRoad(fA, fB)) {
-            this._stage = "depot";
-            this._pfInst = null;
-        } else {
-            this.SetPhase("road_gap");
-            this._stage = "done";
-            this._pfInst = null;
-        }
+        return segs;
     }
 
-    /* S4a: build a road depot. Uses the GS-placed D sign when available;
-     * otherwise scans near station A for a buildable pair. Mirrors arena
-     * PhaseDepot: clear both tiles, BuildRoadDepot, connect depot front to
-     * the nearest station front with a Pathfinder road so a bus can leave. */
+    /* Tile at the far end of a path chain. FindPath returns the GOAL node
+     * whose GetParent() chain walks back to the source; the goal tile is the
+     * returned node's own tile (the head), not the tail. */
+    function LastTileOf(path) {
+        if (path == null) return -1;
+        return path.GetTile();
+    }
+
+    /* Called when the full route is laid: connect both stops to their
+     * fronts and move to the depot stage. */
+    function FinishRoad() {
+        local tA = this._slotA.bp[0];
+        local fA = this._slotA.bp[1];
+        local tB = this._slotB.bp[0];
+        local fB = this._slotB.bp[1];
+        this.SetPhase("road_built");
+        this.ConnectStop(tA, fA);
+        this.ConnectStop(tB, fB);
+        this._stage = "depot";
+    }
+
+
     function PhaseDepot() {
         if (this._slotD.bp == null) {
             // No D sign (GS best-effort) -> find near station A's front.
@@ -575,25 +638,6 @@ class ExecutorV1 extends AIController {
 
     /* Run a fresh pathfinder with huge no_existing_road penalty: if it finds
      * a route it means the tiles we built form a connected road. */
-    function VerifyRoad(fA, fB) {
-        local pf = this._PF();
-        pf.cost.tile = 100;
-        pf.cost.turn = 50;
-        pf.cost.no_existing_road = 100000;
-        pf.cost.slope = 200;
-        pf.cost.bridge_per_tile = 100000;
-        pf.cost.tunnel_per_tile = 100000;
-        pf.InitializePath([fA], [fB]);
-        local vpath = false;
-        local viters = 0;
-        while (vpath == false && viters < 300) {
-            vpath = pf.FindPath(50);
-            viters++;
-            if (viters % 20 == 0) this.Sleep(1);
-        }
-        return vpath != null && vpath != false;
-    }
-
     /* Locate the blueprint sign for station `label` ("A"/"B" -> sign slot
      * "S"/"E"). Returns [tile, front] or null. */
     function FindSign(label) {

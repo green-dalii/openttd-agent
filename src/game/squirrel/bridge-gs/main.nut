@@ -351,7 +351,11 @@ class BridgeV1 extends GSController {
         }
         local best = null;
         local bestScore = -1;
-        foreach (lim in [60, 90]) {
+        // Segmented road building (executor S3+) lifts the old <=60-tile
+        // AyStar deadlock cap, so long pairs are now allowed. Prefer
+        // moderate (25..140) but accept up to 260 to let the planner reach
+        // farther, more profitable towns.
+        foreach (lim in [140, 260]) {
             for (local i = 0; i < all.len(); i++) {
                 for (local j = i + 1; j < all.len(); j++) {
                     local ddx = all[i][2] - all[j][2]; if (ddx < 0) ddx = -ddx;
