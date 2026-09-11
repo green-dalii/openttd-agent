@@ -173,6 +173,28 @@ describe("front-end assets", () => {
 		}
 	});
 
+	it("never uses scrollIntoView to follow a list", () => {
+		// Regression (2026-09-11, reported by the user): the Agent steps list called
+		// `el.scrollIntoView()` on every appended step. That API scrolls EVERY
+		// scrollable ancestor including the document, so a local list update yanked
+		// the whole page and the reader kept losing their place. Use the
+		// container-local helpers instead (UI.scrollToEnd / UI.keepVisible).
+		for (const file of JS_FILES()) {
+			const src = read(file);
+			for (const line of src.split("\n")) {
+				const t = line.trim();
+				// Skip comments: the helpers document *why* scrollIntoView is banned.
+				if (t.startsWith("*") || t.startsWith("//") || t.startsWith("/*")) continue;
+				const code = line.split("//")[0]!;
+				expect(
+					/\.scrollIntoView\s*\(/.test(code),
+					`${file}: scrollIntoView escapes the component and moves the page - ` +
+						`use UI.scrollToEnd / UI.keepVisible\n  ${line.trim()}`,
+				).toBe(false);
+			}
+		}
+	});
+
 	it("marks the scripted demo brain as not a real LLM", () => {
 		// A faux run must never be mistakable for a real one in the UI.
 		const src = read("assets/js/live.js");

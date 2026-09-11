@@ -53,6 +53,12 @@ interface UiModule {
 	segmented(root: any, opts: any): any;
 	kpi(o: any): string;
 	paintSparks(root: any, perTile?: any): void;
+	/**
+	 * Container-local scrolling: never touch an ancestor (the document included),
+	 * which `Element.scrollIntoView` does. See the helpers in common.js.
+	 */
+	scrollToEnd(el: any): boolean;
+	keepVisible(container: any, child: any): boolean;
 	// prefs
 	getPref(key: string, fallback?: any): any;
 	setPref(key: string, value: any): void;

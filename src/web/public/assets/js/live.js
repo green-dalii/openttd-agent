@@ -638,8 +638,9 @@
         ${s.data ? `<details><summary>result</summary><pre>${U.esc(JSON.stringify(s.data, null, 2))}</pre></details>` : ""}
       </li>`;
     }).join("") || `<li class="empty">No steps ${state.stepFilter === "all" ? "yet" : "match this filter"}.</li>`;
-    const last = elSteps.lastElementChild;
-    if (elAutoScroll.checked && last && last.scrollIntoView) last.scrollIntoView({ block: "nearest" });
+    // Follow only inside this list. `scrollIntoView` used to scroll the whole
+    // document on every appended step, yanking the page away from the reader.
+    if (elAutoScroll.checked) U.scrollToEnd(elSteps);
   }
 
   function renderStages() {

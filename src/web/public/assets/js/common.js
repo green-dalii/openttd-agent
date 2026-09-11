@@ -371,6 +371,52 @@ function briefOf(ev) {
   }
 }
 
+/* --------------------- container-local scrolling --------------------- */
+/**
+ * Scroll a container to its end **without touching the page**.
+ *
+ * 为什么不用 `el.scrollIntoView()`（2026-09-11 用户实测报告）:
+ *   `scrollIntoView` 会滚动 **所有可滚动祖先，包括文档本身**。
+ *   Agent steps 每追加一条就调用它，于是页面不停自己往下跳，
+ *   把用户正在读的地方顶走 —— 一个局部列表的更新却抢走了整页焦点。
+ *   直接设置 `scrollTop` 只影响这个元素。
+ *
+ * 禁止: 用 `scrollIntoView` 做"跟随最新"（它表达不了"只滚这个容器"）；
+ *   `web-assets.test.ts` 有静态护栏阻止它回来。
+ */
+function scrollToEnd(el) {
+  if (!el) return false;
+  const sh = Number(el.scrollHeight);
+  const ch = Number(el.clientHeight);
+  if (!Number.isFinite(sh) || !Number.isFinite(ch)) return false;
+  // Nothing to do when the content already fits (also avoids a pointless reflow).
+  if (sh <= ch) return false;
+  el.scrollTop = sh;
+  return true;
+}
+
+/**
+ * Scroll `container` just enough to reveal `child`, and nothing else.
+ *
+ * Same reasoning as `scrollToEnd`: `scrollIntoView` walks up and scrolls every
+ * scrollable ancestor, so a dropdown opened low on the page would yank the page.
+ * Uses rects, so it does not depend on `offsetParent`.
+ */
+function keepVisible(container, child) {
+  if (!container || !child || !container.getBoundingClientRect) return false;
+  const c = container.getBoundingClientRect();
+  const b = child.getBoundingClientRect();
+  if (b.top < c.top) {
+    container.scrollTop -= c.top - b.top;
+    return true;
+  }
+  if (b.bottom > c.bottom) {
+    container.scrollTop += b.bottom - c.bottom;
+    return true;
+  }
+  return false;
+}
+
 /* ------------------------------ toasts ------------------------------ */
 /* Feedback used to live in one dim line under a form, which is easy to miss.
    Contract: docs/DASHBOARD-UI.md §2. */
@@ -590,7 +636,7 @@ function combobox(root, opts) {
       // the search input while open, and AT reads the focused element.
       input.setAttribute("aria-activedescendant", node.id);
       btn.setAttribute("aria-activedescendant", node.id);
-      if (node.scrollIntoView) node.scrollIntoView({ block: "nearest" });
+      keepVisible(list, node);
     }
   }
 
@@ -795,7 +841,7 @@ window.UI = {
   // events
   categoryOf, categoryClass, categoryLabel, categoryCounts, eventMatches, briefOf,
   // widgets
-  toast, confirmDialog, combobox, segmented, kpi, paintSparks,
+  toast, confirmDialog, combobox, segmented, kpi, paintSparks, scrollToEnd, keepVisible,
   // prefs
   getPref, setPref,
   // charts helpers
