@@ -34,7 +34,8 @@ export type WireMessage =
 	| { type: "step"; data: unknown }
 	| { type: "checkpoint"; data: unknown }
 	| { type: "run"; data: unknown }
-	| { type: "stage"; data: unknown };
+	| { type: "stage"; data: unknown }
+	| { type: "stageImage"; data: unknown };
 
 /** Provider catalog access (docs/DASHBOARD-API.md §3.1). */
 export interface CatalogHooks {
@@ -52,6 +53,8 @@ export interface CatalogHooks {
 export interface SessionHooks {
 	list: () => unknown[];
 	read: (id: string, limit?: number) => unknown | null;
+	/** Raw bytes of an archived stage image (e.g. "001.png"), or null. */
+	stageFile?: (id: string, file: string) => Buffer | null;
 }
 
 /**
@@ -236,6 +239,12 @@ export class WebServer {
 		for (const ws of this.clients) this.send(ws, msg);
 	}
 
+	/** Announce a newly captured stage image so pages can show it immediately. */
+	publishStageImage(data: unknown): void {
+		const msg: WireMessage = { type: "stageImage", data };
+		for (const ws of this.clients) this.send(ws, msg);
+	}
+
 	/** Push a run-state change (start/stop/pause/resume) to the pages. */
 	publishRun(data: unknown): void {
 		const msg: WireMessage = { type: "run", data };
@@ -334,6 +343,21 @@ export class WebServer {
 			// GET /api/version — which build produced these logs?
 			if (url.pathname === "/api/version" && req.method === "GET") {
 				return json(200, { version: this.version ?? "unknown" });
+			}
+
+			/**
+			 * GET /api/sessions/:id/stages/:n.png — the captured minimap.
+			 * Path components are validated (no traversal) before touching disk.
+			 */
+			if (segments[1] === "sessions" && segments[3] === "stages" && req.method === "GET") {
+				if (!this.sessionHooks?.stageFile) return json(404, { error: "stages disabled" });
+				const id = decodeURIComponent(segments[2] ?? "");
+				const file = decodeURIComponent(segments[4] ?? "");
+				const data = this.sessionHooks.stageFile(id, file);
+				if (!data) return json(404, { error: "no such stage image" });
+				res.writeHead(200, { "content-type": "image/png", "cache-control": "no-cache" });
+				res.end(data);
+				return;
 			}
 
 			// /api/run[...] — control surface (docs §3.2)

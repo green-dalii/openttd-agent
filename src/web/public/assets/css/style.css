@@ -111,6 +111,9 @@ main { padding: var(--sp-4) var(--sp-5) 64px; max-width: 1360px; margin: 0 auto;
 .snap canvas { background: none; }
 .snap .snap-meta { font-size: 10.5px; color: var(--muted); margin-top: 4px; display: flex;
   justify-content: space-between; gap: 6px; }
+/* Real captured minimap (the schematic canvas is the fallback). */
+.snap-img { display: block; width: 100%; height: auto; border-radius: var(--r-sm);
+  image-rendering: pixelated; background: var(--bg-sunken); }
 
 /* ------------------------------ grouping ------------------------------ */
 .group { display: flex; align-items: center; gap: var(--sp-3); margin: var(--sp-2) 0 calc(-1 * var(--sp-1)); }

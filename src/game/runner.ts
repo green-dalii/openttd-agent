@@ -23,6 +23,7 @@ import {
 	listSessions,
 	newSessionId,
 	readSession,
+	readStageFile,
 	reconcileStaleSessions,
 } from "../agent/session-store.js";
 import { AdminUpdateType } from "../game/admin-protocol.js";
@@ -206,6 +207,7 @@ export async function runWatch(
 			list: () => listSessions(cfg.dataDir),
 			read: (id: string, limit?: number) =>
 				readSession(cfg.dataDir, id, limit ? { limit } : {}),
+			stageFile: (id: string, file: string) => readStageFile(cfg.dataDir, id, file),
 		},
 	};
 	if (attached) {

@@ -14,6 +14,7 @@ import { APP_VERSION } from "../version.js";
 import { AdminClient } from "../game/admin-client.js";
 import { WorldState } from "../game/world-state.js";
 import path from "node:path";
+import { renameSync, statSync } from "node:fs";
 import { AdminUpdateType, ALL_COMPANIES } from "../game/admin-protocol.js";
 import {
 	deploySquirrelPacks,
@@ -30,6 +31,7 @@ type AgentOptionsStreamFn = AgentOptions["streamFn"];
 import { runDecision } from "./loop.js";
 import { DecisionScheduler } from "./scheduler.js";
 import { buildStageView } from "./stage-view.js";
+import { captureMinimap, MINIMAP_REL_PATH } from "../game/minimap.js";
 import {
 	emptyTracker,
 	recordAction,
@@ -50,6 +52,7 @@ import {
 	listSessions,
 	newSessionId,
 	readSession,
+	readStageFile,
 	reconcileStaleSessions,
 } from "./session-store.js";
 import type { SessionTotals } from "./session-store.js";
@@ -445,6 +448,7 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 		sessions: {
 			list: () => listSessions(cfg.dataDir),
 			read: (id: string, limit?: number) => readSession(cfg.dataDir, id, limit ? { limit } : {}),
+			stageFile: (id: string, file: string) => readStageFile(cfg.dataDir, id, file),
 		},
 	};
 	let web: WebServer | null = null;
@@ -505,7 +509,35 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 	/** Tool outcomes since the last decision, fed back to the model next time. */
 	const pendingActions: { tool: string; ok: boolean; summary: string }[] = [];
 	/** Stage snapshots this run produced (also archived per session). */
-	const stageViews: ReturnType<typeof buildStageView>[] = [];
+	const stageViews: (ReturnType<typeof buildStageView> & { index: number; image?: string })[] = [];
+
+	/**
+	 * Capture the game's real minimap for this stage, if the game can produce one.
+	 *
+	 * `screenshot minimap` works even on a headless dedicated server (the minimap
+	 * is rendered from map data, not the 3D viewport) - see src/game/minimap.ts.
+	 * Best effort: a failure only means this stage has no image.
+	 */
+	const captureStageImage = async (index: number): Promise<string | null> => {
+		const target = session.minimapTarget(index);
+		const ok = await captureMinimap(
+			{
+				send: (cmd) => client?.rcon(cmd),
+				statMtime: () => {
+					try {
+						return statSync(path.join(cfg.dataDir, MINIMAP_REL_PATH)).mtimeMs;
+					} catch {
+						return null;
+					}
+				},
+				move: (from, to) => renameSync(from, to),
+				sleep,
+				now: () => Date.now(),
+			},
+			{ target, source: path.join(cfg.dataDir, MINIMAP_REL_PATH) },
+		);
+		return ok ? path.basename(target) : null;
+	};
 
 	/** Build + push a stage snapshot (map diagram) for the dashboard timeline. */
 	const publishStage = (phase?: string) => {
@@ -525,9 +557,19 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 			...(phase ? { phase } : {}),
 		});
 		void c0;
-		stageViews.push(view);
+		const index = session.nextStageIndex();
+		// Pair the view with its archive index so the page can request the image.
+		const stamped = { ...view, index };
+		stageViews.push(stamped);
 		session.saveStage(view);
-		web?.publishStage(view);
+		web?.publishStage(stamped);
+		// The real image is captured asynchronously; the diagram is immediate.
+		void captureStageImage(index).then((img) => {
+			if (!img) return;
+			const st = stageViews.find((x) => x.index === index);
+			if (st) st.image = img;
+			web?.publishStageImage({ index, file: img, gameDate: view.gameDate });
+		});
 	};
 
 	const { agent } = createAgent({

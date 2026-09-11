@@ -352,3 +352,85 @@ describe("WebServer checkpoints", () => {
 		expect(r.body).toContain("providers");
 	});
 });
+
+/**
+ * Stage images: the captured minimap must be reachable, and nothing else must be.
+ * `screenshot minimap` is the only capture that works headless
+ * (docs/AGENT-LOOP-AND-CONTROL.md §4), so this endpoint is how the dashboard shows
+ * real game images instead of only a schematic.
+ */
+describe("WebServer stage images", () => {
+	let server: WebServer | null = null;
+	let port = 0;
+	afterEach(async () => {
+		if (server) await server.stop();
+		server = null;
+	});
+
+	const PNG = Buffer.from(
+		// 1x1 PNG (valid signature + IHDR) - enough to assert byte passthrough.
+		"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==",
+		"base64",
+	);
+
+	async function startWithStageFile(): Promise<void> {
+		server = new WebServer({
+			host: "127.0.0.1",
+			port: 0,
+			sessions: {
+				list: () => [],
+				read: () => null,
+				stageFile: (id, file) => (id === "s1" && file === "001.png" ? PNG : null),
+			},
+		});
+		await server.start();
+		port = server.actualPort;
+	}
+
+	function get(path: string): Promise<{ status: number; type: string; body: Buffer }> {
+		return new Promise((resolve, reject) => {
+			http.get({ host: "127.0.0.1", port, path }, (res) => {
+				const chunks: Buffer[] = [];
+				res.on("data", (c) => chunks.push(c as Buffer));
+				res.on("end", () =>
+					resolve({
+						status: res.statusCode ?? 0,
+						type: String(res.headers["content-type"] ?? ""),
+						body: Buffer.concat(chunks),
+					}),
+				);
+			}).on("error", reject);
+		});
+	}
+
+	it("serves an archived stage PNG with the right content type", async () => {
+		await startWithStageFile();
+		const r = await get("/api/sessions/s1/stages/001.png");
+		expect(r.status).toBe(200);
+		expect(r.type).toContain("image/png");
+		expect(r.body.equals(PNG)).toBe(true);
+	});
+
+	it("404s for a stage that does not exist", async () => {
+		await startWithStageFile();
+		const r = await get("/api/sessions/s1/stages/999.png");
+		expect(r.status).toBe(404);
+	});
+
+	it("404s (not 500) for a traversal attempt", async () => {
+		await startWithStageFile();
+		for (const bad of ["..%2F..%2Fopenttd.cfg", "001.png%2F..%2F..%2Fsecrets.cfg"]) {
+			const r = await get(`/api/sessions/s1/stages/${bad}`);
+			expect(r.status, bad).toBe(404);
+			expect(r.type).toContain("json");
+		}
+	});
+
+	it("404s when the server has no stage hook at all", async () => {
+		server = new WebServer({ host: "127.0.0.1", port: 0, getSnapshot: () => ({}) });
+		await server.start();
+		port = server.actualPort;
+		const r = await get("/api/sessions/s1/stages/001.png");
+		expect(r.status).toBe(404);
+	});
+});

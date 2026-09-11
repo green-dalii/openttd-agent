@@ -602,6 +602,8 @@ function connectWs(handlers) {
         case "step": handlers.onStep && handlers.onStep(msg.data); break;
         case "checkpoint": handlers.onCheckpoint && handlers.onCheckpoint(msg.data); break;
         case "run": handlers.onRun && handlers.onRun(msg.data); break;
+        case "stage": handlers.onStage && handlers.onStage(msg.data); break;
+        case "stageImage": handlers.onStageImage && handlers.onStageImage(msg.data); break;
       }
     };
     ws.onclose = () => {

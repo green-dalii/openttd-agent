@@ -295,6 +295,16 @@ export class SessionStore {
 		}
 	}
 
+	/** Stage index the next capture will use (kept in sync with saveStage). */
+	nextStageIndex(): number {
+		return this.stageCount;
+	}
+
+	/** Absolute path where the minimap for the next stage should be archived. */
+	minimapTarget(index: number): string {
+		return path.join(this.dir, "stages", `${String(index).padStart(3, "0")}.png`);
+	}
+
 	/** All archived stage snapshots, oldest first (never throws). */
 	readStages(): unknown[] {
 		try {
@@ -374,6 +384,18 @@ export function listSessions(dataDir: string, now: number = Date.now()): Session
 	return list
 		.map((m) => withEffectiveStatus(normalizeMeta(m), now))
 		.sort((a, b) => b.startedAt - a.startedAt);
+}
+
+/** Read an archived stage image, or null. Rejects traversal and non-PNG names. */
+export function readStageFile(dataDir: string, id: string, file: string): Buffer | null {
+	if (!id || id.includes("/") || id.includes("..")) return null;
+	// Only `NNN.png` - never an arbitrary path.
+	if (!/^\d{3}\.png$/.test(file)) return null;
+	try {
+		return readFileSync(path.join(sessionDir(dataDir, id), "stages", file));
+	} catch {
+		return null;
+	}
 }
 
 /** Read one session's meta/telemetry/events/audit, or null when unknown. */

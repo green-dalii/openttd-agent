@@ -99,7 +99,19 @@
     },
     onRun: (r) => { state.run = r; renderRunControls(); renderNotice(); },
     onStage: (v) => { state.stages = [...state.stages, v].slice(-24); renderStageViews(); },
+    onStageImage: (info) => {
+      // A real captured minimap arrived for one stage; swap it in.
+      const i = Number(info && info.index);
+      if (Number.isFinite(i) && state.stages[i]) state.stages[i].image = info.file;
+      renderStageViews();
+    },
     onStage: (v) => { state.stages = [...state.stages, v].slice(-24); renderStageViews(); },
+    onStageImage: (info) => {
+      // A real captured minimap arrived for one stage; swap it in.
+      const i = Number(info && info.index);
+      if (Number.isFinite(i) && state.stages[i]) state.stages[i].image = info.file;
+      renderStageViews();
+    },
   });
 
   /* --------------------------- run controls --------------------------- */
@@ -650,9 +662,13 @@
       return;
     }
     const shown = views.slice(-12);
+    const sessionId = (state.telemetry && state.telemetry.sessionId) || state.sessionId || "";
     box.innerHTML = shown.map((v, i) => `
       <div class="snap">
-        <canvas class="snap-map" data-i="${i}" height="130"></canvas>
+        ${v.image && sessionId
+          ? `<img class="snap-img" src="/api/sessions/${U.esc(sessionId)}/stages/${U.esc(v.image)}"
+                  alt="minimap of ${U.esc(v.gameDate || "stage")}" width="130" height="130" />`
+          : `<canvas class="snap-map" data-i="${i}" height="130"></canvas>`}
         <div class="snap-meta">
           <span>${U.esc(v.gameDate || "—")}</span>
           <span>${U.esc((v.phase || "").slice(0, 22))}${(v.phase || "").length > 22 ? "…" : ""}</span>
@@ -663,8 +679,9 @@
           <span>${U.fmtMoney(v.companies && v.companies[0] ? v.companies[0].money : 0)}</span>
         </div>
       </div>`).join("");
-    const canvases = box.querySelectorAll(".snap-map");
-    canvases.forEach((cv, i) => {
+    // Only the stages without a captured image need the schematic diagram.
+    box.querySelectorAll(".snap-map").forEach((cv) => {
+      const i = Number(cv.getAttribute("data-i"));
       if (window.Charts && window.Charts.stageMap) window.Charts.stageMap(cv, shown[i]);
     });
   }

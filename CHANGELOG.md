@@ -46,7 +46,18 @@
 - `decision-context`(12) / `scheduler`(11) / `supervisor`(12) / `stage-view`(9) 单测
 - `web-assets` 增强：同时校验 `const elX = $("id")` 这类**别名**（此前漏检）
 
+### Added（真实画面：小地图快照）
+- `src/game/minimap.ts`：`captureMinimap()` 请求 `screenshot minimap` 并**轮询 mtime**
+  确认落盘后归档（固定 sleep 会归档到上一张）
+- 每个施工阶段写 `<session>/stages/NNN.png`（与同名几何描述 JSON 配对），
+  `GET /api/sessions/:id/stages/:n.png` 提供（仅接受 `NNN.png`，拒绝路径穿越）
+- Live 页实时显示新捕获的图（WS 帧 `stageImage`），Sessions 页可回放全阶段
+- 拿不到图时降级为示意图（`stage-view.ts`）
+
 ### Verified（真机，本轮）
+- **真实小地图**：`screenshot minimap` → 256×256 PNG，逐阶段归档且**内容随施工变化**
+  （4114/4124/4129 字节，sha 不同）；浏览器实测 `naturalWidth=256 loaded=true`，
+  0 console 异常
 - 决策数由 **1 → 4+**（phase_change 驱动，随运行持续增加）；`llm.kind=real`；token 正常
 - `--serve` 全链路：idle → start agent → pause（server.log 有 pause）→ resume →
   stop（session 落 `aborted`）→ **不重启进程再起 watch**；重复 start 返回 409

@@ -677,11 +677,18 @@ openttd-agent/
    `POST /api/run/{start,stop,pause,resume}`；`GET /api/run`；WS 帧 `run`。
    被监督的 run **复用**已有 WebServer（`WebServer.attach()` 晚绑定 hooks），
    否则一个端口两个扇出。stop = `aborted`（用户主动停止 ≠ 达成目标）。
-7. **阶段画面（#5 的诚实答案）**: OpenTTD **dedicated server 无帧缓冲**，
-   rcon `screenshot` 实测返回 `Screenshot failed!` → 像素截图在本架构下不可能。
-   替代：`stage-view.ts` 用 GS ack 的真实 tile 坐标（`tile = y*width + x`）
-   生成几何描述，前端 canvas 画**示意图**，每个施工阶段存一份（`<session>/stages/NNN.json`），
-   UI 明确标注"由世界数据绘制"。要真截图只能改用带窗口的客户端（架构变更，另立 ADR）。
+7. **阶段画面（#5）**: ⚠️ **本条的初版结论是错的，已修正**。初版只试了 `screenshot`
+   就断言"headless 下截图不可能"。穷举变体后实测：
+   - `screenshot` / `big` / `giant` / `no_con` → `Screenshot failed!`（需 3D 视口 + 帧缓冲）
+   - **`screenshot minimap` → 成功**，写出 256×256 RGB PNG（`screenshot/screenshot.png`）
+   - `minimap big` 只改文件名，尺寸不变；`minimap no_con` **失败**
+
+   小地图由**地图数据**渲染，不经过 3D 视口，因此 headless dedicated server 可出图。
+   SPEC §10.2 的"视觉像素"边界仅指**视口画面**。
+   实现：每个施工阶段 `captureMinimap()` → `<session>/stages/NNN.png`（与同名
+   `NNN.json` 几何描述配对）；命令返回 ≠ 落盘，必须**轮询 mtime**，否则归档到上一张。
+   拿不到 PNG 时前端降级画 `stage-view.ts` 的示意图。
+   教训：**"某个变体失败"不等于"整个能力不可得"**。
 8. **E2E 必须证明"智能真的接上了"（AGENTS.md §5.1）**: v0.3~v0.5 的 E2E 只验证
    "进程起来了 + 有 token 计数"，所以"压根没接线"这类错误无人发现。新增
    `test/live/agent-loop.test.ts` 断言 7 条：`llm.kind==="real"`、`mode==="agent"`、
