@@ -20,7 +20,29 @@ export interface CompanyState {
 	stats: CompanyStats | null;
 	/** Wall-clock ms of last economy update (for "stale?" UI). */
 	lastEconomyAt: number | null;
+	/**
+	 * Bounded cash/loan/income series for the dashboard curve.
+	 *
+	 * Kept server-side because the dashboard is a **view**: a browser refresh
+	 * used to wipe the whole curve (history lived only in page memory), so an
+	 * operator returning to a long run saw a blank chart.
+	 */
+	history: CompanyHistoryPoint[];
 }
+
+/** One sampled point of a company's economy (for the cash/loan/income curve). */
+export interface CompanyHistoryPoint {
+	at: number;
+	/** Game date at sample time (for axis labels); null before the first date event. */
+	year: number | null;
+	month: number | null;
+	money: number;
+	loan: number;
+	income: number;
+}
+
+/** Cap on retained history points per company (~1h at a 5s poll). */
+const MAX_HISTORY = 600;
 
 export interface WorldSnapshot {
 	date: GameDate | null;
@@ -65,7 +87,13 @@ export class WorldState {
 			case "company_new": {
 				const p = ev.payload as { id: number };
 				if (!this.companies.has(p.id)) {
-					this.companies.set(p.id, { info: null, economy: null, stats: null, lastEconomyAt: null });
+					this.companies.set(p.id, {
+						info: null,
+						economy: null,
+						stats: null,
+						lastEconomyAt: null,
+						history: [],
+					});
 				}
 				break;
 			}
@@ -76,13 +104,27 @@ export class WorldState {
 					economy: this.companies.get(p.id)?.economy ?? null,
 					stats: this.companies.get(p.id)?.stats ?? null,
 					lastEconomyAt: this.companies.get(p.id)?.lastEconomyAt ?? null,
+					history: this.companies.get(p.id)?.history ?? [],
 				});
 				break;
 			}
 			case "company_economy": {
 				const p = ev.payload as CompanyEconomy;
-				this.upsertCompany(p.id).economy = p;
-				this.upsertCompany(p.id).lastEconomyAt = ev.ts;
+				const c = this.upsertCompany(p.id);
+				c.economy = p;
+				c.lastEconomyAt = ev.ts;
+				// Money is signed (SPEC §10.6); keep it numeric for the chart.
+				c.history = [
+					...c.history,
+					{
+						at: ev.ts,
+						year: this.date?.year ?? null,
+						month: this.date?.month ?? null,
+						money: Number(p.money),
+						loan: Number(p.loan),
+						income: Number(p.income),
+					},
+				].slice(-MAX_HISTORY);
 				break;
 			}
 			case "company_stats": {
@@ -103,7 +145,7 @@ export class WorldState {
 	private upsertCompany(id: number): CompanyState {
 		let c = this.companies.get(id);
 		if (!c) {
-			c = { info: null, economy: null, stats: null, lastEconomyAt: null };
+			c = { info: null, economy: null, stats: null, lastEconomyAt: null, history: [] };
 			this.companies.set(id, c);
 		}
 		return c;

@@ -74,6 +74,7 @@ describe("summarizeState", () => {
 						} as never,
 						stats: { id: 0, vehicles: 3, stations: 2 } as never,
 						lastEconomyAt: null,
+						history: [],
 					},
 				],
 			]),

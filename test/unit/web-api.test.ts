@@ -7,7 +7,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import http from "node:http";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { PAGES, PUBLIC_DIR, WebServer } from "../../src/web/server.js";
+import { WebSocket } from "ws";
+import { PAGES, PAGE_ALIASES, PUBLIC_DIR, WebServer } from "../../src/web/server.js";
 
 /** Recursive relative file listing under a directory (test helper). */
 function listFiles(root: string, prefix = ""): string[] {
@@ -118,7 +119,6 @@ describe("WebServer REST", () => {
 		const r = await req("GET", "/api/telemetry");
 		expect(r.status).toBe(200);
 		expect((r.body.totals as { toolCalls: number }).toolCalls).toBe(3);
-
 		if (server) await server.stop();
 		await start({ telemetry: undefined });
 		expect((await req("GET", "/api/telemetry")).status).toBe(404);
@@ -253,5 +253,102 @@ describe("WebServer REST", () => {
 		await start();
 		const r = await req("PUT", "/api/llm", {});
 		expect(r.status).toBe(405);
+	});
+});
+
+/**
+ * Staged summaries must reach a live browser DURING a run, not only at shutdown
+ * (docs/DASHBOARD-UI.md §7). These tests lock the WS frame + snapshot payload.
+ */
+describe("WebServer checkpoints", () => {
+	let server: WebServer | null = null;
+	let port = 0;
+	afterEach(async () => {
+		if (server) await server.stop();
+		server = null;
+	});
+
+	async function startWithCheckpoints(): Promise<void> {
+		server = new WebServer({
+			host: "127.0.0.1",
+			port: 0,
+			getSnapshot: () => ({
+				totalEvents: 5,
+				checkpoints: [{ at: 1, gameDate: "1950-02-01", turn: 1, note: "first", totals: {} }],
+			}),
+		});
+		await server.start();
+		port = server.actualPort;
+	}
+
+	/** Collect WS frames until `want` arrives or the deadline passes. */
+	function frames(want: string, timeoutMs = 3000): Promise<Record<string, unknown>[]> {
+		return new Promise((resolve, reject) => {
+			const got: Record<string, unknown>[] = [];
+			const ws = new WebSocket(`ws://127.0.0.1:${port}`);
+			const done = (err?: Error) => {
+				ws.close();
+				if (err) reject(err);
+				else resolve(got);
+			};
+			const timer = setTimeout(() => done(new Error(`no '${want}' frame within ${timeoutMs}ms`)), timeoutMs);
+			ws.on("message", (raw) => {
+				const msg = JSON.parse(String(raw)) as Record<string, unknown>;
+				got.push(msg);
+				if (msg.type === want) {
+					clearTimeout(timer);
+					done();
+				}
+			});
+			ws.on("error", (e) => {
+				clearTimeout(timer);
+				done(e);
+			});
+		});
+	}
+
+	it("broadcasts a checkpoint frame to a connected client", async () => {
+		await startWithCheckpoints();
+		const pending = frames("checkpoint");
+		// Give the socket a moment to register, then publish like a runner would.
+		await new Promise((r) => setTimeout(r, 120));
+		server!.publishCheckpoint({
+			at: 1234,
+			gameDate: "1950-04-01",
+			turn: 2,
+			note: "2 decisions, 3 tool calls",
+			totals: { events: 12 },
+		});
+		const got = await pending;
+		const frame = got.find((m) => m.type === "checkpoint");
+		expect(frame).toBeTruthy();
+		const data = frame!.data as { gameDate: string; note: string };
+		expect(data.gameDate).toBe("1950-04-01");
+		expect(data.note).toContain("2 decisions");
+	});
+
+	it("serves the snapshot with the checkpoint backlog so a reload is not empty", async () => {
+		await startWithCheckpoints();
+		const got = await frames("snapshot");
+		const snap = got.find((m) => m.type === "snapshot")!.data as { checkpoints: unknown[] };
+		expect(Array.isArray(snap.checkpoints)).toBe(true);
+		expect(snap.checkpoints).toHaveLength(1);
+	});
+
+	it("resolves the legacy /llm URL to the providers page", async () => {
+		await startWithCheckpoints();
+		expect(PAGE_ALIASES["/llm"]).toBe("/providers");
+		expect(PAGES["/providers"]).toBe("pages/providers.html");
+		const r = await new Promise<{ status: number; body: string }>((resolve, reject) => {
+			http
+				.get({ host: "127.0.0.1", port, path: "/llm" }, (res) => {
+					let d = "";
+					res.on("data", (c) => (d += c));
+					res.on("end", () => resolve({ status: res.statusCode ?? 0, body: d }));
+				})
+				.on("error", reject);
+		});
+		expect(r.status).toBe(200);
+		expect(r.body).toContain("providers");
 	});
 });

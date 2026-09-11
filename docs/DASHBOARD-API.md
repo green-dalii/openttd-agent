@@ -41,14 +41,14 @@
 src/web/public/
   pages/                 # 一个页面一个 HTML（只放 HTML）
     live.html            #   Live  ：实时游戏 + agent 遥测
-    llm.html             #   Providers：provider 目录选型 + 密钥
+    providers.html       #   Providers：provider 目录选型 + 密钥
     sessions.html        #   Sessions：历史局管理 / 复盘
   assets/
     css/style.css        # 全部样式（单文件，无预处理器）
     js/
       common.js          # 共享：DOM/格式化/事件分类/WS 客户端/绘图/导航
       live.js            # 页面脚本：live.html
-      providers.js       # 页面脚本：llm.html
+      providers.js       # 页面脚本：providers.html
       sessions.js        # 页面脚本：sessions.html
 ```
 
@@ -57,10 +57,12 @@ src/web/public/
 | URL | 文件 | 职责 |
 |---|---|---|
 | `GET /` | `pages/live.html` | Live：实时游戏 + agent 遥测 |
-| `GET /llm` | `pages/llm.html` | Providers：provider 目录选型 + 密钥（独立子页） |
+| `GET /providers` | `pages/providers.html` | Providers：provider 目录选型 + 密钥（独立子页） |
+| `GET /llm` | *(别名 → `/providers`)* | v0.3 的旧 URL，保留以免书签/文档失效 |
 | `GET /sessions` | `pages/sessions.html` | Sessions：历史局管理 / 复盘 |
 
-- URL 保持**扁平**（`/llm` 而非 `/pages/llm.html`）——文件可自由挪动，链接不会断。
+- URL 保持**扁平**（`/providers` 而非 `/pages/providers.html`）——文件可自由挪动，链接不会断。
+- 更名/迁移页面时，把旧 URL 加进 `PAGE_ALIASES`（服务端 301 式内部重写，不产生 404）。
 - 新增一个页面 = `pages/` 加一个 HTML + `assets/js/` 加一个脚本 + `PAGES` 加一行。
 - 强制约束（单测锁定 `web-api.test.ts`）:
   - `public/` 根目录**不得**再有散落的 html/css/js；
@@ -302,14 +304,20 @@ GET /api/sessions/:id
 ## 4. WS 协议
 
 ```
-{ "type": "snapshot",  "data": { date, companies, totalEvents, recent, telemetry } }
+{ "type": "snapshot",  "data": { date, companies, totalEvents, recent, telemetry, sessionId, checkpoints } }
 { "type": "event",     "data": GameEvent }        // 游戏事件（原样）
 { "type": "telemetry", "data": TelemetrySnapshot }  // 遥测变化（节流 ≥ 250ms）
 { "type": "step",      "data": StepRecord }         // 单步（用于即时追加）
+{ "type": "checkpoint","data": SessionCheckpoint }  // 阶段性总结（运行中产生）
 ```
 
 - 新客户端连上：先收一帧 `snapshot`（含 `telemetry` 全量），此后收增量。
 - 后端**必须节流** telemetry 帧（≥250ms），否则 thinking delta 会刷爆 WS。
+- **`checkpoint` 必须在运行中产生**（`--agent` 每个 decision turn 一条；`--watch` 每约
+  60 个事件一条），且 `snapshot.checkpoints` 必须带**全量 backlog**（含最终条）。
+  原因：v0.3 只在 shutdown 写 checkpoint，导致 Live 页「阶段性总结」面板在**整局运行期间
+  恒为空**（晚订阅/刷新者同样看不到）。见 `docs/DASHBOARD-UI.md` §7。
+- **`snapshot.sessionId`** 供 Live 页在遥测缺席（watch 模式）时仍能显示当前局 ID。
 
 ---
 

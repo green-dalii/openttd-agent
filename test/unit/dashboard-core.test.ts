@@ -3,6 +3,8 @@
  * 事实来源: docs/DASHBOARD-API.md §2.5/§2.6/§6.2/§6.3.
  */
 import { describe, expect, it } from "vitest";
+import { Telemetry } from "../../src/agent/telemetry.js";
+import { WorldState } from "../../src/game/world-state.js";
 import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -390,5 +392,130 @@ describe("session store", () => {
 		expect(cp.note).toContain("1,200");
 		expect(cp.note).toContain("42 events");
 		expect(cp.totals.usage.totalTokens).toBe(1200);
+	});
+});
+
+/**
+ * Staged summaries must report the run's REAL numbers.
+ *
+ * Regression: agent mode only ever synced `events` into the session record, so
+ * every checkpoint (and the sessions page) read "0 decisions, 0 tool calls,
+ * 0 tokens" even for a run that spent thousands of tokens.
+ * See docs/DASHBOARD-UI.md §7.
+ */
+describe("staged summary numbers", () => {
+	it("reads counts and tokens from the telemetry actually ingested", () => {
+		const tel = new Telemetry({ sessionId: "s", limit: 50 });
+		tel.ingestAgentEvent({ type: "turn_start", turn: 1 } as never);
+		tel.ingestAgentEvent({
+			type: "message_end",
+			message: {
+				role: "assistant",
+				content: [{ type: "text", text: "hi" }],
+				usage: {
+					input: 1200,
+					output: 40,
+					cacheRead: 10,
+					cacheWrite: 0,
+					reasoning: 7,
+					totalTokens: 1240,
+					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.02 },
+				},
+			},
+		} as never);
+		// Tool accounting comes from the real event pair, not a helper.
+		tel.ingestAgentEvent({
+			type: "tool_execution_start",
+			toolCallId: "c1",
+			toolName: "build_bus_route",
+			args: {},
+		} as never);
+		tel.ingestAgentEvent({
+			type: "tool_execution_end",
+			toolCallId: "c1",
+			toolName: "build_bus_route",
+			result: { ok: true, summary: "sent" },
+		} as never);
+		tel.decisionPoint();
+
+		const snap = tel.snapshot();
+		expect(snap.totals.toolCalls).toBe(1);
+		expect(snap.usage.total.totalTokens).toBe(1240);
+
+		// The summary is derived from totals, so a zero-token run can never be
+		// printed when telemetry saw usage (this is what regressed).
+		const meta = {
+			id: "x", mode: "agent", status: "running", startedAt: 0, seed: 1, startYear: 1950,
+			mapSize: [256, 256], serverName: "s", companyName: "c",
+			llm: { providerId: "p", model: "m", api: "openai-completions", kind: "real" },
+			checkpoints: [],
+			totals: {
+				events: 42, decisions: snap.totals.decisions, toolCalls: snap.totals.toolCalls,
+				toolFailures: snap.totals.toolFailures,
+				usage: {
+					input: snap.usage.total.input, output: snap.usage.total.output,
+					cacheRead: snap.usage.total.cacheRead, cacheWrite: snap.usage.total.cacheWrite,
+					reasoning: snap.usage.total.reasoning, totalTokens: snap.usage.total.totalTokens,
+					costTotal: snap.usage.total.costTotal,
+				},
+			},
+		} as Parameters<typeof buildStageSummary>[0];
+		const cp = buildStageSummary(meta, "1950-02-01", 1);
+		expect(cp.note).toContain("1 decisions");
+		expect(cp.note).toContain("1 tool calls");
+		expect(cp.note).toContain("1,240 tokens");
+		// Guard the actual regression: a run with usage must never summarize as
+		// "0 tokens" (note: "1,240 tokens" legitimately CONTAINS "0 tokens").
+		expect(cp.note).not.toMatch(/(?:^|\D)0 tokens/);
+		expect(cp.totals.usage.totalTokens).toBe(1240);
+		expect(cp.turn).toBe(1);
+	});
+});
+
+/**
+ * The dashboard is a VIEW: the cash curve must be owned by the server, so a
+ * browser refresh or a late subscriber still sees the whole run.
+ *
+ * Regression: history lived only in page memory, so reloading a long-running
+ * game showed a single-point chart (and an empty one before the first poll).
+ */
+describe("world-state economy history", () => {
+	it("accumulates a bounded series and exposes it in the snapshot", () => {
+		const world = new WorldState();
+		const econ = (money: number, income: number) => ({
+			seq: 0,
+			kind: "company_economy" as const,
+			ts: Date.now(),
+			payload: { id: 0, money: BigInt(money), loan: 100000n, income: BigInt(income) } as never,
+		});
+		world.ingest({ seq: 1, kind: "company_new", ts: 1, payload: { id: 0 } as never });
+		world.ingest(econ(1000, -50));
+		world.ingest(econ(2000, -60));
+		world.ingest(econ(3000, 10));
+
+		const c = world.snapshot().companies.get(0)!;
+		expect(c.history).toHaveLength(3);
+		expect(c.history.map((h) => h.money)).toEqual([1000, 2000, 3000]);
+		// Signed income is preserved (SPEC §10.6) - not 2^64.
+		expect(c.history[0]!.income).toBe(-50);
+		expect(c.history[2]!.income).toBe(10);
+		// Latest economy still tracked separately.
+		expect(c.economy?.money).toBe(3000n);
+	});
+
+	it("keeps the series bounded so a long run cannot grow without limit", () => {
+		const world = new WorldState();
+		for (let i = 0; i < 700; i++) {
+			world.ingest({
+				seq: i,
+				kind: "company_economy",
+				ts: i,
+				payload: { id: 0, money: BigInt(i), loan: 0n, income: 0n } as never,
+			});
+		}
+		const c = world.snapshot().companies.get(0)!;
+		expect(c.history.length).toBeLessThanOrEqual(600);
+		// The newest point must survive the cap.
+		expect(c.history[c.history.length - 1]!.money).toBe(699);
 	});
 });

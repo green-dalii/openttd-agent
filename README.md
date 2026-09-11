@@ -3,8 +3,8 @@
 > LLM agent framework that autonomously plays — and self-evolves inside — OpenTTD.
 > External brain (Pi `@earendil-works/pi-agent-core`) ↔ Admin Port TCP ↔ in-game Bridge GS / Executor AI.
 
-**当前状态: v0.3.0 (Dashboard 打磨)** — 观测 + 决策闭环 + 三页式 Dashboard（Live / Providers / Sessions）、
-39 个内置 provider 目录、token 计量与历史局复盘。**盈利验收待真实 LLM key**。
+**当前状态: v0.4.0 (Dashboard UX)** — 观测 + 决策闭环 + 三页式 Dashboard（Live / Providers / Sessions）、
+39 个内置 provider 目录、token 计量、历史局复盘与运行对比。**盈利验收待真实 LLM key**。
 完整设计见 [`SPEC.md`](SPEC.md)，开发计划见 [`ROADMAP.md`](ROADMAP.md)，开发规范见 [`AGENTS.md`](AGENTS.md)。
 
 ---
@@ -213,13 +213,14 @@ src/
     public/
       pages/                # 一页一个 HTML
         live.html           #   Live     ：实时游戏 + agent 遥测
-        llm.html            #   Providers：provider 目录选型 + 密钥
+        providers.html      #   Providers：provider 目录选型 + 密钥
         sessions.html       #   Sessions ：历史局管理 / 复盘
-      assets/css/style.css  # 全部样式
+      assets/css/style.css  # 全部样式 + 设计 token
       assets/js/
-        common.js           # 共享工具（格式化/事件分类/WS/绘图/导航）
+        charts.js           # 图表模块（折线/柱/环/迷你线，自建无依赖）
+        common.js           # 共享 UI 原语（格式化/组合框/Toast/WS）
         live.js             # 页面脚本：live.html
-        providers.js        # 页面脚本：llm.html
+        providers.js        # 页面脚本：providers.html
         sessions.js         # 页面脚本：sessions.html
   cli/run.ts                # CLI: --probe / --dry-run / --watch / --v02 / --agent
 test/
@@ -232,13 +233,16 @@ docs/
 
 ## Dashboard（v0.3.0）
 
-三个独立子页（原生 HTML/JS/CSS，**无构建链**）：
+三个独立子页（原生 HTML/JS/CSS，**无构建链**）。信息按**紧迫性**分层——
+一个长跑的用户回来只想先知道三件事：还在跑吗？在赚钱吗？agent 正常吗？
 
 | 页面 | URL | 内容 |
 |---|---|---|
-| **Live** | `/` | 顶部 KPI（日期/公司/事件/session）、**Agent 遥测**（token 总量·按 turn·按 tool、思考流、每步 log）、公司卡片 + 现金曲线、**事件流（按类别 Tag + 人类可读摘要**，可展开原始 JSON）、阶段性总结时间线 |
-| **Providers** | `/llm` | **pi-ai 内置 39 个 provider / ~1900 个模型**：选一个 provider → 选模型（API/上下文/价格来自目录）→ 填密钥。自动检测环境变量（如 `DEEPSEEK_API_KEY`、`HF_TOKEN`、`GEMINI_API_KEY`）。也支持自建 OpenAI 兼容端点 |
-| **Sessions** | `/sessions` | 历史局列表（模式/状态/耗时/token/成本）+ 单局复盘（成绩单、阶段性总结、agent 步骤、事件流） |
+| **Live** | `/` | ① **KPI 条**（Cash/Income/Value/Loan/Fleet/Tokens，带环比 delta + 迷你趋势线）② **Agent**（token 构成、失败率、按 turn 柱图可切 Tokens/Cost、工具延迟表、步骤流可过滤、思考流）③ **Economy**（多序列现金曲线，hover 十字线 + tooltip）④ **Activity**（事件流：类别 chips **带计数**、搜索、**暂停**、原始 JSON 折叠）⑤ **阶段总结时间线** |
+| **Providers** | `/providers` | **可搜索组合框**（键盘可用：↑↓/Enter/Esc）从 **pi-ai 内置 39 provider / ~1900 模型**中选型，**按「Ready now / Needs a key」分组**；自动检测环境变量（`DEEPSEEK_API_KEY`、`HF_TOKEN`、`GEMINI_API_KEY`…），已就绪时明确写「无需粘贴」；也支持自建 OpenAI 兼容端点 |
+| **Sessions** | `/sessions` | 总览 KPI（完成率/累计 token/花费）+ 卡片式历史列表（含 built/incomplete 徽章）+ 单局复盘（成绩单、token 环图、阶段总结、步骤流、事件流搜索）+ **两次运行对比**（带 Δ 列） |
+
+> 旧 URL `/llm` 仍可用（`PAGE_ALIASES` 内部重写，不再 404）。
 
 ```bash
 pnpm run cli --watch --web-port 8080      # Live + Providers + Sessions
@@ -258,7 +262,8 @@ sessions/<id>/audit.jsonl    #   该局决策/步骤/动作
 sessions/<id>/telemetry.json #   该局末次遥测（token/步骤）
 ```
 
-> 详情见 [`docs/DASHBOARD-API.md`](docs/DASHBOARD-API.md)（前后端冻结契约，含 WS 协议与 Tag 分类规则）。
+> - 数据/接口契约: [`docs/DASHBOARD-API.md`](docs/DASHBOARD-API.md)（含 WS 协议与 Tag 分类规则）
+> - 前端/UX 契约: [`docs/DASHBOARD-UI.md`](docs/DASHBOARD-UI.md)（设计 token、组合框/图表契约、页面信息架构）
 
 ## 已知边界 (v0.3.0)
 - **盈利验收仍未完成**：需要真实 LLM key + 更长观察期（见 ROADMAP v0.2.1）

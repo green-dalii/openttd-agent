@@ -32,6 +32,7 @@ import { summarizeState } from "./tools/index.js";
 import { fauxAssistantMessage, fauxToolCall, createFauxCore } from "@earendil-works/pi-ai";
 import { buildBrain, redactKey } from "./provider.js";
 import { Telemetry } from "./telemetry.js";
+import type { TelemetrySnapshot } from "./telemetry.js";
 import { FileCredentialStore } from "./file-credential-store.js";
 import {
 	SessionStore,
@@ -40,6 +41,7 @@ import {
 	newSessionId,
 	readSession,
 } from "./session-store.js";
+import type { SessionTotals } from "./session-store.js";
 import { createLlmApi } from "./llm-api.js";
 import { WebServer } from "../web/server.js";
 import { pruningTransformContext } from "./context.js";
@@ -69,6 +71,37 @@ function sleep(ms: number): Promise<void> {
 function formatGameDate(d: { year: number; month: number; day: number } | null): string {
 	if (!d) return "unknown";
 	return `${d.year}-${String(d.month).padStart(2, "0")}-${String(d.day).padStart(2, "0")}`;
+}
+
+/**
+ * Copy live telemetry into the session record's totals.
+ *
+ * Without this the session (and therefore every staged summary) reported
+ * `0 decisions, 0 tool calls, 0 tokens` in agent mode, because only `events`
+ * was ever synced — the flagship "总结" feature read as an empty run.
+ * Kept as the single source of truth for both the per-turn and final writes.
+ */
+function totalsFromTelemetry(
+	prev: SessionTotals,
+	t: TelemetrySnapshot,
+	events: number,
+): SessionTotals {
+	const u = t.usage.total;
+	return {
+		events,
+		decisions: t.totals.decisions,
+		toolCalls: t.totals.toolCalls,
+		toolFailures: t.totals.toolFailures,
+		usage: {
+			input: u.input,
+			output: u.output,
+			cacheRead: u.cacheRead,
+			cacheWrite: u.cacheWrite,
+			reasoning: u.reasoning,
+			totalTokens: u.totalTokens,
+			costTotal: u.costTotal,
+		},
+	};
 }
 
 /** Human-readable description of the selected brain (never includes the key). */
@@ -260,6 +293,8 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 				...(toWireSnapshot(world) as Record<string, unknown>),
 				telemetry: telemetry.snapshot(),
 				sessionId: session.id,
+				// Backlog for late subscribers / reloads (docs/DASHBOARD-UI.md §7).
+				checkpoints: session.current().checkpoints,
 			}),
 			llm: llmApi.llm,
 			catalog: llmApi.catalog,
@@ -319,6 +354,15 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 		const state = await runDecision(agent, deps);
 		console.log(`[agent] decision turn ${i + 1}: ${JSON.stringify(state.date)}`);
 		telemetry.onActivity?.();
+
+		// Staged summary per completed decision turn, so the Live page's timeline
+		// fills up during the run instead of only at shutdown
+		// (docs/DASHBOARD-UI.md §7).
+		const snap = deps.state.snapshot();
+		session.update({ totals: totalsFromTelemetry(session.current().totals, telemetry.snapshot(), snap.totalEvents) });
+		const cp = buildStageSummary(session.current(), formatGameDate(snap.date), i + 1);
+		session.addCheckpoint(cp);
+		web?.publishCheckpoint(cp);
 	}
 
 	// --- observe construction + report ---
@@ -354,9 +398,9 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 	// Persist the run for the sessions page (staged summary + outcome).
 	const finalTelemetry = telemetry.snapshot();
 	session.saveTelemetry(finalTelemetry);
-	session.update({ totals: { ...session.current().totals, events: snap.totalEvents } });
+	session.update({ totals: totalsFromTelemetry(session.current().totals, finalTelemetry, snap.totalEvents) });
 	session.addCheckpoint(
-		buildStageSummary(session.current(), formatGameDate(snap.date), Math.max(1, finalTelemetry.turns)),
+		buildStageSummary(session.current(), formatGameDate(snap.date), Math.max(1, maxTurns)),
 	);
 	console.log(
 		`[agent] tokens: in=${finalTelemetry.usage.total.input} out=${finalTelemetry.usage.total.output} ` +

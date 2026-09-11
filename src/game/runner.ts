@@ -115,6 +115,10 @@ export async function runWatch(
 				world.ingest(ev);
 				web?.publishEvent(ev);
 				session?.appendEvent(ev);
+				// Staged summary every ~60 observed events (docs/DASHBOARD-UI.md §7).
+				// Declared as a hoisted function: events can arrive during connect(),
+				// before a const arrow would be initialized.
+				maybeCheckpoint(false);
 				if (ev.kind === "company_new") {
 					companiesSeen++;
 					console.log(`[watch] company created: id=${(ev.payload as { id: number }).id}`);
@@ -155,7 +159,11 @@ export async function runWatch(
 	web = new WebServer({
 		host: opts.webHost ?? "127.0.0.1",
 		port: opts.webPort ?? 0,
-		getSnapshot: () => toWireSnapshot(world),
+		getSnapshot: () => ({
+			...(toWireSnapshot(world) as Record<string, unknown>),
+			// Backlog for late subscribers / reloads (docs/DASHBOARD-UI.md §7).
+			checkpoints: session.current().checkpoints,
+		}),
 		onFirstClient: () => {
 			web?.publishSnapshot(toWireSnapshot(world));
 		},
@@ -170,6 +178,23 @@ export async function runWatch(
 	});
 	await web.start();
 	console.log(`[watch] dashboard: http://127.0.0.1:${web.actualPort}/`);
+
+	// --- staged summaries DURING the run (docs/DASHBOARD-UI.md §7) ---
+	// Checkpoints used to be written only at shutdown, so the Live page's timeline
+	// stayed empty for the whole game. Emit one every ~60 observed events, and
+	// push it over WS so the timeline fills in as it runs.
+	let lastCheckpointEvents = 0;
+	function maybeCheckpoint(force: boolean): void {
+		if (!session) return;
+		const snap = world.snapshot();
+		const events = snap.totalEvents;
+		if (!force && events - lastCheckpointEvents < 60) return;
+		lastCheckpointEvents = events;
+		session.update({ totals: { ...session.current().totals, events } });
+		const cp = buildStageSummary(session.current(), formatGameDate(snap.date), 0);
+		session.addCheckpoint(cp);
+		web?.publishCheckpoint(cp);
+	}
 
 	// --- periodic economy poll (keeps curve fresh between quarters) ---
 	const pollTimer = setInterval(() => {
@@ -213,9 +238,10 @@ export async function runWatch(
 		const snap = world.snapshot();
 		const c0 = snap.companies.get(0);
 		session.update({ totals: { ...session.current().totals, events: snap.totalEvents } });
-		session.addCheckpoint(
-			buildStageSummary(session.current(), formatGameDate(snap.date), 0),
-		);
+		// Closing checkpoint: always the last one, even if the periodic one just ran.
+		const cp = buildStageSummary(session.current(), formatGameDate(snap.date), 0);
+		session.addCheckpoint(cp);
+		web?.publishCheckpoint(cp);
 		session.finalize({
 			status: "completed",
 			outcome: {
@@ -249,6 +275,8 @@ function toWireSnapshot(world: WorldState): unknown {
 			info: cs.info,
 			economy: cs.economy,
 			stats: cs.stats,
+			// Server-owned curve so a refresh does not blank the chart.
+			history: cs.history.slice(-400),
 		};
 	}
 	return {

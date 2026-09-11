@@ -296,6 +296,17 @@ export class ByteReader {
 		return v;
 	}
 
+	/**
+	 * Read a **signed** 64-bit value (two's complement).
+	 *
+	 * OpenTTD's `Money` is int64 and `Send_uint64` merely serializes its 8 bytes,
+	 * so money/loan/income/company-value must be read as signed: a losing company
+	 * otherwise reads as ~1.8e19 (SPEC §10.6).
+	 */
+	int64(): bigint {
+		return BigInt.asIntN(64, this.uint64());
+	}
+
 	/** Read a NUL-terminated UTF-8 string. */
 	cstr(): string {
 		const start = this.off;

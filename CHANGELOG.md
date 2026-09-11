@@ -2,6 +2,75 @@
 
 本文件遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.4.0] - 2026-09-11
+
+### Changed (Dashboard UX 重构 — 从「极客日志面板」到可用控制台)
+**Provider/Model 选择改为**「**可搜索组合框**」**（原来两个并排滚动列表，"在列表里找列表"）
+- 39 provider × ~1900 model 不是"列表内容"而是"单选控件"：用户通常已知道要用哪个，
+  第一交互应是**搜索**
+- 键盘完整：`↑`/`↓`/`Home`/`End`/`Enter`/`Esc`；ARIA `combobox`/`listbox`/`aria-activedescendant`
+- **按「Ready now / Needs a key / Cloud-OAuth」分组**，直接回答"我现在能用哪个"
+- Providers 页从 `/llm` 迁到 `/providers`；旧 URL 经 `PAGE_ALIASES` 内部重写，不再 404
+
+**Live 页按信息紧迫性重排，信息密度显著提升**
+- 首屏 **KPI 条**：Cash / Income / Company value / Loan / Fleet / Tokens
+  —— 大数字 + **环比 delta** + **迷你趋势线**
+- Agent 区：token 构成、**失败率**、按 turn 图可切 **Tokens / Cost**、工具延迟表、
+  步骤流**可过滤**（全部/LLM/工具/失败）、思考流独立面板
+- 事件流：类别 chips **带计数**、**搜索**（跨 kind/类别/摘要/payload）、
+  **暂停**（阅读时不被冲走）、默认**最新在前**
+- 新增**图表模块** `assets/js/charts.js`：折线（网格/轴标签/**hover 十字线 + tooltip**/面积）、
+  柱状（含横向 top-N）、环图、迷你线；**按 DPR 渲染**（视网膜屏不再发虚）、
+  ResizeObserver 自适应、`prefers-reduced-motion` 尊重
+- Sessions 页新增**两次运行对比**（Δ 列）与 token 环图
+
+**设计系统**：`style.css` 重建为 token 化（`--c1..--c8` 图表色板、间距/圆角刻度、
+三级文字），组件契约见 `docs/DASHBOARD-UI.md`
+**新增交互原语**：Toast（保存成功/失败不再是一行小字）、确认对话框、分段控件、
+视图偏好 `localStorage` 持久化（隐藏类别/跟随滚动/图表指标）
+
+### Fixed
+- **阶段性总结面板恒为空（dead UI）**：Live 页读 `telemetry.checkpoints`，但该字段
+  从不存在，且 checkpoint **只在 shutdown 写**。现在 `--agent` 每个 decision turn、
+  `--watch` 每约 60 事件就产生一条，新增 `checkpoint` WS 帧，且
+  `snapshot.checkpoints` 带全量 backlog（晚订阅/刷新也能看到）
+- **阶段总结数字全是 0**：agent 模式只同步了 `events`，从未把遥测写进 session totals，
+  于是"1 decisions, 1 tool calls, 0 tokens"这类假数据会长期存在 →
+  新增 `totalsFromTelemetry()` 作为唯一映射点
+- `live.js` 使用未导出的 `U.pickColor`（现金曲线会直接崩）→ 由门禁测试捕获并修复
+- `paintSparks` 把所有迷你线画成同一条数据 → 改为按 tile 对齐
+
+### Tests
+- `web-assets.test.ts` 强化：除语法/引用外，新增 **`$("id")` 必须在同页存在**、
+  **只允许使用 `window.UI`/`window.Charts` 真正导出的符号**、**前端不得持久化/回显密钥**
+- `charts.test.ts`（8）：`node:vm` 沙箱加载（证明加载期不碰 DOM），覆盖刻度/定义域/
+  比例尺/环图弧段/数字压缩与**退化输入不产生 NaN**
+- `web-api.test.ts` 新增 checkpoint WS 帧与 snapshot backlog 用例
+- `dashboard-core.test.ts` 新增「阶段总结必须反映真实遥测」回归用例
+
+### Fixed（浏览器实测发现，CDP 逐条验证）
+- **协议层符号错误**：`money/loan/income/companyValue` 是 **int64**（OpenTTD `Money`），
+  却按 `uint64` 读 → 亏损公司显示 `£18446744073.71B`。新增 `ByteReader.int64()`，
+  与 `SPEC.md` §10.6 一致；真机已验证显示 `-£6.0k`
+- **现金曲线刷新即清空**：历史只存在页面内存，违反"服务端是真源" → 上移到
+  `WorldState`（有界 600 点），`snapshot` 携带，前端 seed；真机验证刷新前后曲线一致
+- **空状态图表跳高**：无数据分支跳过 `fit()`，画布停留在默认 300×200 → 空状态也按
+  容器宽度设置 backing store（含回归测试）
+- **迷你趋势线错位**：`paintSparks` 把同一份数据画到所有 tile → 改为按 tile 对齐
+- **组合框分组失效**：选项未按组排序导致组标题重复出现 14 次 → 加 `sort` 并按
+  「Ready now → Needs key → OAuth」排序
+- 大数字尾部粘 delta chip → chip 移入独立行
+
+### Verified
+- `pnpm run gate` 全绿：**170 passed / 1 skipped**
+- 真机 `--agent`：`/`、`/providers`、`/llm`(别名)、`/sessions` 与全部静态资源均 200；
+  **运行中**（status=running）meta.json 已有 checkpoint 且数字正确
+  （`1 decisions, 1 tool calls, 1,790 tokens`）；关闭后写入第二条 + 成绩单；无残留监听
+- **真实浏览器（Chrome headless + CDP）**：三页 **0 个 console 异常**；
+  组合框实测「输入 deep → ↑↓ → Enter」选中 deepseek，模型目录 4 条，
+  环境变量就绪时显示「ready — no action needed」；`canvas` 真实绘制
+  （网格线/面积/折线，非空白）；截图存档于验证流程
+
 ## [0.3.0] - 2026-09-10
 
 ### Added (Dashboard 打磨)

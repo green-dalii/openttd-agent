@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>openttd-agent · providers</title>
+<link rel="stylesheet" href="/assets/css/style.css" />
+</head>
+<body>
+<header>
+  <div class="brand">
+    <h1>openttd-agent <span class="dim">providers</span></h1>
+    <div id="nav"></div>
+  </div>
+  <div class="runbar">
+    <div class="item"><span class="lbl">Catalog</span><span id="p-catalog" class="val">…</span></div>
+    <div class="item"><span class="lbl">Ready now</span><span id="p-ready" class="val">…</span></div>
+    <div class="item"><span class="lbl">Selected</span><span id="p-selected" class="val dim">…</span></div>
+  </div>
+</header>
+
+<main>
+  <div class="group"><h2>Choose how the agent thinks</h2><div class="rule"></div></div>
+
+  <section class="grid split-12">
+    <!-- left: the actual controls -->
+    <div class="panel">
+      <div class="panel-head">
+        <h2>Model selection</h2>
+        <div id="p-mode"></div>
+      </div>
+
+      <div id="catalog-fields">
+        <div class="field">
+          <label for="prov-cbx">Provider</label>
+          <div id="prov-cbx"></div>
+        </div>
+        <div class="field">
+          <label for="model-cbx">Model</label>
+          <div id="model-cbx"></div>
+        </div>
+
+        <div id="auth-box">
+          <h3>Credentials <span id="auth-status"></span></h3>
+          <p class="hint" id="auth-hint"></p>
+          <div class="field">
+            <label for="auth-key">API key</label>
+            <input id="auth-key" type="password" autocomplete="off" spellcheck="false"
+                   placeholder="paste a key (stored locally, never echoed back)" />
+          </div>
+        </div>
+      </div>
+
+      <div id="custom-fields" hidden>
+        <p class="hint">
+          Talk to your own OpenAI-compatible server (llama.cpp, vLLM, a gateway, a proxy).
+          Nothing about this endpoint is inferred — you supply the URL and the API shape.
+        </p>
+        <div class="field">
+          <label for="auth-base">Base URL</label>
+          <input id="auth-base" type="text" placeholder="http://127.0.0.1:8080/v1" spellcheck="false" />
+        </div>
+        <div class="field">
+          <label for="auth-api">API shape</label>
+          <select id="auth-api">
+            <option value="openai-completions">openai-completions</option>
+            <option value="anthropic-messages">anthropic-messages</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="auth-model">Model id</label>
+          <input id="auth-model" type="text" placeholder="llama-3.1-8b-instruct" spellcheck="false" />
+        </div>
+        <div class="field">
+          <label for="auth-key-custom">API key <span class="dim">(optional)</span></label>
+          <input id="auth-key-custom" type="password" autocomplete="off"
+                 placeholder="leave blank if your server needs none" />
+        </div>
+      </div>
+
+      <div class="actions">
+        <button type="button" id="save" class="primary">Save configuration</button>
+        <button type="button" id="clear-key" class="danger">Clear stored key</button>
+        <span class="form-msg" id="form-msg"></span>
+      </div>
+    </div>
+
+    <!-- right: what will actually happen -->
+    <div class="panel">
+      <div class="panel-head"><h2>How the agent will run</h2></div>
+      <div id="effective"></div>
+      <h3>Where this is stored</h3>
+      <p class="hint">
+        Selection → <code>&lt;OPENTTD_DATA_DIR&gt;/llm.json</code><br />
+        Keys → <code>credentials.json</code> (same directory, mode 0600)<br />
+        Explicit <code>LLM_*</code> environment variables always win over both files.
+      </p>
+      <h3>Ready providers</h3>
+      <p class="hint">Providers whose key is already present in this machine's environment — no pasting needed.</p>
+      <div id="ready-list" class="scroll-y"></div>
+    </div>
+  </section>
+</main>
+
+<script src="/assets/js/common.js"></script>
+<script src="/assets/js/charts.js"></script>
+<script src="/assets/js/providers.js"></script>
+</body>
+</html>

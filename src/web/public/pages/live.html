@@ -12,64 +12,97 @@
     <h1>openttd-agent <span class="dim">live</span></h1>
     <div id="nav"></div>
   </div>
-  <div class="stats">
-    <div class="stat"><span class="lbl">Game date</span><span id="g-date" class="val">—</span></div>
-    <div class="stat"><span class="lbl">Companies</span><span id="g-companies" class="val">—</span></div>
-    <div class="stat"><span class="lbl">Events</span><span id="g-events" class="val">0</span></div>
-    <div class="stat"><span class="lbl">Session</span><span id="g-session" class="val dim">—</span></div>
-    <div class="stat"><span class="lbl">Link</span><span id="g-link" class="val dim">…</span></div>
+  <div class="runbar">
+    <div class="item"><span class="lbl">Connection</span><span id="g-link" class="pill idle">…</span></div>
+    <div class="item"><span class="lbl">Session</span><span id="g-session" class="val dim">—</span></div>
+    <div class="item"><span class="lbl">Mode</span><span id="g-mode" class="val dim">—</span></div>
+    <div class="item"><span class="lbl">Game date</span><span id="g-date" class="val">—</span></div>
+    <div class="item"><span class="lbl">Elapsed</span><span id="g-elapsed" class="val">—</span></div>
   </div>
 </header>
 
 <main>
-  <!-- agent telemetry -->
-  <section class="panel" id="telem-panel">
-    <h2>Agent brain <span class="dim" id="t-brain">no brain (observer only)</span></h2>
-    <div class="cards" id="t-cards"></div>
-    <div class="grid-2">
-      <div>
-        <h3>Tokens per turn</h3>
-        <canvas id="t-chart" width="560" height="180"></canvas>
-        <div id="t-turn-table" class="mini-table"></div>
+  <!-- 1. Is it working? (answers: is the company making money) -->
+  <section class="kpis" id="kpis"></section>
+
+  <!-- 2. How is the agent doing? -->
+  <div class="group"><h2>Agent</h2><div class="rule"></div>
+    <span class="dim" id="t-brain"></span></div>
+  <section class="grid split-21">
+    <div class="panel">
+      <div class="panel-head">
+        <h2>Token usage per turn</h2>
+        <div class="actions">
+          <div id="token-metric"></div>
+        </div>
       </div>
-      <div>
-        <h3>Tools</h3>
-        <div id="t-tools" class="mini-table"></div>
-        <h3>Recent thinking</h3>
-        <ol id="t-thinking" class="thinking-list"></ol>
-      </div>
+      <div class="chart-box"><canvas id="t-chart" height="200"></canvas></div>
+      <div class="legend" id="t-legend"></div>
+      <div class="scroll-y" id="t-turn-table"></div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h2>Runtime</h2></div>
+      <div id="t-usage"></div>
+      <h3>Tool performance</h3>
+      <div class="scroll-y" id="t-tools"></div>
     </div>
   </section>
 
-  <section id="companies"></section>
-
-  <section class="panel">
-    <h2>Cash history <span class="dim">(per company)</span></h2>
-    <canvas id="chart" width="900" height="240"></canvas>
-  </section>
-
-  <section class="grid-2">
-    <section class="panel">
-      <h2>Agent steps <span class="dim" id="steps-count">(0)</span></h2>
-      <label class="check"><input id="steps-autoscroll" type="checkbox" checked /> <span>auto-scroll</span></label>
+  <section class="grid two">
+    <div class="panel">
+      <div class="panel-head"><h2>Agent steps <span class="dim" id="steps-count">(0)</span></h2>
+        <div class="actions">
+          <div id="step-filter"></div>
+          <label class="check"><input id="steps-autoscroll" type="checkbox" checked /> <span>follow</span></label>
+        </div>
+      </div>
       <ol id="steps" class="steps"></ol>
-    </section>
-
-    <section class="panel">
-      <h2>Event stream <span class="dim">(newest last)</span></h2>
-      <div class="filters" id="ev-filters"></div>
-      <label class="check"><input id="ev-raw" type="checkbox" /> <span>show raw JSON inline</span></label>
-      <ol id="events" class="events"></ol>
-    </section>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h2>Reasoning</h2>
+        <span class="dim">latest thoughts from the model</span></div>
+      <ol id="t-thinking" class="thinking-list"></ol>
+    </div>
   </section>
 
+  <!-- 3. Economy -->
+  <div class="group"><h2>Economy</h2><div class="rule"></div></div>
+  <section id="companies" class="kpis"></section>
   <section class="panel">
-    <h2>Staged summaries <span class="dim">(阶段性总结)</span></h2>
-    <ol id="stages" class="timeline"><li class="empty">Checkpoints appear as decision turns complete.</li></ol>
+    <div class="panel-head">
+      <h2>Cash history</h2>
+      <div class="actions"><div id="cash-metric"></div></div>
+    </div>
+    <div class="chart-box"><canvas id="chart" height="260"></canvas></div>
+    <div class="legend" id="cash-legend"></div>
+  </section>
+
+  <!-- 4. What just happened? -->
+  <div class="group"><h2>Activity</h2><div class="rule"></div>
+    <span class="dim" id="ev-total"></span></div>
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Event stream <span class="dim">(newest first)</span></h2>
+      <div class="actions">
+        <input id="ev-search" class="filter" type="search" placeholder="Search events…" />
+        <button type="button" id="ev-pause" class="btn sm">Pause</button>
+        <label class="check"><input id="ev-raw" type="checkbox" /> <span>raw JSON</span></label>
+      </div>
+    </div>
+    <div class="event-tools"><div class="filters" id="ev-filters"></div></div>
+    <ol id="events" class="events"></ol>
+  </section>
+
+  <!-- 5. Staged summaries: filled DURING the run (docs/DASHBOARD-UI.md §7) -->
+  <section class="panel">
+    <div class="panel-head"><h2>Staged summaries <span class="dim">阶段性总结</span></h2>
+      <span class="dim" id="stage-count"></span></div>
+    <ol id="stages" class="timeline"></ol>
   </section>
 </main>
 
 <script src="/assets/js/common.js"></script>
+<script src="/assets/js/charts.js"></script>
 <script src="/assets/js/live.js"></script>
 </body>
 </html>

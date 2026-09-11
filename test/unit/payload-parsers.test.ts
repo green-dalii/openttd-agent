@@ -75,6 +75,29 @@ describe("parseCompanyEconomy", () => {
 		});
 	});
 
+	it("reads negative Money fields as signed (not 2^64 underflow)", () => {
+		// Real-machine bug: a company losing money sends a negative income as
+		// two's complement; read as u64 it became 18446744073709551615 and the
+		// dashboard showed "£18446744073.71B income". OpenTTD's Money is int64
+		// and Send_uint64 merely serializes the 8 bytes, so these must be signed.
+		// See SPEC §10.6 (signedness) and docs/DASHBOARD-UI.md §0.
+		const parts: Uint8Array[] = [Uint8Array.of(0)];
+		for (const v of [-2_500n, 100_000n, -1n]) {
+			const b = new Uint8Array(8);
+			new DataView(b.buffer).setBigInt64(0, v, true);
+			parts.push(b);
+		}
+		const d1 = new Uint8Array(2);
+		new DataView(d1.buffer).setUint16(0, 0, true);
+		parts.push(d1);
+		const out = parseCompanyEconomy(concat(parts));
+		expect(out.money).toBe(-2_500n);
+		expect(out.loan).toBe(100_000n);
+		expect(out.income).toBe(-1n);
+		// The exact regression: a small negative must never become ~1.8e19.
+		expect(out.income < 0n).toBe(true);
+	});
+
 	it("tolerates truncated payloads defensively", () => {
 		const out = parseCompanyEconomy(Uint8Array.of(0, 1, 2, 3));
 		expect(out.id).toBe(0);

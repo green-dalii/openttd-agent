@@ -67,6 +67,8 @@ export interface ParsedCompanyEconomy {
  *   u8 index; u64 money; u64 current_loan; u64 income(neg expenses);
  *   u16 delivered_cargo; then for i in {0,1}:
  *     u64 company_value; u16 performance_history; u16 delivered_cargo.
+ * Money fields are `int64` on the wire (OpenTTD `Money`); read them signed or a
+ * loss-making company reports ~1.8e19 (SPEC §10.6).
  * Defensive: missing trailing fields become undefined-ish defaults; the id and
  * leading money/loan/income are always attempted.
  */
@@ -84,13 +86,13 @@ export function parseCompanyEconomy(payload: Uint8Array): ParsedCompanyEconomy {
 	};
 	try {
 		out.id = r.uint8();
-		out.money = r.uint64();
-		out.loan = r.uint64();
-		out.income = r.uint64();
+		out.money = r.int64();
+		out.loan = r.int64();
+		out.income = r.int64();
 		out.deliveredCargo = r.uint16();
 		// 2 quarters of old_economy
 		for (let i = 0; i < 2 && r.remaining >= 12; i++) {
-			const value = r.uint64();
+			const value = r.int64();
 			const perf = r.uint16();
 			r.uint16(); // delivered in that quarter (discarded; current already read)
 			if (i === 0) {

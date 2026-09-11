@@ -12,33 +12,56 @@
     <h1>openttd-agent <span class="dim">sessions</span></h1>
     <div id="nav"></div>
   </div>
-  <div class="stats">
-    <div class="stat"><span class="lbl">Sessions</span><span id="s-count" class="val">…</span></div>
-    <div class="stat"><span class="lbl">Completed</span><span id="s-done" class="val">…</span></div>
-    <div class="stat"><span class="lbl">Tokens (all)</span><span id="s-tokens" class="val">…</span></div>
+  <div class="runbar">
+    <div class="item"><span class="lbl">Runs</span><span id="s-count" class="val">…</span></div>
+    <div class="item"><span class="lbl">Completed</span><span id="s-done" class="val">…</span></div>
+    <div class="item"><span class="lbl">Success</span><span id="s-rate" class="val">…</span></div>
+    <div class="item"><span class="lbl">Tokens</span><span id="s-tokens" class="val">…</span></div>
+    <div class="item"><span class="lbl">Spend</span><span id="s-cost" class="val">…</span></div>
   </div>
 </header>
 
 <main>
-  <section class="grid-2">
-    <section class="panel">
-      <h2>Game sessions <span class="dim">(newest first)</span></h2>
-      <ul id="session-list" class="picker tall"></ul>
-    </section>
+  <div class="group"><h2>History</h2><div class="rule"></div>
+    <span class="dim">every <code>--watch</code> / <code>--agent</code> run is archived here</span></div>
 
-    <section class="panel">
-      <h2>Replay <span class="dim" id="replay-title">select a session</span></h2>
-      <div id="session-detail"><p class="empty">Pick a session on the left to inspect its outcome, staged summaries and event log.</p></div>
-    </section>
+  <section class="grid split-12">
+    <div class="panel">
+      <div class="panel-head"><h2>Runs</h2>
+        <label class="check"><input id="only-done" type="checkbox" /> <span>completed only</span></label>
+      </div>
+      <ul id="session-list" class="pick-list"></ul>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">
+        <h2>Replay <span class="dim" id="replay-title">no run selected</span></h2>
+        <div class="actions"><button type="button" id="compare" class="btn sm" disabled>Compare…</button></div>
+      </div>
+      <div id="session-detail"><p class="empty">Pick a run on the left to replay it.</p></div>
+    </div>
   </section>
 
-  <section class="panel" id="detail-steps-panel" hidden>
-    <h2>Agent steps <span class="dim" id="detail-steps-count"></span></h2>
+  <section class="panel" id="steps-panel" hidden>
+    <div class="panel-head"><h2>Agent steps <span class="dim" id="steps-count"></span></h2>
+      <div class="actions"><div id="step-filter"></div>
+        <label class="check"><input id="raw-steps" type="checkbox" /> <span>show args/result</span></label>
+      </div>
+    </div>
     <ol id="detail-steps" class="steps"></ol>
+  </section>
+
+  <section class="panel" id="compare-panel" hidden>
+    <div class="panel-head"><h2>Comparison <span class="dim">selected vs. another run</span></h2>
+      <div class="actions"><div id="compare-pick"></div>
+        <button type="button" id="compare-close" class="btn sm">Close</button></div>
+    </div>
+    <div id="compare-body"></div>
   </section>
 </main>
 
 <script src="/assets/js/common.js"></script>
+<script src="/assets/js/charts.js"></script>
 <script src="/assets/js/sessions.js"></script>
 </body>
 </html>

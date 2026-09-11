@@ -31,7 +31,8 @@ export type WireMessage =
 	| { type: "snapshot"; data: unknown }
 	| { type: "event"; data: unknown }
 	| { type: "telemetry"; data: unknown }
-	| { type: "step"; data: unknown };
+	| { type: "step"; data: unknown }
+	| { type: "checkpoint"; data: unknown };
 
 /** Provider catalog access (docs/DASHBOARD-API.md §3.1). */
 export interface CatalogHooks {
@@ -83,13 +84,22 @@ export interface WebServerOptions {
  *   public/assets/css/*.css    styles
  *   public/assets/js/*.js      shared + per-page scripts
  *
- * URLs stay flat (`/llm`, not `/pages/llm.html`) so links keep working even if
- * files move. Add a page by adding one row here + one file in `pages/`.
+ * URLs stay flat (`/providers`, not `/pages/providers.html`) so links keep
+ * working even if files move. Add a page by adding one row here + one file in
+ * `pages/`; renamed URLs go in PAGE_ALIASES so old links keep resolving.
  */
 export const PAGES: Record<string, string> = {
 	"/": "pages/live.html",
-	"/llm": "pages/llm.html",
+	"/providers": "pages/providers.html",
 	"/sessions": "pages/sessions.html",
+};
+
+/**
+ * Extra URLs that must resolve to a page above. `/llm` was the pre-v0.4 name of
+ * the providers page; kept so bookmarks and docs do not 404 (docs §0).
+ */
+export const PAGE_ALIASES: Record<string, string> = {
+	"/llm": "/providers",
 };
 
 export class WebServer {
@@ -176,6 +186,16 @@ export class WebServer {
 		for (const ws of this.clients) this.send(ws, msg);
 	}
 
+	/**
+	 * Push a staged summary ("阶段性总结"). Emitted while a run is still going, so
+	 * the Live page's timeline fills up during the game instead of only at
+	 * shutdown. Late subscribers get the backlog from the snapshot payload.
+	 */
+	publishCheckpoint(data: unknown): void {
+		const msg: WireMessage = { type: "checkpoint", data };
+		for (const ws of this.clients) this.send(ws, msg);
+	}
+
 	clientCount(): number {
 		return this.clients.size;
 	}
@@ -214,8 +234,11 @@ export class WebServer {
 				return;
 			}
 			let p = decodeURIComponent(url.pathname);
+			if (p.endsWith("/") && p !== "/") p = p.slice(0, -1);
+			// Legacy URLs resolve to their current page before the route lookup.
+			if (PAGE_ALIASES[p]) p = PAGE_ALIASES[p]!;
 			// Page route table first (see PAGES); then plain static files.
-			const route = PAGES[p.endsWith("/") && p !== "/" ? p.slice(0, -1) : p];
+			const route = PAGES[p];
 			if (route) p = `/${route}`;
 			// Prevent path traversal.
 			const filePath = path.normalize(path.join(PUBLIC_DIR, p));
