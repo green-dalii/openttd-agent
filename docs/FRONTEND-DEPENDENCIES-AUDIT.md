@@ -118,20 +118,45 @@ function stackTotals 18 function stackedBars 106 function stageMap 56
 
 **建议**：换。
 
-### 3.3 common.js 的格式化函数（fmtInt/Money/Tok/Cost/Duration/Ago/Clock/Pct）—— **建议：换 Intl，零依赖**
+### 3.3 common.js 的格式化函数（fmtInt/Money/Tok/Cost/Duration/Ago/Clock/Pct）—— **建议：换 Intl，零依赖** ✅ 已实施（阶段 1）
 
 ```js
-fmtInt(1234)             → Intl.NumberFormat().format(1234)
-fmtMoney(1234)           → Intl.NumberFormat({style:"currency",currency:"GBP"}).format(1234)
-fmtPct(0.345, 1)         → Intl.NumberFormat({style:"percent",minimumFractionDigits:1}).format(0.345)
-fmtAgo(t)                → Intl.RelativeTimeFormat("en",{numeric:"auto"}).format(secondsDiff, "second")
+fmtInt(1234)     → Intl.NumberFormat().format(1234)
+fmtPct(0.345, 1) → Intl.NumberFormat({style:"percent",minimumFractionDigits:1}).format(0.345)
+fmtAgo(t)        → Intl.RelativeTimeFormat("en",{numeric:"auto"}).format(-5,"minute")
 ```
 
 这些浏览器原生 API 在所有目标浏览器（Chrome/Firefox/Safari ≥2018）都支持。
-**这是最便宜的胜利**：零依赖，删 ~70 行，提升国际化能力（现在我硬编了
-"k/M"、硬编了"$"）。
+**这是最便宜的胜利**：零依赖，删 ~70 行，提升国际化能力。
 
-**唯一例外**：`fmtGameDate`（游戏日期 1950-5-1）是领域格式，保留。
+**⚠️ 但是——实施中踩到一个真坑，必须记下来**：
+
+**不要让 ICU 决定单位后缀。** `notation:"compact"` 的后缀拼写是
+**CLDR 版本数据，不是契约**。同一次调用实测：
+
+| 值 | Node 24 (ICU) | Chrome 149 | 本项目 charts.js |
+|---|---|---|---|
+| 1500 | `1.5K` | `1.5k` | `1.5k` |
+| 1.5e6 | `1.5M` | `1.5m` | `1.5M` |
+| 1.5e9 | `1.5B` | **`1.5bn`** | `1.5B` |
+| 1.5e12 | `1.5T` | **`1.5tn`** | `1.5T` |
+
+后果：同一页面会出现 KPI 写 `£1.5bn`、图表轴写 `1.5B` **自相矛盾**，
+而且换一次运行时/浏览器版本就可能再变一次。
+
+**因此的最终设计**：
+- **Intl 只负责数字部分**（千分位、四舍五入、小数位）
+- **单位阶梯 k/M/B/T 是本项目的显式约定**，定义在 `common.js` 的
+  `COMPACT_UNITS`，与 `charts.js` 的 `util.fmtCompact` 保持同一套词汇
+- 两条测试守住它：`format-intl.test.ts` 里
+  ① 在一个**拒绝 compact notation 的敌对 Intl** 下重跑，确认我们不依赖它；
+  ② 逐值断言 `fmtTok(v) === charts.util.fmtCompact(v)`，让 KPI 与图表轴永远一致
+- 浏览器端也验证过：`kpi_chart_agree: true`
+
+**保留手写的两个**：
+- `fmtDuration`：`Intl.DurationFormat` 尚未普遍可用，且 `1m30s` 这种紧凑写法是
+  仪表盘约定而非 locale 问题
+- `fmtGameDate`（1950-02-01）：游戏历法，不是真实日期
 
 ### 3.4 手写渲染（live.js / providers.js / sessions.js）—— **建议：暂不换框架**
 

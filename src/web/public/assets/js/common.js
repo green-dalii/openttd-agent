@@ -20,69 +20,174 @@ function esc(s) {
 }
 
 /* ---------------------------- formatting ---------------------------- */
-function fmtInt(n) {
+/*
+ * 数字由平台 `Intl` 渲染；**单位阶梯是本项目的显式约定**。
+ *
+ * 为什么换（2026-09-11，docs/FRONTEND-DEPENDENCIES-AUDIT.md §3.3）: 手写实现要自己维护
+ * 小数位与稀有量级回退，而且硬编了 en-US。
+ *
+ * 为什么不直接用 `notation:"compact"`（同一轮实测踩到的坑）:
+ *   **compact 的后缀拼写是 CLDR 版本数据，不是契约**。同一次调用实测：
+ *     | 值    | Node 24 | Chrome 149 | 本项目 charts.js |
+ *     |-------|---------|------------|------------------|
+ *     | 1500  | 1.5K    | 1.5k       | 1.5k             |
+ *     | 1.5e6 | 1.5M    | 1.5m       | 1.5M             |
+ *     | 1.5e9 | 1.5B    | **1.5bn**  | 1.5B             |
+ *   让 ICU 决定单位会导致同一页面 KPI 写 `£1.5bn`、图表轴写 `1.5B` 自相矛盾，
+ *   而且换一次运行时就会变。所以: **Intl 只负责数字部分**（千分位/舍入/小数位），
+ *   **k/M/B/T 由本文件定义**，与 charts.js 保持一致。
+ *
+ * 关键约束: 格式化器在模块加载时构造一次并复用。
+ * `new Intl.NumberFormat()` 的构造成本远高于 format()，而这些函数在渲染循环里高频调用。
+ * `test/unit/format-intl.test.ts` 会数构造次数，并在一个拒绝 compact notation 的
+ * 敌对 Intl 下重跑，防止有人改回让 ICU 决定单位。
+ */
+const LOCALE = "en-GB";
+
+/** Ordinal grouping for counts (1,234,567). */
+const FMT_INT = new Intl.NumberFormat(LOCALE);
+/** ≤1 decimal: token counts, chart magnitudes. */
+const FMT_1DP = new Intl.NumberFormat(LOCALE, { maximumFractionDigits: 1 });
+/** ≤2 decimals: money, where the extra digit matters. */
+const FMT_2DP = new Intl.NumberFormat(LOCALE, { maximumFractionDigits: 2 });
+/** Rounded whole numbers, for money below the ladder threshold. */
+const FMT_0DP = new Intl.NumberFormat(LOCALE, { maximumFractionDigits: 0 });
+/** Provider token costs are quoted in USD and routinely fall below one cent. */
+const FMT_COST = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  minimumFractionDigits: 3,
+  maximumFractionDigits: 4,
+});
+/** Wall-clock, 24h, zero-padded. */
+const FMT_CLOCK = new Intl.DateTimeFormat(LOCALE, {
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hour12: false,
+});
+const FMT_AGO = new Intl.RelativeTimeFormat(LOCALE, { numeric: "auto" });
+/** Percent formatters are keyed by decimal digits; normally 0-2 variants. */
+const FMT_PCT = new Map();
+function pctFormatter(digits) {
+  let f = FMT_PCT.get(digits);
+  if (!f) {
+    f = new Intl.NumberFormat(LOCALE, {
+      style: "percent",
+      minimumFractionDigits: digits,
+      maximumFractionDigits: digits,
+    });
+    FMT_PCT.set(digits, f);
+  }
+  return f;
+}
+
+/**
+ * Magnitude ladder - the dashboard's shared vocabulary.
+ * Mirrors `charts.js` `util.fmtCompact` so a KPI tile and an axis agree.
+ */
+const COMPACT_UNITS = [
+  { limit: 1e12, div: 1e12, suffix: "T" },
+  { limit: 1e9, div: 1e9, suffix: "B" },
+  { limit: 1e6, div: 1e6, suffix: "M" },
+  { limit: 1e3, div: 1e3, suffix: "k" },
+];
+
+/**
+ * Compact a magnitude using the shared ladder; Intl renders only the digits.
+ * `digits` selects the decimal budget (1 for counts, 2 for money).
+ * Beyond the largest unit the scaled value simply keeps grouping (18,446,744T),
+ * which stays honest instead of overflowing into a wrong unit.
+ */
+function compact(v, digits) {
+  const fmt = digits === 2 ? FMT_2DP : FMT_1DP;
+  const a = Math.abs(v);
+  for (const u of COMPACT_UNITS) {
+    if (a >= u.limit) return fmt.format(v / u.div) + u.suffix;
+  }
+  return FMT_0DP.format(v);
+}
+
+/** Shared guard: these formatters throw on non-finite input, so filter first. */
+function finite(n) {
   const v = Number(n);
-  return Number.isFinite(v) ? v.toLocaleString("en-US") : "—";
+  return Number.isFinite(v) ? v : null;
+}
+
+/**
+ * True for "no data at all". Note `Number(null) === 0`, which is how a missing
+ * value used to render as a confident `0` - that is a lie, not a default.
+ */
+function isBlank(n) {
+  return n === null || n === undefined || n === "";
+}
+
+function fmtInt(n) {
+  if (isBlank(n)) return "—";
+  const v = finite(n);
+  return v === null ? "—" : FMT_INT.format(v);
 }
 
 function fmtMoney(n) {
-  if (n === undefined || n === null || n === "") return "—";
-  const v = Number(n);
-  if (!Number.isFinite(v)) return String(n);
+  if (isBlank(n)) return "—";
+  const v = finite(n);
+  if (v === null) return "—";
+  // Sign goes outside the symbol: "-£2.5M", matching the old output.
   const sign = v < 0 ? "-" : "";
-  const a = Math.abs(v);
-  if (a >= 1e9) return `${sign}£${(a / 1e9).toFixed(2)}B`;
-  if (a >= 1e6) return `${sign}£${(a / 1e6).toFixed(2)}M`;
-  if (a >= 1e3) return `${sign}£${(a / 1e3).toFixed(1)}k`;
-  return `${sign}£${Math.round(a)}`;
+  return `${sign}£${compact(Math.abs(v), 2)}`;
 }
 
 function fmtTok(n) {
-  const v = Number(n);
-  if (!Number.isFinite(v) || v === 0) return "0";
-  if (v >= 1e6) return `${(v / 1e6).toFixed(2)}M`;
-  if (v >= 1e3) return `${(v / 1e3).toFixed(1)}k`;
-  return String(v);
+  const v = finite(n);
+  return v === null || v === 0 ? "0" : compact(v, 1);
 }
 
 function fmtCost(n) {
-  const v = Number(n);
-  if (!Number.isFinite(v) || v === 0) return "$0";
-  if (v < 0.01) return `$${v.toFixed(4)}`;
-  return `$${v.toFixed(3)}`;
+  const v = finite(n);
+  if (v === null) return "—";
+  // A run that has spent nothing reads better as "$0" than "$0.000".
+  return v === 0 ? "$0" : FMT_COST.format(v);
 }
 
+/**
+ * Compact durations: `500ms`, `1.5s`, `1m30s`, `1h10m`.
+ *
+ * 刻意保留手写: `Intl.DurationFormat` 尚未在目标浏览器普遍可用，
+ * 且这里的单位选择（毫秒/秒/分时）是仪表盘的展示约定，不是 locale 问题。
+ */
 function fmtDuration(ms) {
-  const v = Number(ms);
-  if (!Number.isFinite(v)) return "—";
+  const v = finite(ms);
+  if (v === null) return "—";
   if (v < 1000) return `${Math.round(v)}ms`;
   if (v < 60000) return `${(v / 1000).toFixed(1)}s`;
   if (v < 3600000) return `${Math.floor(v / 60000)}m${Math.round((v % 60000) / 1000)}s`;
   return `${Math.floor(v / 3600000)}h${Math.round((v % 3600000) / 60000)}m`;
 }
 
+/**
+ * "5 minutes ago" via `Intl.RelativeTimeFormat` (plural rules for free).
+ * 输入是 epoch 毫秒；`<= 0` 视为无数据。
+ */
 function fmtAgo(ts) {
-  const v = Number(ts);
-  if (!Number.isFinite(v) || v <= 0) return "—";
-  const d = Date.now() - v;
-  if (d < 1000) return "just now";
-  if (d < 60000) return `${Math.floor(d / 1000)}s ago`;
-  if (d < 3600000) return `${Math.floor(d / 60000)}m ago`;
-  if (d < 86400000) return `${Math.floor(d / 3600000)}h ago`;
-  return `${Math.floor(d / 86400000)}d ago`;
+  const v = finite(ts);
+  if (v === null || v <= 0) return "—";
+  const secs = Math.max(0, Math.round((Date.now() - v) / 1000));
+  // Under a minute reads as "now"; RTF has no unit coarser than seconds.
+  if (secs < 45) return FMT_AGO.format(0, "second");
+  if (secs < 3600) return FMT_AGO.format(-Math.round(secs / 60), "minute");
+  if (secs < 86400) return FMT_AGO.format(-Math.round(secs / 3600), "hour");
+  return FMT_AGO.format(-Math.round(secs / 86400), "day");
 }
 
 function fmtClock(ts) {
-  const v = Number(ts);
-  if (!Number.isFinite(v)) return "—";
-  const d = new Date(v);
-  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}`;
+  const v = finite(ts);
+  return v === null ? "—" : FMT_CLOCK.format(new Date(v));
 }
 
 function fmtPct(v, digits) {
-  const n = Number(v);
-  if (!Number.isFinite(n)) return "—";
-  return `${(n * 100).toFixed(digits === undefined ? 1 : digits)}%`;
+  const n = finite(v);
+  if (n === null) return "—";
+  return pctFormatter(digits === undefined ? 1 : digits).format(n);
 }
 
 /** "1950-02-01" from a date payload (never "undefined-NaN"). */
