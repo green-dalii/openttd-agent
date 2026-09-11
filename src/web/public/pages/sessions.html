@@ -9,64 +9,253 @@
 <link rel="stylesheet" href="/assets/vendor/uplot/uPlot.min.css" />
 </head>
 <body>
-<header>
-  <div class="brand">
-    <h1>openttd-agent <span class="dim">sessions</span></h1>
-    <div id="nav"></div>
-  </div>
-  <div class="runbar">
-    <div class="item"><span class="lbl">Runs</span><span id="s-count" class="val">…</span></div>
-    <div class="item"><span class="lbl">Completed</span><span id="s-done" class="val">…</span></div>
-    <div class="item"><span class="lbl">Success</span><span id="s-rate" class="val">…</span></div>
-    <div class="item"><span class="lbl">Tokens</span><span id="s-tokens" class="val">…</span></div>
-    <div class="item"><span class="lbl">Spend</span><span id="s-cost" class="val">…</span></div>
-  </div>
-</header>
+<!--
+  Sessions page.
 
-<main>
-  <div class="group"><h2>History</h2><div class="rule"></div>
-    <span class="dim">every <code>--watch</code> / <code>--agent</code> run is archived here</span></div>
+  呈现层由 Alpine.js 声明式驱动（见 docs/FRONTEND-DEPENDENCIES-AUDIT.md §3.4）:
+  模板只负责"把状态画出来"，所有判断都在 sessions-view.js 的可测纯函数里。
+  时间戳一类相对时间（"5 分钟前"）会随时间变化，因此由定时器打一个 tick，
+  而不是靠手工在每处重新渲染。
+-->
+<div x-data="sessions" x-init="init()">
+  <header>
+    <div class="brand">
+      <h1>openttd-agent <span class="dim">sessions</span></h1>
+      <div id="nav"></div>
+    </div>
+    <div class="runbar">
+      <div class="item"><span class="lbl">Runs</span><span class="val" x-text="totals().count">…</span></div>
+      <div class="item"><span class="lbl">Completed</span><span class="val" x-text="totals().done">…</span></div>
+      <div class="item"><span class="lbl">Success</span>
+        <span class="val" x-text="totals().successRate === null ? '—' : $fmt.pct(totals().successRate, 0)"
+              :title="successTitle()">…</span></div>
+      <div class="item"><span class="lbl">Tokens</span><span class="val" x-text="$fmt.tok(totals().tokens)">…</span></div>
+      <div class="item"><span class="lbl">Spend</span><span class="val" x-text="$fmt.cost(totals().cost)">…</span></div>
+    </div>
+  </header>
 
-  <section class="grid split-12">
-    <div class="panel">
-      <div class="panel-head"><h2>Runs</h2>
-        <label class="check"><input id="only-done" type="checkbox" /> <span>completed only</span></label>
+  <main>
+    <div class="group"><h2>History</h2><div class="rule"></div>
+      <span class="dim">every <code>--watch</code> / <code>--agent</code> run is archived here</span></div>
+
+    <section class="grid split-12">
+      <div class="panel">
+        <div class="panel-head"><h2>Runs</h2>
+          <label class="check">
+            <input type="checkbox" :checked="onlyDone" @change="toggleOnlyDone($event.target.checked)" />
+            <span>completed only</span>
+          </label>
+        </div>
+        <ul class="pick-list">
+          <template x-for="s in visible()" :key="s.id">
+            <li class="pick" :class="{ sel: s.id === selected }" @click="open(s.id)">
+              <div class="pick-main">
+                <span class="pick-name" x-text="s.id"></span>
+                <span class="badge" :class="statusInfo(s.status).cls"
+                      :title="statusInfo(s.status).title" x-text="s.status"></span>
+                <span class="badge" x-text="s.mode"></span>
+                <span class="badge ok" x-show="isBuilt(s)">built</span>
+                <span class="badge warn" x-show="isIncomplete(s)">incomplete</span>
+              </div>
+              <div class="pick-sub">
+                <span x-text="`seed ${s.seed} · ${s.companyName || '—'} · `"></span>
+                <span x-text="s.endedAt ? $fmt.duration(s.endedAt - s.startedAt) : 'running'"></span>
+                <span x-text="` · ${$fmt.ago(s.startedAt)}`"></span><br />
+                <span x-text="runSummary(s)"></span>
+              </div>
+            </li>
+          </template>
+          <li class="empty" x-show="!visible().length && sessions.length">
+            No runs match this filter.
+          </li>
+          <li class="empty" x-show="!sessions.length">
+            No runs archived yet.
+            <span class="empty-cta"><code>pnpm run cli --watch --web-port 8080</code></span>
+          </li>
+        </ul>
       </div>
-      <ul id="session-list" class="pick-list"></ul>
-    </div>
 
-    <div class="panel">
-      <div class="panel-head">
-        <h2>Replay <span class="dim" id="replay-title">no run selected</span></h2>
-        <div class="actions"><button type="button" id="compare" class="btn sm" disabled>Compare…</button></div>
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Replay <span class="dim" x-text="selected || 'no run selected'"></span></h2>
+          <div class="actions">
+            <button type="button" class="btn sm" :disabled="!canCompare()" @click="startCompare()">Compare…</button>
+          </div>
+        </div>
+
+        <div x-show="loadingDetail" class="empty">Loading…</div>
+        <div x-show="detailError" class="empty" x-text="detailError"></div>
+        <p class="empty" x-show="!selected && !loadingDetail">Pick a run on the left to replay it.</p>
+
+        <!-- Detail: KPI strip + run facts + token composition + summaries + events -->
+        <div x-show="data && !loadingDetail">
+          <div class="kpis" style="margin-bottom:12px">
+            <div class="kpi">
+              <div class="kpi-label">Result</div>
+              <div class="kpi-value">
+                <span class="pos" x-show="metaOutcome().constructionDone === true">built</span>
+                <span class="warn" x-show="metaOutcome().constructionDone === false">incomplete</span>
+                <span x-show="metaOutcome().constructionDone !== true && metaOutcome().constructionDone !== false">—</span>
+              </div>
+              <div class="kpi-hint" x-text="metaOutcome().phase ? `last phase: ${metaOutcome().phase}` : ''"></div>
+            </div>
+            <div class="kpi"><div class="kpi-label">Cash</div>
+              <div class="kpi-value" x-text="$fmt.money(metaOutcome().money)"></div></div>
+            <div class="kpi"><div class="kpi-label">Fleet</div>
+              <div class="kpi-value"><span x-text="$fmt.int(metaOutcome().vehicles)"></span> <span class="dim">veh</span></div>
+              <div class="kpi-hint" x-text="`${$fmt.int(metaOutcome().stations)} stations`"></div></div>
+            <div class="kpi"><div class="kpi-label">Tokens</div>
+              <div class="kpi-value" x-text="$fmt.tok(metaUsage().totalTokens)"></div>
+              <div class="kpi-hint" x-text="$fmt.cost(metaUsage().costTotal)"></div></div>
+            <div class="kpi"><div class="kpi-label">Tool failures</div>
+              <div class="kpi-value" x-text="$fmt.int(metaTotals().toolFailures)"></div>
+              <div class="kpi-hint" x-text="`${$fmt.int(metaTotals().toolCalls)} calls`"></div></div>
+          </div>
+
+          <div class="grid two">
+            <div>
+              <h3>Run</h3>
+              <table class="kv">
+                <tr><td>Status</td><td>
+                  <span class="badge" :class="statusInfo(meta().status).cls"
+                        :title="statusInfo(meta().status).title" x-text="meta().status"></span>
+                  <span x-text="meta().error || ''"></span></td></tr>
+                <tr><td>Mode</td><td x-text="`${meta().mode} · seed ${meta().seed} · from ${meta().startYear}`"></td></tr>
+                <tr><td>App version</td><td x-text="meta().appVersion || '—'"></td></tr>
+                <tr><td>Map</td><td x-text="`${(meta().mapSize || []).join('×')} · ${meta().serverName || ''}`"></td></tr>
+                <tr><td>Brain</td><td x-text="brainText()"></td></tr>
+                <tr><td>Started</td><td x-text="`${$fmt.clock(meta().startedAt)} · ${$fmt.ago(meta().startedAt)}`"></td></tr>
+                <tr><td>Duration</td><td x-text="meta().endedAt ? $fmt.duration(meta().endedAt - meta().startedAt) : 'running'"></td></tr>
+                <tr><td>Events</td><td x-text="`${$fmt.int(metaTotals().events)} recorded · ${archiveEvents().length} in archive`"></td></tr>
+              </table>
+
+              <h3>Token breakdown</h3>
+              <div class="chart-box" x-show="tokenSlices().length">
+                <canvas x-ref="donut" height="200" x-effect="drawDonut()"></canvas>
+              </div>
+              <div class="legend">
+                <template x-for="t in tokenSlices()" :key="t.label">
+                  <span class="lg"><i :style="`background:${t.color}`"></i>
+                    <span x-text="`${t.label} ${$fmt.tok(t.value)}`"></span></span>
+                </template>
+              </div>
+            </div>
+
+            <div>
+              <h3>Staged summaries <span class="dim">阶段性总结</span></h3>
+              <template x-if="checkpoints().length">
+                <ol class="timeline">
+                  <template x-for="c in checkpoints()" :key="`${c.gameDate}-${c.turn}`">
+                    <li>
+                      <span class="t-meta" x-text="`${c.gameDate} · turn ${c.turn}`"></span>
+                      <span x-text="c.note"></span>
+                    </li>
+                  </template>
+                </ol>
+              </template>
+              <p class="hint" x-show="!checkpoints().length">No staged summaries recorded for this run.</p>
+
+              <h3>Event log <span class="dim" x-text="`(${archiveEvents().length} archived)`"></span></h3>
+              <input class="filter" type="search" placeholder="Search events…"
+                     style="width:100%;margin-bottom:6px" x-model="evSearch" />
+              <ol class="events short">
+                <template x-for="ev in shownEvents()" :key="ev.seq">
+                  <li class="ev">
+                    <span class="seq" x-text="ev.seq"></span>
+                    <span class="tag" :class="$ui.categoryClass($ui.categoryOf(ev.kind))"
+                          x-text="$ui.categoryLabel($ui.categoryOf(ev.kind))"></span>
+                    <span class="kind" x-text="ev.kind"></span>
+                    <span class="brief" x-text="$ui.briefOf(ev)"></span>
+                    <button class="raw-toggle" type="button" @click="$raw.toggle($event)">json</button>
+                    <pre class="raw" hidden x-text="JSON.stringify(ev.payload, null, 2)"></pre>
+                  </li>
+                </template>
+                <li class="empty" x-show="!shownEvents().length">No events match.</li>
+              </ol>
+            </div>
+          </div>
+        </div>
       </div>
-      <div id="session-detail"><p class="empty">Pick a run on the left to replay it.</p></div>
-    </div>
-  </section>
+    </section>
 
-  <section class="panel" id="steps-panel" hidden>
-    <div class="panel-head"><h2>Agent steps <span class="dim" id="steps-count"></span></h2>
-      <div class="actions"><div id="step-filter"></div>
-        <label class="check"><input id="raw-steps" type="checkbox" /> <span>show args/result</span></label>
+    <section class="panel" x-show="stepsAll().length" :hidden="!stepsAll().length">
+      <div class="panel-head"><h2>Agent steps
+          <span class="dim" x-text="`(${steps().length}/${stepsAll().length})`"></span></h2>
+        <div class="actions">
+          <div x-ref="stepFilter"></div>
+          <label class="check">
+            <input type="checkbox" :checked="stepRaw" @change="stepRaw = $event.target.checked" />
+            <span>show args/result</span>
+          </label>
+        </div>
       </div>
-    </div>
-    <ol id="detail-steps" class="steps"></ol>
-  </section>
+      <ol class="steps">
+        <template x-for="s in steps()" :key="`${s.turn}-${s.kind}-${s.tool || s.model || ''}`">
+          <li class="step" :class="s.kind === 'tool' ? (s.ok ? 'tool-ok' : 'tool-bad') : 'msg'">
+            <div class="step-head">
+              <span class="badge" :class="s.kind === 'tool' && s.ok === false ? 'bad' : ''"
+                    x-text="s.kind === 'tool' ? 'tool' : 'LLM'"></span>
+              <span class="badge" x-text="`turn ${s.turn}`"></span>
+              <span class="step-title" x-text="stepTitle(s)"></span>
+              <span class="dim" x-show="s.durationMs !== undefined" x-text="$fmt.duration(s.durationMs)"></span>
+              <span class="dim" x-show="s.usage"
+                    x-text="s.usage ? `${$fmt.tok(s.usage.totalTokens)} tok · ${$fmt.cost(s.usage.costTotal)}` : ''"></span>
+            </div>
+            <template x-if="s.thinking">
+              <details class="think" open><summary>reasoning</summary><pre x-text="s.thinking"></pre></details>
+            </template>
+            <div class="step-text" x-show="s.text" x-text="s.text"></div>
+            <template x-if="stepRaw && s.args !== undefined">
+              <details open><summary>args</summary><pre x-text="JSON.stringify(s.args, null, 2)"></pre></details>
+            </template>
+            <template x-if="stepRaw && s.data">
+              <details open><summary>result</summary><pre x-text="JSON.stringify(s.data, null, 2)"></pre></details>
+            </template>
+          </li>
+        </template>
+      </ol>
+    </section>
 
-  <section class="panel" id="compare-panel" hidden>
-    <div class="panel-head"><h2>Comparison <span class="dim">selected vs. another run</span></h2>
-      <div class="actions"><div id="compare-pick"></div>
-        <button type="button" id="compare-close" class="btn sm">Close</button></div>
-    </div>
-    <div id="compare-body"></div>
-  </section>
-</main>
+    <section class="panel" x-show="compareOpen" :hidden="!compareOpen">
+      <div class="panel-head"><h2>Comparison <span class="dim">selected vs. another run</span></h2>
+        <div class="actions">
+          <div x-ref="comparePick"></div>
+          <button type="button" class="btn sm" @click="compareOpen = false">Close</button>
+        </div>
+      </div>
+      <div>
+        <template x-if="compareData">
+          <table class="kv">
+            <tr><th>Metric</th><th class="num" x-text="meta().id || '—'"></th>
+                <th class="num" x-text="compareMeta().id || '—'"></th><th class="num">Δ</th></tr>
+            <template x-for="r in compareRows()" :key="r.key">
+              <tr>
+                <td x-text="r.key"></td>
+                <td class="num" x-text="r.a ?? '—'"></td>
+                <td class="num" x-text="r.b ?? '—'"></td>
+                <td class="num"><span :class="deltaClass(r.delta)" x-text="deltaText(r.delta)"></span></td>
+              </tr>
+            </template>
+          </table>
+        </template>
+        <p class="hint" style="margin-top:8px">
+          Δ is the right-hand run minus the left-hand one, so a positive Δ on Cash is an improvement
+          while a positive Δ on Tool failures or Cost is a regression.
+        </p>
+      </div>
+    </section>
+  </main>
+</div>
 
 <script src="/assets/js/common.js"></script>
   <!-- uPlot must come before ucharts.js, which reads window.uPlot. -->
   <script src="/assets/vendor/uplot/uPlot.iife.min.js"></script>
   <script src="/assets/js/ucharts.js"></script>
   <script src="/assets/js/charts.js"></script>
+<!-- Alpine must load before the bridge and the page component (they extend it). -->
+<script src="/assets/vendor/alpinejs/alpine.min.js" defer></script>
+<script src="/assets/js/alpine-bridge.js"></script>
+<script src="/assets/js/sessions-view.js"></script>
 <script src="/assets/js/sessions.js"></script>
 </body>
 </html>

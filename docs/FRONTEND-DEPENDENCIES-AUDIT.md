@@ -205,12 +205,39 @@ fmtAgo(t)        → Intl.RelativeTimeFormat("en",{numeric:"auto"}).format(-5,"m
 
 我评估过：
 
-| 选项 | 收益 | 代价 | 我的判断 |
+> **状态：已改为进行中（2026-09-11）。** 最初我的判断是"不做框架"，
+> 但用户指出：手写 `renderX()` + `innerHTML` 的维护成本会再次超过引入成本。
+> 复核后**同意**——每加一个字段要在 state、渲染、事件绑定三处同步修改，
+> 漏一处就是"点了没反应"这类静默 bug（本轮已出现两次）。
+> 因此改为：**Alpine.js，逐页迁移**（先 Sessions 验证，再推广）。
+
+| 选项 | 收益 | 代价 | 结论 |
 |---|---|---|---|
-| Alpine.js (20KB) | 不用手写 `renderX()` | 重写 3 个页面、所有交互；事件模型换；测试要重写 | **不做**，收益不能压过重写成本 |
-| petite-vue (7KB) | 同上，更轻 | 同上，且模板语法不如 Alpine 直接 | **不做** |
-| Preact + htm (5KB+2KB) | 真组件化 | 要构建链（htm 自己预编译或运行时），或者运行时 htm 也行；模型最大 | **不做**，项目规模用不上 |
-| **保持现状 + 拆 live.js** | 把 728 行拆成 3 个文件：`live-telemetry.js` / `live-events.js` / `live-stages.js` | 中 | **做**——这是真正的最低风险收益 |
+| **Alpine.js（20KB gzip）** | DOM 成为状态的函数；**无需构建链**（指令写在 HTML 属性里） | 每页要改写模板 | ✅ **采用**，唯一"有响应式且无构建步骤"的主流选项 |
+| petite-vue (7KB) | 更轻 | 维护弱、模板语法不如 Alpine | ❌ |
+| Preact + htm | 真组件化 | 需要 JSX/htm 编译 = 引入构建链，违反仓库硬约束 | ❌ |
+| Vue/React | 生态最大 | 必须 bundler | ❌ |
+
+**分页迁移策略**：一个页面一个 commit，每页迁完都要真机验证再动下一页。
+`Sessions` 作为首个（页面最小、且对比/KPI 逻辑密集，最能暴露"规则丢失"风险）。
+
+**实施要点**（Sessions 页，已落地）：
+- `assets/js/alpine-bridge.js`：注册 `$ui` / `$fmt` / `$pref` / `$raw` 等 magic，
+  以及 `badges` store（`interrupted` 与 `running` 仍然区分）
+- `assets/js/sessions-view.js`：**纯函数 view model**（可见过滤、成功率、
+  Δ 方向、token 分片），在 `node:vm` 里可完整单测 —— 这正是"迁移不会丢业务规则"
+  的保障
+- `assets/js/sessions.js`：只保留 IO（fetch）与命令式部件（donut canvas、分段筛选器）
+- 19 个新的单测锁定模型契约
+
+**两个真机才暴露的坑（都已修）**：
+1. **`Object.assign` 会丢掉类型**：`return Object.assign(model, {...})` 让 `tsc`
+   看不见 `this.data` / `$refs`，必须用展开 `{...model, ...}`。
+2. **响应式读取必须在 effect 的同步作用域内**：`drawDonut()` 原本把
+   `tokenSlices()` 写在 `$nextTick` 回调里 → Alpine 追踪不到依赖 →
+   数据异步到达后 effect 不重跑 → **环形图永远不画**。真机实测：
+   canvas 存在、painted = 0，而图例正常 —— 这是"依赖追踪失效"的典型特征。
+   修好后 painted = 223。已加回归测试（断言读取发生在异步边界之前）。
 
 **判断依据**：现在 3 个页面共享 `window.UI` / `window.Charts`，**没有跨页面的组件复用**，
 **只有跨页面的工具复用**。框架的组件化优势用不到，而模板切换的代价是真实的。

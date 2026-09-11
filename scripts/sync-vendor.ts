@@ -46,6 +46,11 @@ export const VENDOR: VendorEntry[] = [
 	// The type declarations are vendored too: they let `tsc --checkJs` type-check
 	// our usage of the global `uPlot` (see tsconfig.frontend.json).
 	{ pkg: "uplot", from: "dist/uPlot.d.ts", to: "uPlot.d.ts" },
+
+	// Alpine.js: the rendering layer (see docs/FRONTEND-DEPENDENCIES-AUDIT.md §3.4).
+	// `cdn.min.js` is a self-contained IIFE with @vue/reactivity inlined (verified:
+	// zero require() calls), so it needs no build step - unlike the ESM builds.
+	{ pkg: "alpinejs", from: "dist/cdn.min.js", to: "alpine.min.js" },
 ];
 
 /** Absolute directory a vendored package lands in. */

@@ -141,12 +141,14 @@ describe("front-end assets", () => {
 	it("renders every session status the backend can produce", () => {
 		// `interrupted` (a hard-killed run) must be a distinct, explained badge -
 		// it used to fall through to a generic "warn" with no tooltip.
-		const src = read("assets/js/sessions.js");
+		// The map lives in the sessions view model now that the page renders
+		// declaratively, so the rule is asserted where it actually lives.
+		const src = read("assets/js/sessions-view.js");
 		for (const st of ["running", "completed", "aborted", "error", "interrupted"]) {
-			expect(src, `sessions.js has no badge for status "${st}"`).toContain(`${st}:`);
+			expect(src, `no badge for status "${st}"`).toContain(`${st}:`);
 		}
 		// Each entry must carry both a class and an explanation.
-		const block = src.slice(src.indexOf("const STATUS_INFO"), src.indexOf("const statusBadge"));
+		const block = src.slice(src.indexOf("const STATUS_INFO"), src.indexOf("function create"));
 		expect((block.match(/cls:/g) ?? []).length).toBeGreaterThanOrEqual(5);
 		expect((block.match(/title:/g) ?? []).length).toBeGreaterThanOrEqual(5);
 	});

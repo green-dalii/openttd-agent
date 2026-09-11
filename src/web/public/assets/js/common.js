@@ -727,6 +727,12 @@ function connectWs(handlers) {
 }
 
 /* --------------------------- chrome / nav --------------------------- */
+/** Render the nav into an element by id. Shared by every page. */
+function renderNavInto(id, active) {
+  const el = document.getElementById(id);
+  if (el) el.innerHTML = renderNav(active);
+}
+
 function renderNav(active) {
   const items = [
     ["/", "Live"],
@@ -798,5 +804,5 @@ window.UI = {
   utilTotals: (items) => (items || []).reduce(
     (a, it) => a + (it.values || []).reduce((x, v) => x + (Number(v) || 0), 0), 0),
   // infra
-  connectWs, renderNav,
+  connectWs, renderNav, renderNavInto,
 };

@@ -1,0 +1,5 @@
+{
+	"pkg": "alpinejs",
+	"version": "3.17.2",
+	"generatedBy": "scripts/sync-vendor.ts"
+}
