@@ -619,12 +619,16 @@
       const it = items[i];
       if (!it) return;
       const vals = (it.values || []).slice(0, series.length);
+      // Compute the column total from the hovered item itself. `st` (the stack
+      // totals) lives in draw()'s scope and is NOT visible here - reading it was
+      // the "st is not defined" crash; deriving it locally also keeps the row
+      // percentages consistent with the column the user is actually pointing at.
       let sum = 0;
+      for (const v of vals) sum += Number(v) || 0;
       const rows = vals.map(function (v, si) {
         const n = Number(v) || 0;
-        sum += n;
         const col = (series[si] && series[si].color) || pal[si % pal.length];
-        const pct = st.totals[i] ? ((n / st.totals[i]) * 100).toFixed(0) : "0";
+        const pct = sum ? ((n / sum) * 100).toFixed(0) : "0";
         return '<div class="ct-row"><i style="background:' + col + '"></i>' +
           escHtml((series[si] && series[si].name) || ("s" + (si + 1))) +
           "<b>" + escHtml(fmt(n)) + '</b><span class="dim">' + pct + "%</span></div>";

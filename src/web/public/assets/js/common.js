@@ -169,6 +169,7 @@ function categoryClass(cat) {
 
 /** Counts per category, plus a total — the numbers shown on the filter chips. */
 function categoryCounts(events) {
+  /** @type {Record<string, number>} */
   const counts = {};
   let total = 0;
   for (const ev of events || []) {
@@ -309,8 +310,10 @@ function confirmDialog(opts) {
       </div>`;
     document.body.appendChild(dlg);
     const done = (v) => { dlg.close(); dlg.remove(); resolve(v); };
-    dlg.querySelector('[data-act="ok"]').onclick = () => done(true);
-    dlg.querySelector('[data-act="cancel"]').onclick = () => done(false);
+    // The DOM lib types `querySelector` as Element, which has no `onclick`;
+    // these are buttons we just created, so narrow explicitly.
+    /** @type {HTMLButtonElement | null} */ (dlg.querySelector('[data-act="ok"]')).onclick = () => done(true);
+    /** @type {HTMLButtonElement | null} */ (dlg.querySelector('[data-act="cancel"]')).onclick = () => done(false);
     dlg.oncancel = (e) => { e.preventDefault(); done(false); };
     dlg.showModal();
   });

@@ -31,7 +31,6 @@
     run: null,          // supervisor status (serve mode only)
     runControl: false,  // whether /api/run exists
     paused: false,
-    paused: false,
     evSearch: "",
     stepFilter: "all",
     hidden: new Set(U.getPref("ev.hidden", [])),
@@ -105,13 +104,6 @@
       if (Number.isFinite(i) && state.stages[i]) state.stages[i].image = info.file;
       renderStageViews();
     },
-    onStage: (v) => { state.stages = [...state.stages, v].slice(-24); renderStageViews(); },
-    onStageImage: (info) => {
-      // A real captured minimap arrived for one stage; swap it in.
-      const i = Number(info && info.index);
-      if (Number.isFinite(i) && state.stages[i]) state.stages[i].image = info.file;
-      renderStageViews();
-    },
   });
 
   /* --------------------------- run controls --------------------------- */
@@ -120,16 +112,23 @@
      (docs/AGENT-LOOP-AND-CONTROL.md §3). */
   const elRunBox = $("run-controls"), elRunState = $("run-state");
 
-  async function post(path, body) {
+  /**
+   * POST a run-control command and render the resulting state.
+   *
+   * 注意: 请求体变量名**不能**叫 `body` —— 它会遮蔽同名的 `payload` 参数并落进
+   *   TDZ，于是 `JSON.stringify` 在 fetch 之前就抛 ReferenceError，
+   *   按钮一个字节都发不出去（2026-09-11 事故，见 live-run-controls.test.ts）。
+   */
+  async function post(path, payload) {
     try {
       const r = await fetch(path, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(body || {}),
+        body: JSON.stringify(payload || {}),
       });
-      const body = await r.json().catch(() => ({}));
-      if (!r.ok) { U.toast(body.error || `HTTP ${r.status}`, "err", 7000); return false; }
-      state.run = body;
+      const reply = await r.json().catch(() => ({}));
+      if (!r.ok) { U.toast(reply.error || `HTTP ${r.status}`, "err", 7000); return false; }
+      state.run = reply;
       renderRunControls();
       renderNotice();
       return true;

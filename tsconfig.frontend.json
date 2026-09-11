@@ -1,0 +1,24 @@
+{
+	"compilerOptions": {
+		"target": "ES2022",
+		"lib": [
+			"ES2022",
+			"DOM",
+			"DOM.Iterable"
+		],
+		"module": "ESNext",
+		"moduleResolution": "bundler",
+		"allowJs": true,
+		"checkJs": true,
+		"noEmit": true,
+		"strict": false,
+		"noUncheckedIndexedAccess": false,
+		"skipLibCheck": true,
+		"types": [],
+		"forceConsistentCasingInFileNames": true
+	},
+	"include": [
+		"src/web/public/assets/js/**/*.js",
+		"src/web/public/assets/js/**/*.d.ts"
+	]
+}

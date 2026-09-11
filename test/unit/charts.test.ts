@@ -41,7 +41,7 @@ interface FakeCanvasLike {
 	style: Record<string, string>;
 	getAttribute: (n: string) => string | null;
 	getContext: () => unknown;
-	addEventListener: () => void;
+	addEventListener: (type: string, fn: (ev: unknown) => void) => void;
 	getBoundingClientRect: () => { left: number; top: number; width: number; height: number };
 }
 
@@ -125,7 +125,12 @@ function fakeCtx(): {
 }
 
 /** Minimal canvas stub. clientWidth models the CSS layout width. */
-function fakeCanvas(clientWidth: number, ctx: unknown): FakeCanvasLike {
+function fakeCanvas(
+	clientWidth: number,
+	ctx: unknown,
+	/** When given, mousemove/mouseleave handlers are recorded so tests can fire them. */
+	listeners?: Record<string, ((ev: unknown) => void)[]>,
+): FakeCanvasLike {
 	return {
 		clientWidth,
 		width: 300, // the default backing store we must overwrite
@@ -133,7 +138,10 @@ function fakeCanvas(clientWidth: number, ctx: unknown): FakeCanvasLike {
 		style: {} as Record<string, string>,
 		getAttribute: () => null,
 		getContext: () => ctx,
-		addEventListener: () => {},
+		addEventListener: (type: string, fn: (ev: unknown) => void) => {
+			if (!listeners) return;
+			(listeners[type] = listeners[type] || []).push(fn);
+		},
 		getBoundingClientRect: () => ({ left: 0, top: 0, width: clientWidth, height: 150 }),
 	};
 }
@@ -144,6 +152,43 @@ function load(): { charts: ChartsGlobal; sandbox: Record<string, unknown> } {
 	vm.createContext(sandbox);
 	vm.runInContext(SRC, sandbox);
 	return { charts: (sandbox.window as { Charts: ChartsGlobal }).Charts, sandbox };
+}
+
+/**
+ * Load charts.js with a minimal DOM so tooltip code actually runs.
+ * Needed for hover tests: the tooltip guards on `typeof document`.
+ */
+function loadWithDom(): {
+	charts: ChartsGlobal;
+	/** The tooltip element charts.js creates lazily, if any. */
+	tip: () => { innerHTML: string } | null;
+} {
+	let created: { innerHTML: string; style: Record<string, string>; setAttribute: () => void; getBoundingClientRect: () => { width: number; height: number } } | null = null;
+	const document = {
+		body: { appendChild: () => {} },
+		createElement: () => {
+			created = {
+				innerHTML: "",
+				style: {},
+				setAttribute: () => {},
+				getBoundingClientRect: () => ({ width: 100, height: 40 }),
+			};
+			return created;
+		},
+	};
+	const sandbox: Record<string, unknown> = {
+		window: { innerWidth: 1024 },
+		document,
+		devicePixelRatio: 1,
+		setTimeout: () => 0,
+		clearTimeout: () => {},
+	};
+	vm.createContext(sandbox);
+	vm.runInContext(SRC, sandbox);
+	return {
+		charts: (sandbox.window as { Charts: ChartsGlobal }).Charts,
+		tip: () => created,
+	};
 }
 
 describe("charts module", () => {
@@ -363,5 +408,72 @@ describe("charts module", () => {
 		}
 		expect(util.fractionsOf([])).toEqual([]);
 		expect(util.fractionsOf([0, 0])).toEqual([0, 0]);
+	});
+});
+
+/**
+ * Hover path — the tooltip is reached only by a real mousemove, so a broken
+ * handler is invisible to every other test (and to a review of the draw code).
+ *
+ * Regression: `stackedBars` read `st.totals[i]` from inside its hover callback,
+ * but `st` was declared in `draw()`'s scope — so hovering the Token Usage chart
+ * threw `ReferenceError: st is not defined` and the tooltip never appeared.
+ */
+describe("charts tooltip (hover path)", () => {
+	it("stacked bars: hovering shows each series' share without throwing", () => {
+		const { charts, tip } = loadWithDom();
+		const listeners: Record<string, ((ev: unknown) => void)[]> = {};
+		const canvas = fakeCanvas(400, fakeCtx(), listeners);
+		charts.stackedBars(canvas, {
+			items: [
+				{ label: "t1", values: [100, 20] },
+				{ label: "t2", values: [200, 40] },
+			],
+			series: [{ name: "in", color: "#111" }, { name: "out", color: "#222" }],
+		});
+
+		const move = listeners.mousemove?.[0];
+		expect(move, "stackedBars must bind a mousemove handler").toBeTypeOf("function");
+
+		// Second column: 200 + 40, so "out" is 40/240 = ~17%.
+		expect(() => move!({ clientX: 350, clientY: 50 })).not.toThrow();
+		const html = tip()?.innerHTML ?? "";
+		expect(html).toContain("t2");
+		expect(html).toContain("17%");
+		expect(html).toContain("240"); // the column total
+	});
+
+	it("stacked bars: hovering outside any column is a no-op", () => {
+		const { charts } = loadWithDom();
+		const listeners: Record<string, ((ev: unknown) => void)[]> = {};
+		const canvas = fakeCanvas(400, fakeCtx(), listeners);
+		charts.stackedBars(canvas, { items: [{ label: "a", values: [1, 2] }], series: [{ name: "s" }] });
+		const move = listeners.mousemove?.[0];
+		expect(() => move!({ clientX: -50, clientY: 10 })).not.toThrow();
+	});
+
+	it("stacked bars: a zero-total column renders 0% rather than NaN", () => {
+		const { charts, tip } = loadWithDom();
+		const listeners: Record<string, ((ev: unknown) => void)[]> = {};
+		const canvas = fakeCanvas(400, fakeCtx(), listeners);
+		charts.stackedBars(canvas, {
+			items: [{ label: "empty", values: [0, 0] }],
+			series: [{ name: "a" }, { name: "b" }],
+		});
+		listeners.mousemove?.[0]!({ clientX: 100, clientY: 50 });
+		expect(tip()?.innerHTML ?? "").not.toContain("NaN");
+	});
+
+	it("line: hovering reports the nearest point without throwing", () => {
+		const { charts } = loadWithDom();
+		const listeners: Record<string, ((ev: unknown) => void)[]> = {};
+		const canvas = fakeCanvas(400, fakeCtx(), listeners);
+		charts.line(canvas, {
+			series: [{ name: "cash", data: [1, 5, 3, 9] }],
+			labels: ["a", "b", "c", "d"],
+		});
+		const move = listeners.mousemove?.[0];
+		expect(move).toBeTypeOf("function");
+		expect(() => move!({ clientX: 200, clientY: 40 })).not.toThrow();
 	});
 });
