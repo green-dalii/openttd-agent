@@ -59,6 +59,23 @@ export interface StageViewInput {
 	phase?: string;
 }
 
+/**
+ * The region worth looking at, as a normalised centre plus a zoom factor.
+ *
+ * 为什么需要（2026-09-12 实测）: `screenshot minimap` 对 256×256 地图输出
+ * 256×256 的 PNG —— **1 像素/格**。一次施工只改几格，图上因此只差 1-2 个像素，
+ * 于是"每个阶段的画面看起来一样"（实测 6 次抓取仅 3 张不同，且游戏日期全是
+ * 1950-01-01）。这不是抓取频率问题，而是分辨率问题，所以由服务端给出窗口、
+ * 前端裁剪放大，让改动可见。
+ */
+export interface StageFocus {
+	/** Window centre, normalised to the map (0..1). */
+	x: number;
+	y: number;
+	/** How much to magnify: the window spans 1/scale of the map. */
+	scale: number;
+}
+
 export interface StageView {
 	gameDate: string;
 	width: number;
@@ -67,6 +84,11 @@ export interface StageView {
 	companies: StageCompany[];
 	markers: StageMarker[];
 	routes: StageRoute[];
+	/**
+	 * Absent when there is nothing to look at (no markers/routes), in which case
+	 * the whole map is the honest view.
+	 */
+	focus?: StageFocus;
 }
 
 /** OpenTTD tile index -> map coordinates (tile = y * width + x). */
@@ -97,6 +119,64 @@ function normalise(
  *
  * Pure: no IO, no rendering, no assumptions about the canvas.
  */
+/** Zoom limits: 1 = whole map, 12 = ~21 tiles across on a 256 map. */
+const MIN_FOCUS_SCALE = 1;
+const MAX_FOCUS_SCALE = 12;
+/** Never crop tighter than a window that shows some context around the work. */
+const MIN_WINDOW_SPAN = 0.06;
+
+/**
+ * Pick the window that makes this stage's work visible.
+ *
+ * Bounds come from the markers and route endpoints (all normalised), padded so
+ * the work never touches the frame edge. Returns undefined when there is nothing
+ * to frame. Pure.
+ */
+function computeFocus(markers: StageMarker[], routes: StageRoute[]): StageFocus | undefined {
+	const xs: number[] = [];
+	const ys: number[] = [];
+	for (const m of markers) {
+		if (Number.isFinite(m.x) && Number.isFinite(m.y)) {
+			xs.push(m.x);
+			ys.push(m.y);
+		}
+	}
+	for (const r of routes) {
+		for (const p of [r.from, r.to]) {
+			if (p && Number.isFinite(p.x) && Number.isFinite(p.y)) {
+				xs.push(p.x);
+				ys.push(p.y);
+			}
+		}
+	}
+	if (!xs.length || !ys.length) return undefined;
+
+	const minX = Math.min(...xs);
+	const maxX = Math.max(...xs);
+	const minY = Math.min(...ys);
+	const maxY = Math.max(...ys);
+
+	// Pad by 60% of the span so the work sits in context, and never go tighter
+	// than MIN_WINDOW_SPAN (a single-tile span would otherwise zoom to the max).
+	const spanX = Math.max(maxX - minX, MIN_WINDOW_SPAN);
+	const spanY = Math.max(maxY - minY, MIN_WINDOW_SPAN);
+	const span = Math.max(spanX, spanY) * 1.6;
+
+	const scale = Math.max(
+		MIN_FOCUS_SCALE,
+		Math.min(MAX_FOCUS_SCALE, 1 / span),
+	);
+	// Centre on the work, then clamp so the window stays inside the map.
+	const half = 1 / (2 * scale);
+	const cx = Math.min(Math.max((minX + maxX) / 2, half), 1 - half);
+	const cy = Math.min(Math.max((minY + maxY) / 2, half), 1 - half);
+	return {
+		x: Math.round(cx * 10000) / 10000,
+		y: Math.round(cy * 10000) / 10000,
+		scale: Math.round(scale * 100) / 100,
+	};
+}
+
 export function buildStageView(input: StageViewInput): StageView {
 	const [w, h] = input.mapSize;
 	const companies: StageCompany[] = (input.companies ?? []).map((c, i) => ({
@@ -143,6 +223,7 @@ export function buildStageView(input: StageViewInput): StageView {
 		}
 	}
 
+	const focus = computeFocus(markers, routes);
 	return {
 		gameDate: input.gameDate,
 		width: w,
@@ -151,5 +232,6 @@ export function buildStageView(input: StageViewInput): StageView {
 		companies,
 		markers,
 		routes,
+		...(focus ? { focus } : {}),
 	};
 }

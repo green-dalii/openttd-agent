@@ -111,9 +111,34 @@ main { padding: var(--sp-4) var(--sp-5) 64px; max-width: 1360px; margin: 0 auto;
 .snap canvas { background: none; }
 .snap .snap-meta { font-size: 10.5px; color: var(--muted); margin-top: 4px; display: flex;
   justify-content: space-between; gap: 6px; }
-/* Real captured minimap (the schematic canvas is the fallback). */
-.snap-img { display: block; width: 100%; height: auto; border-radius: var(--r-sm);
-  image-rendering: pixelated; background: var(--bg-sunken); }
+/* Real captured minimap (the schematic canvas is the fallback).
+ * The image is a CSS backdrop (not <img>) so it can be cropped and magnified to
+ * the construction window: at 1 px per tile an unscaled 256x256 map changes by
+ * only a pixel or two per stage. `pixelated` keeps tile edges honest when zoomed. */
+.snap-map { position: relative; }
+.snap-img { display: block; width: 100%; aspect-ratio: 1 / 1; border-radius: var(--r-sm);
+  background-color: var(--bg-sunken); background-repeat: no-repeat;
+  image-rendering: pixelated; }
+.snap-map canvas { width: 100%; border-radius: var(--r-sm); }
+/* Our overlay: the only marks we can vouch for, so they are visually distinct. */
+.snap-ov { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.snap-ov .ov-route { stroke: #ffd479; stroke-width: 0.9; stroke-dasharray: 2 1.4; opacity: .95; }
+.snap-ov .ov-town { fill: #ff5f6d; fill-opacity: .85; stroke: #fff; stroke-width: .35; }
+.snap-ov .ov-depot { fill: #5ac8fa; fill-opacity: .95; stroke: #fff; stroke-width: .35; }
+.snap-ov .ov-other { fill: #c3a6ff; }
+.snap-zoom { position: absolute; right: 4px; top: 4px; font-size: 10px; padding: 1px 4px;
+  border-radius: 3px; background: rgba(0,0,0,.55); color: #dfe3ea; font-family: var(--mono); }
+/* Legend: overlay vs. the game's own base map, kept apart on purpose. */
+.snap-legend { grid-column: 1 / -1; display: grid; gap: 3px; margin-top: 6px;
+  padding-top: 6px; border-top: 1px solid var(--line); }
+.snap-legend-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+  font-size: 11px; color: var(--muted); }
+.snap-legend .lg-lead { min-width: 210px; color: var(--ink-dim); }
+.snap-legend .lg { display: inline-flex; align-items: center; gap: 5px; }
+.snap-legend .lg i { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
+.snap-legend .lg-route i { background: none; border-top: 2px dashed #ffd479; height: 0; width: 12px; }
+.snap-legend .lg-town i { background: #ff5f6d; border-radius: 50%; }
+.snap-legend .lg-depot i { background: #5ac8fa; }
 
 /* ------------------------------ grouping ------------------------------ */
 .group { display: flex; align-items: center; gap: var(--sp-3); margin: var(--sp-2) 0 calc(-1 * var(--sp-1)); }

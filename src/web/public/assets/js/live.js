@@ -661,14 +661,43 @@
       box.innerHTML = `<p class="empty">No stage view yet — one is captured at each construction phase.</p>`;
       return;
     }
+    const SV = window.StageViewUI;
     const shown = views.slice(-12);
     const sessionId = (state.telemetry && state.telemetry.sessionId) || state.sessionId || "";
-    box.innerHTML = shown.map((v, i) => `
+    box.innerHTML = shown.map((v, i) => {
+      const hasImg = Boolean(v.image && sessionId);
+      const url = hasImg
+        ? `/api/sessions/${encodeURIComponent(sessionId)}/stages/${encodeURIComponent(v.image)}`
+        : "";
+      // Zoom to the construction window: at 256x256 the raw minimap is 1 px per
+      // tile, so an unscaled capture changes by only a pixel or two per stage.
+      const style = hasImg && SV ? SV.backdropStyle(url, v.focus) : "";
+      const marks = SV ? SV.overlayMarks(v) : [];
+      const overlay = SV
+        ? (`<svg class="snap-ov" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">` +
+            marks.map((m) => {
+              if (m.kind === "route") {
+                return `<line class="ov-route" x1="${m.x1.toFixed(2)}" y1="${m.y1.toFixed(2)}" ` +
+                  `x2="${m.x2.toFixed(2)}" y2="${m.y2.toFixed(2)}"><title>${U.esc(m.label)}</title></line>`;
+              }
+              const cls = m.kind === "town" ? "ov-town" : m.kind === "depot" ? "ov-depot" : "ov-other";
+              const r = m.kind === "town" ? 3 : 2.2;
+              return `<circle class="${cls}" cx="${m.x.toFixed(2)}" cy="${m.y.toFixed(2)}" r="${r}">` +
+                `<title>${U.esc(m.label)}</title></circle>`;
+            }).join("") +
+            `</svg>`)
+        : "";
+      const z = v.focus ? `${v.focus.scale.toFixed(1)}×` : "full";
+      return `
       <div class="snap">
-        ${v.image && sessionId
-          ? `<img class="snap-img" src="/api/sessions/${U.esc(sessionId)}/stages/${U.esc(v.image)}"
-                  alt="minimap of ${U.esc(v.gameDate || "stage")}" width="130" height="130" />`
-          : `<canvas class="snap-map" data-i="${i}" height="130"></canvas>`}
+        <div class="snap-map">
+          ${hasImg
+            ? `<div class="snap-img" style="${style}" role="img"
+                    aria-label="minimap of ${U.esc(v.gameDate || "stage")}, zoomed ${z}"></div>`
+            : `<canvas data-i="${i}" height="130"></canvas>`}
+          ${overlay}
+          ${hasImg ? `<span class="snap-zoom">${U.esc(z)}</span>` : ""}
+        </div>
         <div class="snap-meta">
           <span>${U.esc(v.gameDate || "—")}</span>
           <span>${U.esc((v.phase || "").slice(0, 22))}${(v.phase || "").length > 22 ? "…" : ""}</span>
@@ -678,12 +707,34 @@
           <span>${U.fmtInt((v.companies || []).reduce((a, c) => a + (c.stations || 0), 0))} stn</span>
           <span>${U.fmtMoney(v.companies && v.companies[0] ? v.companies[0].money : 0)}</span>
         </div>
-      </div>`).join("");
+      </div>`;
+    }).join("") + stageLegend();
     // Only the stages without a captured image need the schematic diagram.
-    box.querySelectorAll(".snap-map").forEach((cv) => {
+    box.querySelectorAll(".snap-map canvas").forEach((cv) => {
       const i = Number(cv.getAttribute("data-i"));
       if (window.Charts && window.Charts.stageMap) window.Charts.stageMap(cv, shown[i]);
     });
+  }
+
+  /**
+   * The legend.
+   *
+   * Split on purpose: the route/town/depot marks are OURS (so we can vouch for
+   * them), while the base map colours come from OpenTTD's own terrain minimap
+   * and are only labelled as observed. Mixing the two would imply we control
+   * the game's palette.
+   */
+  function stageLegend() {
+    const SV = window.StageViewUI;
+    if (!SV) return "";
+    const ours = SV.LEGEND.ours.map((x) =>
+      `<span class="lg ${x.cls}"><i></i>${U.esc(x.label)}</span>`).join("");
+    const base = SV.LEGEND.base.map((x) =>
+      `<span class="lg"><i style="background:${x.color}"></i>${U.esc(x.label)}</span>`).join("");
+    return `<div class="snap-legend">
+      <div class="snap-legend-row"><span class="lg-lead">overlay (drawn by us)</span>${ours}</div>
+      <div class="snap-legend-row"><span class="lg-lead">base map (OpenTTD's terrain minimap)</span>${base}</div>
+    </div>`;
   }
 
   /* ---------------------------- controls ---------------------------- */

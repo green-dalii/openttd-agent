@@ -123,3 +123,77 @@ describe("stage view", () => {
 		expect(v.markers).toEqual([]);
 	});
 });
+
+
+/**
+ * The zoom window ("focus").
+ *
+ * 为什么需要（2026-09-12 实测）: `screenshot minimap` 对 256×256 地图输出
+ * 256×256 的 PNG = **1 像素/格**。一次施工改动只有几格宽 → 图上只差 1-2 个像素，
+ * 于是"每个阶段的画面看起来一样"（实测 6 次抓取只有 3 张不同，且游戏日期全是
+ * 1950-01-01）。因此由服务端算出**该阶段施工所在的窗口**，前端据此裁剪放大，
+ * 让小改动可见。这是数据问题，不是截图频率问题。
+ */
+describe("stage view focus (zoom window)", () => {
+	/** A view built from a real-shaped ack payload, as the GS sends it. */
+	function viewWith(tileA: number, tileB: number, depot: number) {
+		return buildStageView({
+			gameDate: "1950-01-01",
+			mapSize: [256, 256],
+			companies: [{ id: 0, name: "c", money: 1, vehicles: 0, stations: 1 }],
+			route: { tileA, tileB, depot, townA: 1, townB: 2, popA: 100, popB: 200 },
+		});
+	}
+
+	it("centres on the construction area, not the whole map", () => {
+		// tile = y*256 + x. Two nearby towns -> a tight window around them.
+		const a = 68 * 256 + 62; // x=62,y=68
+		const b = 82 * 256 + 95; // x=95,y=82
+		const v = viewWith(a, b, b);
+		expect(v.focus).toBeDefined();
+		const f = v.focus!;
+		// Centre sits between the two towns.
+		expect(f.x).toBeGreaterThan(62 / 256);
+		expect(f.x).toBeLessThan(95 / 256);
+		expect(f.y).toBeGreaterThan(68 / 256);
+		expect(f.y).toBeLessThan(82 / 256);
+	});
+
+	it("zooms in far enough that a few tiles are visible", () => {
+		// A window spanning ~1/4 of the map means each tile is ~4x bigger on screen.
+		const v = viewWith(60 * 256 + 60, 60 * 256 + 63, 60 * 256 + 63);
+		expect(v.focus!.scale).toBeGreaterThan(2);
+	});
+
+	it("never zooms past a sane maximum (a 1-tile span must not fill the screen)", () => {
+		const t = 40 * 256 + 40;
+		const v = viewWith(t, t, t);
+		expect(v.focus!.scale).toBeLessThanOrEqual(12);
+	});
+
+	it("stays inside the map (window is clamped to the edges)", () => {
+		// Towns in the far corner: a naive centre would push the window off-map.
+		const a = 2 * 256 + 2;
+		const b = 5 * 256 + 5;
+		const f = viewWith(a, b, b).focus!;
+		expect(f.x).toBeGreaterThanOrEqual(0);
+		expect(f.x).toBeLessThanOrEqual(1);
+		expect(f.y).toBeGreaterThanOrEqual(0);
+		expect(f.y).toBeLessThanOrEqual(1);
+		// And the window must not extend past the edge.
+		const half = 1 / (2 * f.scale);
+		expect(f.x - half).toBeGreaterThanOrEqual(-0.001);
+		expect(f.x + half).toBeLessThanOrEqual(1.001);
+	});
+
+	it("has no focus when there is nothing to look at", () => {
+		const v = buildStageView({
+			gameDate: "1950-01-01",
+			mapSize: [256, 256],
+			companies: [],
+			route: null,
+		});
+		// No markers/routes -> the whole map is the honest view.
+		expect(v.focus).toBeUndefined();
+	});
+});
