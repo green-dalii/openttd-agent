@@ -28,6 +28,7 @@ import {
 } from "../agent/session-store.js";
 import { AdminUpdateType } from "../game/admin-protocol.js";
 import { aiInstalledNames, isAiInstalled } from "./ai-registry.js";
+import { toWireSnapshot } from "./wire-snapshot.js";
 
 export interface WatchOptions {
 	/** Bundled/user AI name to start as the observed company. Default "CPU". */
@@ -345,26 +346,6 @@ export async function runWatch(
 	};
 }
 
-/** Wire-friendly snapshot: Map -> plain object; BigInt already string via caller? No — keep raw, serialize at send. */
-function toWireSnapshot(world: WorldState): unknown {
-	const snap = world.snapshot();
-	const companies: Record<string, unknown> = {};
-	for (const [id, cs] of snap.companies) {
-		companies[String(id)] = {
-			info: cs.info,
-			economy: cs.economy,
-			stats: cs.stats,
-			// Server-owned curve so a refresh does not blank the chart.
-			history: cs.history.slice(-400),
-		};
-	}
-	return {
-		date: snap.date,
-		companies,
-		totalEvents: snap.totalEvents,
-		recent: snap.recent.slice(-100),
-	};
-}
 
 function sleep(ms: number): Promise<void> {
 	return new Promise((r) => setTimeout(r, ms));

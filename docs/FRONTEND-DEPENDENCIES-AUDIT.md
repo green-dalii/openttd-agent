@@ -46,7 +46,7 @@
 **C. 依赖能解决的边际价值？**
 **D. 引入风险？**
 
-### 3.1 charts.js（909 行）—— **建议：替换 line/bars，保留 donut/sparkline/stageMap**
+### 3.1 charts.js（909 → 573 行）—— **已实施（阶段 2）：替换 line/bars，保留 donut/sparkline/stageMap**
 
 ```
 function readDpr 5      function niceNum 14      function fit 21
@@ -88,13 +88,25 @@ function stackTotals 18 function stackedBars 106 function stageMap 56
 - uPlot 没有 series 数据类型校验：传错形状会运行时崩。**用 typescript d.ts 描述
   uPlot 的 API** 可以挡一层。
 
-**建议**：
-- **替换**：line、bars、坐标轴、tooltip 这部分
-- **保留**：donut、sparkline、stageMap（领域可视化）
-- **新增**：一个 ~50 行的 stacking plugin
-- **配套**：把 `uPlot.iife.min.js`（22 KB gzip）+ `uPlot.min.css`（0.7 KB gzip）vendored 到
-  `src/web/public/assets/vendor/uplot/`，加一个 `scripts/sync-vendor.ts` 从
-  `node_modules` 同步（这样既离线可复现又可持续更新）
+**实际结果（阶段 2，已实施）**：
+- `charts.js` 909 → **573 行**（-336 行）；`line`/`bars`/`stackedBars` 全部改为委托给
+  `assets/js/ucharts.js`（~230 行适配层），后者包装 vendored uPlot
+- **页面零改动**：适配层保留原有配置形状（`{series, labels, format}` /
+  `{items, series, maxBars}`），所以 `live.js` / `sessions.js` 不需要跟着改
+- **堆叠柱自己实现累积**：uPlot 的 `paths.bars` 从 0 画起，多条序列会重叠，
+  所以适配层把每条序列**累加**后再交给 uPlot（有单测锁定，含 NaN 与截断）
+- **tooltip 由 uPlot 图例承担**：启用 `legend.live` 后它列出光标处的各序列值，
+  这正好替代了我原先手搓的 tooltip **和** 页面重复的颜色图例
+  （`static/legend` 只保留 uPlot 不知道的信息，如"当前显示哪个指标"）
+- **离线降级**：uPlot 没加载时清空图表区域而不是抛异常（有单测）
+- **vendoring**：`scripts/sync-vendor.ts` 从 `node_modules` 复制（不手抄），
+  `scripts/verify-vendor.ts` 用 sha256 校验逐字节一致，已并入 `gate`
+
+**顺带修掉一个真 bug（不是 uPlot 引起的）**：`toWireSnapshot` 在
+`agent/runner.ts` 与 `game/runner.ts` 各有一份并**漂移**了——后者带 `history`，
+前者忘了。后果：`--agent` / `--serve`（主用法）下**现金曲线永远为空**。
+现已合并为唯一的 `src/game/wire-snapshot.ts`，并加 `wire-snapshot.test.ts` 锁定。
+修完实测：history 0 → 28 点，浏览器里现金图从 0 个绘制像素变成 230。
 
 ### 3.2 common.js 的 combobox（190 行）—— **建议：替换为 Tom Select**
 

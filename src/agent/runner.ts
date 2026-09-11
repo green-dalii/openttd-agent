@@ -61,6 +61,7 @@ import { WebServer } from "../web/server.js";
 import { pruningTransformContext } from "./context.js";
 import { AuditLog } from "./audit.js";
 import { isLlmConfigured } from "../config.js";
+import { toWireSnapshot } from "../game/wire-snapshot.js";
 
 export interface AgentRunOptions {
 	/** Seconds to observe construction after the decision(s). 0 = until Ctrl-C. */
@@ -186,20 +187,6 @@ function describeBrainSelection(cfg: Config): string {
 	return `${where} model=${cfg.llm.model} api=${cfg.llm.api}`;
 }
 
-/** Snapshot of the game world for the dashboard (companies are Maps). */
-function toWireSnapshot(world: WorldState): unknown {
-	const snap = world.snapshot();
-	const companies: Record<string, unknown> = {};
-	for (const [id, cs] of snap.companies) {
-		companies[String(id)] = { info: cs.info, economy: cs.economy, stats: cs.stats };
-	}
-	return {
-		date: snap.date,
-		companies,
-		totalEvents: snap.totalEvents,
-		recent: snap.recent.slice(-100),
-	};
-}
 
 /** How often to refresh the session heartbeat (docs/STARTUP-AND-LIFECYCLE.md §5). */
 const HEARTBEAT_MS = 2000;

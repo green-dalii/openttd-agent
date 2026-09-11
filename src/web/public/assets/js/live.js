@@ -385,8 +385,10 @@
       area: series.length === 1,
       height: 260,
     });
-    $("cash-legend").innerHTML = series.map((s) =>
-      `<span class="lg"><i style="background:${s.color}"></i>${U.esc(s.name)}</span>`).join("");
+    // uPlot's legend renders the colour key + live values itself, so this only
+    // annotates what it cannot know: which metric the axis is showing.
+    $("cash-legend").innerHTML =
+      `<span class="lg dim">showing ${U.esc(state.cashMetric)}</span>`;
   }
 
   function renderEvents() {
@@ -577,7 +579,6 @@
       ? `${U.fmtCost(U.utilTotals(shown))} across ${shown.length} turns`
       : `peak ${U.fmtTok(Math.max.apply(null, shown.map((x) => U.utilTotals([x]))))} per turn`;
     $("t-legend").innerHTML =
-      series.map((x) => `<span class="lg"><i style="background:${x.color}"></i>${U.esc(x.name)}</span>`).join("") +
       `<span class="lg dim">${items.length > shown.length
         ? `showing last ${shown.length} of ${items.length} turns`
         : `${items.length} turn${items.length === 1 ? "" : "s"}`}` +

@@ -1,4 +1,3 @@
-/* eslint-disable no-console */
 /**
  * LLM stub — a minimal OpenAI-compatible server for offline development.
  *

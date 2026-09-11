@@ -285,359 +285,50 @@
     STATE.set(canvas, st);
   }
 
-  /* ------------------------------ line ------------------------------ */
-  /**
-   * Multi-series line chart. cfg:
-   *   series: { name, color?, data: number[], dashed? }[]
-   *   labels?: string[]   format?: (v)=>string   area?: boolean
-   *   yZero?: boolean     height?: number
-   */
-  function line(canvas, cfg) {
-    const c = cfg || {};
-    const series = (c.series || []).filter(function (s) { return s && Array.isArray(s.data); });
-    if (!series.length) { sizedClear(canvas, c.height); return; }
-    const labels = c.labels || [];
-    const fmt = c.format || fmtCompact;
-    const pal = palette();
-
-    let hoverIdx = null;
-
-    function draw() {
-      const g = fit(canvas, c.height);
-      const ctx = g.ctx, W = g.w, H = g.h;
-      const all = [];
-      for (const s of series) for (const v of s.data) if (isFinite(v)) all.push(Number(v));
-      if (!all.length) return;
-
-      const dom = niceDomain(Math.min.apply(null, all), Math.max.apply(null, all), { includeZero: c.yZero !== false });
-      const padL = 46, padR = 12, padT = 12, padB = labels.length ? 20 : 14;
-      const innerW = Math.max(1, W - padL - padR);
-      const innerH = Math.max(1, H - padT - padB);
-      const y = scaleLinear(dom, [padT + innerH, padT]);
-      const maxLen = Math.max.apply(null, series.map(function (s) { return s.data.length; }));
-      const x = function (i) { return padL + (i / Math.max(maxLen - 1, 1)) * innerW; };
-
-      // plot background
-      ctx.fillStyle = SUNKEN();
-      ctx.fillRect(padL, padT, innerW, innerH);
-
-      // grid + y labels
-      const ticks = niceTicks(dom[0], dom[1], 5);
-      ctx.font = "10px ui-monospace, monospace";
-      ctx.textBaseline = "middle";
-      for (const t of ticks) {
-        const yy = y(t);
-        if (yy < padT - 1 || yy > padT + innerH + 1) continue;
-        ctx.strokeStyle = LINE();
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(padL, Math.round(yy) + 0.5);
-        ctx.lineTo(padL + innerW, Math.round(yy) + 0.5);
-        ctx.stroke();
-        ctx.fillStyle = MUTED();
-        ctx.textAlign = "right";
-        ctx.fillText(fmt(t), padL - 6, yy);
-      }
-
-      // x labels (first / last only, to stay readable)
-      if (labels.length) {
-        ctx.fillStyle = MUTED();
-        ctx.textAlign = "left";
-        ctx.fillText(String(labels[0]), padL, H - 8);
-        ctx.textAlign = "right";
-        ctx.fillText(String(labels[labels.length - 1]), padL + innerW, H - 8);
-      }
-
-      // series
-      series.forEach(function (s, si) {
-        const color = s.color || pal[si % pal.length];
-        const pts = [];
-        s.data.forEach(function (v, i) {
-          if (!isFinite(v)) return;
-          pts.push([x(i), y(Number(v))]);
-        });
-        if (!pts.length) return;
-        if (c.area) {
-          const grad = ctx.createLinearGradient(0, padT, 0, padT + innerH);
-          grad.addColorStop(0, hexA(color, 0.28));
-          grad.addColorStop(1, hexA(color, 0));
-          ctx.fillStyle = grad;
-          ctx.beginPath();
-          ctx.moveTo(pts[0][0], padT + innerH);
-          for (const p of pts) ctx.lineTo(p[0], p[1]);
-          ctx.lineTo(pts[pts.length - 1][0], padT + innerH);
-          ctx.closePath();
-          ctx.fill();
-        }
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 1.8;
-        ctx.setLineDash(s.dashed ? [4, 3] : []);
-        ctx.beginPath();
-        pts.forEach(function (p, i) { i === 0 ? ctx.moveTo(p[0], p[1]) : ctx.lineTo(p[0], p[1]); });
-        ctx.stroke();
-        ctx.setLineDash([]);
-        // last-point marker
-        const last = pts[pts.length - 1];
-        ctx.fillStyle = color;
-        ctx.beginPath();
-        ctx.arc(last[0], last[1], 2.6, 0, Math.PI * 2);
-        ctx.fill();
-      });
-
-      // hover crosshair + tooltip
-      if (hoverIdx !== null && hoverIdx < maxLen) {
-        const hx = x(hoverIdx);
-        ctx.strokeStyle = MUTED();
-        ctx.setLineDash([3, 3]);
-        ctx.beginPath();
-        ctx.moveTo(hx, padT);
-        ctx.lineTo(hx, padT + innerH);
-        ctx.stroke();
-        ctx.setLineDash([]);
-        series.forEach(function (s, si) {
-          const v = s.data[hoverIdx];
-          if (!isFinite(v)) return;
-          ctx.fillStyle = s.color || pal[si % pal.length];
-          ctx.beginPath();
-          ctx.arc(hx, y(Number(v)), 3.4, 0, Math.PI * 2);
-          ctx.fill();
-        });
-      }
-    }
-
-    mount(canvas, draw);
-
-    bindHover(canvas, function (ev) {
-      const rect = canvas.getBoundingClientRect();
-      const padL = 46, padR = 12;
-      const innerW = Math.max(1, rect.width - padL - padR);
-      const maxLen = Math.max.apply(null, series.map(function (s) { return s.data.length; }));
-      const rel = (ev.clientX - rect.left - padL) / innerW;
-      const idx = Math.round(rel * Math.max(maxLen - 1, 1));
-      const clamped = Math.min(Math.max(idx, 0), Math.max(maxLen - 1, 0));
-      if (clamped === hoverIdx) return;
-      hoverIdx = clamped;
-      draw();
-      const head = labels[clamped] !== undefined ? "<b>" + escHtml(String(labels[clamped])) + "</b>" : "<b>#" + (clamped + 1) + "</b>";
-      const rows = series.map(function (s, si) {
-        const col = s.color || pal[si % pal.length];
-        const v = s.data[clamped];
-        return '<div class="ct-row"><i style="background:' + col + '"></i>' +
-          escHtml(s.name || ("series " + (si + 1))) +
-          "<b>" + escHtml(isFinite(v) ? fmt(Number(v)) : "—") + "</b></div>";
-      }).join("");
-      tipShow(head + rows, ev.clientX, ev.clientY);
-    }, function () {
-      if (hoverIdx === null) return;
-      hoverIdx = null;
-      draw();
-      tipHide();
-    });
-  }
-
-  /* ------------------------------ bars ------------------------------ */
-  /**
-   * Bar chart. cfg:
-   *   items: { label, value, color?, sub? }[]
-   *   format?: (v)=>string   horizontal?: boolean   height?: number   max?: number
-   */
-  function bars(canvas, cfg) {
-    const c = cfg || {};
-    const fmt = c.format || fmtCompact;
-    const pal = palette();
-    let items = (c.items || []).filter(function (i) { return i && isFinite(i.value); });
-
-    function draw() {
-      if (!items.length) { sizedClear(canvas, c.height); return; }
-      const g = fit(canvas, c.height);
-      const ctx = g.ctx, W = g.w, H = g.h;
-      ctx.font = "10px ui-monospace, monospace";
-
-      if (c.horizontal) {
-        const sorted = items.slice().sort(function (a, b) { return b.value - a.value; })
-          .slice(0, c.max || 12);
-        const rowH = Math.min(30, Math.max(18, (H - 6) / sorted.length));
-        const labelW = 132;
-        const vmax = Math.max.apply(null, sorted.map(function (i) { return Math.abs(i.value); })) || 1;
-        sorted.forEach(function (it, i) {
-          const yy = i * rowH + 3;
-          const barW = Math.max(2, (Math.abs(it.value) / vmax) * (W - labelW - 54));
-          ctx.fillStyle = INK();
-          ctx.textBaseline = "middle";
-          ctx.textAlign = "right";
-          ctx.fillText(clip(it.label, 18), labelW - 8, yy + rowH / 2);
-          ctx.fillStyle = it.color || pal[i % pal.length];
-          roundRect(ctx, labelW, yy + 3, barW, rowH - 8, 3);
-          ctx.fill();
-          ctx.fillStyle = INK();
-          ctx.textAlign = "left";
-          ctx.fillText(fmt(it.value), labelW + barW + 6, yy + rowH / 2);
-        });
-        return;
-      }
-
-      const padL = 46, padR = 12, padT = 12, padB = 26;
-      const innerW = Math.max(1, W - padL - padR);
-      const innerH = Math.max(1, H - padT - padB);
-      const vmax = Math.max.apply(null, items.map(function (i) { return Math.max(0, i.value); })) || 1;
-      const dom = zeroBasedDomain(vmax);
-      const y = scaleLinear(dom, [padT + innerH, padT]);
-      const ticks = niceTicks(dom[0], dom[1], 4);
-      ctx.textAlign = "right";
-      ctx.textBaseline = "middle";
-      for (const t of ticks) {
-        const yy = y(t);
-        if (yy < padT - 1 || yy > padT + innerH + 1) continue;
-        ctx.strokeStyle = LINE();
-        ctx.beginPath();
-        ctx.moveTo(padL, Math.round(yy) + 0.5);
-        ctx.lineTo(padL + innerW, Math.round(yy) + 0.5);
-        ctx.stroke();
-        ctx.fillStyle = MUTED();
-        ctx.fillText(fmt(t), padL - 6, yy);
-      }
-      const slot = innerW / items.length;
-      const barW = Math.max(2, Math.min(38, slot * 0.62));
-      items.forEach(function (it, i) {
-        const cx = padL + slot * (i + 0.5);
-        const top = y(Math.max(0, it.value));
-        const h = Math.max(1, padT + innerH - top);
-        ctx.fillStyle = it.color || pal[i % pal.length];
-        roundRect(ctx, cx - barW / 2, top, barW, h, 3);
-        ctx.fill();
-        ctx.fillStyle = MUTED();
-        ctx.textAlign = "center";
-        ctx.textBaseline = "top";
-        ctx.fillText(clip(String(it.label), Math.max(4, Math.floor(slot / 7))), cx, padT + innerH + 5);
-      });
-    }
-
-    mount(canvas, draw);
-    bindHover(canvas, function (ev) {
-      const rect = canvas.getBoundingClientRect();
-      const padL = 46, padR = 12;
-      const innerW = Math.max(1, rect.width - padL - padR);
-      const slot = innerW / Math.max(items.length, 1);
-      const i = Math.floor((ev.clientX - rect.left - padL) / slot);
-      const it = items[i];
-      if (!it) return;
-      tipShow("<b>" + escHtml(String(it.label)) + "</b><div class=\"ct-row\"><b>" +
-        escHtml(fmt(it.value)) + "</b></div>" + (it.sub ? '<div class="ct-sub">' + escHtml(it.sub) + "</div>" : ""),
-        ev.clientX, ev.clientY);
-    }, tipHide);
-  }
-
-  /* --------------------------- stacked bars --------------------------- */
-  /**
-   * Stacked columns — the right shape for *composition* over time (e.g. token
-   * usage split into input/output/reasoning per turn).
+  /* ======================================================================
+   * line / bars / stackedBars now delegate to the vendored uPlot adapter
+   * (assets/js/ucharts.js). See docs/FRONTEND-DEPENDENCIES-AUDIT.md §3.1.
    *
-   * Why not a line chart: with input ~20x output, line series collapse onto the
-   * same pixels (measured: 3px apart in a 200px canvas) leaving most of the
-   * plot empty. Stacking shows both the total (bar height) and the split.
+   * The page-facing config shape is unchanged, so pages did not have to move:
+   *   line(el, { series, labels, format, area, height })
+   *   stackedBars(el, { items, series, format, height, maxBars })
    *
-   * cfg: { items: [{ label, values: number[], sub? }], series: [{name,color}],
-   *        format?, height?, maxBars? }
-   */
-  function stackedBars(canvas, cfg) {
-    const c = cfg || {};
-    const series = c.series || [];
-    let items = (c.items || []).filter(Boolean);
-    const fmt = c.format || fmtCompact;
-    const pal = palette();
-    const truncated = items.length > (c.maxBars || 24);
-    if (truncated) items = items.slice(-(c.maxBars || 24));
+   * Why: axes, ticks, DPR, resize, crosshair, legend and touch handling are
+   * commodity work, and they were the source of most of my painting bugs
+   * (measured: 149 + 98 + 106 lines of it). uPlot is MIT, zero-dependency and
+   * ships an IIFE build, so no bundler is involved.
+   *
+   * `donut` / `sparkline` / `stageMap` stay below: uPlot does not draw them and
+   * they are project-specific, so the schematic stays hand-written.
+   * ====================================================================== */
 
-    function draw() {
-      if (!items.length) { sizedClear(canvas, c.height); return; }
-      const g = fit(canvas, c.height);
-      const ctx = g.ctx, W = g.w, H = g.h;
-      const padL = 46, padR = 12, padT = 12, padB = 26;
-      const innerW = Math.max(1, W - padL - padR);
-      const innerH = Math.max(1, H - padT - padB);
-
-      const st = stackTotals(items, series.length);
-      // Zero-based: bars must start at 0 or their length lies about the value.
-      const dom = zeroBasedDomain(st.maxStack);
-      const y = scaleLinear(dom, [padT + innerH, padT]);
-
-      ctx.font = "10px ui-monospace, monospace";
-      ctx.textBaseline = "middle";
-      ctx.textAlign = "right";
-      for (const t of niceTicks(dom[0], dom[1], 5)) {
-        const yy = y(t);
-        if (yy < padT - 1 || yy > padT + innerH + 1) continue;
-        ctx.strokeStyle = LINE();
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(padL, Math.round(yy) + 0.5);
-        ctx.lineTo(padL + innerW, Math.round(yy) + 0.5);
-        ctx.stroke();
-        ctx.fillStyle = MUTED();
-        ctx.fillText(fmt(t), padL - 6, yy);
-      }
-
-      const slot = innerW / items.length;
-      const barW = Math.max(3, Math.min(34, slot * 0.66));
-      items.forEach(function (it, i) {
-        const cx = padL + slot * (i + 0.5);
-        let acc = 0;
-        const vals = (it.values || []).slice(0, series.length);
-        for (let si = 0; si < vals.length; si++) {
-          const v = Number(vals[si]) || 0;
-          if (v <= 0) continue;
-          const yTop = y(acc + v);
-          const yBot = y(acc);
-          const h = Math.max(1, yBot - yTop);
-          ctx.fillStyle = (series[si] && series[si].color) || pal[si % pal.length];
-          roundRect(ctx, cx - barW / 2, yTop, barW, h, Math.min(3, barW / 3));
-          ctx.fill();
-          acc += v;
-        }
-        ctx.fillStyle = MUTED();
-        ctx.textAlign = "center";
-        ctx.textBaseline = "top";
-        ctx.fillText(clip(String(it.label), Math.max(3, Math.floor(slot / 7))), cx, padT + innerH + 5);
-      });
-
-      // Show that older turns were dropped, so the chart never lies silently.
-      if (truncated) {
-        ctx.fillStyle = MUTED();
-        ctx.textAlign = "left";
-        ctx.textBaseline = "top";
-        ctx.fillText("…earlier turns hidden", padL + 2, padT + 1);
-      }
-    }
-
-    mount(canvas, draw);
-    bindHover(canvas, function (ev) {
-      const rect = canvas.getBoundingClientRect();
-      const padL = 46;
-      const innerW = Math.max(1, rect.width - padL - 12);
-      const slot = innerW / Math.max(items.length, 1);
-      const i = Math.floor((ev.clientX - rect.left - padL) / slot);
-      const it = items[i];
-      if (!it) return;
-      const vals = (it.values || []).slice(0, series.length);
-      // Compute the column total from the hovered item itself. `st` (the stack
-      // totals) lives in draw()'s scope and is NOT visible here - reading it was
-      // the "st is not defined" crash; deriving it locally also keeps the row
-      // percentages consistent with the column the user is actually pointing at.
-      let sum = 0;
-      for (const v of vals) sum += Number(v) || 0;
-      const rows = vals.map(function (v, si) {
-        const n = Number(v) || 0;
-        const col = (series[si] && series[si].color) || pal[si % pal.length];
-        const pct = sum ? ((n / sum) * 100).toFixed(0) : "0";
-        return '<div class="ct-row"><i style="background:' + col + '"></i>' +
-          escHtml((series[si] && series[si].name) || ("s" + (si + 1))) +
-          "<b>" + escHtml(fmt(n)) + '</b><span class="dim">' + pct + "%</span></div>";
-      }).join("");
-      tipShow("<b>" + escHtml(String(it.label)) + "</b>" + rows +
-        '<div class="ct-row ct-sub">total<b>' + escHtml(fmt(sum)) + "</b></div>" +
-        (it.sub ? '<div class="ct-sub">' + escHtml(it.sub) + "</div>" : ""), ev.clientX, ev.clientY);
-    }, tipHide);
+  /** uPlot adapter, or null when the vendor script did not load. */
+  function adapter() {
+    return (typeof window !== "undefined" && window.UCharts) || null;
   }
+
+  /**
+   * Delegate to the adapter; when it is unavailable (offline, blocked script)
+   * leave the area visibly empty rather than showing a stale drawing.
+   *
+   * 不抛异常是硬要求: 图表拿不到时页面必须照常可用（顶多少一张图）。
+   * uPlot 挂载到 `<div>`，而旧的 `sizedClear` 只认 canvas，所以这里按元素能力
+   * 分派，而不是假定它就是 canvas —— 假定错了会把整页带崩。
+   */
+  function delegate(method, el, cfg) {
+    const a = adapter();
+    if (a) return a[method](el, cfg);
+    try {
+      const height = (cfg || {}).height;
+      if (el && typeof el.getContext === "function") sizedClear(el, height);
+      else if (el && typeof el.replaceChildren === "function") el.replaceChildren();
+      else if (el) el.innerHTML = "";
+    } catch {
+      /* best effort: an empty chart must never break the page */
+    }
+    return null;
+  }
+
 
   /* ------------------------------ donut ------------------------------ */
   /**
@@ -844,25 +535,7 @@
   }
 
   /* ------------------------------ helpers ------------------------------ */
-  function roundRect(ctx, x, y, w, h, r) {
-    const rr = Math.max(0, Math.min(r, Math.min(w, h) / 2));
-    ctx.beginPath();
-    ctx.moveTo(x + rr, y);
-    ctx.lineTo(x + w - rr, y);
-    ctx.quadraticCurveTo(x + w, y, x + w, y + rr);
-    ctx.lineTo(x + w, y + h - rr);
-    ctx.quadraticCurveTo(x + w, y + h, x + w - rr, y + h);
-    ctx.lineTo(x + rr, y + h);
-    ctx.quadraticCurveTo(x, y + h, x, y + h - rr);
-    ctx.lineTo(x, y + rr);
-    ctx.quadraticCurveTo(x, y, x + rr, y);
-    ctx.closePath();
-  }
 
-  function clip(s, n) {
-    const str = String(s === undefined || s === null ? "" : s);
-    return str.length > n ? str.slice(0, Math.max(1, n - 1)) + "…" : str;
-  }
 
   function escHtml(s) {
     return String(s === undefined || s === null ? "" : s).replace(/[&<>"']/g, function (ch) {
@@ -887,9 +560,9 @@
   }
 
   window.Charts = {
-    line: line,
-    bars: bars,
-    stackedBars: stackedBars,
+    line: (el, cfg) => delegate("line", el, cfg),
+    bars: (el, cfg) => delegate("stackedBars", el, cfg),
+    stackedBars: (el, cfg) => delegate("stackedBars", el, cfg),
     stageMap: stageMap,
     donut: donut,
     sparkline: sparkline,

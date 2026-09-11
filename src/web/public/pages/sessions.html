@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>openttd-agent · sessions</title>
 <link rel="stylesheet" href="/assets/css/style.css" />
+<!-- Vendored third-party (uPlot, MIT, zero dependencies). Synced by `pnpm run vendor`. -->
+<link rel="stylesheet" href="/assets/vendor/uplot/uPlot.min.css" />
 </head>
 <body>
 <header>
@@ -61,7 +63,10 @@
 </main>
 
 <script src="/assets/js/common.js"></script>
-<script src="/assets/js/charts.js"></script>
+  <!-- uPlot must come before ucharts.js, which reads window.uPlot. -->
+  <script src="/assets/vendor/uplot/uPlot.iife.min.js"></script>
+  <script src="/assets/js/ucharts.js"></script>
+  <script src="/assets/js/charts.js"></script>
 <script src="/assets/js/sessions.js"></script>
 </body>
 </html>

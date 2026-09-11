@@ -41,7 +41,12 @@ const FRONTEND_GLOBALS = {
 };
 
 export default tseslint.config(
-	{ ignores: ["node_modules/", "dist/", "coverage/"] },
+	{
+		// Vendored third-party bundles are not our code and must not be edited:
+		// `pnpm run vendor:check` guarantees they match upstream byte-for-byte.
+		// Linting a minified file only produces thousands of meaningless findings.
+		ignores: ["node_modules/", "dist/", "coverage/", "src/web/public/assets/vendor/"],
+	},
 	...tseslint.configs.recommended,
 	{
 		files: ["**/*.ts"],
@@ -53,6 +58,11 @@ export default tseslint.config(
 				{ argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
 			],
 		},
+	},
+	{
+		// CLI/dev scripts talk to the terminal; console output is their interface.
+		files: ["scripts/**/*.ts"],
+		rules: { "no-console": "off" },
 	},
 	{
 		files: ["src/web/public/**/*.js"],

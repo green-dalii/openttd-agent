@@ -63,11 +63,12 @@ interface StackedCfg {
 }
 
 interface ChartsGlobal {
-	line: (canvas: FakeCanvasLike, cfg: LineCfg) => void;
-	stackedBars: (canvas: FakeCanvasLike, cfg: StackedCfg) => void;
+	line: (canvas: unknown, cfg: LineCfg) => unknown;
+	stackedBars: (canvas: unknown, cfg: StackedCfg) => unknown;
 	bars: unknown;
 	donut: unknown;
 	sparkline: unknown;
+	stageMap: unknown;
 	destroy: unknown;
 	util: ChartUtil;
 }
@@ -154,42 +155,6 @@ function load(): { charts: ChartsGlobal; sandbox: Record<string, unknown> } {
 	return { charts: (sandbox.window as { Charts: ChartsGlobal }).Charts, sandbox };
 }
 
-/**
- * Load charts.js with a minimal DOM so tooltip code actually runs.
- * Needed for hover tests: the tooltip guards on `typeof document`.
- */
-function loadWithDom(): {
-	charts: ChartsGlobal;
-	/** The tooltip element charts.js creates lazily, if any. */
-	tip: () => { innerHTML: string } | null;
-} {
-	let created: { innerHTML: string; style: Record<string, string>; setAttribute: () => void; getBoundingClientRect: () => { width: number; height: number } } | null = null;
-	const document = {
-		body: { appendChild: () => {} },
-		createElement: () => {
-			created = {
-				innerHTML: "",
-				style: {},
-				setAttribute: () => {},
-				getBoundingClientRect: () => ({ width: 100, height: 40 }),
-			};
-			return created;
-		},
-	};
-	const sandbox: Record<string, unknown> = {
-		window: { innerWidth: 1024 },
-		document,
-		devicePixelRatio: 1,
-		setTimeout: () => 0,
-		clearTimeout: () => {},
-	};
-	vm.createContext(sandbox);
-	vm.runInContext(SRC, sandbox);
-	return {
-		charts: (sandbox.window as { Charts: ChartsGlobal }).Charts,
-		tip: () => created,
-	};
-}
 
 describe("charts module", () => {
 	it("loads in a sandbox with no document and exposes the frozen API", () => {
@@ -292,19 +257,6 @@ describe("charts module", () => {
 		expect(ctx.calls.lineTo ?? 0).toBe(0);
 	});
 
-	it("draws grid, axis labels and a series line for populated data", () => {
-		const ctx = fakeCtx();
-		const canvas = fakeCanvas(600, ctx);
-		load().charts.line(canvas, {
-			series: [{ name: "cash", data: [0, 10, 5, 20] }],
-			labels: ["a", "b", "c", "d"],
-			height: 200,
-		});
-		expect(canvas.width).toBe(600);
-		expect(ctx.calls.stroke).toBeGreaterThan(3); // grid + series
-		expect(ctx.calls.fillText).toBeGreaterThan(3); // y ticks (+ x end labels)
-		expect(ctx.calls.lineTo).toBeGreaterThan(2); // the polyline
-	});
 
 	it("stacks series per item and reports totals + the tallest stack", () => {
 		const { util } = load().charts;
@@ -351,43 +303,7 @@ describe("charts module", () => {
 		expect(Number.isFinite(util.zeroBasedDomain(NaN)[1]!)).toBe(true);
 	});
 
-	it("draws bars from the baseline (no dead band under them)", () => {
-		const ctx = fakeCtx();
-		const canvas = fakeCanvas(600, ctx);
-		load().charts.stackedBars(canvas, {
-			items: [{ label: "t1", values: [100] }],
-			series: [{ name: "x", color: "#5fb3ff" }],
-			height: 220,
-		});
-		// The bar must reach the plot floor: padT(12) + innerH(220-12-26) = 194.
-		// With the old padded domain it stopped ~30px short of this.
-		expect(ctx.fills.length).toBeGreaterThan(0);
-		expect(Math.round(ctx.fills[0]!.maxY)).toBeGreaterThanOrEqual(190);
-	});
 
-	it("draws stacked columns for composition over time", () => {
-		// This is the fix for the token panel: a line chart collapsed the series
-		// onto the same pixels (measured 3px apart), while stacking shows both the
-		// total per turn and its split.
-		const ctx = fakeCtx();
-		const canvas = fakeCanvas(600, ctx);
-		load().charts.stackedBars(canvas, {
-			items: [
-				{ label: "t1", values: [830, 40, 10] },
-				{ label: "t2", values: [1200, 30, 8] },
-			],
-			series: [
-				{ name: "Input", color: "#5fb3ff" },
-				{ name: "Output", color: "#7bc96f" },
-				{ name: "Reasoning", color: "#c3a6ff" },
-			],
-			height: 200,
-		});
-		expect(canvas.width).toBe(600);
-		expect(canvas.height).toBe(200);
-		expect(ctx.calls.fill ?? 0).toBeGreaterThanOrEqual(6); // 2 bars x 3 segments
-		expect(ctx.calls.fillText ?? 0).toBeGreaterThan(3); // y ticks + labels
-	});
 
 	it("still sizes the canvas when there is nothing to stack", () => {
 		const ctx = fakeCtx();
@@ -411,69 +327,109 @@ describe("charts module", () => {
 	});
 });
 
+
 /**
- * Hover path — the tooltip is reached only by a real mousemove, so a broken
- * handler is invisible to every other test (and to a review of the draw code).
+ * Delegation to the vendored uPlot adapter.
  *
- * Regression: `stackedBars` read `st.totals[i]` from inside its hover callback,
- * but `st` was declared in `draw()`'s scope — so hovering the Token Usage chart
- * threw `ReferenceError: st is not defined` and the tooltip never appeared.
+ * line / bars / stackedBars used to be ~350 lines of hand-written canvas
+ * painting here (axes, ticks, DPR, resize, crosshair, hover). They now route to
+ * `assets/js/ucharts.js`, which wraps uPlot. These tests pin the seam so the
+ * migration cannot silently become a no-op or a blank chart.
  */
-describe("charts tooltip (hover path)", () => {
-	it("stacked bars: hovering shows each series' share without throwing", () => {
-		const { charts, tip } = loadWithDom();
-		const listeners: Record<string, ((ev: unknown) => void)[]> = {};
-		const canvas = fakeCanvas(400, fakeCtx(), listeners);
-		charts.stackedBars(canvas, {
-			items: [
-				{ label: "t1", values: [100, 20] },
-				{ label: "t2", values: [200, 40] },
-			],
-			series: [{ name: "in", color: "#111" }, { name: "out", color: "#222" }],
-		});
+describe("charts delegation to uPlot", () => {
+	/** Load charts.js with a recording UCharts stub in place of uPlot. */
+	function loadWithAdapter(present: boolean): {
+		charts: ChartsGlobal;
+		calls: { method: string; el: unknown; cfg: unknown }[];
+		cleared: unknown[];
+	} {
+		const calls: { method: string; el: unknown; cfg: unknown }[] = [];
+		const cleared: unknown[] = [];
+		const sandbox: Record<string, unknown> = {
+			devicePixelRatio: 1,
+			document: {
+				getElementById: () => null,
+				createElement: () => ({ style: {}, setAttribute: () => {}, classList: { add: () => {} } }),
+				body: { appendChild: () => {} },
+				documentElement: {},
+			},
+			setTimeout: () => 0,
+			clearTimeout: () => {},
+		};
+		if (present) {
+			sandbox.UCharts = {
+				available: () => true,
+				line: (el: unknown, cfg: unknown) => calls.push({ method: "line", el, cfg }),
+				stackedBars: (el: unknown, cfg: unknown) => calls.push({ method: "stackedBars", el, cfg }),
+				destroy: () => {},
+			};
+		}
+		sandbox.window = sandbox;
+		sandbox.globalThis = sandbox;
+		vm.createContext(sandbox);
+		vm.runInContext(SRC, sandbox);
+		return {
+			charts: (sandbox.window as { Charts: ChartsGlobal }).Charts,
+			calls,
+			cleared,
+		};
+	}
 
-		const move = listeners.mousemove?.[0];
-		expect(move, "stackedBars must bind a mousemove handler").toBeTypeOf("function");
-
-		// Second column: 200 + 40, so "out" is 40/240 = ~17%.
-		expect(() => move!({ clientX: 350, clientY: 50 })).not.toThrow();
-		const html = tip()?.innerHTML ?? "";
-		expect(html).toContain("t2");
-		expect(html).toContain("17%");
-		expect(html).toContain("240"); // the column total
+	it("routes line() to the adapter with the caller's config intact", () => {
+		const { charts, calls } = loadWithAdapter(true);
+		const el = { nodeName: "DIV" };
+		const cfg = { series: [{ name: "Cash", data: [1, 2] }], labels: ["a", "b"], height: 260 };
+		charts.line(el, cfg);
+		expect(calls).toHaveLength(1);
+		expect(calls[0]!.method).toBe("line");
+		expect(calls[0]!.el).toBe(el);
+		// The page-facing config must reach uPlot unmodified.
+		expect(calls[0]!.cfg).toEqual(cfg);
 	});
 
-	it("stacked bars: hovering outside any column is a no-op", () => {
-		const { charts } = loadWithDom();
-		const listeners: Record<string, ((ev: unknown) => void)[]> = {};
-		const canvas = fakeCanvas(400, fakeCtx(), listeners);
-		charts.stackedBars(canvas, { items: [{ label: "a", values: [1, 2] }], series: [{ name: "s" }] });
-		const move = listeners.mousemove?.[0];
-		expect(() => move!({ clientX: -50, clientY: 10 })).not.toThrow();
+	it("routes stackedBars() to the adapter", () => {
+		const { charts, calls } = loadWithAdapter(true);
+		const el = { nodeName: "DIV" };
+		charts.stackedBars(el, { items: [{ label: "T1", values: [1, 2] }], series: [{ name: "a" }, { name: "b" }] });
+		expect(calls).toHaveLength(1);
+		expect(calls[0]!.method).toBe("stackedBars");
 	});
 
-	it("stacked bars: a zero-total column renders 0% rather than NaN", () => {
-		const { charts, tip } = loadWithDom();
-		const listeners: Record<string, ((ev: unknown) => void)[]> = {};
-		const canvas = fakeCanvas(400, fakeCtx(), listeners);
-		charts.stackedBars(canvas, {
-			items: [{ label: "empty", values: [0, 0] }],
-			series: [{ name: "a" }, { name: "b" }],
-		});
-		listeners.mousemove?.[0]!({ clientX: 100, clientY: 50 });
-		expect(tip()?.innerHTML ?? "").not.toContain("NaN");
+	it("does not use the hand-written canvas path any more", () => {
+		// If someone reintroduces painting here, this catches it: the fake canvas
+		// records nothing because the adapter is the only route now.
+		const { charts, calls } = loadWithAdapter(true);
+		const ctx = fakeCtx();
+		const canvas = fakeCanvas(400, ctx);
+		charts.line(canvas, { series: [{ name: "s", data: [1, 2, 3] }], labels: ["a", "b", "c"] });
+		expect(calls.length).toBe(1);
+		expect(ctx.calls.stroke ?? 0).toBe(0);
+		expect(ctx.calls.fillText ?? 0).toBe(0);
 	});
 
-	it("line: hovering reports the nearest point without throwing", () => {
-		const { charts } = loadWithDom();
-		const listeners: Record<string, ((ev: unknown) => void)[]> = {};
-		const canvas = fakeCanvas(400, fakeCtx(), listeners);
-		charts.line(canvas, {
-			series: [{ name: "cash", data: [1, 5, 3, 9] }],
-			labels: ["a", "b", "c", "d"],
-		});
-		const move = listeners.mousemove?.[0];
-		expect(move).toBeTypeOf("function");
-		expect(() => move!({ clientX: 200, clientY: 40 })).not.toThrow();
+	it("stays safe (no throw) when the adapter is missing", () => {
+		// Offline, or the vendor script was blocked: the page must still load.
+		const { charts } = loadWithAdapter(false);
+		expect(() =>
+			charts.line({ nodeName: "DIV" }, { series: [{ name: "s", data: [1] }], labels: ["a"] }),
+		).not.toThrow();
+		expect(() =>
+			charts.stackedBars({ nodeName: "DIV" }, { items: [{ label: "t", values: [1] }], series: [{ name: "s" }] }),
+		).not.toThrow();
+	});
+
+	it("still provides the project-specific charts uPlot does not draw", () => {
+		// donut / sparkline / stageMap must remain (they are not commodities).
+		const { charts } = loadWithAdapter(true);
+		for (const k of ["donut", "sparkline", "stageMap"] as const) {
+			expect(typeof charts[k], k).toBe("function");
+		}
+	});
+
+	it("keeps the shared numeric utilities available to pages", () => {
+		const { charts } = loadWithAdapter(true);
+		for (const k of ["fmtCompact", "niceTicks", "donutSlices", "stackTotals"] as const) {
+			expect(typeof charts.util[k], `util.${k}`).toBe("function");
+		}
 	});
 });
