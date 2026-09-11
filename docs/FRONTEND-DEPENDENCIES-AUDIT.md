@@ -108,7 +108,38 @@ function stackTotals 18 function stackedBars 106 function stageMap 56
 现已合并为唯一的 `src/game/wire-snapshot.ts`，并加 `wire-snapshot.test.ts` 锁定。
 修完实测：history 0 → 28 点，浏览器里现金图从 0 个绘制像素变成 230。
 
-### 3.2 common.js 的 combobox（190 行）—— **建议：替换为 Tom Select**
+### 3.2 common.js 的 combobox（190 行）—— **尝试过 Tom Select，已回退（未落地）**
+
+> **状态：阶段 3 尝试后回退。** 下面保留原始分析，并补上实测结果与结论。
+> 回退原因：集成后浏览器实测 **下拉能打开但选项为空**，属功能性回归；
+> 按"每阶段验证通过才继续"的原则，宁可保留已验证可用的手写实现，
+> 也不上线一个坏掉的搜索框。**未提交任何阶段 3 代码。**
+
+**实测结果（2026-09-11）**：
+1. 直接把手写的 `<div id="prov-cbx">` 交给 Tom Select 是错的：它把该 div 当作
+   原始 input 并隐藏，然后把真正的 `.ts-wrapper` 作为**兄弟节点**插到容器外面 ——
+   页面布局与选择器全部失配，下拉永远打不开。**修正**：自己建一个 `<input>`
+   放进 host 内部（这一条已验证有效：wrapper/control/input 都正确落在 host 里）。
+2. 修正后：输入可用（`inputValue` 正确变为 `"deep"`）、下拉能打开
+   （`display:block`），**但 `.ts-dropdown` 内 `.option` 数量为 0**。
+   用 `clearOptions()` + `addOption()` + `refreshOptions(false)` 填充选项
+   在该版本下没有让下拉渲染出条目（打开瞬间列表为空）。
+   未能在本阶段内定位到根因。
+3. 期间还发现：选项渲染钩子（`$sub` 副标题、`optgroup` 分组）在打开的
+   下拉里都没有出现，说明**自定义 render 也没生效** —— 指向"选项没有真正
+   进入实例缓存"这一共同根因，而不是两个独立问题。
+
+**下一步若重启阶段 3**（建议）：
+- 改用构造期传 `options`（而非构造后 `addOption`），或用官方 `addOptions()`；
+- 用 `TomSelect.getOrCreateInstance()` 拿到实例，直接断言
+  `Object.keys(inst.options).length`，把"选项是否真的进去了"变成可断言的目标；
+- 先在一个最小 HTML 页面上跑通"配置形状 → 渲染"再接入 providers 页，
+  避免在真实页面里同时调试布局与数据两个变量。
+
+---
+
+#### 原始分析（仍然成立，供重启时参考）
+
 
 我手写的 combobox 有：
 - 键盘 ↑↓/Home/End/Enter/Esc
