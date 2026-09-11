@@ -231,6 +231,17 @@ docs/
   DASHBOARD-API.md          # dashboard 前后端**冻结契约**（改前必读）
 ```
 
+## 三种启动方式怎么选
+
+| 命令 | LLM | 能否控制 | 面板表现 |
+|---|---|---|---|
+| `pnpm run cli --watch --seed 7 --web-port 8187` | 无（观察内置 AI） | 只能 Ctrl-C | **Token/步骤是空的，这是正常的** |
+| `pnpm run cli --agent --web-port 8187` | 需要 | 只能 Ctrl-C | token/步骤/思考/阶段图齐全 |
+| `pnpm run cli --serve --web-port 8187` | 需要 | **页面可 开始/停止/暂停/恢复** | 同上，且可切换 agent/watch |
+
+`--watch` 与 `--seed 7` **不冲突**，命令可直接用——它只是"只看不打"，
+所以看不到 LLM 的决策与 token。想看智能行为就用 `--agent` 或 `--serve`。
+
 ## 运行控制（v0.6.0）
 
 ```bash
@@ -287,6 +298,16 @@ Nothing was started: fix the items above and run again.
 - `--offline-demo` — **唯一**允许无 LLM 运行的显式开关（会在 UI 标注为非真实 LLM）
 - `--skip-preflight` — 只跳过非安全项用于调试；二进制与 LLM 检查不可跳过
 - 检查**在任何副作用之前**完成：不会 spawn 游戏、不会写 session
+
+## 阶段性画面（真实小地图）
+
+每个施工阶段自动抓一张**真实小地图**（`screenshot minimap`，256×256 PNG），
+存 `<session>/stages/NNN.png`，与同名的几何描述 JSON 配对：
+
+- 小地图由**地图数据**渲染，不需要帧缓冲 → headless dedicated server 也能出图
+- 视口截图（`screenshot`）**在 headless 下不可用**（需要 3D 视口），实测 `Screenshot failed!`
+- 抓取失败时前端自动降级为示意图（由 GS ack 的真实 tile 坐标绘制）
+- 仪表盘 Stage views 实时显示；Sessions 页可回放整局所有阶段图
 
 ## Session 生命周期（v0.5.0）
 
