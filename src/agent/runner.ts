@@ -10,6 +10,7 @@
  */
 
 import { OpenTTDProcessManager } from "../game/process-manager.js";
+import { APP_VERSION } from "../version.js";
 import { AdminClient } from "../game/admin-client.js";
 import { WorldState } from "../game/world-state.js";
 import path from "node:path";
@@ -378,6 +379,7 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 		id: newSessionId(cfg.seed),
 		mode: "agent",
 		status: "running",
+		appVersion: APP_VERSION,
 		startedAt: Date.now(),
 		seed: cfg.seed,
 		startYear: cfg.startYear,
@@ -430,6 +432,7 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 	// Supervised mode attaches to an existing server (one port, one fan-out).
 	const attachedWeb = opts.web as WebServer | undefined;
 	const wired = {
+		version: APP_VERSION,
 		getSnapshot: () => ({
 			...(toWireSnapshot(world) as Record<string, unknown>),
 			telemetry: telemetry.snapshot(),

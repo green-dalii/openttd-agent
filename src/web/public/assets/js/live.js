@@ -99,6 +99,7 @@
     },
     onRun: (r) => { state.run = r; renderRunControls(); renderNotice(); },
     onStage: (v) => { state.stages = [...state.stages, v].slice(-24); renderStageViews(); },
+    onStage: (v) => { state.stages = [...state.stages, v].slice(-24); renderStageViews(); },
   });
 
   /* --------------------------- run controls --------------------------- */

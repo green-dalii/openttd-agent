@@ -25,12 +25,13 @@ import { handleServerPacket } from "../game/observer.js";
 import { runWatch } from "../game/runner.js";
 import { formatPreflight, runPreflight } from "../agent/preflight.js";
 import { runServe } from "../agent/serve.js";
+import { APP_VERSION } from "../version.js";
 import { runV02 } from "../game/v02-runner.js";
 import { runAgent } from "../agent/runner.js";
 import { applyLlmSettingsFile } from "../agent/llm-settings.js";
 
 interface CliArgs {
-	mode: "probe" | "dry-run" | "watch" | "v02" | "agent" | "serve" | "help";
+	mode: "probe" | "dry-run" | "watch" | "v02" | "agent" | "serve" | "version" | "help";
 	year?: number;
 	seed?: number;
 	timeoutMs: number;
@@ -118,6 +119,10 @@ function parseArgs(argv: string[]): CliArgs {
 			case "--web-port":
 				webPort = parseIntNum(argv[++i], "--web-port");
 				break;
+			case "--version":
+			case "-V":
+				mode = "version";
+				break;
 			case "-h":
 			case "--help":
 				mode = "help";
@@ -166,6 +171,7 @@ Usage:
   --llm-key K        agent: API key (also LLM_API_KEY / OPENAI_API_KEY)
   --llm-model M      agent: model id (e.g. gpt-4o-mini, deepseek-chat)
   --llm-api A        agent: streaming API (openai-completions|anthropic-messages)
+  --version, -V      print the version and exit
   --help             this help
 
   --offline-demo     agent: allow the scripted demo brain (no real LLM)
@@ -184,8 +190,13 @@ Startup gate (docs/STARTUP-AND-LIFECYCLE.md):
 
 async function main(): Promise<number> {
 	const args = parseArgs(process.argv.slice(2));
+	// Self-describing logs: a bug report must say which version produced it.
 	if (args.mode === "help") {
 		console.log(USAGE);
+		return 0;
+	}
+	if (args.mode === "version") {
+		console.log(`openttd-agent ${APP_VERSION}`);
 		return 0;
 	}
 	const overrides: Record<string, string> = {};
@@ -225,6 +236,7 @@ async function main(): Promise<number> {
 		offlineDemo: args.offlineDemo,
 		skipUnsafe: args.skipPreflight,
 	});
+	console.log(`[preflight] openttd-agent ${APP_VERSION}`);
 	console.log(formatPreflight(pre));
 	if (!pre.ok) return 1;
 	if (args.mode === "watch") {

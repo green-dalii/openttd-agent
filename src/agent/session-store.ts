@@ -43,6 +43,8 @@ export interface SessionMeta {
 	serverName: string;
 	companyName: string;
 	llm: { providerId: string; model: string; api: string; kind: "real" | "faux" };
+	/** App version that produced this run (so logs map back to code). */
+	appVersion?: string;
 	outcome?: {
 		constructionDone?: boolean;
 		phase?: string;
@@ -181,6 +183,7 @@ function normalizeMeta(meta: NewSessionMeta | SessionMeta): SessionMeta {
 	return {
 		...meta,
 		checkpoints: Array.isArray(meta.checkpoints) ? meta.checkpoints : [],
+		appVersion: typeof meta.appVersion === "string" ? meta.appVersion : undefined,
 		heartbeatAt: typeof meta.heartbeatAt === "number" ? meta.heartbeatAt : undefined,
 		totals: { ...emptyTotals(), ...(meta.totals ?? {}) },
 	};

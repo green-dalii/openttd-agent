@@ -21,6 +21,7 @@ import { RunSupervisor, type RunMode } from "./supervisor.js";
 import { runAgent } from "./runner.js";
 import { runWatch } from "../game/runner.js";
 import { runPreflight, formatPreflight } from "./preflight.js";
+import { APP_VERSION } from "../version.js";
 
 export interface ServeOptions {
 	webPort?: number;
@@ -87,7 +88,8 @@ export async function runServe(cfg: Config, opts: ServeOptions = {}): Promise<Se
 	web = new WebServer({
 		host: "127.0.0.1",
 		port: opts.webPort ?? 0,
-		getSnapshot: () => ({ mode: "serve", run: supervisor.state() }),
+		version: APP_VERSION,
+		getSnapshot: () => ({ mode: "serve", run: supervisor.state(), appVersion: APP_VERSION }),
 		llm: llmApi.llm,
 		catalog: llmApi.catalog,
 		sessions: {
@@ -103,6 +105,7 @@ export async function runServe(cfg: Config, opts: ServeOptions = {}): Promise<Se
 		},
 	});
 	await web.start();
+	console.log(`[serve] openttd-agent ${APP_VERSION}`);
 	console.log(`[serve] dashboard: http://127.0.0.1:${web.actualPort}/`);
 	console.log("[serve] start/stop/pause from the page (or POST /api/run/start)");
 

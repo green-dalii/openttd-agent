@@ -171,20 +171,50 @@ pnpm run cli --serve --web-port 8080
 
 新增 `{ type: "run", data: RunState }`，状态变化即推送，页面无需轮询。
 
-## 4. 游戏画面快照（#5）
+## 4. 游戏画面快照（审计阶段性成果）
 
-**平台事实（已实测）**：OpenTTD **dedicated server 没有帧缓冲**，
-rcon `screenshot` 返回 `Screenshot failed!`。因此**真实截图在本架构下不可能**——
-这是 OpenTTD 的限制，不是实现偷懒。
+### 4.1 事实边界：像素级截图在本架构下不可得
 
-**替代方案（本版采用）**：用已有的世界数据渲染**示意图**（"地图视图"）：
+**SPEC §10.2 早已写明**："拿不到的（诚实边界）: 视觉像素"。2026-09-11 逐条实测确认：
 
-- 数据来源：GS ack（`tileA/tileB/depot/frontA/frontB/townA/townB/popA/popB`）+
-  公司/车辆/站点计数。OpenTTD tile = `y * mapX + x`，可还原为坐标。
-- 渲染：Canvas 画出地图边界、两座城镇（带人口）、路线、站点/车库位置。
-- **每个阶段快照一次**（随 checkpoint 一起存 `<session>/stages/<n>.json`），
-  在 Live/Sessions 页按时间线展示，对应"阶段性的游戏画面状态"。
-- 诚实标注：UI 文案写明这是**由数据绘制的示意图**，不是游戏截图。
+| 尝试 | 结果 |
+|---|---|
+| dedicated server (`-D`) + rcon `screenshot` | `Screenshot failed!`（无帧缓冲） |
+| 本机视频驱动列表 (`-h`) | 只有 `cocoa` / `cocoa-opengl`，**没有 `null`**，无法无窗口运行 |
+| 窗口模式 `-v cocoa-opengl -g <save>` + rcon | `Could not change to foreground application. Error -50`；admin 端口未开 |
+| GS/AI API 中的截图函数 | 不存在（GS API 无 screenshot） |
 
-> 若未来需要像素级画面，只能改为"带窗口的 OpenTTD"（非 dedicated），
-> 属于架构变更，应另立 ADR。
+**结论**：本架构（headless dedicated）下拿不到游戏渲染的画面。这不是实现偷懒，
+是 OpenTTD 的限制；要真截图必须引入带窗口的客户端或外部渲染器。
+
+### 4.2 方案清单（按"接近真实画面"排序）
+
+| # | 方案 | 真实度 | 代价 | 状态 |
+|---|---|---|---|---|
+| **A** | **数据示意图**（当前实现）：用 GS ack 真实 tile 坐标 + 公司数据画地图/路线/城镇 | 低（几何示意） | 0 | ✅ 已实现 |
+| **B** | **地形抽样导出**：GS 用 `GSMap.GetTileType/GetTileHeight` 抽样（如 64×64=4096 点），Node 端合成 PNG/Canvas 色块图 | **中高**（真实地形、水域、城镇分布） | 中 | 建议 |
+| **C** | **存档外渲染**：关机时已 `rcon save`；用外部工具（`openttd-map` / `OpenTTD_surveyor`，Python）渲染存档为真正的小地图 PNG | **高**（接近官方 minimap） | 中高（多一个外部依赖/流水线） | 可选 |
+| **D** | **带窗口客户端截图**：非 dedicated 运行 + `screenshot` | 最高（真实画面） | 高（需要图形会话；本机实测不可用；破坏"headless 可复现"） | ❌ 不建议 |
+| **E** | 假彩色统计图：由已有的 GDP/站/车/货流数据上色 | 低（不是地图） | 低 | 已被 A 覆盖 |
+
+**为什么 B 是性价比最高的下一步**：`GSMap` 已在本项目 GS 里用过
+（`bridge-gs/main.nut` 的 `GSMap.GetTileIndex/GetTileSizeX/IsBuildable`），
+无需新依赖；抽样得到的 tile 类型足以画出**真实地形与水域**，比 A 的示意图接近游戏画面得多。
+
+**B 的硬约束（SPEC §10.2）**：GS 推送 ≤ **1450B/条**，且受
+`script_max_opcode_till_suspend` 执行预算限制。因此必须：
+- **抽样而非全量**（256×256 = 65536 tile 会直接超预算；64×64 ≈ 4096 次调用较安全），
+- **分帧推送**（每条消息一块，按行/按区，避免单条超限），
+- 抽样值量化成 1 字节（枚举映射：水/草/林/路/铁/城镇/工业）后再编码。
+
+**C 的接入方式**：`session.close()` 时已有存档，可在 `--serve` 的 stop 流程里
+调用外部渲染器，把 PNG 落到 `<session>/stages/`；失败不影响主流程（非致命）。
+
+### 4.3 当前实现（A）的诚实标注
+
+前端在 Stage views 面板明确写出：
+"diagram rendered from world data — OpenTTD's headless server has no framebuffer,
+so a real screenshot is not possible"。**不得**把它当作游戏截图展示。
+
+每个施工阶段存一份：`<session>/stages/NNN.json`，内容为 `stage-view.ts` 的
+几何描述（地图边界、路线、城镇位置与人口、车库），Sessions 页可回放审计。

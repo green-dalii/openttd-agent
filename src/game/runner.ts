@@ -11,6 +11,7 @@
  */
 
 import { loadConfig, ConfigError, type Config } from "../config.js";
+import { APP_VERSION } from "../version.js";
 import { OpenTTDProcessManager } from "../game/process-manager.js";
 import { AdminClient } from "../game/admin-client.js";
 import { WorldState } from "../game/world-state.js";
@@ -156,6 +157,7 @@ export async function runWatch(
 		id: newSessionId(cfg.seed),
 		mode: "watch",
 		status: "running",
+		appVersion: APP_VERSION,
 		startedAt: Date.now(),
 		seed: cfg.seed,
 		startYear: cfg.startYear,
@@ -194,6 +196,7 @@ export async function runWatch(
 	// keeps a single port and a single WS fan-out across start/stop cycles.
 	const attached = opts.web as WebServer | undefined;
 	const wired = {
+		version: APP_VERSION,
 		getSnapshot: () => ({
 			...(toWireSnapshot(world) as Record<string, unknown>),
 			// Backlog for late subscribers / reloads (docs/DASHBOARD-UI.md §7).

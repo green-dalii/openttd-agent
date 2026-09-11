@@ -91,6 +91,8 @@ export interface WebServerOptions {
 	sessions?: SessionHooks;
 	/** Start/stop/pause/resume the game run. Absent => 404. */
 	run?: RunHooks;
+	/** App version, surfaced at /api/version and in the page footer. */
+	version?: string;
 }
 
 /**
@@ -127,6 +129,7 @@ export class WebServer {
 	private wss: WebSocketServer;
 	private getSnapshot: () => unknown;
 	private runHooks?: RunHooks;
+	private version?: string;
 	private sessionHooks?: SessionHooks;
 	private onFirstClient?: () => void;
 	private llmHooks?: WebServerOptions["llm"];
@@ -141,6 +144,7 @@ export class WebServer {
 		this.getSnapshot = opts.getSnapshot ?? (() => ({}));
 		this.onFirstClient = opts.onFirstClient;
 		this.runHooks = opts.run;
+		this.version = opts.version;
 		this.sessionHooks = opts.sessions;
 		this.llmHooks = opts.llm;
 		this.telemetryHook = opts.telemetry;
@@ -217,11 +221,13 @@ export class WebServer {
 		getSnapshot?: () => unknown;
 		telemetry?: () => unknown;
 		sessions?: SessionHooks;
+		version?: string;
 	}): void {
 		if (hooks.getSnapshot) this.getSnapshot = hooks.getSnapshot;
 		if (hooks.telemetry) this.telemetryHook = hooks.telemetry;
 		else this.telemetryHook = undefined;
 		if (hooks.sessions) this.sessionHooks = hooks.sessions;
+		if (hooks.version) this.version = hooks.version;
 	}
 
 	/** Push a stage snapshot (data-rendered map diagram) for the timeline. */
@@ -325,6 +331,11 @@ export class WebServer {
 		};
 		const segments = url.pathname.split("/").filter(Boolean); // ["api", ...]
 		try {
+			// GET /api/version — which build produced these logs?
+			if (url.pathname === "/api/version" && req.method === "GET") {
+				return json(200, { version: this.version ?? "unknown" });
+			}
+
 			// /api/run[...] — control surface (docs §3.2)
 			if (segments[1] === "run") {
 				if (!this.runHooks) return json(404, { error: "run control disabled" });

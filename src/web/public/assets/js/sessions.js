@@ -173,6 +173,7 @@
           <table class="kv">
             <tr><td>Status</td><td>${statusBadge(meta.status)} ${meta.error ? U.esc(meta.error) : ""}</td></tr>
             <tr><td>Mode</td><td>${U.esc(meta.mode)} · seed ${U.esc(meta.seed)} · from ${U.esc(meta.startYear)}</td></tr>
+            <tr><td>App version</td><td>${U.esc(meta.appVersion || "—")}</td></tr>
             <tr><td>Map</td><td>${U.esc((meta.mapSize || []).join("×"))} · ${U.esc(meta.serverName || "")}</td></tr>
             <tr><td>Brain</td><td>${U.esc(meta.llm ? `${meta.llm.kind} · ${meta.llm.providerId || "—"} / ${meta.llm.model || "—"}` : "—")}</td></tr>
             <tr><td>Started</td><td>${U.esc(U.fmtClock(meta.startedAt))} · ${U.fmtAgo(meta.startedAt)}</td></tr>
