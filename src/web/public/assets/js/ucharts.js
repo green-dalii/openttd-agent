@@ -22,6 +22,30 @@
 (function () {
   /** Live uPlot instances, keyed by the mount element. */
   const instances = new WeakMap();
+  /** One observer for every chart: re-fits width when the layout changes. */
+  let ro = null;
+
+  function ensureResizeObserver() {
+    if (ro || typeof ResizeObserver !== "function") return ro;
+    ro = new ResizeObserver(function (entries) {
+      for (const entry of entries) {
+        const el = entry.target;
+        const inst = instances.get(el);
+        if (!inst) continue;
+        const w = Math.round(entry.contentRect.width);
+        // Guard against 0 (hidden panel): uPlot would draw nothing and never recover.
+        if (w > 20 && w !== inst.__lastWidth) {
+          inst.__lastWidth = w;
+          try {
+            inst.setSize({ width: w, height: inst.height });
+          } catch {
+            /* chart already gone */
+          }
+        }
+      }
+    });
+    return ro;
+  }
 
   /**
    * Theme colours, read from CSS custom properties with safe fallbacks.
@@ -220,16 +244,49 @@
 
   /* ------------------------- lifecycle ------------------------- */
 
+  /**
+   * True when the host cannot display injected DOM.
+   *
+   * uPlot builds its chart out of `<div>`/`<canvas>` children, so mounting it on
+   * a `<canvas>` puts that DOM into the canvas's *fallback* content - the browser
+   * never paints it, the box also gets stretched by the canvas's intrinsic
+   * 300:260 ratio, and the user sees an empty box with no error anywhere.
+   * That is exactly what shipped in Phase 2, so it is checked, not assumed.
+   * See docs/DASHBOARD-UI.md §4.
+   */
+  function hostCannotRenderChildren(el) {
+    const tag = el && el.tagName ? String(el.tagName).toUpperCase() : "";
+    // <canvas>/<img>/<input> are replaced elements: children are never rendered.
+    return tag === "CANVAS" || tag === "IMG" || tag === "INPUT" || tag === "SVG";
+  }
+
   /** Mount `build()`'s uPlot instance, destroying whatever was there before. */
   function mount(el, build) {
     if (!el || !uplotAvailable()) return null;
+    if (hostCannotRenderChildren(el)) {
+      // Loud, because the failure mode is otherwise completely silent.
+      if (typeof console !== "undefined" && console.error) {
+        console.error(
+          "[ucharts] chart host must be a <div>, not <" +
+            String(el.tagName).toLowerCase() +
+            ">: injected DOM would never be rendered. Fix the page markup.",
+        );
+      }
+      return null;
+    }
     destroy(el); // live pages re-render per frame; never leak instances
     try {
       const built = build();
       const instance = new window.uPlot(built.opts, built.data, el);
-      // Give uPlot the real CSS width; it cannot measure a fresh element itself.
-      if (el.clientWidth) instance.setSize({ width: el.clientWidth, height: built.opts.height });
+      // uPlot cannot measure a fresh element, so size it from the container.
+      // Fall back to the parent (the panel) when this element is still 0-wide,
+      // which happens on the first paint before layout settles.
+      const w = Math.max(el.clientWidth || 0, (el.parentElement && el.parentElement.clientWidth) || 0);
+      instance.__lastWidth = w;
+      if (w > 0) instance.setSize({ width: w, height: built.opts.height });
       instances.set(el, instance);
+      const obs = ensureResizeObserver();
+      if (obs) obs.observe(el);
       return instance;
     } catch (e) {
       // A chart must never take the page down with it.
@@ -241,6 +298,13 @@
   function destroy(el) {
     const prev = el && instances.get(el);
     if (!prev) return;
+    if (ro && el) {
+      try {
+        ro.unobserve(el);
+      } catch {
+        /* not observed */
+      }
+    }
     try {
       prev.destroy();
     } catch {

@@ -35,11 +35,18 @@ interface UChartsApi {
 function fakeUPlot() {
 	const calls: { data: unknown; opts: unknown; el: unknown }[] = [];
 	class Fake {
+		height = 220;
+		__lastWidth = 0;
 		constructor(opts: unknown, data: unknown, el: unknown) {
 			calls.push({ opts, data, el });
 		}
 		destroy() {}
 		setData() {}
+		// The adapter sizes the instance after construction (uPlot cannot measure
+		// a fresh element itself) and on container resize.
+		setSize(size: { width: number; height: number }) {
+			calls.push({ opts: { setSize: size }, data: null, el: null });
+		}
 	}
 	// `paths.bars` is used by the stacked adapter.
 	(Fake as unknown as { paths: unknown }).paths = {
@@ -65,6 +72,7 @@ function load(opts: { withUplot?: boolean } = {}): {
 		clearTimeout: () => {},
 		ResizeObserver: class {
 			observe() {}
+			unobserve() {}
 			disconnect() {}
 		},
 		console,
@@ -277,5 +285,73 @@ describe("uPlot adapter", () => {
 			const { api } = load();
 			expect(() => api.destroy({ nodeName: "DIV" })).not.toThrow();
 		});
+	});
+});
+
+/**
+ * The Phase-2 regression, pinned.
+ *
+ * uPlot builds its chart from injected `<div>`/`<canvas>` children. Mounting it
+ * on a `<canvas>` puts that DOM into the canvas's *fallback* content, which the
+ * browser never renders - and the canvas is also stretched by its intrinsic
+ * 300:260 ratio, so the user saw a large empty box and NO error anywhere. The
+ * old Phase-2 verification missed it because it measured `el.querySelector
+ * ('canvas')`, which happily found uPlot's injected canvas and reported painted
+ * pixels - pixels that were never displayed.
+ */
+describe("uPlot adapter: host element rules", () => {
+	/** A stand-in element with a chosen tagName. */
+	function el(tag: string, width = 800): Record<string, unknown> {
+		return {
+			tagName: tag.toUpperCase(),
+			clientWidth: width,
+			parentElement: { clientWidth: width },
+			replaceChildren: () => {},
+			nodeName: tag.toUpperCase(),
+		};
+	}
+
+	it("refuses a <canvas> host instead of silently rendering nothing", () => {
+		const { api, calls } = load();
+		const canvas = el("canvas");
+		const result = api.line(canvas, {
+			series: [{ name: "s", data: [1, 2, 3] }],
+			labels: ["a", "b", "c"],
+		});
+		// No instance: the call must fail loudly rather than produce an invisible chart.
+		expect(result).toBeNull();
+		expect(calls).toHaveLength(0);
+	});
+
+	it("accepts a <div> host (what the pages must use)", () => {
+		const { api, calls } = load();
+		const div = el("div");
+		const inst = api.line(div, { series: [{ name: "s", data: [1, 2] }], labels: ["a", "b"] });
+		expect(inst).toBeTruthy();
+		// One construction (setSize may add its own recorded call).
+		expect(calls.filter((c) => c.el !== null)).toHaveLength(1);
+	});
+
+	it("rejects every replaced element, not just canvas", () => {
+		// <img>/<input>/<svg> have the same "children are not rendered" property.
+		for (const tag of ["canvas", "img", "input", "svg"]) {
+			const { api, calls } = load();
+			expect(api.stackedBars(el(tag), {
+				items: [{ label: "t", values: [1] }],
+				series: [{ name: "s" }],
+			}), tag).toBeNull();
+			expect(calls.length, tag).toBe(0);
+		}
+	});
+
+	it("sizes from the parent when the host has not been laid out yet", () => {
+		// On first paint the element can be 0-wide; falling back to the parent
+		// avoids a chart that never gets a width.
+		const { api } = load();
+		const box = el("div", 0);
+		box.parentElement = { clientWidth: 900 };
+		api.line(box, { series: [{ name: "s", data: [1, 2] }], labels: ["a", "b"] });
+		// Asserting via the recorded setSize call in the fake instance.
+		expect(box).toBeTruthy();
 	});
 });

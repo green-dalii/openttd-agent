@@ -153,6 +153,26 @@ describe("front-end assets", () => {
 		expect((block.match(/title:/g) ?? []).length).toBeGreaterThanOrEqual(5);
 	});
 
+	it("never uses a <canvas> as a uPlot host", () => {
+		// Regression (Phase 2, 2026-09-11): the cash/token charts were hosted by
+		// <canvas> elements. uPlot builds its chart from injected DOM, so the chart
+		// ended up as canvas *fallback* content - never painted - and the canvas was
+		// stretched to ~1108px by its intrinsic ratio. The page showed a large empty
+		// box with no error anywhere, and the original verification missed it because
+		// it measured the injected canvas (which did have pixels) instead of asking
+		// whether anything was visible.
+		const charts = ["chart", "t-chart"];
+		for (const page of HTML_FILES()) {
+			const html = read(page);
+			for (const id of charts) {
+				const m = new RegExp(`<(\\w+)[^>]*id="${id}"`).exec(html);
+				if (!m) continue;
+				expect(m[1]!.toLowerCase(), `${page}: #${id} must be a <div> for uPlot, not <${m[1]}>`)
+					.toBe("div");
+			}
+		}
+	});
+
 	it("marks the scripted demo brain as not a real LLM", () => {
 		// A faux run must never be mistakable for a real one in the UI.
 		const src = read("assets/js/live.js");

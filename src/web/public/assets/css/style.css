@@ -144,6 +144,15 @@ main { padding: var(--sp-4) var(--sp-5) 64px; max-width: 1360px; margin: 0 auto;
 canvas { width: 100%; display: block; background: var(--bg-sunken); border-radius: var(--r-sm); }
 canvas.kpi-spark { background: none; height: 26px; margin-top: 4px; }
 .chart-box { position: relative; }
+/*
+ * uPlot renders into its host element, so chart hosts must be plain <div>s.
+ * A <canvas> host would (a) put uPlot's DOM into canvas *fallback* content that
+ * the browser never paints, and (b) be stretched by the canvas's intrinsic
+ * 300:260 ratio. To make a future mistake obvious instead of silent, the host
+ * div gets an explicit min-height.
+ */
+.chart-box > div[id] { width: 100%; min-height: 120px; }
+.chart-box .uplot { width: 100%; }
 
 /* ------------------------------- KPIs ------------------------------- */
 .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: var(--sp-3); }
