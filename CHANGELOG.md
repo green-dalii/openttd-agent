@@ -2,6 +2,59 @@
 
 本文件遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.5.0] - 2026-09-11
+
+### Added (启动门禁 + Session 生命周期)
+**启动前环境检查（`src/agent/preflight.ts`，`docs/STARTUP-AND-LIFECYCLE.md`）**
+- **先决条件不满足就拒绝启动，且发生在任何副作用之前**（不 spawn 游戏、不建 session）
+- 检查项：`binary`（存在且可执行）、`dataDir`（可建可写）、`ports`（未被占用）、
+  `llmConfigured`、`llmReachable`、`gsFiles`（warn）
+- **LLM 可用性做真实最小请求**：配置完整 ≠ 可用（key 可能失效、endpoint 不可达、
+  模型名下线）。用 `buildBrain()` 走**真正会被使用的那条路径**，避免"检查的和用的不是同一个"
+- `--offline-demo`：**唯一**允许无 LLM 运行的显式开关（UI 里标注为"非真实 LLM"）
+- `--skip-preflight`：只跳过非安全项（ports/gsFiles），二进制与 LLM 检查不可跳过
+
+**移除静默降级（本次核心行为修正）**
+- 此前 `--agent` 在 LLM 未配置时**静默换成脚本化 faux**，照样启动游戏、部署 GS、建线，
+  用户看到的是一次"无脑模拟"。现在**直接拒绝启动并说明怎么修**
+- `runAgent()` 在无 LLM 且未显式 `--offline-demo` 时抛错（不假装在工作）
+
+**Session 生命周期（`session-store.ts`）**
+- `heartbeatAt` 心跳（runner 每 2s 刷新）+ 新状态 **`interrupted`**
+- **有效状态在读取时计算**（`effectiveStatus`）：`running` 且心跳超时 15s ⇒ `interrupted`；
+  读取不写盘（幂等无副作用）
+- **启动时和解**（`reconcileStaleSessions`）：新进程把上一个进程遗留的过期 `running`
+  写盘固化为 `interrupted`（附 `endedAt` 与原因），历史自愈
+- 崩溃兜底：`uncaughtException`/`unhandledRejection` → 尽力 finalize 为 `error`；
+  新增 `SIGHUP` 处理
+- 前端：`interrupted` 是**独立徽章**并带 tooltip（此前会静默落成通用 warn）
+
+### Fixed（仪表盘数据可视化）
+- **Token 图表类型错误**：输入/输出/推理用三条折线，但输入约是输出的 20 倍，
+  实测三条线挤在 **3px** 内（输出 y≈153、推理 y≈156），200px 画布约 60% 是空白。
+  改为**堆叠柱状图**（`Charts.stackedBars`）——同时表达"每轮总量"与"构成比例"，
+  带 hover tooltip（各段数值 + 占比）
+- **柱状图基线非零**：`niceDomain()` 会在最小值下方留 4% 内边距，非负序列因此把 y 轴
+  拉到 **-200**，柱子悬空约 30px、下方一条死区。新增 `zeroBasedDomain()`，
+  柱图一律从 0 起（实测柱底 193 vs 地板 194）
+- Token 面板新增：阶段汇总（peak/累计）、按轮次倒序明细表（含缓存列）
+
+### Changed（Live 页排版）
+- Agent 行高度对齐（Token 435px vs Runtime 431px，此前 382 vs 431）
+- Reasoning 独立成面板并显示计数；步骤流与推理流并排（两者都会增长）
+- 步骤/事件流默认行为与空态文案更明确
+
+### Verified
+- `pnpm run gate` 全绿：**200 passed / 1 skipped**
+- 真机（Chrome headless + CDP）：
+  - 拒绝启动三条路径实测：无 LLM / 无二进制 / 端口占用，均 `Nothing was started`，
+    **未 spawn 任何进程、未写 session**
+  - LLM 不可达时拒绝启动；**密钥未出现在任何输出**（`sk-` 出现次数 0）
+  - SIGKILL 模拟崩溃 → 盘上 `running`；重启后 `reconciled 1 abandoned session`，
+    仪表盘由 `running` 变为 **`interrupted`**；同时并存 `running`（当前）与
+    `aborted`（优雅停止）三种状态各就各位
+  - Token 图：柱底 193 / 地板 194（基线正确）、网格 4360px、图例与汇总正常
+
 ## [0.4.0] - 2026-09-11
 
 ### Changed (Dashboard UX 重构 — 从「极客日志面板」到可用控制台)

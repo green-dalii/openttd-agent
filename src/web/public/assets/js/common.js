@@ -683,6 +683,9 @@ window.UI = {
   getPref, setPref,
   // charts helpers
   PALETTE, pickColor,
+  /** Sum [{values:number[]}] — for chart legends. */
+  utilTotals: (items) => (items || []).reduce(
+    (a, it) => a + (it.values || []).reduce((x, v) => x + (Number(v) || 0), 0), 0),
   // infra
   connectWs, renderNav,
 };

@@ -162,3 +162,13 @@ export function redactKey(key: string): string {
 	if (key.length <= 8) return "****";
 	return `${key.slice(0, 4)}…${key.slice(-4)}`;
 }
+
+/**
+ * Remove a secret from arbitrary text (provider error bodies often echo the key
+ * back). Distinct from `redactKey`, which *masks* a key for display; this one
+ * *eliminates* it. Kept next to redactKey so key-safety lives in one place.
+ */
+export function scrubSecret(text: string, secret: string): string {
+	if (!secret || secret.length < 4) return text;
+	return text.split(secret).join("<redacted>");
+}

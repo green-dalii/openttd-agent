@@ -135,6 +135,42 @@
     });
   }
 
+  /**
+   * Zero-based upper domain for bar/column charts: [0, niceMax].
+   *
+   * Bar charts must start at 0 — that is what makes bar length proportional to
+   * value. niceDomain() pads ~4% below the minimum, which for a non-negative
+   * series pushes the axis below zero and leaves a dead band under the bars.
+   */
+  function zeroBasedDomain(max, count) {
+    const hi = Number(max);
+    if (!isFinite(hi) || hi <= 0) return [0, 1];
+    const ticks = niceTicks(0, hi, count || 5);
+    const top = ticks.length ? ticks[ticks.length - 1] : hi;
+    return [0, top > 0 ? top : 1];
+  }
+
+  /**
+   * Stack series values per item: returns per-item totals, the running total and
+   * the max stack height (for the y domain). Pure — safe to unit test.
+   */
+  function stackTotals(items, seriesCount) {
+    const list = Array.isArray(items) ? items : [];
+    const n = Math.max(0, Number(seriesCount) || 0);
+    const totals = [];
+    let running = 0;
+    let maxStack = 0;
+    for (const it of list) {
+      const vals = (it && Array.isArray(it.values) ? it.values : []).slice(0, n);
+      let sum = 0;
+      for (const v of vals) sum += Number(v) || 0;
+      totals.push(sum);
+      running += sum;
+      if (sum > maxStack) maxStack = sum;
+    }
+    return { totals: totals, total: running, maxStack: maxStack };
+  }
+
   /** 1.5k / 2M / -3B style compaction; "—" for non-finite. */
   function fmtCompact(v) {
     const n = Number(v);
@@ -444,7 +480,7 @@
       const innerW = Math.max(1, W - padL - padR);
       const innerH = Math.max(1, H - padT - padB);
       const vmax = Math.max.apply(null, items.map(function (i) { return Math.max(0, i.value); })) || 1;
-      const dom = niceDomain(0, vmax, { includeZero: true });
+      const dom = zeroBasedDomain(vmax);
       const y = scaleLinear(dom, [padT + innerH, padT]);
       const ticks = niceTicks(dom[0], dom[1], 4);
       ctx.textAlign = "right";
@@ -488,6 +524,114 @@
       tipShow("<b>" + escHtml(String(it.label)) + "</b><div class=\"ct-row\"><b>" +
         escHtml(fmt(it.value)) + "</b></div>" + (it.sub ? '<div class="ct-sub">' + escHtml(it.sub) + "</div>" : ""),
         ev.clientX, ev.clientY);
+    }, tipHide);
+  }
+
+  /* --------------------------- stacked bars --------------------------- */
+  /**
+   * Stacked columns — the right shape for *composition* over time (e.g. token
+   * usage split into input/output/reasoning per turn).
+   *
+   * Why not a line chart: with input ~20x output, line series collapse onto the
+   * same pixels (measured: 3px apart in a 200px canvas) leaving most of the
+   * plot empty. Stacking shows both the total (bar height) and the split.
+   *
+   * cfg: { items: [{ label, values: number[], sub? }], series: [{name,color}],
+   *        format?, height?, maxBars? }
+   */
+  function stackedBars(canvas, cfg) {
+    const c = cfg || {};
+    const series = c.series || [];
+    let items = (c.items || []).filter(Boolean);
+    const fmt = c.format || fmtCompact;
+    const pal = palette();
+    const truncated = items.length > (c.maxBars || 24);
+    if (truncated) items = items.slice(-(c.maxBars || 24));
+
+    function draw() {
+      if (!items.length) { sizedClear(canvas, c.height); return; }
+      const g = fit(canvas, c.height);
+      const ctx = g.ctx, W = g.w, H = g.h;
+      const padL = 46, padR = 12, padT = 12, padB = 26;
+      const innerW = Math.max(1, W - padL - padR);
+      const innerH = Math.max(1, H - padT - padB);
+
+      const st = stackTotals(items, series.length);
+      // Zero-based: bars must start at 0 or their length lies about the value.
+      const dom = zeroBasedDomain(st.maxStack);
+      const y = scaleLinear(dom, [padT + innerH, padT]);
+
+      ctx.font = "10px ui-monospace, monospace";
+      ctx.textBaseline = "middle";
+      ctx.textAlign = "right";
+      for (const t of niceTicks(dom[0], dom[1], 5)) {
+        const yy = y(t);
+        if (yy < padT - 1 || yy > padT + innerH + 1) continue;
+        ctx.strokeStyle = LINE();
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(padL, Math.round(yy) + 0.5);
+        ctx.lineTo(padL + innerW, Math.round(yy) + 0.5);
+        ctx.stroke();
+        ctx.fillStyle = MUTED();
+        ctx.fillText(fmt(t), padL - 6, yy);
+      }
+
+      const slot = innerW / items.length;
+      const barW = Math.max(3, Math.min(34, slot * 0.66));
+      items.forEach(function (it, i) {
+        const cx = padL + slot * (i + 0.5);
+        let acc = 0;
+        const vals = (it.values || []).slice(0, series.length);
+        for (let si = 0; si < vals.length; si++) {
+          const v = Number(vals[si]) || 0;
+          if (v <= 0) continue;
+          const yTop = y(acc + v);
+          const yBot = y(acc);
+          const h = Math.max(1, yBot - yTop);
+          ctx.fillStyle = (series[si] && series[si].color) || pal[si % pal.length];
+          roundRect(ctx, cx - barW / 2, yTop, barW, h, Math.min(3, barW / 3));
+          ctx.fill();
+          acc += v;
+        }
+        ctx.fillStyle = MUTED();
+        ctx.textAlign = "center";
+        ctx.textBaseline = "top";
+        ctx.fillText(clip(String(it.label), Math.max(3, Math.floor(slot / 7))), cx, padT + innerH + 5);
+      });
+
+      // Show that older turns were dropped, so the chart never lies silently.
+      if (truncated) {
+        ctx.fillStyle = MUTED();
+        ctx.textAlign = "left";
+        ctx.textBaseline = "top";
+        ctx.fillText("…earlier turns hidden", padL + 2, padT + 1);
+      }
+    }
+
+    mount(canvas, draw);
+    bindHover(canvas, function (ev) {
+      const rect = canvas.getBoundingClientRect();
+      const padL = 46;
+      const innerW = Math.max(1, rect.width - padL - 12);
+      const slot = innerW / Math.max(items.length, 1);
+      const i = Math.floor((ev.clientX - rect.left - padL) / slot);
+      const it = items[i];
+      if (!it) return;
+      const vals = (it.values || []).slice(0, series.length);
+      let sum = 0;
+      const rows = vals.map(function (v, si) {
+        const n = Number(v) || 0;
+        sum += n;
+        const col = (series[si] && series[si].color) || pal[si % pal.length];
+        const pct = st.totals[i] ? ((n / st.totals[i]) * 100).toFixed(0) : "0";
+        return '<div class="ct-row"><i style="background:' + col + '"></i>' +
+          escHtml((series[si] && series[si].name) || ("s" + (si + 1))) +
+          "<b>" + escHtml(fmt(n)) + '</b><span class="dim">' + pct + "%</span></div>";
+      }).join("");
+      tipShow("<b>" + escHtml(String(it.label)) + "</b>" + rows +
+        '<div class="ct-row ct-sub">total<b>' + escHtml(fmt(sum)) + "</b></div>" +
+        (it.sub ? '<div class="ct-sub">' + escHtml(it.sub) + "</div>" : ""), ev.clientX, ev.clientY);
     }, tipHide);
   }
 
@@ -678,10 +822,13 @@
   window.Charts = {
     line: line,
     bars: bars,
+    stackedBars: stackedBars,
     donut: donut,
     sparkline: sparkline,
     destroy: destroy,
     util: {
+      stackTotals: stackTotals,
+      zeroBasedDomain: zeroBasedDomain,
       niceTicks: niceTicks,
       niceDomain: niceDomain,
       donutSlices: donutSlices,

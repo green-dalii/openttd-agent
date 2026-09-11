@@ -32,9 +32,28 @@
         elComparePanel = $("compare-panel"), elCompareBody = $("compare-body"),
         elComparePick = $("compare-pick");
 
+  /**
+   * Status badge. `interrupted` is the state a hard-killed run ends in (no
+   * finalize could run), so it must be visibly distinct from a live `running`
+   * and explain itself instead of looking like a generic warning.
+   * See docs/STARTUP-AND-LIFECYCLE.md §5.
+   */
+  const STATUS_INFO = {
+    running: { cls: "live", title: "Currently running" },
+    completed: { cls: "ok", title: "Finished normally" },
+    aborted: { cls: "warn", title: "Stopped by the user" },
+    error: { cls: "bad", title: "Ended with an error" },
+    interrupted: {
+      cls: "bad",
+      title:
+        "The process stopped without shutting down cleanly (crash, kill -9, or power loss), " +
+        "so the run has no final result. Anything recorded before that point is still intact.",
+    },
+  };
+
   const statusBadge = (s) => {
-    const cls = s === "completed" ? "ok" : s === "running" ? "live" : s === "error" ? "bad" : "warn";
-    return `<span class="badge ${cls}">${U.esc(s)}</span>`;
+    const info = STATUS_INFO[s] || { cls: "warn", title: "" };
+    return `<span class="badge ${info.cls}" title="${U.esc(info.title)}">${U.esc(s)}</span>`;
   };
 
   /* ------------------------------- list ------------------------------- */

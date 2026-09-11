@@ -627,6 +627,32 @@ openttd-agent/
    `test/unit/web-assets.test.ts`：`node --check` 全部脚本、校验每个 `href/src` 指向真实文件、
    `PAGES` 目标存在、页面脚本不得使用 `common.js` 未导出的符号、public 根目录不得有散落文件。
 
+## 10.18 v0.5.0 实现: 启动门禁 + Session 生命周期 + 图表语义（2026-09-11）
+契约: `docs/STARTUP-AND-LIFECYCLE.md`（门禁与生命周期）、`docs/DASHBOARD-UI.md` §6c（图表选型）。
+
+1. **禁止静默降级（行为修正）**: 此前 `--agent` 在 LLM 未配置时**静默换成 faux** 并照常
+   启动游戏/部署 GS/建线 → 用户看到"无脑模拟"。现在先决条件不满足即**拒绝启动**。
+   无 LLM 只能通过显式 `--offline-demo` 运行，且 UI 标注为非真实 LLM。
+2. **门禁必须在副作用之前**: brain 装配原先在 boot 之后，导致"检查了但已经启动了"。
+   顺序固定为 preflight → spawn → session。preflight 不写任何会话文件。
+3. **LLM 可用性需要真实请求**: `isLlmConfigured()` 只判断字段齐全；key 失效/端点不可达/
+   模型下线都测不出来。用 `buildBrain()` 走**与运行期同一条路径**发最小请求，
+   首个事件即判定（避免"检查的和用的不是同一个"）。
+   **pi-ai 的流式失败不抛异常**，而是产出 `{type:"error"}` 事件 —— 只看 try/catch
+   会把死端点误判为可用（实测踩到）。
+4. **心跳 + 派生状态**: 强杀进程时 `finalize()` 不会执行，盘上永远 `running`。
+   runner 每 2s 写 `heartbeatAt`；`effectiveStatus()` 在**读取时**把超时（15s）的
+   `running` 判为 `interrupted`（不写盘，幂等）；`reconcileStaleSessions()` 在启动时固化。
+   注意 `listSessions` 走 **index.json**，因此心跳必须同时更新 index，否则读者看到的是陈旧记录。
+5. **和解必须看"原始"状态**: `effectiveStatus` 把"过期 running"和"已和解"都映射为
+   `interrupted`，用它做幂等判断会导致每轮都重写；必须先用存储态的 `status === "running"` 过滤。
+6. **柱状图零基**: `niceDomain()` 的 4% 内边距会把非负序列的 y 轴拉到 0 以下，
+   柱子悬空、下方死区（实测悬空 ~30px）→ 柱图用 `zeroBasedDomain()`。
+7. **构成数据不能用折线**: 输入/输出/推理量级差 ~20 倍时三条折线挤压在同一像素带
+   （实测 3px 内），应改用堆叠柱。
+8. **前端空态也要定尺寸**: 跳过 `fit()` 会留下默认 300×200 backing store，
+   配合 `canvas{width:100%}` 无 CSS 高度 → 3:2 方框，数据到达时高度跳变。
+
 ---
 
 ## 附录 A — 关键事实来源

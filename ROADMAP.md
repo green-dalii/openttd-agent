@@ -13,10 +13,29 @@
 - ✅ **v0.2.0 — 通信 + Executor「手」（M2 前半）（2026-09-09 完成）**
 - 🔵 **v0.2.1 — Pi Agent「脑」接线（M2 后半）（接线完成，盈利验收待真实 LLM）**
 - ✅ **v0.3.0 — Dashboard 打磨（观测/配置/复盘三页）（2026-09-10 完成）**
+- ✅ **v0.4.0 — Dashboard UX 重构（可搜索选型 / 信息层级 / 图表）（2026-09-11 完成）**
+- ✅ **v0.5.0 — 启动门禁 + Session 生命周期 + 图表语义（2026-09-11 完成）**
 - ⬜ v0.3.1 — 进化闭环（M3）
 - ⬜ v0.4.0 — 打磨与广度（M4）
 
 ---
+
+### v0.5.0 — 启动门禁 + Session 生命周期（✅ 完成, 2026-09-11）
+**目标**: 先决条件不满足就拒绝启动；进程异常结束时不再谎报 running；修正图表语义。
+
+1. `src/agent/preflight.ts`：binary / dataDir / ports / llmConfigured / **llmReachable** / gsFiles，
+   **在任何副作用之前**执行（不 spawn、不建 session）✅
+2. **移除静默 faux 降级**：`--offline-demo` 是唯一显式豁免，UI 标注为非真实 LLM ✅
+3. 心跳 + `interrupted` 派生状态 + 启动和解（历史自愈）✅
+4. 崩溃兜底：`uncaughtException` / `unhandledRejection` / `SIGHUP` ✅
+5. Token 图改**堆叠柱**（构成语义）+ 柱图**零基** + 空态定尺寸 ✅
+6. Live 页排版对齐；Reasoning 独立面板 ✅
+
+**验收**
+- [x] `pnpm run gate` 全绿（202 passed / 1 skipped）
+- [x] 三条拒绝路径（无 LLM / 无二进制 / 端口占用）均 `Nothing was started`，未 spawn、未写 session
+- [x] SIGKILL 后重启和解 → 仪表盘由 running 变 interrupted；running/aborted/interrupted 同屏正确
+- [x] 密钥零泄漏（输出中 `sk-` 计数 0）
 
 ### v0.0.1 — 脚手架 + MVP（✅ 已完成，2026-09-07）
 **目标**: 可运行的 TypeScript 工程骨架 + 首个**可验证的最小闭环**，证明「外部进程↔OpenTTD Admin Port」双向通道真实可用。

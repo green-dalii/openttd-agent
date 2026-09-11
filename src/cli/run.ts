@@ -23,6 +23,7 @@ import {
 } from "../game/admin-protocol.js";
 import { handleServerPacket } from "../game/observer.js";
 import { runWatch } from "../game/runner.js";
+import { formatPreflight, runPreflight } from "../agent/preflight.js";
 import { runV02 } from "../game/v02-runner.js";
 import { runAgent } from "../agent/runner.js";
 import { applyLlmSettingsFile } from "../agent/llm-settings.js";
@@ -39,6 +40,10 @@ interface CliArgs {
 	llmApiKey?: string;
 	llmModel?: string;
 	llmApi?: string;
+	/** Explicitly allow the scripted (non-LLM) demo brain in agent mode. */
+	offlineDemo?: boolean;
+	/** Skip non-safety preflight checks (ports/gsFiles) for debugging. */
+	skipPreflight?: boolean;
 }
 
 function parseArgs(argv: string[]): CliArgs {
@@ -53,6 +58,8 @@ function parseArgs(argv: string[]): CliArgs {
 	let llmApiKey: string | undefined;
 	let llmModel: string | undefined;
 	let llmApi: string | undefined;
+	let offlineDemo = false;
+	let skipPreflight = false;
 	for (let i = 0; i < argv.length; i++) {
 		const a = argv[i]!;
 		switch (a) {
@@ -83,6 +90,12 @@ function parseArgs(argv: string[]): CliArgs {
 			case "--llm-api":
 				llmApi = argv[++i];
 				break;
+			case "--offline-demo":
+				offlineDemo = true;
+				break;
+			case "--skip-preflight":
+				skipPreflight = true;
+				break;
 			case "--dry-run":
 				mode = "dry-run";
 				break;
@@ -109,7 +122,10 @@ function parseArgs(argv: string[]): CliArgs {
 				throw new ConfigError(`unknown option: ${a}`);
 		}
 	}
-	return { mode, year, seed, timeoutMs, aiName, webPort, demoSeconds, llmBaseUrl, llmApiKey, llmModel, llmApi };
+	return {
+		mode, year, seed, timeoutMs, aiName, webPort, demoSeconds,
+		llmBaseUrl, llmApiKey, llmModel, llmApi, offlineDemo, skipPreflight,
+	};
 }
 
 function parseIntNum(v: string | undefined, label: string): number {
@@ -130,10 +146,11 @@ Usage:
   pnpm run cli --v02 [opts]             v0.2 decision-loop demo: deploy BridgeV1 GS
                                          + ExecutorV1 AI, drive a demo blueprint,
                                          Ctrl-C or --demo-seconds N to stop.
-  pnpm run cli --agent [opts]           v0.2.1 agent brain: boot game + BridgeV1 GS
+  pnpm run cli --agent [opts]           Agent brain: boot game + BridgeV1 GS
                                          + ExecutorV1, then let the pi-agent-core
-                                         brain decide (faux provider by default) and
-                                         observe construction (--demo-seconds N).
+                                         brain decide (requires a configured LLM;
+                                         see Startup gate below) and observe
+                                         construction (--demo-seconds N).
   --year N           start year (default 1950)
   --seed N           map seed (default random)
   --timeout-ms N     probe: max wait for first economy (default 15000)
@@ -145,9 +162,18 @@ Usage:
   --llm-api A        agent: streaming API (openai-completions|anthropic-messages)
   --help             this help
 
+  --offline-demo     agent: allow the scripted demo brain (no real LLM)
+  --skip-preflight   skip non-safety preflight checks (ports/gsFiles)
+  OPENTTD_AI_LIST.
+
 Env: OPENTTD_BINARY, OPENTTD_DATA_DIR, OPENTTD_ADMIN_PORT/PASSWORD,
      OPENTTD_GAME_PORT, OPENTTD_START_YEAR, OPENTTD_SEED, OPENTTD_MAP_SIZE,
      OPENTTD_AI_LIST.
+
+Startup gate (docs/STARTUP-AND-LIFECYCLE.md):
+  Every mode runs a preflight first. Agent mode REQUIRES a configured AND
+  reachable LLM; without one it refuses to start instead of silently running
+  a scripted simulation.
 `;
 
 async function main(): Promise<number> {
@@ -169,6 +195,18 @@ async function main(): Promise<number> {
 		console.log(JSON.stringify(redact(cfg), null, 2));
 		return 0;
 	}
+
+	// --- startup gate (docs/STARTUP-AND-LIFECYCLE.md §2) ---
+	// Runs BEFORE any side effect: no game process, no session record, no files
+	// beyond a writability probe. A failed check refuses to start rather than
+	// falling back to a silent scripted run.
+	const pre = await runPreflight(cfg, {
+		mode: args.mode,
+		offlineDemo: args.offlineDemo,
+		skipUnsafe: args.skipPreflight,
+	});
+	console.log(formatPreflight(pre));
+	if (!pre.ok) return 1;
 	if (args.mode === "watch") {
 		try {
 			await runWatch(cfg, {

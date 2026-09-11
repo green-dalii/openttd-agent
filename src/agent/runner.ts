@@ -40,6 +40,7 @@ import {
 	listSessions,
 	newSessionId,
 	readSession,
+	reconcileStaleSessions,
 } from "./session-store.js";
 import type { SessionTotals } from "./session-store.js";
 import { createLlmApi } from "./llm-api.js";
@@ -53,6 +54,12 @@ export interface AgentRunOptions {
 	seconds?: number;
 	/** Scripted plan for the faux provider: towns to build between. */
 	planTowns?: { from?: number; to?: number };
+	/**
+	 * Explicit opt-in to the scripted (non-LLM) brain. Without it, agent mode
+	 * refuses to run when no LLM is configured instead of silently simulating
+	 * (docs/STARTUP-AND-LIFECYCLE.md §1).
+	 */
+	offlineDemo?: boolean;
 	/** Max decision turns to run (default 1). */
 	maxTurns?: number;
 	/**
@@ -126,8 +133,18 @@ function toWireSnapshot(world: WorldState): unknown {
 	};
 }
 
+/** How often to refresh the session heartbeat (docs/STARTUP-AND-LIFECYCLE.md §5). */
+const HEARTBEAT_MS = 2000;
+
 /** Run one agent-driven session. Returns process exit code. */
 export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise<number> {
+	// Self-heal history left behind by a previous process that died without
+	// finalizing (SIGKILL / crash): those records would otherwise show as
+	// "running" in the dashboard forever.
+	const reconciled = reconcileStaleSessions(cfg.dataDir);
+	if (reconciled.length) {
+		console.log(`[agent] reconciled ${reconciled.length} abandoned session(s) -> interrupted`);
+	}
 	const mgr = new OpenTTDProcessManager(cfg);
 	const world = new WorldState();
 	let client: AdminClient | null = null;
@@ -225,15 +242,18 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 		console.log(
 			`[agent] brain: REAL ${built.source} provider ${describeBrainSelection(cfg)} key=${redactKey(cfg.llm.apiKey)}`,
 		);
-	} else if (mustServeDashboard) {
-		// Dashboard needs a model to render telemetry against; the faux provider
-		// keeps the UI demonstrable offline (it is NOT a real LLM).
-		const fauxForUi = createFauxCore({});
-		fauxForUi.setResponses([fauxAssistantMessage("No LLM configured yet — configure a provider in the dashboard.")]);
-		streamFn = fauxForUi.streamSimple as unknown as AgentOptionsStreamFn;
-		model = fauxForUi.getModel() as unknown as Model<string>;
-		console.log("[agent] brain: FAUX provider (dashboard only — configure a provider in the Providers page)");
+	} else if (!opts.offlineDemo) {
+		// No silent fallback. Preflight normally catches this before we get here;
+		// reaching it means the runner was invoked directly (library/tests), and
+		// pretending to work would be worse than failing.
+		throw new Error(
+			"no LLM configured: refusing to run a simulated game. " +
+				"Configure a provider (Providers page, or LLM_PROVIDER/LLM_MODEL), " +
+				"or pass --offline-demo to run the scripted demo explicitly.",
+		);
 	} else {
+		// Explicit offline demo: scripted plan, clearly labelled as such in the UI
+		// (brain.kind = "faux") so it can never be mistaken for a real run.
 		const faux = createFauxCore({});
 		const plan = opts.planTowns ?? {};
 		faux.setResponses([
@@ -247,7 +267,7 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 		]);
 		streamFn = faux.streamSimple as unknown as AgentOptionsStreamFn;
 		model = faux.getModel() as unknown as Model<string>;
-		console.log("[agent] brain: FAUX provider (offline demo — no real LLM configured)");
+		console.log("[agent] brain: FAUX provider (--offline-demo — NOT a real LLM)");
 	}
 	// Audit trail (SPEC §7): decisions + action results -> JSONL under dataDir.
 	const audit = new AuditLog(cfg.dataDir, "agent-audit.jsonl");
@@ -281,6 +301,32 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 	});
 	session.saveTelemetry(telemetry.snapshot());
 	console.log(`[agent] session: ${session.id}`);
+
+	// Keep the record provably alive, and make a hard failure end it properly.
+	session.heartbeat();
+	const heartbeatTimer = setInterval(() => session.heartbeat(), HEARTBEAT_MS);
+	heartbeatTimer.unref();
+
+	// Last-resort finalization: an uncaught error or a hard signal must not leave
+	// the session claiming to be running.
+	let finalized = false;
+	const emergencyFinalize = (status: "error" | "aborted", reason?: string) => {
+		if (finalized) return;
+		finalized = true;
+		try {
+			session.finalize({ status, ...(reason ? { error: reason } : {}) });
+		} catch {
+			/* shutdown must not throw */
+		}
+	};
+	const onCrash = (err: unknown) => {
+		const msg = err instanceof Error ? err.message : String(err);
+		console.error(`[agent] fatal: ${msg}`);
+		emergencyFinalize("error", msg.slice(0, 300));
+	};
+	process.once("uncaughtException", onCrash);
+	process.once("unhandledRejection", onCrash);
+	process.once("SIGHUP", requestStop);
 
 	// --- dashboard (same shape as watch mode; docs/DASHBOARD-API.md §3) ---
 	let web: WebServer | null = null;
@@ -410,6 +456,10 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 	console.log(
 		`[agent] tools: ${finalTelemetry.totals.toolCalls} calls, ${finalTelemetry.totals.toolFailures} failed`,
 	);
+	clearInterval(heartbeatTimer);
+	process.off("uncaughtException", onCrash);
+	process.off("unhandledRejection", onCrash);
+	finalized = true;
 	session.finalize({
 		status: reachedDone ? "completed" : "aborted",
 		outcome: {

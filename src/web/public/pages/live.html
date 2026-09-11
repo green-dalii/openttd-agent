@@ -28,16 +28,19 @@
   <!-- 2. How is the agent doing? -->
   <div class="group"><h2>Agent</h2><div class="rule"></div>
     <span class="dim" id="t-brain"></span></div>
+  <!-- Row 1: the chart needs the wide column; runtime figures are narrow. -->
   <section class="grid split-21">
     <div class="panel">
       <div class="panel-head">
-        <h2>Token usage per turn</h2>
+        <h2>Token usage</h2>
         <div class="actions">
           <div id="token-metric"></div>
+          <span class="dim" id="token-summary"></span>
         </div>
       </div>
-      <div class="chart-box"><canvas id="t-chart" height="200"></canvas></div>
+      <div class="chart-box"><canvas id="t-chart" height="220"></canvas></div>
       <div class="legend" id="t-legend"></div>
+      <h3>Per-turn detail</h3>
       <div class="scroll-y" id="t-turn-table"></div>
     </div>
     <div class="panel">
@@ -48,6 +51,7 @@
     </div>
   </section>
 
+  <!-- Row 2: steps (live feed) beside reasoning (also a feed) - both grow. -->
   <section class="grid two">
     <div class="panel">
       <div class="panel-head"><h2>Agent steps <span class="dim" id="steps-count">(0)</span></h2>
@@ -59,8 +63,8 @@
       <ol id="steps" class="steps"></ol>
     </div>
     <div class="panel">
-      <div class="panel-head"><h2>Reasoning</h2>
-        <span class="dim">latest thoughts from the model</span></div>
+      <div class="panel-head"><h2>Reasoning <span class="dim" id="think-count"></span></h2>
+        <span class="dim">newest first</span></div>
       <ol id="t-thinking" class="thinking-list"></ol>
     </div>
   </section>

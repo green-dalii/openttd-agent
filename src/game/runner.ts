@@ -22,6 +22,7 @@ import {
 	listSessions,
 	newSessionId,
 	readSession,
+	reconcileStaleSessions,
 } from "../agent/session-store.js";
 import { AdminUpdateType } from "../game/admin-protocol.js";
 import { aiInstalledNames, isAiInstalled } from "./ai-registry.js";
@@ -59,6 +60,9 @@ export async function runWatch(
 	cfg: Config,
 	opts: WatchOptions = {},
 ): Promise<WatchResult> {
+	// Heal history abandoned by a previous crash before adding to it.
+	const reconciled = reconcileStaleSessions(cfg.dataDir);
+	if (reconciled.length) console.log(`[watch] reconciled ${reconciled.length} abandoned session(s)`);
 	const started = Date.now();
 	const aiName = opts.aiName ?? DEFAULT_AI;
 	const pollIntervalMs = opts.pollIntervalMs ?? DEFAULT_POLL_MS;
@@ -154,6 +158,29 @@ export async function runWatch(
 	});
 	console.log(`[watch] session: ${session.id}`);
 
+	// Liveness + last-resort finalization (docs/STARTUP-AND-LIFECYCLE.md §5):
+	// without these a killed process leaves the run showing as running forever.
+	session.heartbeat();
+	const heartbeatTimer = setInterval(() => session.heartbeat(), 2000);
+	heartbeatTimer.unref();
+	let finalized = false;
+	const emergencyFinalize = (status: "error" | "aborted", reason?: string) => {
+		if (finalized) return;
+		finalized = true;
+		try {
+			session.finalize({ status, ...(reason ? { error: reason } : {}) });
+		} catch {
+			/* shutdown must not throw */
+		}
+	};
+	const onCrash = (err: unknown) => {
+		const msg = err instanceof Error ? err.message : String(err);
+		console.error(`[watch] fatal: ${msg}`);
+		emergencyFinalize("error", msg.slice(0, 300));
+	};
+	process.once("uncaughtException", onCrash);
+	process.once("unhandledRejection", onCrash);
+
 	// --- web server (dashboard) ---
 	const llmApi = createLlmApi({ dataDir: cfg.dataDir, cfg, envLlm: cfg.llm });
 	web = new WebServer({
@@ -234,6 +261,10 @@ export async function runWatch(
 	await mgr.stop();
 
 	// Finalize the session record so the dashboard can list/replay it.
+	clearInterval(heartbeatTimer);
+	process.off("uncaughtException", onCrash);
+	process.off("unhandledRejection", onCrash);
+	finalized = true;
 	try {
 		const snap = world.snapshot();
 		const c0 = snap.companies.get(0);

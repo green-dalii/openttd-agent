@@ -3,7 +3,7 @@
 > LLM agent framework that autonomously plays — and self-evolves inside — OpenTTD.
 > External brain (Pi `@earendil-works/pi-agent-core`) ↔ Admin Port TCP ↔ in-game Bridge GS / Executor AI.
 
-**当前状态: v0.4.0 (Dashboard UX)** — 观测 + 决策闭环 + 三页式 Dashboard（Live / Providers / Sessions）、
+**当前状态: v0.5.0 (启动门禁 + 生命周期)** — 观测 + 决策闭环 + 三页式 Dashboard（Live / Providers / Sessions）、
 39 个内置 provider 目录、token 计量、历史局复盘与运行对比。**盈利验收待真实 LLM key**。
 完整设计见 [`SPEC.md`](SPEC.md)，开发计划见 [`ROADMAP.md`](ROADMAP.md)，开发规范见 [`AGENTS.md`](AGENTS.md)。
 
@@ -230,6 +230,53 @@ test/
 docs/
   DASHBOARD-API.md          # dashboard 前后端**冻结契约**（改前必读）
 ```
+
+## 启动门禁（v0.5.0）
+
+**先决条件不满足就拒绝启动，绝不静默跑假模拟。** 每个模式启动前都会检查：
+
+```
+$ pnpm run cli --agent --web-port 8080
+[preflight] ERROR: prerequisites not met
+  ✓ binary     /Applications/.../openttd
+  ✓ dataDir    /tmp/openttd-agent-data (writable)
+  ✓ ports      admin 3977, game 3979 free
+  ✗ llmConfigured no provider/model configured
+      → Configure one on the Providers page (pnpm run cli --agent --web-port 8080),
+        or set LLM_PROVIDER/LLM_MODEL. To run the scripted demo instead, pass --offline-demo.
+Nothing was started: fix the items above and run again.
+```
+
+| 检查 | 说明 |
+|---|---|
+| `binary` | OpenTTD 可执行文件存在**且可执行** |
+| `dataDir` | 数据目录可创建可写 |
+| `ports` | admin/game 端口未被占用 |
+| `llmConfigured` | agent 模式**必须**配好 provider/model（`--watch` 是纯观测，不需要 LLM） |
+| `llmReachable` | 对 LLM 发一次**真实最小请求**——配置完整 ≠ 可用（key 失效/端点不可达/模型下线） |
+| `gsFiles` | GameScript 源（warn，不阻断） |
+
+- `--offline-demo` — **唯一**允许无 LLM 运行的显式开关（会在 UI 标注为非真实 LLM）
+- `--skip-preflight` — 只跳过非安全项用于调试；二进制与 LLM 检查不可跳过
+- 检查**在任何副作用之前**完成：不会 spawn 游戏、不会写 session
+
+## Session 生命周期（v0.5.0）
+
+进程被 `kill -9` / 崩溃 / 断电时 `finalize()` 不会执行。此前该 Session 会**永远显示
+running**，误导用户。现在：
+
+| 结束方式 | 状态 |
+|---|---|
+| 正常跑完 | `completed` |
+| Ctrl-C / SIGTERM / SIGHUP | `aborted`（优雅，有 `endedAt`） |
+| 未捕获异常 | `error`（带 message） |
+| `kill -9` / 崩溃 / 断电 | 盘上 `running` → 读取时判为 **`interrupted`**；下次启动写盘固化 |
+
+机制：runner 每 2s 写 `heartbeatAt`；读取时 `effectiveStatus()` 判断心跳是否超时
+（15s）→ 返回 `interrupted`（**不写盘**，幂等）；新进程启动时
+`reconcileStaleSessions()` 把遗留的过期记录固化，历史自愈。
+
+> 详见 [`docs/STARTUP-AND-LIFECYCLE.md`](docs/STARTUP-AND-LIFECYCLE.md)。
 
 ## Dashboard（v0.3.0）
 

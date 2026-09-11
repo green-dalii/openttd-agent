@@ -132,6 +132,25 @@ describe("front-end assets", () => {
 		expect(listFiles().filter((f) => !f.includes("/"))).toEqual([]);
 	});
 
+	it("renders every session status the backend can produce", () => {
+		// `interrupted` (a hard-killed run) must be a distinct, explained badge -
+		// it used to fall through to a generic "warn" with no tooltip.
+		const src = read("assets/js/sessions.js");
+		for (const st of ["running", "completed", "aborted", "error", "interrupted"]) {
+			expect(src, `sessions.js has no badge for status "${st}"`).toContain(`${st}:`);
+		}
+		// Each entry must carry both a class and an explanation.
+		const block = src.slice(src.indexOf("const STATUS_INFO"), src.indexOf("const statusBadge"));
+		expect((block.match(/cls:/g) ?? []).length).toBeGreaterThanOrEqual(5);
+		expect((block.match(/title:/g) ?? []).length).toBeGreaterThanOrEqual(5);
+	});
+
+	it("marks the scripted demo brain as not a real LLM", () => {
+		// A faux run must never be mistakable for a real one in the UI.
+		const src = read("assets/js/live.js");
+		expect(src).toMatch(/not a real LLM|scripted demo/i);
+	});
+
 	it("keeps secrets out of the front end and out of local storage", () => {
 		// common.js is the only file allowed to touch storage (via setPref), and it
 		// must not learn about credential fields to do it.

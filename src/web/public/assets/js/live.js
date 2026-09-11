@@ -168,6 +168,7 @@
     elMode.textContent = mode && mode.kind
       ? (mode.kind === "real" ? "agent · real LLM" : "agent · test brain")
       : (state.connected ? "observer only" : "—");
+    elMode.classList.toggle("neg", Boolean(mode && mode.kind === "faux"));
     if (state.startedAt) elElapsed.textContent = U.fmtDuration(Date.now() - state.startedAt);
   }
 
@@ -348,13 +349,15 @@
       $("t-tools").innerHTML = "";
       $("t-thinking").innerHTML = "";
       $("t-turn-table").innerHTML = "";
-      C.line($("t-chart"), { series: [] });
+      $("token-summary").textContent = "";
+      $("think-count").textContent = "";
+      C.stackedBars($("t-chart"), { items: [], series: [], height: 220 });
       $("t-legend").innerHTML = "";
       return;
     }
     const b = t.brain || {};
     brain.textContent = b.kind
-      ? `${b.kind === "real" ? "real LLM" : "test brain"} · ${b.provider || "—"} / ${b.model || "—"}`
+      ? `${b.kind === "real" ? "real LLM" : "⚠ scripted demo (not a real LLM)"} · ${b.provider || "—"} / ${b.model || "—"}`
       : "not configured";
 
     const u = (t.usage && t.usage.total) || {};
@@ -387,6 +390,7 @@
       : `<p class="empty">No tool calls yet.</p>`;
 
     const th = state.thinking || [];
+    $("think-count").textContent = th.length ? `(${th.length})` : "";
     $("t-thinking").innerHTML = th.length
       ? th.slice().reverse().map((x) =>
           `<li><span class="badge">turn ${U.esc(x.turn)}</span> <span class="dim">${U.esc(U.fmtClock(x.ts))}</span>
@@ -394,9 +398,15 @@
       : `<li class="empty">No reasoning captured yet.</li>`;
   }
 
+  /** Read a CSS custom property (single place: charts read colours too). */
+  function cssColor(name, fallback) {
+    const v = getComputedStyle(document.documentElement).getPropertyValue(name);
+    return (v && v.trim()) || fallback;
+  }
+
   /* Metric switch for the per-turn chart (tokens vs cost) — view pref (docs §6). */
   const TOKEN_METRICS = [
-    { id: "total", label: "Tokens", hint: "input + output per turn" },
+    { id: "total", label: "Tokens", hint: "input / output / reasoning per turn" },
     { id: "cost", label: "Cost", hint: "spend per turn" },
   ];
   U.segmented($("token-metric"), {
@@ -409,33 +419,73 @@
     const t = state.telemetry;
     const byTurn = (t && t.usage && t.usage.byTurn) || [];
     if (!byTurn.length) {
-      C.line($("t-chart"), { series: [] });
+      C.stackedBars($("t-chart"), { items: [], series: [], height: 220 });
       $("t-legend").innerHTML = "";
-      $("t-turn-table").innerHTML = `<p class="empty">No LLM turns recorded yet.</p>`;
+      $("t-turn-table").innerHTML =
+        `<p class="empty">No LLM turns recorded yet — token usage appears after the first decision.</p>`;
       return;
     }
-    const labels = byTurn.map((r) => `turn ${r.turn}`);
-    const cost = state.tokenMetric === "cost";
-    const fmt = cost ? U.fmtCost : U.fmtTok;
-    const series = cost
-      ? [{ name: "Cost", color: "#e5c07b", data: byTurn.map((r) => Number((r.usage || {}).costTotal) || 0) }]
-      : [
-          { name: "Input", color: "#5fb3ff", data: byTurn.map((r) => Number((r.usage || {}).input) || 0) },
-          { name: "Output", color: "#7bc96f", data: byTurn.map((r) => Number((r.usage || {}).output) || 0) },
-          { name: "Reasoning", color: "#c3a6ff", data: byTurn.map((r) => Number((r.usage || {}).reasoning) || 0) },
-        ];
-    C.line($("t-chart"), { series, format: fmt, yZero: true, height: 200 });
-    $("t-legend").innerHTML = series.map((s) =>
-      `<span class="lg"><i style="background:${s.color}"></i>${U.esc(s.name)}</span>`).join("");
+
+    const isCost = state.tokenMetric === "cost";
+    let series;
+    let items;
+    if (isCost) {
+      series = [{ name: "Cost", color: "#e5c07b" }];
+      items = byTurn.map((r) => ({
+        label: `T${r.turn}`,
+        values: [Number((r.usage || {}).costTotal) || 0],
+        sub: `${U.fmtInt((r.usage || {}).totalTokens)} tokens`,
+      }));
+    } else {
+      // Composition, not comparison: input dwarfs output/reasoning, so stacking
+      // is the only honest way to show both the per-turn total and its split.
+      const color = cssColor("--c2", "#5fb3ff");
+      series = [
+        { name: "Input", color },
+        { name: "Output", color: cssColor("--c3", "#7bc96f") },
+        { name: "Reasoning", color: cssColor("--c4", "#c3a6ff") },
+        { name: "Cache read", color: cssColor("--c7", "#56d4dd") },
+      ];
+      items = byTurn.map((r) => {
+        const u = r.usage || {};
+        return {
+          label: `T${r.turn}`,
+          values: [u.input || 0, u.output || 0, u.reasoning || 0, u.cacheRead || 0],
+          sub: `${U.fmtInt(u.totalTokens)} tokens in ${U.fmtInt(r.steps)} step(s)`,
+        };
+      });
+    }
+
+    const shown = items.slice(-24);
+    C.stackedBars($("t-chart"), {
+      items: shown,
+      series,
+      format: isCost ? U.fmtCost : U.fmtTok,
+      height: 220,
+      maxBars: 24,
+    });
+
+    const totals = U.utilTotals(shown);
+    $("token-summary").textContent = isCost
+      ? `${U.fmtCost(U.utilTotals(shown))} across ${shown.length} turns`
+      : `peak ${U.fmtTok(Math.max.apply(null, shown.map((x) => U.utilTotals([x]))))} per turn`;
+    $("t-legend").innerHTML =
+      series.map((x) => `<span class="lg"><i style="background:${x.color}"></i>${U.esc(x.name)}</span>`).join("") +
+      `<span class="lg dim">${items.length > shown.length
+        ? `showing last ${shown.length} of ${items.length} turns`
+        : `${items.length} turn${items.length === 1 ? "" : "s"}`}` +
+      `${isCost ? "" : ` · ${U.fmtTok(totals)} total`}</span>`;
+
     $("t-turn-table").innerHTML =
       `<table class="kv"><tr><th>Turn</th><th class="num">In</th><th class="num">Out</th>` +
-      `<th class="num">Reason</th><th class="num">Total</th><th class="num">Cost</th><th class="num">Steps</th></tr>` +
-      byTurn.map((r) => {
+      `<th class="num">Reason</th><th class="num">Cache</th><th class="num">Total</th>` +
+      `<th class="num">Cost</th><th class="num">Steps</th></tr>` +
+      byTurn.slice().reverse().map((r) => {
         const u = r.usage || {};
         return `<tr><td>${U.esc(r.turn)}</td><td class="num">${U.fmtTok(u.input)}</td>
           <td class="num">${U.fmtTok(u.output)}</td><td class="num">${U.fmtTok(u.reasoning)}</td>
-          <td class="num">${U.fmtTok(u.totalTokens)}</td><td class="num">${U.fmtCost(u.costTotal)}</td>
-          <td class="num">${U.fmtInt(r.steps)}</td></tr>`;
+          <td class="num">${U.fmtTok(u.cacheRead)}</td><td class="num">${U.fmtTok(u.totalTokens)}</td>
+          <td class="num">${U.fmtCost(u.costTotal)}</td><td class="num">${U.fmtInt(r.steps)}</td></tr>`;
       }).join("") + `</table>`;
   }
 

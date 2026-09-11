@@ -14,13 +14,29 @@ import path from "node:path";
 import type { TelemetrySnapshot } from "./telemetry.js";
 import type { GameEvent } from "../types.js";
 
+/**
+ * Lifecycle states. `interrupted` is never written by a *running* process — it
+ * is derived at read time when a heartbeat goes stale, or persisted by the next
+ * process during startup reconciliation (docs/STARTUP-AND-LIFECYCLE.md §5).
+ */
+export type SessionStatus = "running" | "completed" | "aborted" | "error" | "interrupted";
+
+/** A running session with no heartbeat for this long is presumed dead. */
+export const STALE_AFTER_MS = 15_000;
+
 /** One durable summary of a session (§2.5). */
 export interface SessionMeta {
 	id: string;
 	mode: "watch" | "agent" | "v02" | "probe";
-	status: "running" | "completed" | "aborted" | "error";
+	status: SessionStatus;
 	startedAt: number;
 	endedAt?: number;
+	/**
+	 * Last liveness tick while running. Lets readers detect a process that died
+	 * without finalizing (SIGKILL / crash / power loss) instead of showing a
+	 * dead run as "running" forever. See docs/STARTUP-AND-LIFECYCLE.md §5.
+	 */
+	heartbeatAt?: number;
 	seed: number;
 	startYear: number;
 	mapSize: [number, number];
@@ -165,6 +181,7 @@ function normalizeMeta(meta: NewSessionMeta | SessionMeta): SessionMeta {
 	return {
 		...meta,
 		checkpoints: Array.isArray(meta.checkpoints) ? meta.checkpoints : [],
+		heartbeatAt: typeof meta.heartbeatAt === "number" ? meta.heartbeatAt : undefined,
 		totals: { ...emptyTotals(), ...(meta.totals ?? {}) },
 	};
 }
@@ -224,6 +241,18 @@ export class SessionStore {
 			/* non-fatal */
 		}
 		return full;
+	}
+
+	/**
+	 * Liveness tick. Cheap enough to call every couple of seconds: it rewrites
+	 * meta.json and the index entry (readers consult the index first, so both
+	 * must carry the heartbeat or a live run looks abandoned).
+	 */
+	heartbeat(at: number = Date.now()): SessionMeta {
+		this.meta = { ...this.meta, heartbeatAt: at };
+		this.writeMeta();
+		this.upsertIndex(this.meta);
+		return this.meta;
 	}
 
 	/** Current meta (in-memory, always populated). */
@@ -303,11 +332,14 @@ export class SessionStore {
 }
 
 /** All sessions, newest first (never throws). */
-export function listSessions(dataDir: string): SessionMeta[] {
+export function listSessions(dataDir: string, now: number = Date.now()): SessionMeta[] {
 	const file = path.join(sessionsDir(dataDir), INDEX_FILE);
 	const cur = readJsonSafe<{ sessions?: SessionMeta[] }>(file);
 	const list = Array.isArray(cur?.sessions) ? cur.sessions : [];
-	return [...list].sort((a, b) => b.startedAt - a.startedAt);
+	// Report the *effective* status so a dead run is never listed as running.
+	return list
+		.map((m) => withEffectiveStatus(normalizeMeta(m), now))
+		.sort((a, b) => b.startedAt - a.startedAt);
 }
 
 /** Read one session's meta/telemetry/events/audit, or null when unknown. */
@@ -315,11 +347,13 @@ export function readSession(
 	dataDir: string,
 	id: string,
 	opts: { limit?: number } = {},
+	now: number = Date.now(),
 ): SessionReadResult | null {
 	if (!id || id.includes("/") || id.includes("..")) return null;
 	const dir = sessionDir(dataDir, id);
-	const meta = readJsonSafe<SessionMeta>(path.join(dir, "meta.json"));
-	if (!meta) return null;
+	const raw = readJsonSafe<SessionMeta>(path.join(dir, "meta.json"));
+	if (!raw) return null;
+	const meta = withEffectiveStatus(normalizeMeta(raw), now);
 	return {
 		meta,
 		telemetry: readJsonSafe<TelemetrySnapshot>(path.join(dir, "telemetry.json")),
@@ -348,4 +382,85 @@ export function buildStageSummary(
 			`(${t.toolFailures} failed), ${t.events} events, ${tokens} tokens`,
 		totals: { events: t.events, decisions: t.decisions, toolCalls: t.toolCalls, usage: { ...t.usage } },
 	};
+}
+
+/* ---------------------- lifecycle: liveness ---------------------- */
+
+/**
+ * Status a reader should show, accounting for a process that died without
+ * finalizing. Pure: it never mutates or writes.
+ *
+ * A `running` record whose last heartbeat (or start, if it never beat) is older
+ * than STALE_AFTER_MS is reported as `interrupted`; anything already finished is
+ * returned unchanged regardless of age.
+ */
+export function effectiveStatus(meta: SessionMeta, now: number = Date.now()): SessionStatus {
+	if (meta.status !== "running") return meta.status;
+	const last = meta.heartbeatAt ?? meta.startedAt;
+	return now - last > STALE_AFTER_MS ? "interrupted" : "running";
+}
+
+/** Apply effectiveStatus to a meta object (returns a copy when it changes). */
+function withEffectiveStatus(meta: SessionMeta, now: number): SessionMeta {
+	const eff = effectiveStatus(meta, now);
+	return eff === meta.status ? meta : { ...meta, status: eff };
+}
+
+/**
+ * Persist `interrupted` for records abandoned by a previous process.
+ *
+ * Called once at startup: it makes history self-healing so the dashboard never
+ * shows a dead session as running, and it is idempotent.
+ * Returns the ids that were changed.
+ */
+export function reconcileStaleSessions(dataDir: string, now: number = Date.now()): string[] {
+	const changed: string[] = [];
+	let list: SessionMeta[];
+	try {
+		// Read the RAW index: effectiveStatus() maps both "stale running" and
+		// "already reconciled" to "interrupted", so it cannot tell them apart and
+		// a second pass would keep re-writing (not idempotent). The stored status
+		// is what distinguishes them.
+		const file = path.join(sessionsDir(dataDir), INDEX_FILE);
+		const cur = readJsonSafe<{ sessions?: SessionMeta[] }>(file);
+		const raw = Array.isArray(cur?.sessions) ? cur.sessions : [];
+		list = raw.map((m) => normalizeMeta(m));
+	} catch {
+		return changed;
+	}
+	for (const meta of list) {
+		// Only a record that still *claims* to be running can be abandoned.
+		if (meta.status !== "running") continue;
+		if (effectiveStatus(meta, now) !== "interrupted") continue;
+		try {
+			const dir = sessionDir(dataDir, meta.id);
+			const next: SessionMeta = {
+				...meta,
+				status: "interrupted",
+				heartbeatAt: meta.heartbeatAt,
+				endedAt: meta.heartbeatAt ?? meta.startedAt,
+				error: meta.error ?? "interrupted: process exited without finalizing",
+			};
+			writeFileSync(path.join(dir, "meta.json"), JSON.stringify(next, null, 2), "utf8");
+			changed.push(meta.id);
+		} catch {
+			/* a record we cannot rewrite must not break startup */
+		}
+	}
+	if (changed.length) {
+		// Rewrite the index so a single read sees the corrected states.
+		try {
+			const file = path.join(sessionsDir(dataDir), INDEX_FILE);
+			const cur = readJsonSafe<{ sessions?: SessionMeta[] }>(file);
+			const all = Array.isArray(cur?.sessions) ? cur.sessions : [];
+			const ids = new Set(changed);
+			const next = all.map((m) =>
+				ids.has(m.id) ? { ...m, status: "interrupted" as const, endedAt: m.heartbeatAt ?? m.startedAt } : m,
+			);
+			writeFileSync(file, JSON.stringify({ sessions: next }, null, 2), "utf8");
+		} catch {
+			/* non-fatal: meta.json is the source of truth */
+		}
+	}
+	return changed;
 }

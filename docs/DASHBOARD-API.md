@@ -318,6 +318,9 @@ GET /api/sessions/:id
   原因：v0.3 只在 shutdown 写 checkpoint，导致 Live 页「阶段性总结」面板在**整局运行期间
   恒为空**（晚订阅/刷新者同样看不到）。见 `docs/DASHBOARD-UI.md` §7。
 - **`snapshot.sessionId`** 供 Live 页在遥测缺席（watch 模式）时仍能显示当前局 ID。
+- **Session 状态可能是派生的**：`GET /api/sessions[/:id]` 返回的 `status` 已经过
+  `effectiveStatus()` 处理——心跳超时的 `running` 会呈现为 `interrupted`。
+  客户端**不得**再把 `running` 当作"一定活着"（见 `docs/STARTUP-AND-LIFECYCLE.md` §5）。
 
 ---
 

@@ -27,6 +27,11 @@ interface ChartUtil {
 	fmtCompact: (v: unknown) => string;
 	niceNum: (range: number, round: boolean) => number;
 	fractionsOf: (values: number[]) => number[];
+	stackTotals: (
+		items: { values: number[] }[],
+		seriesCount: number,
+	) => { totals: number[]; total: number; maxStack: number };
+	zeroBasedDomain: (max: number, count?: number) => number[];
 }
 
 interface FakeCanvasLike {
@@ -49,8 +54,17 @@ interface LineCfg {
 	height?: number;
 }
 
+interface StackedCfg {
+	items: { label: string; values: number[]; sub?: string }[];
+	series: { name: string; color?: string }[];
+	format?: (v: number) => string;
+	height?: number;
+	maxBars?: number;
+}
+
 interface ChartsGlobal {
 	line: (canvas: FakeCanvasLike, cfg: LineCfg) => void;
+	stackedBars: (canvas: FakeCanvasLike, cfg: StackedCfg) => void;
 	bars: unknown;
 	donut: unknown;
 	sparkline: unknown;
@@ -59,23 +73,55 @@ interface ChartsGlobal {
 }
 
 /** Minimal 2D-context stub: records call counts, returns nothing meaningful. */
-function fakeCtx(): { calls: Record<string, number> } & Record<string, unknown> {
+function fakeCtx(): {
+	calls: Record<string, number>;
+	fills: { minY: number; maxY: number }[];
+} & Record<string, unknown> {
 	const calls: Record<string, number> = {};
 	const noop = (name: string) => () => {
 		calls[name] = (calls[name] || 0) + 1;
 	};
-	const ctx: Record<string, unknown> = { calls };
+	// Path recorder: lets tests assert drawn geometry (e.g. "bar reaches floor").
+	const fills: { minY: number; maxY: number }[] = [];
+	let pathY: number[] = [];
+	const ctx: Record<string, unknown> = { calls, fills };
 	for (const m of [
-		"setTransform", "clearRect", "fillRect", "beginPath", "moveTo", "lineTo",
-		"stroke", "fill", "arc", "fillText", "save", "restore", "closePath",
-		"setLineDash", "quadraticCurveTo", "strokeRect", "measureText",
+		"setTransform", "clearRect", "fillRect", "stroke", "arc", "fillText",
+		"save", "restore", "setLineDash", "strokeRect",
 	]) {
 		ctx[m] = noop(m);
 	}
+	// Track the y extent of each filled path.
+	ctx.beginPath = () => {
+		pathY = [];
+		calls.beginPath = (calls.beginPath || 0) + 1;
+	};
+	const recordY = (name: string) => (...args: unknown[]) => {
+		const y = args.length >= 2 ? Number(args[1]) : Number(args[0]);
+		if (Number.isFinite(y)) pathY.push(y);
+		calls[name] = (calls[name] || 0) + 1;
+	};
+	ctx.moveTo = recordY("moveTo");
+	ctx.lineTo = recordY("lineTo");
+	ctx.quadraticCurveTo = (...args: unknown[]) => {
+		// (cx, cy, x, y): the endpoint and control point both lie on the path
+		for (const v of [Number(args[1]), Number(args[3])]) {
+			if (Number.isFinite(v)) pathY.push(v);
+		}
+		calls.quadraticCurveTo = (calls.quadraticCurveTo || 0) + 1;
+	};
+	ctx.closePath = noop("closePath");
+	ctx.fill = () => {
+		if (pathY.length) fills.push({ minY: Math.min(...pathY), maxY: Math.max(...pathY) });
+		calls.fill = (calls.fill || 0) + 1;
+	};
 	ctx.measureText = () => ({ width: 10 });
 	ctx.createLinearGradient = () => ({ addColorStop: () => {} });
 	ctx.getImageData = () => ({ data: new Uint8ClampedArray(0) });
-	return ctx as { calls: Record<string, number> } & Record<string, unknown>;
+	return ctx as {
+		calls: Record<string, number>;
+		fills: { minY: number; maxY: number }[];
+	} & Record<string, unknown>;
 }
 
 /** Minimal canvas stub. clientWidth models the CSS layout width. */
@@ -213,6 +259,97 @@ describe("charts module", () => {
 		expect(ctx.calls.stroke).toBeGreaterThan(3); // grid + series
 		expect(ctx.calls.fillText).toBeGreaterThan(3); // y ticks (+ x end labels)
 		expect(ctx.calls.lineTo).toBeGreaterThan(2); // the polyline
+	});
+
+	it("stacks series per item and reports totals + the tallest stack", () => {
+		const { util } = load().charts;
+		const r = util.stackTotals(
+			[
+				{ values: [100, 20, 5] },
+				{ values: [250, 10, 1] },
+				{ values: [0, 0, 0] },
+			],
+			3,
+		);
+		expect(r.totals).toEqual([125, 261, 0]);
+		expect(r.total).toBe(386);
+		expect(r.maxStack).toBe(261);
+	});
+
+	it("ignores extra values beyond the declared series count", () => {
+		const { util } = load().charts;
+		const r = util.stackTotals([{ values: [10, 10, 10] }], 2);
+		expect(r.totals).toEqual([20]); // the 3rd value has no series colour
+		expect(r.maxStack).toBe(20);
+	});
+
+	it("handles empty and malformed stack input without NaN", () => {
+		const { util } = load().charts;
+		expect(util.stackTotals([], 3)).toEqual({ totals: [], total: 0, maxStack: 0 });
+		const r = util.stackTotals([{ values: [] }, { values: [NaN, 5] }], 2);
+		expect(r.totals[0]).toBe(0);
+		expect(Number.isFinite(r.totals[1]!)).toBe(true);
+		expect(Number.isFinite(r.maxStack)).toBe(true);
+	});
+
+	it("gives bar charts a zero-based domain (bars must start at 0)", () => {
+		// Regression: niceDomain() pads ~4% below the minimum, so a non-negative
+		// series got an axis running to -200 and left a dead band under every bar
+		// (measured: bars started ~30px above the baseline).
+		const { util } = load().charts;
+		const [lo, hi] = util.zeroBasedDomain(923);
+		expect(lo).toBe(0);
+		expect(hi).toBeGreaterThanOrEqual(923);
+		// and it must not collapse on degenerate input
+		expect(util.zeroBasedDomain(0)).toEqual([0, 1]);
+		expect(util.zeroBasedDomain(-5)).toEqual([0, 1]);
+		expect(Number.isFinite(util.zeroBasedDomain(NaN)[1]!)).toBe(true);
+	});
+
+	it("draws bars from the baseline (no dead band under them)", () => {
+		const ctx = fakeCtx();
+		const canvas = fakeCanvas(600, ctx);
+		load().charts.stackedBars(canvas, {
+			items: [{ label: "t1", values: [100] }],
+			series: [{ name: "x", color: "#5fb3ff" }],
+			height: 220,
+		});
+		// The bar must reach the plot floor: padT(12) + innerH(220-12-26) = 194.
+		// With the old padded domain it stopped ~30px short of this.
+		expect(ctx.fills.length).toBeGreaterThan(0);
+		expect(Math.round(ctx.fills[0]!.maxY)).toBeGreaterThanOrEqual(190);
+	});
+
+	it("draws stacked columns for composition over time", () => {
+		// This is the fix for the token panel: a line chart collapsed the series
+		// onto the same pixels (measured 3px apart), while stacking shows both the
+		// total per turn and its split.
+		const ctx = fakeCtx();
+		const canvas = fakeCanvas(600, ctx);
+		load().charts.stackedBars(canvas, {
+			items: [
+				{ label: "t1", values: [830, 40, 10] },
+				{ label: "t2", values: [1200, 30, 8] },
+			],
+			series: [
+				{ name: "Input", color: "#5fb3ff" },
+				{ name: "Output", color: "#7bc96f" },
+				{ name: "Reasoning", color: "#c3a6ff" },
+			],
+			height: 200,
+		});
+		expect(canvas.width).toBe(600);
+		expect(canvas.height).toBe(200);
+		expect(ctx.calls.fill ?? 0).toBeGreaterThanOrEqual(6); // 2 bars x 3 segments
+		expect(ctx.calls.fillText ?? 0).toBeGreaterThan(3); // y ticks + labels
+	});
+
+	it("still sizes the canvas when there is nothing to stack", () => {
+		const ctx = fakeCtx();
+		const canvas = fakeCanvas(674, ctx);
+		load().charts.stackedBars(canvas, { items: [], series: [], height: 200 });
+		expect(canvas.width).toBe(674);
+		expect(canvas.height).toBe(200);
 	});
 
 	it("handles an all-zero donut without NaN", () => {
