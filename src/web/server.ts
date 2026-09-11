@@ -32,7 +32,9 @@ export type WireMessage =
 	| { type: "event"; data: unknown }
 	| { type: "telemetry"; data: unknown }
 	| { type: "step"; data: unknown }
-	| { type: "checkpoint"; data: unknown };
+	| { type: "checkpoint"; data: unknown }
+	| { type: "run"; data: unknown }
+	| { type: "stage"; data: unknown };
 
 /** Provider catalog access (docs/DASHBOARD-API.md §3.1). */
 export interface CatalogHooks {
@@ -50,6 +52,19 @@ export interface CatalogHooks {
 export interface SessionHooks {
 	list: () => unknown[];
 	read: (id: string, limit?: number) => unknown | null;
+}
+
+/**
+ * Run control (docs/AGENT-LOOP-AND-CONTROL.md §3.2). Injected so the web layer
+ * stays agnostic of the agent/game layers. Absent => the control API 404s and
+ * the pages hide the controls.
+ */
+export interface RunHooks {
+	status: () => unknown;
+	start: (mode: "agent" | "watch") => Promise<void> | void;
+	stop: () => Promise<void> | void;
+	pause: () => Promise<void> | void;
+	resume: () => Promise<void> | void;
 }
 
 export interface WebServerOptions {
@@ -74,6 +89,8 @@ export interface WebServerOptions {
 	catalog?: CatalogHooks;
 	/** Past sessions. Absent => 404. */
 	sessions?: SessionHooks;
+	/** Start/stop/pause/resume the game run. Absent => 404. */
+	run?: RunHooks;
 }
 
 /**
@@ -109,11 +126,12 @@ export class WebServer {
 	private httpServer: http.Server;
 	private wss: WebSocketServer;
 	private getSnapshot: () => unknown;
+	private runHooks?: RunHooks;
+	private sessionHooks?: SessionHooks;
 	private onFirstClient?: () => void;
 	private llmHooks?: WebServerOptions["llm"];
 	private telemetryHook?: WebServerOptions["telemetry"];
 	private catalogHooks?: CatalogHooks;
-	private sessionHooks?: SessionHooks;
 	private clients = new Set<WebSocket>();
 	private started = false;
 
@@ -122,10 +140,11 @@ export class WebServer {
 		this.port = opts.port ?? 0; // 0 = OS-assigned
 		this.getSnapshot = opts.getSnapshot ?? (() => ({}));
 		this.onFirstClient = opts.onFirstClient;
+		this.runHooks = opts.run;
+		this.sessionHooks = opts.sessions;
 		this.llmHooks = opts.llm;
 		this.telemetryHook = opts.telemetry;
 		this.catalogHooks = opts.catalog;
-		this.sessionHooks = opts.sessions;
 
 		this.httpServer = http.createServer((req, res) => this.serveStatic(req, res));
 		this.wss = new WebSocketServer({ noServer: true });
@@ -141,6 +160,12 @@ export class WebServer {
 			if (this.clients.size === 1) this.onFirstClient?.();
 			// Send full snapshot immediately.
 			this.send(ws, { type: "snapshot", data: this.getSnapshot() });
+			// Also push the current telemetry as a first-class frame. A client that
+			// connects between two decisions would otherwise see nothing until the
+			// next activity, even though the data already exists server-side.
+			if (this.telemetryHook) {
+				this.send(ws, { type: "telemetry", data: this.telemetryHook() });
+			}
 			ws.on("message", () => {
 				// v0.1: read-only dashboard; ignore inbound for now.
 			});
@@ -177,6 +202,37 @@ export class WebServer {
 	/** Push an agent telemetry snapshot (docs §4). Callers must throttle. */
 	publishTelemetry(data: unknown): void {
 		const msg: WireMessage = { type: "telemetry", data };
+		for (const ws of this.clients) this.send(ws, msg);
+	}
+
+	/**
+	 * Late-bind the live data hooks.
+	 *
+	 * In supervised mode the server outlives any single run, and a run's snapshot
+	 * closure only exists once that run has booted. Re-binding keeps one server
+	 * (one port, one WS fan-out) across start/stop cycles instead of tearing it
+	 * down each time (docs/AGENT-LOOP-AND-CONTROL.md §3.1).
+	 */
+	attach(hooks: {
+		getSnapshot?: () => unknown;
+		telemetry?: () => unknown;
+		sessions?: SessionHooks;
+	}): void {
+		if (hooks.getSnapshot) this.getSnapshot = hooks.getSnapshot;
+		if (hooks.telemetry) this.telemetryHook = hooks.telemetry;
+		else this.telemetryHook = undefined;
+		if (hooks.sessions) this.sessionHooks = hooks.sessions;
+	}
+
+	/** Push a stage snapshot (data-rendered map diagram) for the timeline. */
+	publishStage(data: unknown): void {
+		const msg: WireMessage = { type: "stage", data };
+		for (const ws of this.clients) this.send(ws, msg);
+	}
+
+	/** Push a run-state change (start/stop/pause/resume) to the pages. */
+	publishRun(data: unknown): void {
+		const msg: WireMessage = { type: "run", data };
 		for (const ws of this.clients) this.send(ws, msg);
 	}
 
@@ -269,6 +325,47 @@ export class WebServer {
 		};
 		const segments = url.pathname.split("/").filter(Boolean); // ["api", ...]
 		try {
+			// /api/run[...] — control surface (docs §3.2)
+			if (segments[1] === "run") {
+				if (!this.runHooks) return json(404, { error: "run control disabled" });
+				const action = segments[2];
+				if (!action && req.method === "GET") return json(200, this.runHooks.status());
+				if (action === "start" && req.method === "POST") {
+					const raw = await readBody(req);
+					let body: Record<string, unknown> = {};
+					try {
+						body = raw.length ? (JSON.parse(raw) as Record<string, unknown>) : {};
+					} catch {
+						return json(400, { error: "invalid JSON body" });
+					}
+					const mode = body.mode === "watch" ? "watch" : "agent";
+					try {
+						await this.runHooks.start(mode);
+					} catch (e) {
+						// 409: conflict (a run is already active), not a client error.
+						return json(409, { error: e instanceof Error ? e.message : String(e) });
+					}
+					return json(200, this.runHooks.status());
+				}
+				if (action === "stop" && req.method === "POST") {
+					try {
+						await this.runHooks.stop();
+					} catch (e) {
+						return json(409, { error: e instanceof Error ? e.message : String(e) });
+					}
+					return json(200, this.runHooks.status());
+				}
+				if ((action === "pause" || action === "resume") && req.method === "POST") {
+					try {
+						await (action === "pause" ? this.runHooks.pause() : this.runHooks.resume());
+					} catch (e) {
+						return json(409, { error: e instanceof Error ? e.message : String(e) });
+					}
+					return json(200, this.runHooks.status());
+				}
+				return json(405, { error: "method not allowed" });
+			}
+
 			// GET /api/telemetry
 			if (url.pathname === "/api/telemetry" && req.method === "GET") {
 				if (!this.telemetryHook) return json(404, { error: "telemetry disabled" });

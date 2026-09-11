@@ -36,6 +36,14 @@ export interface WatchOptions {
 	webHost?: string;
 	/** Web port; 0 = ephemeral. Default 0. */
 	webPort?: number;
+	/**
+	 * An already-running WebServer to attach to (supervised `--serve` mode).
+	 * When given, this run must NOT create its own: one port, one WS fan-out.
+	 * See docs/AGENT-LOOP-AND-CONTROL.md §3.1.
+	 */
+	web?: unknown;
+	/** External control hooks (stop/pause/resume) for the supervisor. */
+	control?: { onReady?: (h: { stop: () => void; pause: () => void; resume: () => void }) => void };
 }
 
 export interface WatchResult {
@@ -182,28 +190,39 @@ export async function runWatch(
 	process.once("unhandledRejection", onCrash);
 
 	// --- web server (dashboard) ---
-	const llmApi = createLlmApi({ dataDir: cfg.dataDir, cfg, envLlm: cfg.llm });
-	web = new WebServer({
-		host: opts.webHost ?? "127.0.0.1",
-		port: opts.webPort ?? 0,
+	// In supervised mode a server already exists; attach to it so the dashboard
+	// keeps a single port and a single WS fan-out across start/stop cycles.
+	const attached = opts.web as WebServer | undefined;
+	const wired = {
 		getSnapshot: () => ({
 			...(toWireSnapshot(world) as Record<string, unknown>),
 			// Backlog for late subscribers / reloads (docs/DASHBOARD-UI.md §7).
 			checkpoints: session.current().checkpoints,
 		}),
-		onFirstClient: () => {
-			web?.publishSnapshot(toWireSnapshot(world));
-		},
-		// LLM provider settings + built-in provider catalog (SPEC §4).
-		llm: llmApi.llm,
-		catalog: llmApi.catalog,
-		// Historical sessions (read-only).
 		sessions: {
 			list: () => listSessions(cfg.dataDir),
-			read: (id, limit) => readSession(cfg.dataDir, id, limit ? { limit } : {}),
+			read: (id: string, limit?: number) =>
+				readSession(cfg.dataDir, id, limit ? { limit } : {}),
 		},
-	});
-	await web.start();
+	};
+	if (attached) {
+		attached.attach(wired);
+		web = attached;
+	} else {
+		const llmApi = createLlmApi({ dataDir: cfg.dataDir, cfg, envLlm: cfg.llm });
+		web = new WebServer({
+			host: opts.webHost ?? "127.0.0.1",
+			port: opts.webPort ?? 0,
+			...wired,
+			onFirstClient: () => {
+				web?.publishSnapshot(toWireSnapshot(world));
+			},
+			// LLM provider settings + built-in provider catalog (SPEC §4).
+			llm: llmApi.llm,
+			catalog: llmApi.catalog,
+		});
+		await web.start();
+	}
 	console.log(`[watch] dashboard: http://127.0.0.1:${web.actualPort}/`);
 
 	// --- staged summaries DURING the run (docs/DASHBOARD-UI.md §7) ---
@@ -222,6 +241,29 @@ export async function runWatch(
 		session.addCheckpoint(cp);
 		web?.publishCheckpoint(cp);
 	}
+
+	// Expose stop/pause/resume to the supervisor (docs §3).
+	if (web) web.publishRun({ state: "running", sessionId: session.id, mode: "watch" });
+	opts.control?.onReady?.({
+		stop: () => {
+			stopRequested = true;
+			resolveStopped?.();
+		},
+		pause: () => {
+			try {
+				client?.rcon("pause");
+			} catch {
+				/* ignore */
+			}
+		},
+		resume: () => {
+			try {
+				client?.rcon("unpause");
+			} catch {
+				/* ignore */
+			}
+		},
+	});
 
 	// --- periodic economy poll (keeps curve fresh between quarters) ---
 	const pollTimer = setInterval(() => {
@@ -257,7 +299,8 @@ export async function runWatch(
 	}
 	await sleep(300);
 	client?.close();
-	if (web) await web.stop();
+	// Only tear down a server we created; a supervised one outlives this run.
+	if (web && !opts.web) await web.stop();
 	await mgr.stop();
 
 	// Finalize the session record so the dashboard can list/replay it.

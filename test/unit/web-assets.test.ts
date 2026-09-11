@@ -118,11 +118,17 @@ describe("front-end assets", () => {
 			const html = read(page);
 			const ids = new Set([...html.matchAll(/\bid="([^"]+)"/g)].map((m) => m[1]!));
 			const script = page.replace(/\.html$/, ".js").replace("pages/", "assets/js/");
-			// shared scripts are checked against every page that loads them
 			const scripts = [script].filter((s) => JS_FILES().includes(s));
 			for (const s of scripts) {
-				for (const m of read(s).matchAll(/\b(?:U\.)?\$\("([^"]+)"\)/g)) {
+				const src = read(s);
+				for (const m of src.matchAll(/\b(?:U\.)?\$\("([^"]+)"\)/g)) {
 					expect(ids.has(m[1]!), `${s} looks up #${m[1]} which ${page} does not define`).toBe(true);
+				}
+				// Element aliases (`const elFoo = $("foo")`) are the same hazard one
+				// level removed: a refactor that drops the element from the HTML
+				// leaves a crash in a code path no unit test executes.
+				for (const m of src.matchAll(/const\s+(el[A-Za-z0-9_]*)\s*=\s*\$\("([^"]+)"\)/g)) {
+					expect(ids.has(m[2]!), `${s}: ${m[1]} = $("${m[2]}") but ${page} has no #${m[2]}`).toBe(true);
 				}
 			}
 		}

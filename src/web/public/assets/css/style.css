@@ -92,6 +92,26 @@ h1 .dim { font-size: 12px; }
 main { padding: var(--sp-4) var(--sp-5) 64px; max-width: 1360px; margin: 0 auto;
   display: flex; flex-direction: column; gap: var(--sp-4); }
 
+/* ------------------------- run controls / notice ------------------------- */
+.run-actions { display: inline-flex; gap: 6px; margin-left: 8px; }
+.notice {
+  display: flex; align-items: flex-start; gap: var(--sp-3);
+  background: var(--panel-2); border: 1px solid var(--line-strong); border-left: 3px solid var(--warn);
+  border-radius: var(--r-md); padding: var(--sp-3) var(--sp-4); font-size: 12.5px; color: var(--ink-dim);
+}
+.notice.info { border-left-color: var(--info); }
+.notice.err { border-left-color: var(--neg); }
+.notice .notice-body { flex: 1; }
+.notice strong { color: var(--ink); }
+.notice .notice-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+
+/* stage snapshot (data-rendered map diagram) */
+.stage-snaps { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--sp-3); }
+.snap { background: var(--bg-sunken); border: 1px solid var(--line); border-radius: var(--r-sm); padding: 8px; }
+.snap canvas { background: none; }
+.snap .snap-meta { font-size: 10.5px; color: var(--muted); margin-top: 4px; display: flex;
+  justify-content: space-between; gap: 6px; }
+
 /* ------------------------------ grouping ------------------------------ */
 .group { display: flex; align-items: center; gap: var(--sp-3); margin: var(--sp-2) 0 calc(-1 * var(--sp-1)); }
 .group h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .12em; color: var(--muted); font-weight: 600; }

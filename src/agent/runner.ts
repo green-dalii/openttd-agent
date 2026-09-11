@@ -27,6 +27,15 @@ import type { Model } from "@earendil-works/pi-ai";
 /** pi-agent-core's StreamFn, via AgentOptions. */
 type AgentOptionsStreamFn = AgentOptions["streamFn"];
 import { runDecision } from "./loop.js";
+import { DecisionScheduler } from "./scheduler.js";
+import { buildStageView } from "./stage-view.js";
+import {
+	emptyTracker,
+	recordAction,
+	recordEvent,
+	recordPhase,
+	type DecisionTracker,
+} from "./decision-context.js";
 import type { AgentDeps } from "./types.js";
 import { summarizeState } from "./tools/index.js";
 import { fauxAssistantMessage, fauxToolCall, createFauxCore } from "@earendil-works/pi-ai";
@@ -62,6 +71,25 @@ export interface AgentRunOptions {
 	offlineDemo?: boolean;
 	/** Max decision turns to run (default 1). */
 	maxTurns?: number;
+	/**
+	 * An already-running WebServer to attach to (supervised mode). When given,
+	 * the run must NOT start its own - two servers would fight over the port and
+	 * the dashboard would only see half the state.
+	 * See docs/AGENT-LOOP-AND-CONTROL.md §3.1.
+	 */
+	web?: unknown;
+	/** External control hooks for the supervisor (stop/pause/resume). */
+	control?: {
+		onReady?: (h: { stop: () => void; pause: () => void; resume: () => void }) => void;
+	};
+	/** Min wall-clock gap between two LLM decisions (default 5s). */
+	decisionMinGapMs?: number;
+	/** Game days between periodic decisions (default 90). */
+	decisionIntervalDays?: number;
+	/** Scheduler poll interval (default 1s). */
+	decisionTickMs?: number;
+	/** Hard cap on decisions per run; 0 = unlimited (default). */
+	maxDecisions?: number;
 	/**
 	 * Dashboard port in agent mode. Undefined ⇒ no dashboard (CLI-only run);
 	 * 0 ⇒ ephemeral port. Agent mode serves the same live dashboard the watch
@@ -108,6 +136,42 @@ function totalsFromTelemetry(
 			totalTokens: u.totalTokens,
 			costTotal: u.costTotal,
 		},
+	};
+}
+
+/**
+ * Describe a fleet/station change worth the model's attention, or null when
+ * nothing notable happened. Facts only - the model decides what it means.
+ */
+function describeNotable(
+	prev: { vehicles: number; stations: number } | null,
+	now: { vehicles?: number; stations?: number },
+): string | null {
+	if (!prev) return null;
+	const parts: string[] = [];
+	const dv = (now.vehicles ?? 0) - prev.vehicles;
+	const ds = (now.stations ?? 0) - prev.stations;
+	if (dv) parts.push(`vehicles ${dv > 0 ? "+" : ""}${dv}`);
+	if (ds) parts.push(`stations ${ds > 0 ? "+" : ""}${ds}`);
+	return parts.length ? parts.join(", ") : null;
+}
+
+/** Game days elapsed since the first observed date, for interval scheduling. */
+function gameDaysSinceStart(deps: AgentDeps): number {
+	const d = deps.state.snapshot().date;
+	if (!d) return 0;
+	return (d.year - 1950) * 360 + (d.month - 1) * 30 + (d.day - 1);
+}
+
+/** Comparable numbers for the next decision's delta. */
+function baselineOf(snap: ReturnType<AgentDeps["state"]["snapshot"]>, gameDay: number) {
+	const c = snap.companies.get(0) ?? [...snap.companies.values()][0];
+	return {
+		money: Number(c?.economy?.money ?? 0) || 0,
+		income: c?.economy ? Number(BigInt.asIntN(64, c.economy.income)) || 0 : 0,
+		vehicles: c?.stats?.vehicles ?? 0,
+		stations: c?.stats?.stations ?? 0,
+		gameDay,
 	};
 }
 
@@ -174,6 +238,24 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 	// The executor's periodic bus dump overwrites the company name, so the
 	// LAST phase is not the terminal one. Track "reached done" separately.
 	let reachedDone = false;
+
+	// Decision cadence + the causality window handed to the model. The framework
+	// owns *when* to ask; the LLM owns *what* to do (docs/AGENT-LOOP-AND-CONTROL §1).
+	const scheduler = new DecisionScheduler({
+		minGapMs: opts.decisionMinGapMs ?? 5_000,
+		intervalGameDays: opts.decisionIntervalDays ?? 90,
+	});
+	let tracker: DecisionTracker = emptyTracker();
+	// The model's requested wake-up (SPEC §4.2 step 5), if it gave one.
+	let waitUntil: { gameDays: number; from: number } | null = null;
+	// Latest route ack from the executor (drives the map diagram).
+	let lastRoute: Record<string, unknown> | null = null;
+	// Last company stats, used to detect changes worth a decision.
+	let prevStats: { vehicles: number; stations: number } | null = null;
+	let waitCondition: string | null = null;
+	// Set below (after the session exists) so events during boot are still safe.
+	let onPhaseChange: ((phase: string) => void) | null = null;
+	let onNotableEvent: ((summary: string) => void) | null = null;
 	client = new AdminClient({
 		cfg,
 		callbacks: {
@@ -182,7 +264,20 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 				if (ev.kind === "gamescript") {
 					const p = ev.payload as Record<string, unknown>;
 					if (p.cmd === "state") gsStates++;
-					else console.log(`[agent] GS: ${JSON.stringify(p)}`);
+					else {
+						console.log(`[agent] GS: ${JSON.stringify(p)}`);
+						// Remember the coordinates the executor acknowledged, so each
+						// stage snapshot can draw the actual built route.
+						if (p.kind === "ack" && p.cmd === "build_bus_route") lastRoute = p;
+					}
+				}
+				// Notable events (fleet/station changes) are worth the model's
+				// attention, so they open a decision window (scheduler throttles).
+				if (ev.kind === "company_stats") {
+					const st = ev.payload as { vehicles?: number; stations?: number };
+					const notable = describeNotable(prevStats, st);
+					if (notable) onNotableEvent?.(notable);
+					prevStats = { vehicles: st.vehicles ?? 0, stations: st.stations ?? 0 };
 				}
 				if (ev.kind === "company_info") {
 					const p = ev.payload as { id: number; name: string; isAi: boolean };
@@ -190,6 +285,9 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 						executorPhase = p.name;
 						if (p.name.startsWith("EX done")) reachedDone = true;
 						console.log(`[agent] executor phase -> "${p.name}"`);
+						// A phase change means the world moved: it is a reason to ask
+						// the model again (it may want to react to the new situation).
+						onPhaseChange?.(p.name);
 					}
 				}
 			},
@@ -329,30 +427,61 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 	process.once("SIGHUP", requestStop);
 
 	// --- dashboard (same shape as watch mode; docs/DASHBOARD-API.md §3) ---
+	// Supervised mode attaches to an existing server (one port, one fan-out).
+	const attachedWeb = opts.web as WebServer | undefined;
+	const wired = {
+		getSnapshot: () => ({
+			...(toWireSnapshot(world) as Record<string, unknown>),
+			telemetry: telemetry.snapshot(),
+			sessionId: session.id,
+			// Backlog for late subscribers / reloads (docs/DASHBOARD-UI.md §7).
+			checkpoints: session.current().checkpoints,
+			stages: stageViews.slice(-24),
+		}),
+		telemetry: () => telemetry.snapshot(),
+		sessions: {
+			list: () => listSessions(cfg.dataDir),
+			read: (id: string, limit?: number) => readSession(cfg.dataDir, id, limit ? { limit } : {}),
+		},
+	};
 	let web: WebServer | null = null;
-	if (mustServeDashboard) {
+	if (attachedWeb) {
+		attachedWeb.attach(wired);
+		web = attachedWeb;
+	} else if (mustServeDashboard) {
 		const llmApi = createLlmApi({ dataDir: cfg.dataDir, cfg, envLlm: cfg.llm });
 		web = new WebServer({
 			host: "127.0.0.1",
 			port: opts.webPort ?? 0,
-			getSnapshot: () => ({
-				...(toWireSnapshot(world) as Record<string, unknown>),
-				telemetry: telemetry.snapshot(),
-				sessionId: session.id,
-				// Backlog for late subscribers / reloads (docs/DASHBOARD-UI.md §7).
-				checkpoints: session.current().checkpoints,
-			}),
+			...wired,
 			llm: llmApi.llm,
 			catalog: llmApi.catalog,
-			telemetry: () => telemetry.snapshot(),
-			sessions: {
-				list: () => listSessions(cfg.dataDir),
-				read: (id, limit) => readSession(cfg.dataDir, id, limit ? { limit } : {}),
-			},
 		});
 		await web.start();
 		console.log(`[agent] dashboard: http://127.0.0.1:${web.actualPort}/`);
 	}
+
+	// Publish the session id and expose stop/pause/resume to the supervisor.
+	if (web) web.publishRun({ state: "running", sessionId: session.id, mode: "agent" });
+	opts.control?.onReady?.({
+		stop: requestStop,
+		pause: () => {
+			scheduler.pause();
+			try {
+				client?.rcon("pause");
+			} catch {
+				/* ignore */
+			}
+		},
+		resume: () => {
+			scheduler.resume(gameDaysSinceStart(deps));
+			try {
+				client?.rcon("unpause");
+			} catch {
+				/* ignore */
+			}
+		},
+	});
 
 	// Telemetry -> WS (throttled) + session archive. ≥250ms per contract §4.
 	let lastBroadcast = 0;
@@ -370,6 +499,34 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 	};
 	telemetry.onActivity = broadcast;
 
+	/** Tool outcomes since the last decision, fed back to the model next time. */
+	const pendingActions: { tool: string; ok: boolean; summary: string }[] = [];
+	/** Stage snapshots this run produced (also archived per session). */
+	const stageViews: ReturnType<typeof buildStageView>[] = [];
+
+	/** Build + push a stage snapshot (map diagram) for the dashboard timeline. */
+	const publishStage = (phase?: string) => {
+		const snap = deps.state.snapshot();
+		const c0 = snap.companies.get(0);
+		const view = buildStageView({
+			gameDate: formatGameDate(snap.date),
+			mapSize: [cfg.mapSizeX, cfg.mapSizeY],
+			companies: [...snap.companies.values()].map((c) => ({
+				id: c.info?.id ?? 0,
+				name: c.info?.name ?? null,
+				money: c.economy?.money,
+				vehicles: c.stats?.vehicles,
+				stations: c.stats?.stations,
+			})),
+			route: lastRoute,
+			...(phase ? { phase } : {}),
+		});
+		void c0;
+		stageViews.push(view);
+		session.saveStage(view);
+		web?.publishStage(view);
+	};
+
 	const { agent } = createAgent({
 		deps,
 		streamFn,
@@ -378,6 +535,9 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 		transformContext: pruningTransformContext({ keepRecent: 40 }),
 		onActionResult: (tool, r) => {
 			console.log(`[agent] tool ${tool}: ok=${r.ok} ${r.summary}`);
+			// Failures are recorded too: the model must be able to see its own
+			// mistakes on the next decision (docs/AGENT-LOOP-AND-CONTROL §2.4).
+			pendingActions.push({ tool, ok: r.ok, summary: r.summary });
 			audit.write({ type: "action_result", ts: Date.now(), tool, ok: r.ok, summary: r.summary, data: r.data });
 			session.appendAudit({ type: "action_result", ts: Date.now(), tool, ok: r.ok, summary: r.summary, data: r.data });
 		},
@@ -388,31 +548,11 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 		telemetry.ingestAgentEvent(event);
 	});
 
-	// --- decision turn(s) ---
-	const maxTurns = opts.maxTurns ?? 1;
-	for (let i = 0; i < maxTurns && !stopRequested; i++) {
-		// Record the decision point (state seen) BEFORE the agent acts, so the
-		// trail reads decision -> action_result. Telemetry counts it too.
-		telemetry.decisionPoint();
-		const preState = summarizeState(deps.state.snapshot());
-		audit.write({ type: "decision", ts: Date.now(), turn: i + 1, date: String(preState.date ?? "?"), state: preState });
-		session.appendAudit({ type: "decision", ts: Date.now(), turn: i + 1, state: preState });
-		const state = await runDecision(agent, deps);
-		console.log(`[agent] decision turn ${i + 1}: ${JSON.stringify(state.date)}`);
-		telemetry.onActivity?.();
-
-		// Staged summary per completed decision turn, so the Live page's timeline
-		// fills up during the run instead of only at shutdown
-		// (docs/DASHBOARD-UI.md §7).
-		const snap = deps.state.snapshot();
-		session.update({ totals: totalsFromTelemetry(session.current().totals, telemetry.snapshot(), snap.totalEvents) });
-		const cp = buildStageSummary(session.current(), formatGameDate(snap.date), i + 1);
-		session.addCheckpoint(cp);
-		web?.publishCheckpoint(cp);
-	}
-
-	// --- observe construction + report ---
-	console.log("[agent] observing construction…");
+	// Polling must start BEFORE the decision loop: it is what discovers the
+	// executor's phase transitions and fresh economy numbers, which is exactly
+	// what the scheduler reacts to. Leaving it after the loop meant the loop
+	// never saw a phase change and therefore never asked again.
+	console.log("[agent] polling state (economy/phase)…");
 	const obs = setInterval(() => {
 		if (stopRequested) return;
 		try {
@@ -423,6 +563,129 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 			/* closed */
 		}
 	}, 700);
+
+	// --- decision loop (continuous, not once) ---
+	// v0.5.0 and earlier ran exactly one decision (`maxTurns ?? 1`), so the model
+	// built a line and was never consulted again — income decayed with nobody
+	// asked to fix it. The scheduler now keeps asking on phase changes, periodic
+	// intervals and notable events until the run ends.
+	// See docs/AGENT-LOOP-AND-CONTROL.md §2.1.
+	onPhaseChange = (phase: string) => {
+		recordPhase(tracker, phase);
+		// One snapshot per construction phase: this is the "阶段性游戏画面"
+		// (a data-rendered diagram, not a screenshot - see stage-view.ts).
+		publishStage(phase);
+		// A model-supplied wait condition matching this phase is its wake-up call.
+		if (waitCondition && phase.toLowerCase().includes(waitCondition)) {
+			waitCondition = null;
+			scheduler.request("wait_until");
+			return;
+		}
+		scheduler.request("phase_change");
+	};
+	onNotableEvent = (summary: string) => {
+		recordEvent(tracker, summary);
+		scheduler.request("event");
+	};
+	scheduler.request("start");
+
+	const decisionTickMs = opts.decisionTickMs ?? 1_000;
+	const maxDecisions = opts.maxDecisions ?? 0; // 0 = bounded only by run length
+	while (!stopRequested) {
+		const nowDay = gameDaysSinceStart(deps);
+		if (waitUntil && nowDay - waitUntil.from >= waitUntil.gameDays) {
+			waitUntil = null;
+			scheduler.request("wait_until");
+		}
+		const due = scheduler.take(Date.now(), nowDay);
+		if (!due) {
+			await sleep(decisionTickMs);
+			continue;
+		}
+		if (maxDecisions && scheduler.count() > maxDecisions) {
+			console.log(`[agent] decision cap reached (${maxDecisions})`);
+			break;
+		}
+
+		// Snapshot the window BEFORE acting, so the next decision can compare.
+		const preState = summarizeState(deps.state.snapshot());
+		const preSnap = deps.state.snapshot();
+		telemetry.decisionPoint();
+		audit.write({
+			type: "decision",
+			ts: Date.now(),
+			turn: scheduler.count(),
+			trigger: due.trigger,
+			date: String(preState.date ?? "?"),
+			state: preState,
+		});
+		session.appendAudit({ type: "decision", ts: Date.now(), turn: scheduler.count(), trigger: due.trigger, state: preState });
+
+		const history = session.current().checkpoints.map((c) => c.note);
+		// SPEC §1.1 step 2: FREEZE while the LLM thinks. OpenTTD is a continuous
+		// clock; without pausing, the world moves on and the model's decision lands
+		// against a state it never saw.
+		try {
+			client?.rcon("pause");
+		} catch {
+			/* already paused is fine */
+		}
+
+		const { plan } = await runDecision(agent, deps, {
+			trigger: due.trigger,
+			tracker,
+			gameDay: gameDaysSinceStart(deps),
+			history,
+			...(executorPhase ? { phase: executorPhase } : {}),
+		});
+		telemetry.onActivity?.();
+
+		// SPEC §1.1 step 5: THAW so the executor can carry the decision out.
+		try {
+			client?.rcon("unpause");
+		} catch {
+			/* ignore */
+		}
+
+		// SPEC §4.2 step 5: honour the model's own wake-up ("或等待条件满足").
+		// The framework only parses it; the content is the model's call.
+		if (plan && plan.wait_until) {
+			const w = plan.wait_until;
+			const days = Number(w.game_days);
+			if (Number.isFinite(days) && days > 0) {
+				waitUntil = { gameDays: days, from: gameDaysSinceStart(deps) };
+			} else if (typeof w.condition === "string" && w.condition.trim()) {
+				// A textual condition is matched against the next phase change.
+				waitCondition = w.condition.trim().toLowerCase();
+			}
+		}
+		publishStage(plan && plan.goal ? plan.goal : undefined);
+		if (plan && plan.goal) {
+			audit.write({ type: "note", ts: Date.now(), message: `plan: ${plan.goal}`, data: { plan } });
+			session.appendAudit({ type: "plan", ts: Date.now(), plan });
+		}
+
+		// Record the outcome of whatever the model asked for, then open a new
+		// window so the next decision sees the effect of this one.
+		for (const a of pendingActions) {
+			recordAction(tracker, a);
+		}
+		pendingActions.length = 0;
+		tracker = {
+			baseline: baselineOf(preSnap, gameDaysSinceStart(deps)),
+			phases: [],
+			actions: [],
+			notableEvents: [],
+		};
+
+		const snap = deps.state.snapshot();
+		session.update({ totals: totalsFromTelemetry(session.current().totals, telemetry.snapshot(), snap.totalEvents) });
+		const cp = buildStageSummary(session.current(), formatGameDate(snap.date), scheduler.count());
+		session.addCheckpoint(cp);
+		web?.publishCheckpoint(cp);
+		console.log(`[agent] decision ${scheduler.count()} (${due.trigger}) at ${snap.date ? formatGameDate(snap.date) : "?"}`);
+	}
+
 	const stopPromise = new Promise<void>((res) => {
 		resolveStop = res;
 		const check = () => (stopRequested ? res() : setTimeout(check, 300));
@@ -446,7 +709,7 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 	session.saveTelemetry(finalTelemetry);
 	session.update({ totals: totalsFromTelemetry(session.current().totals, finalTelemetry, snap.totalEvents) });
 	session.addCheckpoint(
-		buildStageSummary(session.current(), formatGameDate(snap.date), Math.max(1, maxTurns)),
+		buildStageSummary(session.current(), formatGameDate(snap.date), Math.max(1, scheduler.count())),
 	);
 	console.log(
 		`[agent] tokens: in=${finalTelemetry.usage.total.input} out=${finalTelemetry.usage.total.output} ` +
@@ -484,7 +747,8 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 		}
 		await sleep(300);
 		client?.close();
-		if (web) await web.stop();
+		// Only tear down a server we created; a supervised one outlives this run.
+	if (web && !opts.web) await web.stop();
 		await mgr.stop();
 	}
 }

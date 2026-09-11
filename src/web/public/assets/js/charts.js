@@ -776,6 +776,69 @@
     });
   }
 
+  /* ---------------------------- stage map ---------------------------- */
+  /**
+   * Draw a stage snapshot: the map bounds, the built route and its markers.
+   *
+   * This is a DIAGRAM rendered from world data, not a game screenshot - OpenTTD's
+   * dedicated server has no framebuffer (`screenshot` returns "Screenshot failed!").
+   * See docs/AGENT-LOOP-AND-CONTROL.md §4.
+   */
+  function stageMap(canvas, view) {
+    const v = view || {};
+    mount(canvas, function () {
+      const g = fit(canvas, Number(canvas.getAttribute("height")) || 140);
+      const ctx = g.ctx, W = g.w, H = g.h;
+      const pad = 6;
+      const side = Math.min(W, H) - pad * 2;
+      const ox = (W - side) / 2, oy = (H - side) / 2;
+      const px = function (nx) { return ox + Math.max(0, Math.min(1, nx)) * side; };
+      const py = function (ny) { return oy + Math.max(0, Math.min(1, ny)) * side; };
+
+      // map bounds
+      ctx.fillStyle = SUNKEN();
+      ctx.fillRect(ox, oy, side, side);
+      ctx.strokeStyle = LINE();
+      ctx.lineWidth = 1;
+      ctx.strokeRect(Math.round(ox) + 0.5, Math.round(oy) + 0.5, side, side);
+
+      // route(s)
+      for (const r of v.routes || []) {
+        ctx.strokeStyle = cssVar("--accent", "#ffb347");
+        ctx.lineWidth = 2;
+        ctx.setLineDash([5, 3]);
+        ctx.beginPath();
+        ctx.moveTo(px(r.from.x), py(r.from.y));
+        ctx.lineTo(px(r.to.x), py(r.to.y));
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+
+      // markers (town size is proportional to population)
+      for (const m of v.markers || []) {
+        const cx = px(m.x), cy = py(m.y);
+        const rad = m.kind === "town" ? 4 + (Number(m.size) || 0) * 5 : 3.5;
+        ctx.fillStyle = m.kind === "town"
+          ? cssVar("--c6", "#e5c07b")
+          : m.kind === "depot" ? cssVar("--c2", "#5fb3ff") : cssVar("--c3", "#7bc96f");
+        ctx.beginPath();
+        ctx.arc(cx, cy, rad, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = hexA("#000000", 0.45);
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
+
+      if (!(v.markers || []).length) {
+        ctx.fillStyle = MUTED();
+        ctx.font = "11px ui-monospace, monospace";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText("no construction yet", ox + side / 2, oy + side / 2);
+      }
+    });
+  }
+
   /* ------------------------------ helpers ------------------------------ */
   function roundRect(ctx, x, y, w, h, r) {
     const rr = Math.max(0, Math.min(r, Math.min(w, h) / 2));
@@ -823,6 +886,7 @@
     line: line,
     bars: bars,
     stackedBars: stackedBars,
+    stageMap: stageMap,
     donut: donut,
     sparkline: sparkline,
     destroy: destroy,

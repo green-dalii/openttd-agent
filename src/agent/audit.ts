@@ -15,6 +15,8 @@ export type AuditRecord =
 			type: "decision";
 			ts: number;
 			turn: number;
+			/** Why the model was asked (docs/AGENT-LOOP-AND-CONTROL.md §2.1). */
+			trigger?: string;
 			date: string;
 			state: Record<string, unknown>;
 	  }

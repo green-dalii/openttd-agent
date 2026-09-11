@@ -15,13 +15,26 @@
   <div class="runbar">
     <div class="item"><span class="lbl">Connection</span><span id="g-link" class="pill idle">…</span></div>
     <div class="item"><span class="lbl">Session</span><span id="g-session" class="val dim">—</span></div>
-    <div class="item"><span class="lbl">Mode</span><span id="g-mode" class="val dim">—</span></div>
     <div class="item"><span class="lbl">Game date</span><span id="g-date" class="val">—</span></div>
     <div class="item"><span class="lbl">Elapsed</span><span id="g-elapsed" class="val">—</span></div>
+    <!-- Run controls (only present in --serve mode; hidden otherwise) -->
+    <div class="item" id="run-controls" hidden>
+      <span class="lbl">Run</span>
+      <span id="run-state" class="pill idle">idle</span>
+      <span class="run-actions">
+        <button type="button" id="run-start-agent" class="btn sm primary">Start agent</button>
+        <button type="button" id="run-start-watch" class="btn sm">Observe only</button>
+        <button type="button" id="run-pause" class="btn sm">Pause</button>
+        <button type="button" id="run-stop" class="btn sm danger">Stop</button>
+      </span>
+    </div>
   </div>
 </header>
 
 <main>
+  <!-- Explains a non-agent run and offers the fix (agent must be started). -->
+  <section class="notice" id="notice" hidden></section>
+
   <!-- 1. Is it working? (answers: is the company making money) -->
   <section class="kpis" id="kpis"></section>
 
@@ -102,6 +115,15 @@
     <div class="panel-head"><h2>Staged summaries <span class="dim">阶段性总结</span></h2>
       <span class="dim" id="stage-count"></span></div>
     <ol id="stages" class="timeline"></ol>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Stage views <span class="dim">阶段性画面</span></h2>
+      <span class="dim">diagram rendered from world data — OpenTTD's headless server
+        has no framebuffer, so a real screenshot is not possible</span>
+    </div>
+    <div class="stage-snaps" id="stage-snaps"></div>
   </section>
 </main>
 

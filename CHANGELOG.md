@@ -2,6 +2,57 @@
 
 本文件遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.6.0] - 2026-09-11
+
+> **本轮的主要工作是"把实现拉回 SPEC"**，而不是加功能。审计真机 Session 日志发现，
+> 之前几轮返工的根因都是**没有按 SPEC §1.1/§4.2 实现决策循环**。
+
+### Fixed（核心：Agent 其实只决策了一次）
+- **`maxTurns ?? 1` 使整局只问 LLM 一次**：模型在 1950-01-01 建一条线后再没被咨询过，
+  收入一路下滑也无人补救。真机证据：三个 Session 全是 `mode=watch` + `kind=faux` +
+  `decisions=0`（内置 CPU AI 在打），而面板看起来一切正常
+- **轮询顺序 bug**：阶段变化靠 admin poll 发现，而 poll 曾写在决策循环**之后** →
+  永远发现不到变化 → 调度器收不到 `phase_change` → 仍表现为"只决策一次"
+- **删除框架层的策略引导**：旧 prompt 写"施工中就报告并结束回合"，等于替模型做决定。
+  现在 prompt 只给事实与因果（并有测试禁止 `you should`/`recommend` 等措辞）
+- **Live 页 `renderHeader` 引用已删除的 `#g-mode`** → 页面首屏就崩（浏览器实测发现）
+
+### Added（决策循环，对齐 SPEC §1.1/§4.2）
+- `decision-context.ts`：每次决策喂**现状 + 因果**（`sinceLastDecision`：金额/车辆变化、
+  阶段列表、上次动作结果、显著事件）——没有它模型无法复盘自己动作的效果
+- `scheduler.ts`：**何时问**与**问什么**分离。触发 = `start`/`phase_change`/
+  `wait_until`/`interval`(每月，SPEC §4.2 默认)/`event`/`manual`；同窗口多触发**合并**
+- **冻结-观察-决策-执行-解冻**（SPEC §1.1 六步）：决策前 `rcon pause`，决策后 `unpause`
+- **结构化计划**（SPEC §4.2 步骤 2）：`{goal, plan[], immediate_action, wait_until, rationale}`
+  ——接口由框架规定，**内容全由模型填**；`wait_until` 让模型决定自己何时再被问
+- **运行控制（`--serve`）**：常驻 dashboard + `RunSupervisor`，页面可
+  **开始 / 停止 / 暂停 / 恢复**；`POST /api/run/{start,stop,pause,resume}`、`GET /api/run`、
+  WS 帧 `run`。被监督的 run 复用同一个 WebServer（`attach()` 晚绑定）
+- **阶段画面**：`stage-view.ts` 用 GS ack 的真实 tile 坐标生成几何描述，
+  前端 canvas 渲染**示意图**（每个施工阶段一张，存档 `<session>/stages/NNN.json`）
+- Live 页新增运行控制条、**未接线时的明确提示**（而不是让人猜为什么面板是空的）
+
+### Docs
+- **`AGENTS.md` §5.1**：E2E 必须证明"智能真的接上了"（7 条断言），
+  并规定**每次新 Session/compact 后先读 SPEC 对齐再动手**
+- `docs/AGENT-LOOP-AND-CONTROL.md`：决策循环与运行控制契约，含**§2.0 偏离记录**
+- `SPEC.md` §10.19：把本轮事实固化（含 dedicated server 无帧缓冲 → 无法截图的结论）
+
+### Tests
+- `test/live/agent-loop.test.ts`（新增，`@live`）：断言 `kind==="real"`、`mode==="agent"`、
+  `decisions>=2`、`tokens>0`、audit 含带 trigger 的 decision 与 action_result、
+  trigger 不全为 `start`、dashboard telemetry 非零、WS 推送 `telemetry`
+  ——**这层测试此前缺失，正是"没接线"能溜过去的原因**
+- `decision-context`(12) / `scheduler`(11) / `supervisor`(12) / `stage-view`(9) 单测
+- `web-assets` 增强：同时校验 `const elX = $("id")` 这类**别名**（此前漏检）
+
+### Verified（真机，本轮）
+- 决策数由 **1 → 4+**（phase_change 驱动，随运行持续增加）；`llm.kind=real`；token 正常
+- `--serve` 全链路：idle → start agent → pause（server.log 有 pause）→ resume →
+  stop（session 落 `aborted`）→ **不重启进程再起 watch**；重复 start 返回 409
+- 浏览器实测（CDP，禁用缓存）：**0 console 异常**，运行控制条可见、
+  6 张阶段示意图真实绘制（canvas 非空）、token/步骤/轮次表均有数据
+
 ## [0.5.0] - 2026-09-11
 
 ### Added (启动门禁 + Session 生命周期)

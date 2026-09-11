@@ -26,7 +26,11 @@
     steps: [],
     thinking: [],
     checkpoints: [],
+    stages: [],
     startedAt: null,
+    run: null,          // supervisor status (serve mode only)
+    runControl: false,  // whether /api/run exists
+    paused: false,
     paused: false,
     evSearch: "",
     stepFilter: "all",
@@ -36,7 +40,7 @@
   };
 
   const elLink = $("g-link"), elDate = $("g-date"), elSession = $("g-session"),
-        elMode = $("g-mode"), elElapsed = $("g-elapsed"),
+        elElapsed = $("g-elapsed"),
         elKpis = $("kpis"), elStream = $("events"), elSteps = $("steps"),
         elStepsCount = $("steps-count"), elStages = $("stages"), elStageCount = $("stage-count"),
         elFilters = $("ev-filters"), elRaw = $("ev-raw"), elEvTotal = $("ev-total"),
@@ -65,9 +69,12 @@
       }
       // Late subscribers/reloads get the staged-summary backlog here.
       state.checkpoints = Array.isArray(snap.checkpoints) ? snap.checkpoints.slice() : [];
+      state.stages = Array.isArray(snap.stages) ? snap.stages.slice() : state.stages;
       if (snap.sessionId) state.sessionId = snap.sessionId;
       if (snap.telemetry) applyTelemetry(snap.telemetry, true);
+      if (snap.run) state.run = snap.run;
       renderAll();
+      renderNotice();
     },
     onEvent: (ev) => {
       if (!state.startedAt) state.startedAt = Date.now();
@@ -80,7 +87,7 @@
       renderChart();
       renderEvents();
     },
-    onTelemetry: (t) => { applyTelemetry(t, false); renderTelemetry(); },
+    onTelemetry: (t) => { applyTelemetry(t, false); renderTelemetry(); renderNotice(); },
     onStep: (step) => {
       if (!state.startedAt) state.startedAt = Date.now();
       pushStep(step);
@@ -90,7 +97,97 @@
       state.checkpoints = [...state.checkpoints, cp];
       renderStages();
     },
+    onRun: (r) => { state.run = r; renderRunControls(); renderNotice(); },
+    onStage: (v) => { state.stages = [...state.stages, v].slice(-24); renderStageViews(); },
   });
+
+  /* --------------------------- run controls --------------------------- */
+  /* Present only in --serve mode; the buttons drive /api/run/* so the user can
+     start/stop/pause a run without restarting the process
+     (docs/AGENT-LOOP-AND-CONTROL.md §3). */
+  const elRunBox = $("run-controls"), elRunState = $("run-state");
+
+  async function post(path, body) {
+    try {
+      const r = await fetch(path, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body || {}),
+      });
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) { U.toast(body.error || `HTTP ${r.status}`, "err", 7000); return false; }
+      state.run = body;
+      renderRunControls();
+      renderNotice();
+      return true;
+    } catch (e) {
+      U.toast("Request failed: " + e, "err");
+      return false;
+    }
+  }
+
+  function renderRunControls() {
+    if (!state.runControl) { elRunBox.hidden = true; return; }
+    elRunBox.hidden = false;
+    const st = (state.run && state.run.state) || "idle";
+    elRunState.textContent = st + (state.run && state.run.mode ? ` · ${state.run.mode}` : "");
+    elRunState.className = "pill " + (st === "running" ? "ok" : st === "paused" ? "idle" : st === "idle" ? "idle" : "bad");
+    const busy = st === "starting" || st === "stopping";
+    $("run-start-agent").disabled = busy || st !== "idle";
+    $("run-start-watch").disabled = busy || st !== "idle";
+    $("run-stop").disabled = busy || st === "idle";
+    $("run-pause").disabled = busy || st === "idle";
+    $("run-pause").textContent = st === "paused" ? "Resume" : "Pause";
+  }
+
+  $("run-start-agent").onclick = () => post("/api/run/start", { mode: "agent" });
+  $("run-start-watch").onclick = () => post("/api/run/start", { mode: "watch" });
+  $("run-stop").onclick = async () => {
+    const ok = await U.confirmDialog({
+      title: "Stop the run?",
+      body: "The game will shut down and the session is finalised as aborted. Recorded data is kept.",
+      confirm: "Stop run",
+    });
+    if (ok) post("/api/run/stop");
+  };
+  $("run-pause").onclick = () => {
+    const st = (state.run && state.run.state) || "idle";
+    post(st === "paused" ? "/api/run/resume" : "/api/run/pause");
+  };
+
+  /** Explain WHY there is no agent telemetry, and offer the action to take. */
+  function renderNotice() {
+    const el = $("notice");
+    const t = state.telemetry;
+    const brain = t && t.brain;
+    const hasBrain = Boolean(brain && brain.kind === "real");
+    const runState = (state.run && state.run.state) || "idle";
+    const err = state.run && state.run.error;
+
+    if (err) {
+      el.hidden = false;
+      el.className = "notice err";
+      el.innerHTML = `<div class="notice-body"><strong>Could not start</strong><br>${U.esc(err)}</div>`;
+      return;
+    }
+    if (hasBrain) { el.hidden = true; return; }
+
+    // No real LLM in this run: say so plainly instead of showing empty panels.
+    el.hidden = false;
+    el.className = "notice";
+    const isServe = state.runControl;
+    const idle = isServe && runState === "idle";
+    el.innerHTML = `<div class="notice-body">
+      <strong>${idle ? "No run is active" : "This run has no LLM"}</strong><br>
+      ${idle
+        ? "Start a run to see the agent's decisions, token usage and steps."
+        : "Token usage and LLM steps only exist when an agent is driving. This run only observes the built-in game AI, so those panels stay empty by design."}
+      ${isServe ? `<div class="notice-actions">
+        <button type="button" class="btn sm primary" id="notice-start">Start agent</button>
+        <a class="btn sm" href="/providers">Configure provider</a>
+      </div>` : `<div class="notice-actions"><span class="dim">Restart with <code>pnpm run cli --serve</code> to control runs from here.</span></div>`}
+    </div>`;
+  }
 
   function applyTelemetry(t, replace) {
     state.telemetry = t;
@@ -145,6 +242,7 @@
   /* ---------------------------- render ---------------------------- */
   function renderAll() {
     renderHeader();
+    renderStageViews();
     renderKpis();
     renderCompanies();
     renderChart();
@@ -164,11 +262,8 @@
   function renderHeader() {
     elDate.textContent = state.date ? U.fmtGameDate(state.date) : "—";
     elSession.textContent = (state.telemetry && state.telemetry.sessionId) || state.sessionId || "—";
-    const mode = state.telemetry && state.telemetry.brain;
-    elMode.textContent = mode && mode.kind
-      ? (mode.kind === "real" ? "agent · real LLM" : "agent · test brain")
-      : (state.connected ? "observer only" : "—");
-    elMode.classList.toggle("neg", Boolean(mode && mode.kind === "faux"));
+    // Mode/brain is surfaced by the Agent panel heading and the notice banner;
+    // the header only carries the run-state pill now.
     if (state.startedAt) elElapsed.textContent = U.fmtDuration(Date.now() - state.startedAt);
   }
 
@@ -544,6 +639,35 @@
       : `<li class="empty">No staged summary yet — one is recorded as the run progresses.</li>`;
   }
 
+  /** Stage snapshots: one small map diagram per construction phase. */
+  function renderStageViews() {
+    const box = $("stage-snaps");
+    if (!box) return;
+    const views = state.stages || [];
+    if (!views.length) {
+      box.innerHTML = `<p class="empty">No stage view yet — one is captured at each construction phase.</p>`;
+      return;
+    }
+    const shown = views.slice(-12);
+    box.innerHTML = shown.map((v, i) => `
+      <div class="snap">
+        <canvas class="snap-map" data-i="${i}" height="130"></canvas>
+        <div class="snap-meta">
+          <span>${U.esc(v.gameDate || "—")}</span>
+          <span>${U.esc((v.phase || "").slice(0, 22))}${(v.phase || "").length > 22 ? "…" : ""}</span>
+        </div>
+        <div class="snap-meta">
+          <span>${U.fmtInt((v.companies || []).reduce((a, c) => a + (c.vehicles || 0), 0))} veh</span>
+          <span>${U.fmtInt((v.companies || []).reduce((a, c) => a + (c.stations || 0), 0))} stn</span>
+          <span>${U.fmtMoney(v.companies && v.companies[0] ? v.companies[0].money : 0)}</span>
+        </div>
+      </div>`).join("");
+    const canvases = box.querySelectorAll(".snap-map");
+    canvases.forEach((cv, i) => {
+      if (window.Charts && window.Charts.stageMap) window.Charts.stageMap(cv, shown[i]);
+    });
+  }
+
   /* ---------------------------- controls ---------------------------- */
   elRaw.onchange = renderEvents;
   elEvSearch.oninput = () => { state.evSearch = elEvSearch.value.trim(); renderEvents(); };
@@ -568,6 +692,19 @@
 
   elAutoScroll.checked = U.getPref("steps.follow", true);
   renderAll();
+
+  // Discover whether run control is available (serve mode) and its state.
+  (async () => {
+    try {
+      const r = await fetch("/api/run");
+      if (r.ok) {
+        state.runControl = true;
+        state.run = await r.json();
+      }
+    } catch { /* control disabled */ }
+    renderRunControls();
+    renderNotice();
+  })();
   // Keep "elapsed" honest without a busy 1s repaint loop: refresh it on the
   // events we already receive, plus a slow tick for quiet periods.
   setInterval(() => { if (state.startedAt) renderHeader(); }, 5000);

@@ -9,7 +9,7 @@
  * 禁止: 任何写入失败抛穿到 agent 循环（审计同款语义：失败即忽略）；越出 dataDir。
  */
 
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync, appendFileSync } from "node:fs";
 import path from "node:path";
 import type { TelemetrySnapshot } from "./telemetry.js";
 import type { GameEvent } from "../types.js";
@@ -194,6 +194,7 @@ export class SessionStore {
 	readonly dir: string;
 	readonly id: string;
 	private meta: SessionMeta;
+	private stageCount = 0;
 
 	constructor(dataDir: string, meta?: SessionMeta) {
 		this.dataDir = dataDir;
@@ -273,6 +274,36 @@ export class SessionStore {
 		this.meta = { ...this.meta, checkpoints: [...this.meta.checkpoints, cp] };
 		this.writeMeta();
 		this.upsertIndex(this.meta);
+	}
+
+	/**
+	 * Archive one stage snapshot (data-rendered map diagram) so the Sessions page
+	 * can replay the run's construction progress. Stored as a numbered JSON file
+	 * under `stages/` (index = order of capture).
+	 */
+	saveStage(view: unknown): void {
+		try {
+			const dir = path.join(this.dir, "stages");
+			mkdirSync(dir, { recursive: true });
+			const n = this.stageCount++;
+			writeFileSync(path.join(dir, `${String(n).padStart(3, "0")}.json`), JSON.stringify(view, null, 2), "utf8");
+		} catch {
+			/* non-fatal: a missing snapshot must not break a run */
+		}
+	}
+
+	/** All archived stage snapshots, oldest first (never throws). */
+	readStages(): unknown[] {
+		try {
+			const dir = path.join(this.dir, "stages");
+			return readdirSync(dir)
+				.filter((f) => f.endsWith(".json"))
+				.sort()
+				.map((f) => readJsonSafe<unknown>(path.join(dir, f)))
+				.filter((v) => v !== null);
+		} catch {
+			return [];
+		}
 	}
 
 	appendEvent(ev: GameEvent): void {

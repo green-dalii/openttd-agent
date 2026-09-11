@@ -653,6 +653,41 @@ openttd-agent/
 8. **前端空态也要定尺寸**: 跳过 `fit()` 会留下默认 300×200 backing store，
    配合 `canvas{width:100%}` 无 CSS 高度 → 3:2 方框，数据到达时高度跳变。
 
+## 10.19 v0.6.0 实现: 决策循环对齐 SPEC §1.1/§4.2 + 运行控制 + 阶段画面（2026-09-11）
+契约: `docs/AGENT-LOOP-AND-CONTROL.md`（对齐记录 §2.0）。**本轮修的是"没按 SPEC 实现"**。
+
+1. **`maxTurns ?? 1` = 整局只决策一次（最严重的偏离）**: LLM 在 1950-01-01 建一条线后
+   再也没被问过，收入一路下滑也无人补救。真机证据：三个 Session 均
+   `mode=watch` + `kind=faux` + `decisions=0`——用户看到的是内置 CPU AI 在打，
+   而面板一切正常。**这是"无脑操作"的真正根因，不是 LLM 不行。**
+2. **`DecisionScheduler`（何时问）与 `DecisionContext`（问什么）分离**:
+   - 触发: `start`/`phase_change`/`wait_until`/`interval`(每月)/`event`/`manual`；
+     同窗口内多触发**合并**为一次（取优先级最高），避免施工事件风暴烧 token。
+   - 载荷含 `sinceLastDecision`（money/income/vehicles 变化、阶段列表、上次动作结果、
+     显著事件）——没有它模型无法判断"我上次改的东西有没有用"。
+3. **SPEC §1.1 六步落地（冻结-观察-决策-执行-解冻）**: 决策前 `rcon pause`、
+   决策后 `rcon unpause`。不冻结时模型作答期间世界仍在推进，动作落在它没见过的状态上。
+4. **SPEC §4.2 步骤 2 结构化计划**: prompt 要求
+   `{goal, plan[], immediate_action, wait_until, rationale}`。**接口由框架定，
+   内容全由模型填**（§2.4 禁止引导）；解析失败退回 `interval` 兜底，绝不中断。
+5. **轮询必须在决策循环之前启动**（本次踩到的顺序 bug）: 阶段变化与经济数据靠
+   admin poll 发现，曾经 poll 循环写在决策循环之后 → 永远发现不到阶段变化 →
+   调度器收不到 `phase_change` → 仍表现为"只决策一次"。
+6. **运行控制（`--serve` 监督模式）**: 常驻 WebServer + `RunSupervisor`；
+   `POST /api/run/{start,stop,pause,resume}`；`GET /api/run`；WS 帧 `run`。
+   被监督的 run **复用**已有 WebServer（`WebServer.attach()` 晚绑定 hooks），
+   否则一个端口两个扇出。stop = `aborted`（用户主动停止 ≠ 达成目标）。
+7. **阶段画面（#5 的诚实答案）**: OpenTTD **dedicated server 无帧缓冲**，
+   rcon `screenshot` 实测返回 `Screenshot failed!` → 像素截图在本架构下不可能。
+   替代：`stage-view.ts` 用 GS ack 的真实 tile 坐标（`tile = y*width + x`）
+   生成几何描述，前端 canvas 画**示意图**，每个施工阶段存一份（`<session>/stages/NNN.json`），
+   UI 明确标注"由世界数据绘制"。要真截图只能改用带窗口的客户端（架构变更，另立 ADR）。
+8. **E2E 必须证明"智能真的接上了"（AGENTS.md §5.1）**: v0.3~v0.5 的 E2E 只验证
+   "进程起来了 + 有 token 计数"，所以"压根没接线"这类错误无人发现。新增
+   `test/live/agent-loop.test.ts` 断言 7 条：`llm.kind==="real"`、`mode==="agent"`、
+   `decisions>=2`、`tokens>0`、audit 有 `decision`（带 trigger）与 `action_result`、
+   trigger 不全为 `start`、dashboard telemetry 非零。
+
 ---
 
 ## 附录 A — 关键事实来源

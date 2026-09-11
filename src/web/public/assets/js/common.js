@@ -601,6 +601,7 @@ function connectWs(handlers) {
         case "telemetry": handlers.onTelemetry && handlers.onTelemetry(msg.data); break;
         case "step": handlers.onStep && handlers.onStep(msg.data); break;
         case "checkpoint": handlers.onCheckpoint && handlers.onCheckpoint(msg.data); break;
+        case "run": handlers.onRun && handlers.onRun(msg.data); break;
       }
     };
     ws.onclose = () => {

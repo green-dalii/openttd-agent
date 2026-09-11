@@ -11,6 +11,9 @@ TypeScript/Node (ESM, `type: module`) 单体框架：外部进程通过 **Admin 
 
 - 完整架构见 `SPEC.md`；渐进计划见 `ROADMAP.md`。
 - 必须读 `SPEC.md` §2/§10（已验证协议事实）再动通信相关代码。
+- **每次新 Session 开始或 compact 之后，先读 `SPEC.md` 做目标对齐再动手**
+  （§1 第一性原理、§4 Agent 层、§5 生命周期、§10.x 已固化事实）。本仓库的多数
+  返工都源于"没读 SPEC 就实现"——SPEC 里往往已经写明了正确做法。
 - **进度快查**: 当前开发阶段/验证状态/下一步见 `ROADMAP.md` 顶部「进度速览」+ 对应版本段；
   真机实测事实（含 OpenTTD Squirrel 字符串坑、标牌可见性）见 `SPEC.md` §10.x；
   Squirrel 可复用 helper（Split/ToInt/SetPhase）的规范实现以 `src/game/squirrel/executor-ai/main.nut` 为准。
@@ -58,10 +61,32 @@ scripts/       # dev 辅助 (gen-squirrel, setup-sandbox)
 
 ## 5. 测试与门禁
 
-- `pnpm test` — unit（快，纯）。
+- `pnpm test` — unit（快，纯）。**用 faux provider，无法发现"没接线"**。
 - `pnpm run test:live` — 含 `@live` 真机集成（需要本机 OpenTTD 二进制 + 可写临时 data dir）。
+  **涉及 agent/决策/遥测的改动必须跑这个**，断言见 §5.1。
 - `pnpm run gate` = `typecheck && lint && test`。**红=停**。
 - 新增测试命名：`*.test.ts`。协议 golden 字节样张放 `test/fixtures/`。
+
+## 5.1 E2E 必须证明「智能真的接上了」（血泪教训）
+
+**背景**：v0.3~v0.5 期间，`--agent` 的 E2E 只验证了"进程起来了、有 token 计数"，
+但**从未验证 LLM 真的在驱动决策**。结果三个真机 Session 全是 `mode=watch` +
+`kind=faux` + `decisions=0`——用户看到的是**内置 CPU AI** 在打，而面板一切正常。
+这类"压根没接线"的错误，任何单元测试都抓不到。
+
+**因此，任何关于 agent/决策/telemetry 的改动，E2E 必须至少证明以下全部：**
+
+1. `meta.json.llm.kind === "real"`（不是 faux）
+2. `meta.json.mode === "agent"`（不是 watch 顶包）
+3. `totals.decisions >= 2`（**不是 1**——1 意味着"只问了一次"）
+4. `totals.usage.totalTokens > 0`（真的有模型调用）
+5. `audit.jsonl` 里有 `decision` 且带 `trigger`，并有 `action_result`
+6. 决策 **trigger 不全是 `start`**（说明循环在持续运行）
+7. Dashboard `/api/telemetry` 的 `usage.total.input > 0`、`steps.length > 0`
+
+**新增/修改 `--agent`、loop、tools、telemetry、dashboard 遥测时，必须跑
+`pnpm run test:live` 且上述断言全绿**（见 `test/live/agent-loop.test.ts`）。
+只跑单测不算验证——单测用的是 faux provider，永远无法发现"没接线"。
 
 ## 6. 事实记录（重要）
 

@@ -24,12 +24,13 @@ import {
 import { handleServerPacket } from "../game/observer.js";
 import { runWatch } from "../game/runner.js";
 import { formatPreflight, runPreflight } from "../agent/preflight.js";
+import { runServe } from "../agent/serve.js";
 import { runV02 } from "../game/v02-runner.js";
 import { runAgent } from "../agent/runner.js";
 import { applyLlmSettingsFile } from "../agent/llm-settings.js";
 
 interface CliArgs {
-	mode: "probe" | "dry-run" | "watch" | "v02" | "agent" | "help";
+	mode: "probe" | "dry-run" | "watch" | "v02" | "agent" | "serve" | "help";
 	year?: number;
 	seed?: number;
 	timeoutMs: number;
@@ -63,6 +64,9 @@ function parseArgs(argv: string[]): CliArgs {
 	for (let i = 0; i < argv.length; i++) {
 		const a = argv[i]!;
 		switch (a) {
+			case "--serve":
+				mode = "serve";
+				break;
 			case "--probe":
 				mode = "probe";
 				break;
@@ -138,6 +142,8 @@ const USAGE = `openttd-agent — OpenTTD Admin Port probe / runner
 
 Usage:
   pnpm run cli --dry-run                Print resolved config, exit (no spawn)
+  pnpm run cli --serve [opts]           Long-lived dashboard with run controls:
+                                         start/stop/pause/resume from the page.
   pnpm run cli --probe [opts]           Start dedicated server, admin-join,
                                          poll date + company economy, rcon pause,
                                          print normalized events, exit.
@@ -193,6 +199,20 @@ async function main(): Promise<number> {
 
 	if (args.mode === "dry-run") {
 		console.log(JSON.stringify(redact(cfg), null, 2));
+		return 0;
+	}
+
+	// Serve mode owns its own gate per run (see runServe): it must stay up even
+	// when nothing can start yet, so the user can fix the config in the browser.
+	if (args.mode === "serve") {
+		const serve = await runServe(cfg, {
+			webPort: args.webPort,
+			offlineDemo: args.offlineDemo,
+			skipPreflight: args.skipPreflight,
+		});
+		console.log("[serve] Ctrl-C to stop");
+		await serve.done;
+		await serve.stop();
 		return 0;
 	}
 

@@ -3,7 +3,7 @@
 > LLM agent framework that autonomously plays — and self-evolves inside — OpenTTD.
 > External brain (Pi `@earendil-works/pi-agent-core`) ↔ Admin Port TCP ↔ in-game Bridge GS / Executor AI.
 
-**当前状态: v0.5.0 (启动门禁 + 生命周期)** — 观测 + 决策闭环 + 三页式 Dashboard（Live / Providers / Sessions）、
+**当前状态: v0.6.0 (决策循环对齐 SPEC + 运行控制)** — 观测 + 决策闭环 + 三页式 Dashboard（Live / Providers / Sessions）、
 39 个内置 provider 目录、token 计量、历史局复盘与运行对比。**盈利验收待真实 LLM key**。
 完整设计见 [`SPEC.md`](SPEC.md)，开发计划见 [`ROADMAP.md`](ROADMAP.md)，开发规范见 [`AGENTS.md`](AGENTS.md)。
 
@@ -230,6 +230,34 @@ test/
 docs/
   DASHBOARD-API.md          # dashboard 前后端**冻结契约**（改前必读）
 ```
+
+## 运行控制（v0.6.0）
+
+```bash
+pnpm run cli --serve --web-port 8080
+```
+常驻 dashboard，**页面即可开始 / 停止 / 暂停 / 恢复**一次运行，无需重启进程：
+
+| 操作 | 端点 | 说明 |
+|---|---|---|
+| 状态 | `GET /api/run` | `idle \| starting \| running \| paused \| stopping` |
+| 开始 | `POST /api/run/start` `{mode:"agent"\|"watch"}` | 已在跑则 **409**（不会静默替换） |
+| 停止 | `POST /api/run/stop` | 优雅停止，session 记为 **`aborted`** |
+| 暂停/恢复 | `POST /api/run/pause` \| `/resume` | 游戏级 pause + 决策节拍停/启 |
+
+> **`--agent` 与 `--watch` 的区别**：`--agent` 有 LLM（才有 token/步骤/思考）；
+> `--watch` **只观察游戏内置 AI**，因此那些面板**本来就会是空的**——
+> 页面现在会直接说明这一点，并给你「Start agent」按钮。
+
+## 决策循环（v0.6.0，对齐 SPEC §1.1/§4.2）
+
+框架只是框架：**不给建议、不做策略**，只负责「何时问、问什么、把决定交给执行器」。
+
+- **冻结-观察-决策-执行-解冻**：决策前 `pause`，决策后 `unpause`（否则模型思考时世界还在变）
+- **触发**：开局 / 施工阶段变化 / 模型自定的 `wait_until` / 每月兜底 / 显著事件 / 手动
+- **喂给模型的是因果**：不止当前状态，还有 `sinceLastDecision`（金额与车辆变化、
+  期间阶段、上次动作结果）——这样它才知道自己上一次的改动有没有起效
+- **模型产出结构化计划**：`{goal, plan[], immediate_action, wait_until, rationale}`
 
 ## 启动门禁（v0.5.0）
 
