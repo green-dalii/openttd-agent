@@ -156,9 +156,35 @@ observe · build_bus_route · add_vehicles · set_pause
    结果什么都没收到。改到周期性发送里（已知能到达 agent）才有结果。
    → 写任何 GS 侧探针都必须**先证明通道是通的**。
 
-**尚未完成**：`GSEngine.GetVehicleType` 调用报 "wrong number of parameters"
-（我探针里的 API 用法错误，不影响可行性结论 —— `GSVehicle.BuildVehicle` 文档标注
-`@api ai game`）。买车一步需在阶段二里用正确的调用方式补验。
+### 阶段 1b（买车/订单/启动）：**代码已写，尚未跑到**
+
+**已定位的一个真实原因**：`GSEngineList` **需要一个载具类型参数**。
+我最初写 `GSEngineList()` → 报 "wrong number of parameters"。
+正确写法来自**本项目已知可用的参照实现**
+（`executor-ai/main.nut` 的 `PickBusEngine`）：
+
+```squirrel
+local el = GSEngineList(GSVehicle.VT_ROAD);   // 不是 GSEngineList()
+el.Valuate(GSEngine.IsBuildable);             el.KeepValue(1);
+el.Valuate(GSEngine.GetRoadType);             el.KeepValue(GSRoad.ROADTYPE_ROAD);
+el.Valuate(GSEngine.GetMaxSpeed);
+el.Sort(GSList.SORT_BY_VALUE, false);
+```
+
+> 教训：**先去抄本项目里已经跑通的同类 API 调用**，不要凭头文件签名猜。
+> 我在这一个参数上错了两次（第一次是漏 `SetCurrentRoadType`，这次是漏载具类型）。
+
+**未跑到的原因**：`probe_cm` 的完整版（修车厂 → 选引擎 → 买车 → 下订单 → 启动）
+写好了、也通过了解析（GS 能启动即为证明），但**连续两次真机运行它都没有触发**。
+观察到 `"cmd":"state"` 出现 **0 次** —— GS 的周期性代码块**根本没执行**，
+而探针正是挂在那个块里。这与 ROADMAP §4b 记的执行器 `boot` 停顿是**同一现象**
+（怀疑游戏被 pause 住 → GS 不 tick → 周期块不跑）。
+
+**因此阶段 1b 仍未验证。** 已写入的探针**刻意保持不自动运行**
+（它要花公司的钱建车厂和买车），仅作为 `probe_cm` 命令保留。
+
+**下一步**：先解决 ROADMAP §4b 的 `boot` 停顿 / GS 不 tick 问题 ——
+它同时挡住探针和真正的施工，是当前唯一的拦路石。
 
 **当前状态**：探针**不再自动运行**（它会真建 1 格路、花公司 ~300 金币，
 留在自动流程里等于每局捣乱）。函数保留，需要时用 `probe_cm` 命令调用。

@@ -841,3 +841,10 @@ GS 还能直接收 admin 消息、直接用 `GSAdmin.Send` 发结构化 JSON。
 2. **没有订阅者的 `GSAdmin.Send` 会被静默丢弃**。GS 在 `Start()` 里发的探针消息
    完全收不到；改到周期性发送（已知能到达 agent）后正常。
    → 写任何 GS 侧自检，必须**先证明通道是通的**，否则会得到"跑了但没反应"的假象。
+3. **`GSEngineList` 需要一个载具类型参数**：`GSEngineList(GSVehicle.VT_ROAD)`。
+   不传会报 "wrong number of parameters"。正确用法以 `executor-ai/main.nut`
+   的 `PickBusEngine` 为准（那是本项目已验证的参照实现）。
+4. **GS 周期块不 tick 时，挂在里面的探针不会跑**。连续两次真机运行
+   `"cmd":"state"` 出现 0 次，说明 GS 的周期性代码块根本没执行 ——
+   怀疑游戏被 pause 住（与 §10.21 的事件转发、ROADMAP §4b 的 `boot` 停顿同源）。
+   **这是当前挡住施工与探针的唯一拦路石。**

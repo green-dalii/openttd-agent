@@ -25,11 +25,11 @@ class BridgeV1 extends GSController {
                 // (measured 2026-09-12: the boot-time probe produced nothing,
                 // while this same periodic send reaches the agent every time).
                 // The delay is the point: it proves the channel is live first.
-                // The phase-1 probe is NOT auto-run any more: it passed
-                // (docs/EXECUTOR-ARCHITECTURE.md §1), and it builds a real road
-                // tile that costs the company ~300. Leaving it armed would put a
-                // wrench in every game. It stays available as the `probe_cm`
-                // command for future re-verification.
+                // The probe is NOT auto-run: phase 1 passed and it spends the
+                // company's money, so arming it would sabotage every game.
+                // Reachable as the `probe_cm` command for re-verification.
+                // Phase 1b (depot/engine/buy/order/start) is written but has NOT
+                // been run to completion - see docs/EXECUTOR-ARCHITECTURE.md.
                 local sl = GSSignList();
                 local sc = 0;
                 local names = [];
@@ -77,25 +77,31 @@ class BridgeV1 extends GSController {
     }
 
     /* Dispatch an admin command object. */
-    /* PHASE-1 FEASIBILITY SPIKE (docs/EXECUTOR-ARCHITECTURE.md).
+    /* PHASE-1b FEASIBILITY SPIKE - the full "make one working bus" sequence.
 
-     * Question: can the Game Script itself BUILD for a company - in company mode,
-     * with that company's money? The OpenTTD sources say yes (script_road.hpp is
-     * tagged "@api ai game"; script_companymode.hpp says actions are carried out
-     * "on behalf of the company you switched to ... like the real player is
-     * executing the commands"), and this GS already uses GSCompanyMode to place
-     * signs. But the docs do not say whether it works on a macOS dedicated
-     * server, and that is exactly the kind of thing only a real run answers.
+     * Phase 1 proved the GS can BUILD as the company (GSRoad.BuildRoad returned
+     * true and 307 was charged to company 0). What it did NOT prove is the rest
+     * of the chain: depot, engine choice, buying, orders, starting. If any of
+     * those cannot be done by a GS, the GS-only plan collapses - and I would
+     * rather find that out here, in a 60-line probe, than after porting 880
+     * lines of executor into the GS.
      *
-     * Deliberately tiny and safe: it tries ONE road tile near one town. It never
-     * touches the route the executor is building, and it reports even when it
-     * throws, so a failure is information rather than silence. */
+     * Every step records its own outcome, and each risky call is guarded, so a
+     * throw reports WHERE it happened instead of losing the steps already done.
+     *
+     * It mirrors executor-ai PhaseBus/PickBusEngine deliberately: that code is
+     * the known-good reference for this exact sequence, so any difference is my
+     * mistake rather than an API difference.
+     *
+     * Note it does spend the company's money (a depot and a bus). It is NOT
+     * auto-run - see the note in the periodic tick. */
     function ProbeCompanyMode() {
         local exec = 0;
         local out = {
-            kind = "probe", cmd = "probe_cm", company = exec,
-            money_before = -1, money_after = -1, stage = "init",
-            cm_valid = false, road = "unset", engine = "none", note = ""
+            kind = "probe", cmd = "probe_cm", company = exec, stage = "init",
+            cm_valid = false, road = "unset", depot = "unset", engine = "unset",
+            vehicle = "unset", orders = "unset", started = "unset",
+            money_before = -1, money_after = -1, note = ""
         };
         try {
             if (GSCompany.ResolveCompanyID(exec) == GSCompany.COMPANY_INVALID) {
@@ -105,54 +111,105 @@ class BridgeV1 extends GSController {
             }
             out.money_before = GSCompany.GetBankBalance(exec);
             local mode = GSCompanyMode(exec);
-            out.stage = "mode";
             out.cm_valid = GSCompanyMode.IsValid();
-            // A road type must be selected before any road command; without it
-            // BuildRoad fails its precondition. The Executor AI does exactly this
-            // (AIRoad.SetCurrentRoadType) before it builds anything.
+            // A road type must be selected before any road command. The executor
+            // does this too (AIRoad.SetCurrentRoadType); omitting it was my first
+            // bug in this probe.
             GSRoad.SetCurrentRoadType(GSRoad.ROADTYPE_ROAD);
 
             local tl = GSTownList();
             if (tl.Count() == 0) {
-                out.road = "no-towns";
+                out.note = "no towns";
+                GSAdmin.Send(out);
+                return;
+            }
+            local c = GSTown.GetLocation(tl.Begin());
+
+            // (1) road - already proven, kept so the sequence is self-contained
+            out.stage = "road";
+            local pair = this.FindAdjacentLandPair(c, 16);
+            if (pair == null) {
+                out.road = "no-site";
             } else {
-                local c = GSTown.GetLocation(tl.Begin());
-                local pair = this.FindAdjacentLandPair(c, 16);
-                if (pair == null) {
-                    out.road = "no-site";
-                } else {
-                    out.stage = "build";
-                    local built = GSRoad.BuildRoad(pair[0], pair[1]);
-                    out.stage = "built";
-                    if (built) {
-                        out.road = "ok";
-                    } else {
-                        out.road = "fail";
-                        // Report the error, not just "failed" (SPEC 10.20). Each
-                        // call is guarded because a reporting failure must not
-                        // destroy the result we already have.
-                        out.stage = "err";
-                        local code = -1;
-                        try { code = GSError.GetLastError(); } catch (e2) { code = -2; }
-                        out.note = "code=" + code;
-                        out.stage = "err2";
-                    }
+                local built = GSRoad.BuildRoad(pair[0], pair[1]);
+                if (built) { out.road = "ok"; } else {
+                    local rc = -1; try { rc = GSError.GetLastError(); } catch (e1) { rc = -2; }
+                    out.road = "fail:" + rc;
                 }
             }
 
-            // Can we even see a road engine to buy later? Guarded: this is a
-            // secondary question and a failure here must not hide the primary
-            // result (that the road build returned true).
-            out.stage = "engine";
-            try {
-                foreach (eid, _ in GSEngineList()) {
-                    out.engine = "id" + eid;
-                    break;
+            // (2) depot - BuildRoadDepot(tile, front), needs the front to be road
+            out.stage = "depot";
+            local dp = this.FindAdjacentLandPair(c, 20);
+            local depotTile = -1;
+            if (dp != null) {
+                // Make sure the front tile is road so the depot has a connection.
+                GSRoad.BuildRoad(dp[0], dp[1]);
+                if (GSRoad.BuildRoadDepot(dp[0], dp[1])) {
+                    depotTile = dp[0];
+                    out.depot = "ok";
+                } else {
+                    local dc = -1; try { dc = GSError.GetLastError(); } catch (e2) { dc = -2; }
+                    out.depot = "fail:" + dc;
                 }
-                out.stage = "engine_ok";
+            } else {
+                out.depot = "no-site";
+            }
+
+            // (3) engine - GSEngineList takes a VEHICLE TYPE. Calling it with no
+            // argument is what produced "wrong number of parameters".
+            out.stage = "engine";
+            local engine = -1;
+            try {
+                local el = GSEngineList(GSVehicle.VT_ROAD);
+                el.Valuate(GSEngine.IsBuildable);
+                el.KeepValue(1);
+                el.Valuate(GSEngine.GetRoadType);
+                el.KeepValue(GSRoad.ROADTYPE_ROAD);
+                el.Valuate(GSEngine.GetMaxSpeed);
+                el.Sort(GSList.SORT_BY_VALUE, false);
+                if (!el.IsEmpty()) engine = el.Begin();
+                out.engine = (engine < 0) ? "none" : ("id" + engine);
             } catch (e3) {
                 out.engine = "EXC:" + ("" + e3);
             }
+
+            // (4) buy it
+            out.stage = "buy";
+            local veh = -1;
+            if (depotTile >= 0 && engine >= 0) {
+                veh = GSVehicle.BuildVehicle(depotTile, engine);
+                if (GSVehicle.IsValidVehicle(veh)) {
+                    out.vehicle = "ok:" + veh;
+                } else {
+                    local vc = -1; try { vc = GSError.GetLastError(); } catch (e4) { vc = -2; }
+                    out.vehicle = "fail:" + vc;
+                    veh = -1;
+                }
+            } else {
+                out.vehicle = "skipped";
+            }
+
+            // (5) orders - the vehicle must have somewhere to go
+            out.stage = "order";
+            if (veh >= 0) {
+                local a = GSOrder.AppendOrder(veh, depotTile, GSOrder.OF_NON_STOP_INTERMEDIATE);
+                local b = GSOrder.AppendOrder(veh, pair != null ? pair[0] : depotTile,
+                                              GSOrder.OF_NON_STOP_INTERMEDIATE);
+                out.orders = (a && b) ? "ok" : "fail";
+            } else {
+                out.orders = "skipped";
+            }
+
+            // (6) start it - an unstarted vehicle is a very expensive decoration
+            out.stage = "start";
+            if (veh >= 0) {
+                out.started = GSVehicle.StartStopVehicle(veh) ? "ok" : "fail";
+            } else {
+                out.started = "skipped";
+            }
+
+            out.stage = "done";
             out.money_after = GSCompany.GetBankBalance(exec);
         } catch (e) {
             out.note = "EXC " + ("" + e);
