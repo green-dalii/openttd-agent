@@ -2,6 +2,11 @@
 
 本文件遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+> **文档边界**（范围以 `AGENTS.md` §9 为唯一权威）：本文件是每个版本**改了什么**的
+> 权威记录（面向使用者与回滚）。
+> **不收录**：未来计划（→ `ROADMAP.md`）、开发准则（→ `AGENTS.md`）、
+> 踩过的坑的复盘（→ `MEMORY.md`；此处只写"改了什么"，不写"我为什么犯错"）。
+
 ## [Unreleased]
 
 ### Added（记忆闭环 第 1 片：不变量与门槛）

@@ -1,5 +1,10 @@
 # SPEC — OpenTTD LLM Agent Framework
 
+> **文档边界**（范围以 `AGENTS.md` §9 为唯一权威）：本文件是**系统是什么** +
+> **已验证的系统事实**（协议字节布局、游戏机制、架构取舍 ADR）。
+> **不收录**：进度/待办（→ `ROADMAP.md`）、版本历史（→ `CHANGELOG.md`）、
+> 过程教训（→ `MEMORY.md`）、怎么用（→ `README.md`）。
+
 > 状态: **v0.2 — 用户已拍板（D1-D10）+ 已固化两轮可行性调研 + M0/M1 实测闭环**
 > 版本: 2026-09-08
 > 作者: Pi (pi-shift-router SMART tier)

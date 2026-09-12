@@ -3,6 +3,10 @@
 > LLM agent framework that autonomously plays — and self-evolves inside — OpenTTD.
 > External brain (Pi `@earendil-works/pi-agent-core`) ↔ Admin Port TCP ↔ in-game Bridge GS / Executor AI.
 
+<!-- 文档边界（范围以 AGENTS.md §9 的职责表为唯一权威）：本文件只回答"怎么用"
+     （命令 / 配置 / 架构速览）。协议字节布局与实现事实 → SPEC.md；版本历史 → CHANGELOG.md；
+     过程教训 → MEMORY.md。此处不复制它们的内容，只给指针。 -->
+
 **当前状态: v0.6.0 (决策循环对齐 SPEC + 运行控制)** — 观测 + 决策闭环 + 三页式 Dashboard（Live / Providers / Sessions）、
 39 个内置 provider 目录、token 计量、历史局复盘与运行对比。**盈利验收待真实 LLM key**。
 完整设计见 [`SPEC.md`](SPEC.md)，开发计划见 [`ROADMAP.md`](ROADMAP.md)，开发规范见 [`AGENTS.md`](AGENTS.md)，

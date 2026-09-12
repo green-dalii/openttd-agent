@@ -17,6 +17,13 @@ import { join } from "node:path";
 
 const ROOT = process.cwd();
 
+/** Top-level docs whose boundaries are defined by AGENTS.md §9. */
+const TOP_DOCS = ["AGENTS.md", "SPEC.md", "ROADMAP.md", "CHANGELOG.md", "MEMORY.md", "README.md"];
+
+function doc(name: string): string {
+	return readFileSync(join(ROOT, name), "utf8");
+}
+
 /** 仓库中被 git 跟踪的文件（不含未跟踪的本地垃圾）。 */
 function trackedFiles(): string[] {
 	const out = execFileSync("git", ["ls-files"], { cwd: ROOT, encoding: "utf8" });
@@ -58,5 +65,48 @@ describe("repo hygiene: 临时脚本", () => {
 
 	it(".scratch/ 目录存在(约定，不靠记忆)", () => {
 		expect(existsSync(join(ROOT, ".scratch"))).toBe(true);
+	});
+});
+
+describe("repo hygiene: 文档正交性（AGENTS.md §9）", () => {
+	// These lock in the 2026-09-12 cleanup. The failure they prevent is silent and
+	// gradual: every time a finished version's detail is appended to ROADMAP
+	// instead of CHANGELOG, the two copies drift and neither can be trusted.
+
+	it("ROADMAP 不再复述已完成版本（那属于 CHANGELOG）", () => {
+		const s = doc("ROADMAP.md");
+		// A completed version section looks like `### v0.5.0 — ... （✅ 完成, ...）`.
+		const finished = s.match(/^###+\s+v\d+\.\d+\.\d+\s+—.*(✅|完成)/gm) ?? [];
+		expect(
+			finished,
+			"ROADMAP must only describe what is NOT done; finished versions belong to CHANGELOG.md",
+		).toEqual([]);
+	});
+
+	it("ROADMAP 里没有逐版本的验收勾选历史", () => {
+		const s = doc("ROADMAP.md");
+		const checked = s.match(/^- \[x\] .*(gate|passed|全绿)/gim) ?? [];
+		expect(checked, "acceptance history belongs to CHANGELOG.md, not the plan").toEqual([]);
+	});
+
+	it("只有 AGENTS.md 持有文档职责表（其余文档不得复制）", () => {
+		// Copying the table would make the authority itself one of six copies.
+		const copies = TOP_DOCS.filter((d) => d !== "AGENTS.md" && /唯一职责/.test(doc(d)) && /不应包含/.test(doc(d)));
+		expect(copies, "the responsibility table must exist in exactly one place").toEqual([]);
+	});
+
+	it("每份顶层文档都声明了自己的边界并指向 AGENTS §9", () => {
+		// AGENTS.md is the authority itself, so it has nothing to point at.
+		const missing = TOP_DOCS.filter((d) => d !== "AGENTS.md").filter((d) => {
+			const s = doc(d);
+			return !/AGENTS\.md`?\s*§9/.test(s);
+		});
+		expect(missing, "each doc must point at the single authority for its own boundary").toEqual([]);
+	});
+
+	it("MEMORY 不复制系统事实（只留指针）", () => {
+		// A lesson may reference a fact, but the fact's authority is SPEC.md/docs.
+		const s = doc("MEMORY.md");
+		expect(s, "MEMORY should point at SPEC instead of restating protocol facts").toMatch(/SPEC\.md/);
 	});
 });
