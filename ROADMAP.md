@@ -70,9 +70,11 @@ Intl 替换手写格式化（自带单位阶梯，避免 CLDR 漂移）· uPlot 
   局终：反思 → 蒸馏 → 持久化（**与 metrics 记账互不影响**，各自失败不连带）
   **验收**：`test/live` 断言注入计数 `> 0` 且出现在 `metrics.jsonl`；
   反思失败时 metrics 仍落盘
-- [ ] **P6 — Dashboard 进化视图（SPEC §6.1 #4）**
-  跨局指标折线对比 + lessons/策略浏览 + **手动开关注入**（SPEC §5.3 guardrail：
-  默认关、人工确认后才生效）
+- [~] **P6 — Dashboard 进化视图（SPEC §6.1 #4）**
+  - [x] **后端**：`GET /api/evolution`（metrics + lessons + strategies）+
+        `POST /api/evolution/strategies/:id/enabled`（人工确认闸门）。
+        已在真机 serve 上验证：读、翻、持久化、未知 id → 404
+  - [ ] **前端**：跨局指标折线对比 + lessons/策略浏览 + 手动开关（见 `docs/DASHBOARD-API.md` §3.5）
 
 **红线**：注入默认**关闭**，人类在 UI 确认后才全局生效（SPEC §5.3）。
 一个把错误教训固化进库的系统，比没有记忆的系统更糟。

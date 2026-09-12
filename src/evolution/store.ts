@@ -223,3 +223,22 @@ export function compactStrategies(dataDir: string): number {
 	writeAtomic(strategiesPath(dataDir), list.map((c) => JSON.stringify(c)));
 	return list.length;
 }
+
+/**
+ * Flip one strategy card's human confirmation flag (SPEC §5.3 guardrail).
+ *
+ * Returns false when the id is unknown so the API can answer 404 rather than
+ * silently pretending it worked. Rewrites the library atomically: the toggle is
+ * the one write a human performs, and losing it would silently disable a
+ * strategy they had already reviewed.
+ */
+export function setStrategyEnabled(dataDir: string, id: string, enabled: boolean): boolean {
+	if (!id) return false;
+	const list = readStrategies(dataDir);
+	const idx = list.findIndex((c) => c.id === id);
+	if (idx === -1) return false;
+	const next = list.slice();
+	next[idx] = { ...next[idx]!, enabled: Boolean(enabled) };
+	writeAtomic(strategiesPath(dataDir), next.map((c) => JSON.stringify(c)));
+	return true;
+}

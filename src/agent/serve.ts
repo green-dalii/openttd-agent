@@ -17,6 +17,7 @@ import type { Config } from "../config.js";
 import { WebServer } from "../web/server.js";
 import { createLlmApi } from "./llm-api.js";
 import { listSessions, readSession } from "./session-store.js";
+import { readMetrics, readLessons, readStrategies, setStrategyEnabled } from "../evolution/store.js";
 import { RunSupervisor, type RunMode } from "./supervisor.js";
 import { runAgent } from "./runner.js";
 import { runWatch } from "../game/runner.js";
@@ -95,6 +96,15 @@ export async function runServe(cfg: Config, opts: ServeOptions = {}): Promise<Se
 		sessions: {
 			list: () => listSessions(cfg.dataDir),
 			read: (id, limit) => readSession(cfg.dataDir, id, limit ? { limit } : {}),
+		},
+		// Cross-game memory (SPEC §6.1 view 4). Read-only except the human
+		// confirmation toggle, which is the one write a human performs here
+		// (SPEC §5.3: the engine advises, the human decides).
+		evolution: {
+			metrics: () => readMetrics(cfg.dataDir),
+			lessons: () => readLessons(cfg.dataDir),
+			strategies: () => readStrategies(cfg.dataDir),
+			setStrategyEnabled: (id, enabled) => setStrategyEnabled(cfg.dataDir, id, enabled),
 		},
 		run: {
 			status: () => supervisor.state(),

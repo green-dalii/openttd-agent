@@ -58,6 +58,23 @@ export interface SessionHooks {
 }
 
 /**
+ * Cross-game memory access (SPEC §6.1 view 4, docs/EVOLUTION.md).
+ *
+ * Read-only by construction: the page browses lessons/strategies and can toggle
+ * injection confirmation, but the engine itself cannot write through the web API.
+ */
+export interface EvolutionHooks {
+	/** The metrics ledger (one entry per finished game). */
+	metrics: () => unknown[];
+	/** Distilled lessons. */
+	lessons: () => unknown[];
+	/** The strategy candidate pool. */
+	strategies: () => unknown[];
+	/** Flip the human confirmation flag on one strategy card (SPEC §5.3 guardrail). */
+	setStrategyEnabled?: (id: string, enabled: boolean) => boolean;
+}
+
+/**
  * Run control (docs/AGENT-LOOP-AND-CONTROL.md §3.2). Injected so the web layer
  * stays agnostic of the agent/game layers. Absent => the control API 404s and
  * the pages hide the controls.
@@ -92,6 +109,8 @@ export interface WebServerOptions {
 	catalog?: CatalogHooks;
 	/** Past sessions. Absent => 404. */
 	sessions?: SessionHooks;
+	/** Cross-game memory (SPEC §6.1 view 4). Absent => /api/evolution 404s. */
+	evolution?: EvolutionHooks;
 	/** Start/stop/pause/resume the game run. Absent => 404. */
 	run?: RunHooks;
 	/** App version, surfaced at /api/version and in the page footer. */
@@ -134,6 +153,7 @@ export class WebServer {
 	private runHooks?: RunHooks;
 	private version?: string;
 	private sessionHooks?: SessionHooks;
+	private evolutionHooks?: EvolutionHooks;
 	private onFirstClient?: () => void;
 	private llmHooks?: WebServerOptions["llm"];
 	private telemetryHook?: WebServerOptions["telemetry"];
@@ -149,6 +169,7 @@ export class WebServer {
 		this.runHooks = opts.run;
 		this.version = opts.version;
 		this.sessionHooks = opts.sessions;
+		this.evolutionHooks = opts.evolution;
 		this.llmHooks = opts.llm;
 		this.telemetryHook = opts.telemetry;
 		this.catalogHooks = opts.catalog;
@@ -224,12 +245,15 @@ export class WebServer {
 		getSnapshot?: () => unknown;
 		telemetry?: () => unknown;
 		sessions?: SessionHooks;
+		/** Cross-game memory (SPEC §6.1 view 4). */
+		evolution?: EvolutionHooks;
 		version?: string;
 	}): void {
 		if (hooks.getSnapshot) this.getSnapshot = hooks.getSnapshot;
 		if (hooks.telemetry) this.telemetryHook = hooks.telemetry;
 		else this.telemetryHook = undefined;
 		if (hooks.sessions) this.sessionHooks = hooks.sessions;
+		if (hooks.evolution) this.evolutionHooks = hooks.evolution;
 		if (hooks.version) this.version = hooks.version;
 	}
 
@@ -447,6 +471,40 @@ export class WebServer {
 				const one = this.sessionHooks.read(id, limit);
 				if (!one) return json(404, { error: `unknown session "${id}"` });
 				return json(200, one);
+			}
+
+
+			// /api/evolution — the cross-game memory + metrics ledger (SPEC §6.1 #4).
+			if (segments[1] === "evolution") {
+				if (!this.evolutionHooks) return json(404, { error: "evolution disabled" });
+				// Toggle one strategy card's human confirmation flag (SPEC §5.3:
+				// the engine only advises; nothing takes effect until a human says so).
+				if (segments[2] === "strategies" && segments[4] === "enabled") {
+					if (req.method !== "POST") return json(405, { error: "method not allowed" });
+					if (!this.evolutionHooks.setStrategyEnabled) {
+						return json(404, { error: "strategy toggle disabled" });
+					}
+					const id = decodeURIComponent(segments[3] ?? "");
+					if (!id) return json(400, { error: "missing strategy id" });
+					let body: unknown = null;
+					try {
+						const raw = await readBody(req);
+						body = raw.length ? JSON.parse(raw) : {};
+					} catch {
+						return json(400, { error: "invalid JSON body" });
+					}
+					const enabled = Boolean((body as { enabled?: unknown } | null)?.enabled);
+					if (!this.evolutionHooks.setStrategyEnabled(id, enabled)) {
+						return json(404, { error: `unknown strategy "${id}"` });
+					}
+					return json(200, { ok: true, id, enabled });
+				}
+				if (req.method !== "GET") return json(405, { error: "method not allowed" });
+				return json(200, {
+					metrics: this.evolutionHooks.metrics(),
+					lessons: this.evolutionHooks.lessons(),
+					strategies: this.evolutionHooks.strategies(),
+				});
 			}
 
 			return json(404, { error: "not found" });

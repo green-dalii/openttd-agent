@@ -228,6 +228,10 @@
 **新增交互原语**：Toast（保存成功/失败不再是一行小字）、确认对话框、分段控件、
 视图偏好 `localStorage` 持久化（隐藏类别/跟随滚动/图表指标）
 
+- `GET /api/evolution` + `POST /api/evolution/strategies/:id/enabled`
+  —— 进化层只读视图与 SPEC §5.3 的人工确认闸门（本 API 唯一的写操作）。
+  真机验证：读、翻转、持久化、未知 id → 404。契约见 `docs/DASHBOARD-API.md` §3.5。
+
 ### Fixed
 - **阶段性总结面板恒为空（dead UI）**：Live 页读 `telemetry.checkpoints`，但该字段
   从不存在，且 checkpoint **只在 shutdown 写**。现在 `--agent` 每个 decision turn、

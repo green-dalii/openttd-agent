@@ -22,6 +22,7 @@ import {
 	lessonsPath,
 	readLessons,
 	readStrategies,
+	setStrategyEnabled,
 	strategiesPath,
 } from "../../src/evolution/store.js";
 import { lessonId, type Lesson } from "../../src/evolution/lessons.js";
@@ -204,5 +205,34 @@ describe("learning store: strategies", () => {
 	it("跳过无效条目(无 id / 非对象)", () => {
 		appendStrategies(dir, [card(), {} as unknown as StrategyCard]);
 		expect(readStrategies(dir)).toHaveLength(1);
+	});
+});
+
+describe("learning store: setStrategyEnabled(人工确认 guardrail)", () => {
+	it("翻转指定卡片的 enabled", () => {
+		appendStrategies(dir, [card({ enabled: false })]);
+		const id = card().id;
+		expect(setStrategyEnabled(dir, id, true)).toBe(true);
+		expect(readStrategies(dir)[0]!.enabled).toBe(true);
+	});
+
+	it("可以关回去", () => {
+		appendStrategies(dir, [card({ enabled: true })]);
+		expect(setStrategyEnabled(dir, card().id, false)).toBe(true);
+		expect(readStrategies(dir)[0]!.enabled).toBe(false);
+	});
+
+	it("未知 id 返回 false(让 API 能答 404,而不是假装成功)", () => {
+		appendStrategies(dir, [card()]);
+		expect(setStrategyEnabled(dir, "nope", true)).toBe(false);
+		expect(setStrategyEnabled(dir, "", true)).toBe(false);
+	});
+
+	it("只影响目标卡片", () => {
+		appendStrategies(dir, [card({ action: "a" }), card({ action: "b", params: { q: 1 } })]);
+		setStrategyEnabled(dir, card({ action: "a" }).id, true);
+		const out = readStrategies(dir);
+		expect(out.find((c) => c.action === "a")!.enabled).toBe(true);
+		expect(out.find((c) => c.action === "b")!.enabled).toBe(false);
 	});
 });

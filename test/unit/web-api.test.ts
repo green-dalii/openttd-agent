@@ -30,6 +30,7 @@ describe("WebServer REST", () => {
 	let server: WebServer | null = null;
 	let port = 0;
 	const deleted: string[] = [];
+	const toggled: { id: string; enabled: boolean }[] = [];
 
 	afterEach(async () => {
 		if (server) await server.stop();
@@ -61,6 +62,18 @@ describe("WebServer REST", () => {
 			sessions: {
 				list: () => [{ id: "20260910-213000-seed7", mode: "agent", status: "completed" }],
 				read: (id) => (id === "known" ? { meta: { id }, telemetry: null, events: [], audit: [] } : null),
+			},
+			evolution: {
+				metrics: () => [{ id: "g1", memory: { lessonsInjected: 2, strategiesInjected: 0 } }],
+				lessons: () => [{ id: "l1", text: "build near towns", kind: "do", evidence: ["money +1"] }],
+				strategies: () => [
+					{ id: "s1", action: "build_bus_route", valuePerRun: [9000, 12000], enabled: false },
+				],
+				setStrategyEnabled: (id, enabled) => {
+					if (id !== "s1") return false;
+					toggled.push({ id, enabled });
+					return true;
+				},
 			},
 			...over,
 		});
@@ -243,6 +256,42 @@ describe("WebServer REST", () => {
 			expect(res.length).toBeGreaterThan(0);
 			expect(res.toLowerCase()).toContain(needle.toLowerCase());
 		}
+	});
+
+
+	it("serves the cross-game memory at /api/evolution", async () => {
+		await start();
+		const r = await req("GET", "/api/evolution");
+		expect(r.status).toBe(200);
+		const body = r.body as { metrics: unknown[]; lessons: unknown[]; strategies: unknown[] };
+		expect(body.metrics).toHaveLength(1);
+		expect(body.lessons).toHaveLength(1);
+		expect(body.strategies).toHaveLength(1);
+		// The injection counts are the experiment's independent variable - the page
+		// must be able to show them.
+		expect(JSON.stringify(body.metrics)).toContain("lessonsInjected");
+	});
+
+	it("404s /api/evolution when the hooks are absent", async () => {
+		await start({ evolution: undefined });
+		expect((await req("GET", "/api/evolution")).status).toBe(404);
+	});
+
+	it("toggles a strategy card's human confirmation flag (SPEC §5.3 guardrail)", async () => {
+		await start();
+		const r = await req("POST", "/api/evolution/strategies/s1/enabled", { enabled: true });
+		expect(r.status).toBe(200);
+		expect(toggled).toEqual([{ id: "s1", enabled: true }]);
+	});
+
+	it("rejects an unknown strategy id with 404", async () => {
+		await start();
+		expect((await req("POST", "/api/evolution/strategies/nope/enabled", { enabled: true })).status).toBe(404);
+	});
+
+	it("requires POST for the toggle", async () => {
+		await start();
+		expect((await req("GET", "/api/evolution/strategies/s1/enabled")).status).toBe(405);
 	});
 
 	it("returns 404 for api routes when hooks are absent", async () => {

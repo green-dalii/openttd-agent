@@ -473,3 +473,23 @@ export async function buildBrain(llm: LlmConfig, opts: { credentials?: Credentia
 source?: "catalog" | "custom";   // 默认: baseUrl 为空 => "catalog"（若 providerId 命中目录）否则 "custom"
 ```
 `<dataDir>/llm.json` 同步新增 `source`。**旧文件（无 source）必须照旧可读。**
+
+### 3.5 跨局记忆 `/api/evolution`（v0.6.x）
+
+`GET /api/evolution` — 进化层只读视图。缺 hook 时 404。
+
+```json
+{
+  "metrics":    [ /* 每局一条 GameMetric，含 memory:{lessonsInjected,strategiesInjected} */ ],
+  "lessons":    [ /* Lesson[]，按"更可信者胜"收敛后的库 */ ],
+  "strategies": [ /* StrategyCard[]，候选池（含未通过门槛/未确认的） */ ]
+}
+```
+
+`POST /api/evolution/strategies/:id/enabled` + `{"enabled": true|false}`
+—— SPEC §5.3 的**人工确认**闸门。这是本 API 唯一的写操作：
+引擎只给建议，未经人工确认的策略不会参与注入。未知 id 返回 404（不假装成功）。
+
+**注意** `strategies` 返回的是**候选池**，不是"可注入集合"。
+可注入需要**两道独立的闸**同时通过：SPEC §5.3 的证据门槛（价值>阈值 且 已验证局≥2）
+与人工确认标志。见 `docs/EVOLUTION.md` §2.2。
