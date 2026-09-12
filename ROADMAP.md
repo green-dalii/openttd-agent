@@ -82,6 +82,28 @@
 - [ ] 对照模型基线（多 provider）
 - [ ] 前端：各页面的空态 / 错误态一致性审计
 
+### 3b. 执行器架构改造：GS-only（调研完成，待实施）
+
+**根因（不是"没写完"，是选错架构）**：`SPEC.md` §10 选了 Executor AI + 标牌邮箱，
+起因是"AI 不能直接收 admin 消息"。这条约束派生出三个**结构性**残疾：
+标牌中继命令、31 字符公司名回报、一次性状态机。
+
+**关键发现**：那条约束**根本不必要**。OpenTTD 源码证实
+（`script_companymode.hpp` / `script_road.hpp` / `script_vehicle.hpp`，均 `@api ai game`）：
+GS 在 company mode 下可以施工，且文档原文是
+*"this is like the real player is executing the commands"*。
+→ **Executor AI 是一个可以删掉的组件。**
+`SPEC.md` L355 早已预警此事（"架构可简化为 GS-only"），但那个 spike 从未做。
+
+**已完成**：调研 + 证据 + 四阶段实施计划 → `docs/EXECUTOR-ARCHITECTURE.md`
+**已完成的实测**：`probe_cm` 探针已写出并跑过一轮，得到一条负面事实
+（第二条 admin 连接发不到 GS，见 SPEC §10.24）；该探针改动因改动过程出错已回退。
+
+- [ ] 阶段一：GS 启动时自触发探针，真机证实 company mode 可施工
+- [ ] 阶段二：执行器逻辑移入 GS，结构化上报
+- [ ] 阶段三：删除 Executor AI + 标牌邮箱
+- [ ] 阶段四：扩动作面（真人在用的操作类别，见文档 §3）
+
 ### 4. Harness 给 agent 的信息是否足够（**本次审计的核心问题**）
 
 你的问题："是不是 Harness 给 agent 传递游戏环境和参数不足？为什么持续亏钱、
