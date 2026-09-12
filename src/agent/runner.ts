@@ -59,6 +59,9 @@ import type { SessionTotals } from "./session-store.js";
 import { createLlmApi } from "./llm-api.js";
 import { WebServer } from "../web/server.js";
 import { pruningTransformContext } from "./context.js";
+import { loadMemory, makeLessonProvider, memoryCounts } from "../evolution/memory.js";
+import { runReflection } from "../evolution/reflection-run.js";
+import { buildReflectionEvidence } from "../evolution/reflect.js";
 import { AuditLog } from "./audit.js";
 import { isLlmConfigured } from "../config.js";
 import { toWireSnapshot } from "../game/wire-snapshot.js";
@@ -559,12 +562,59 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 		});
 	};
 
+	// --- cross-game memory (SPEC §5.1 first + last steps of the game loop) ---
+	// Load the library once, before the agent is assembled, so the opening context
+	// already carries previous games' lessons. Injection is off unless the library
+	// actually has confirmed content (see docs/EVOLUTION.md §3).
+	const memory = loadMemory(cfg.dataDir);
+	const memoryProvider = makeLessonProvider(memory);
+	const injected = memoryCounts(memory);
+	session.setMemoryInjected(injected);
+	if (injected.lessonsInjected || injected.strategiesInjected) {
+		console.log(
+			`[evolution] loaded memory: ${injected.lessonsInjected} lesson(s), ` +
+				`${injected.strategiesInjected} strategy card(s)`,
+		);
+	}
+
+	/**
+	 * One tool-free model call, used only by end-of-game reflection.
+	 *
+	 * Deliberately not routed through the agent: reflection must not be able to
+	 * act on the game, and it must not pollute the agent's own turn/telemetry
+	 * accounting with a call that is not a decision.
+	 */
+	async function completeOnce(prompt: { system: string; user: string }): Promise<string> {
+		const stream = (await streamFn(
+			model,
+			{
+				systemPrompt: prompt.system,
+				messages: [{ role: "user", content: prompt.user }],
+			} as never,
+			{} as never,
+		)) as AsyncIterable<{ type?: string; delta?: unknown }>;
+		let text = "";
+		for await (const ev of stream) {
+			if (ev && ev.type === "text_delta" && typeof ev.delta === "string") text += ev.delta;
+		}
+		return text;
+	}
+
 	const { agent } = createAgent({
 		deps,
 		streamFn,
 		model,
-		// Context hygiene + (v0.3) lesson injection (SPEC §4.1).
-		transformContext: pruningTransformContext({ keepRecent: 40 }),
+		// Context hygiene + cross-game lesson injection (SPEC §4.1).
+		//
+		// `lessonsProvider` existed as an unfed hook since v0.2.1: every game ran in
+		// complete isolation because nothing ever supplied it. Loading the memory once
+		// here (rather than per LLM call) keeps the injected set stable for the whole
+		// run, and `setMemoryInjected` records what was ACTUALLY injected - that count
+		// is the independent variable of the M3 "with/without lessons" experiment.
+		transformContext: pruningTransformContext({
+			keepRecent: 40,
+			lessonsProvider: memoryProvider,
+		}),
 		onActionResult: (tool, r) => {
 			console.log(`[agent] tool ${tool}: ok=${r.ok} ${r.summary}`);
 			// Failures are recorded too: the model must be able to see its own
@@ -766,6 +816,49 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 			totalEvents: snap.totalEvents,
 		},
 	});
+
+	// --- reflection: close the loop (SPEC §5.1 last step) ---
+	//
+	// Deliberately AFTER finalize: the metrics ledger is the foundation of the
+	// "with/without lessons" experiment, so it must be on disk before anything that
+	// can fail. `runReflection` never throws - a network blip during reflection must
+	// not cost us the game's record.
+	if (finalTelemetry.totals.decisions > 0) {
+		try {
+			const report = await runReflection({
+				complete: completeOnce,
+				dataDir: cfg.dataDir,
+				facts: {
+					sessionId: session.id,
+					seed: cfg.seed,
+					summary: {
+						money: c0?.economy ? Number(c0.economy.money) : 0,
+						vehicleCount: c0?.stats?.vehicles ?? 0,
+						stationCount: c0?.stats?.stations ?? 0,
+						decisions: finalTelemetry.totals.decisions,
+						toolCalls: finalTelemetry.totals.toolCalls,
+						toolFailures: finalTelemetry.totals.toolFailures,
+						constructionDone: reachedDone,
+						durationMs: Math.max(0, Date.now() - Number(session.current().startedAt || Date.now())),
+					},
+					evidence: buildReflectionEvidence({
+						stages: session.current().checkpoints,
+						actions: pendingActions,
+					}),
+				},
+			});
+			console.log(
+				report.ok
+					? `[evolution] reflection: ${report.lessonsSaved} lesson(s) kept, ` +
+							`${report.strategiesPromoted} strategy card(s) promoted`
+					: `[evolution] reflection failed: ${report.error}`,
+			);
+		} catch (err) {
+			// Belt and braces: runReflection already swallows failures.
+			console.log(`[evolution] reflection error: ${err instanceof Error ? err.message : String(err)}`);
+		}
+	}
+
 	await teardown();
 	return reachedDone ? 0 : 1;
 

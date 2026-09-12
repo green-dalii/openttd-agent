@@ -229,9 +229,20 @@ export interface SelectStrategyOptions {
 }
 
 /**
- * Strategies eligible for injection: **only human-confirmed ones** (SPEC §5.3),
- * ranked by mean payoff. With nothing confirmed this returns [], which is the
- * intended default — the system must not teach itself without review.
+ * Strategies eligible for injection.
+ *
+ * TWO independent gates must both pass, for different reasons:
+ *
+ * 1. **The SPEC §5.3 promotion gate** (value above threshold AND verified in >= 2
+ *    games) - this is about evidence quality. `strategies.jsonl` is a *candidate
+ *    pool*: samples for a pattern have to accumulate somewhere across games before
+ *    the gate can pass, so the file holds candidates, not only winners. Skipping
+ *    this check here would make the pool itself injectable, which is the bug this
+ *    guard exists to prevent.
+ * 2. **The human `enabled` flag** - SPEC §5.3 says the engine only advises and
+ *    nothing changes globally until a human confirms it. Default is off.
+ *
+ * Ranked by mean payoff, then id for stability.
  */
 export function selectStrategies(
 	list: StrategyCard[],
@@ -242,6 +253,7 @@ export function selectStrategies(
 		: MAX_STRATEGIES_INJECTED;
 	return (Array.isArray(list) ? list : [])
 		.filter((c) => c && c.enabled === true)
+		.filter((c) => evaluatePromotion(c).promoted)
 		.map((c) => ({ card: c, value: evaluatePromotion(c).value }))
 		.sort((a, b) => {
 			if (b.value !== a.value) return b.value - a.value;

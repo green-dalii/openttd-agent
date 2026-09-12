@@ -65,7 +65,7 @@ Intl 替换手写格式化（自带单位阶梯，避免 CLDR 漂移）· uPlot 
   `src/evolution/reflect.ts`：`buildReflectionPrompt()` 内含"禁止臆测因果"；
   `parseReflection()` 强校验 schema，`evidence` 为空整条丢弃
   **验收**：臆测性表述与无证据条目都被拒；合法输出解析完整
-- [ ] **P5 — 接进运行生命周期**
+- [x] **P5 — 接进运行生命周期**
   开局：读库 → `selectLessons()` → 喂 `lessonsProvider` → `setMemoryInjected(真实计数)`；
   局终：反思 → 蒸馏 → 持久化（**与 metrics 记账互不影响**，各自失败不连带）
   **验收**：`test/live` 断言注入计数 `> 0` 且出现在 `metrics.jsonl`；

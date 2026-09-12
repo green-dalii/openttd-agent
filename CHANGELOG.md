@@ -35,7 +35,27 @@
 `null`）会被当成"收益为 0"的**有效样本**进入门槛判定。已改为严格转换，缺失/垃圾一律拒绝
 （与之前 `fmtInt(null)` 是同一类错误）。
 
-### Fixed
+- **记忆闭环接上线（P5）**——这是本仓库最贵的一课（AGENTS §5.1）的直接产物：
+  `lessonsProvider` 从 v0.2.1 起存在了十个版本却**从未被喂过**，每一局都在完全隔离中运行。
+  现在 `runner.ts` 在装配 agent 前 `loadMemory()` 一次并把 provider 传进
+  `pruningTransformContext`，同时 `setMemoryInjected()` 记录**实际注入的数量**；
+  局终 `finalize()` 之后跑一次反思，蒸馏出的 lessons 与策略候选落盘。
+- `src/evolution/memory.ts` —— `loadMemory()` / `makeLessonProvider()` / `memoryCounts()`。
+- `src/evolution/reflection-run.ts` —— `runReflection()`：调一次模型 → 解析校验 → 落盘。
+  模型调用通过注入的 `complete` 完成，因此本模块不依赖 pi-agent-core，可纯单测。
+- `src/evolution/reflect.ts` 增加 `buildReflectionEvidence()`：把阶段总结与动作结果
+  归约成**纯事实行**（不加入任何解释——解释正是不许模型臆造的东西）。
+
+### Fixed（P5 中被测试逼出来的设计错误）
+
+- **策略门槛曾经永远不可能通过**：早期实现只把"通过门槛的卡片"写回磁盘，于是第一局的样本
+  被丢弃、第二局只看到自己 → `已验证局≥2` 永远不成立。已改为持久化**完整候选池**，
+  可注入性由 `selectStrategies()` 的**两道独立闸**决定（证据门槛 + 人工确认）。
+- **`selectStrategies()` 没有检查证据门槛**：只要有 `enabled` 就会被注入，
+  使单局样本也能成为"建议"。现已同时要求 promotion 通过。
+- **反思失败不再可能连累记账**：`runReflection()` 不抛异常，且它跑在 `finalize()` **之后**
+  ——metrics 是"带/不带 lessons"对照实验的地基，必须先落盘。
+
 
 - **Live 页满屏 Alpine 报错**（`reading 'children'` + `m is not defined`）。
   真因与最初判断不同：`<template>` 放在 `<svg>` 内部会被 HTML 解析器当作 **SVG 命名空间元素**，

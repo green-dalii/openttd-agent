@@ -251,3 +251,36 @@ export function reflectToStrategies(text: unknown, ctx: StrategyContext): Strate
 	}
 	return out;
 }
+
+/** Minimal shapes so this stays decoupled from agent/runtime types. */
+export interface EvidenceInput {
+	stages?: Array<{ gameDate?: unknown; turn?: unknown; note?: unknown }>;
+	actions?: Array<{ tool?: unknown; ok?: unknown; summary?: unknown }>;
+}
+
+/**
+ * Reduce a game's recorded stage summaries and action results to factual lines.
+ *
+ * This is the *only* evidence reflection is allowed to reason from (SPEC §5.3),
+ * so it stays strictly descriptive: what happened, when, and whether it worked.
+ * No interpretation is added here — interpretation is exactly what we refuse to
+ * let the model invent, and we must not smuggle it in through input either.
+ */
+export function buildReflectionEvidence(input: EvidenceInput): string[] {
+	const out: string[] = [];
+	for (const s of Array.isArray(input?.stages) ? input.stages : []) {
+		const when = typeof s?.gameDate === "string" && s.gameDate ? s.gameDate : "?";
+		const turn = Number.isFinite(Number(s?.turn)) ? `turn ${Number(s?.turn)}` : "?";
+		const note = typeof s?.note === "string" ? s.note.replace(/\s+/g, " ").trim() : "";
+		if (!note) continue;
+		out.push(`${when} (${turn}): ${note}`);
+	}
+	for (const a of Array.isArray(input?.actions) ? input.actions : []) {
+		const tool = typeof a?.tool === "string" ? a.tool : "";
+		if (!tool) continue;
+		const summary =
+			typeof a?.summary === "string" ? a.summary.replace(/\s+/g, " ").trim() : "";
+		out.push(`${tool} -> ${a?.ok === false ? "failed" : "ok"}${summary ? `: ${summary}` : ""}`);
+	}
+	return out;
+}

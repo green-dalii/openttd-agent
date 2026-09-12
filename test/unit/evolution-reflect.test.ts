@@ -14,6 +14,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+	buildReflectionEvidence,
 	buildReflectionPrompt,
 	isSpeculative,
 	parseReflection,
@@ -278,5 +279,58 @@ describe("reflect: reflectToStrategies", () => {
 
 	it("垃圾响应得到空数组", () => {
 		expect(reflectToStrategies("nope", { sessionId: "s1", now: 1 })).toEqual([]);
+	});
+});
+
+describe("reflect: buildReflectionEvidence(喂给模型的事实)", () => {
+	it("把阶段总结渲染成带时间的事实行", () => {
+		const out = buildReflectionEvidence({
+			stages: [{ gameDate: "1950-01-01", turn: 1, note: "planned bus route" }],
+		});
+		expect(out).toHaveLength(1);
+		expect(out[0]).toContain("1950-01-01");
+		expect(out[0]).toContain("planned bus route");
+	});
+
+	it("把动作结果渲染成成功/失败事实", () => {
+		const out = buildReflectionEvidence({
+			actions: [
+				{ tool: "build_bus_route", ok: true, summary: "built 12 tiles" },
+				{ tool: "build_truck_route", ok: false, summary: "no depot" },
+			],
+		});
+		expect(out).toHaveLength(2);
+		expect(out[0]).toContain("build_bus_route");
+		expect(out[0]).toContain("ok");
+		expect(out[1]).toContain("failed");
+		expect(out[1]).toContain("no depot");
+	});
+
+	it("中文/多行 note 被压成单行(注入的是事实行,不是段落)", () => {
+		const out = buildReflectionEvidence({
+			stages: [{ gameDate: "1951-01-01", turn: 2, note: "built road\nand depot" }],
+		});
+		expect(out[0]).not.toContain("\n");
+	});
+
+	it("跳过没有内容的条目(空的 note / 没有 tool)", () => {
+		const out = buildReflectionEvidence({
+			stages: [{ gameDate: "1950-01-01", turn: 1, note: "   " }, { gameDate: "x", turn: 2 }],
+			actions: [{ ok: true, summary: "no tool name" }],
+		});
+		expect(out).toEqual([]);
+	});
+
+	it("容忍空输入与垃圾输入(不抛异常)", () => {
+		expect(buildReflectionEvidence({})).toEqual([]);
+		expect(buildReflectionEvidence({ stages: [], actions: [] })).toEqual([]);
+		expect(buildReflectionEvidence({ stages: [null, undefined] as never[] })).toEqual([]);
+	});
+
+	it("只描述发生了什么,不加入解释(SPEC §5.3)", () => {
+		const out = buildReflectionEvidence({
+			actions: [{ tool: "build_bus_route", ok: true, summary: "built 12 tiles" }],
+		});
+		for (const line of out) expect(isSpeculative(line)).toBe(false);
 	});
 });
