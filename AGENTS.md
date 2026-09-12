@@ -9,11 +9,12 @@
 
 TypeScript/Node (ESM, `type: module`) 单体框架：外部进程通过 **Admin Port TCP** 控制本机 **OpenTTD 15.0 dedicated server**，LLM agent（基于 `@earendil-works/pi-agent-core`）做决策，游戏内 **Bridge GS + Executor AI** 施工。
 
-- 完整架构见 `SPEC.md`；渐进计划见 `ROADMAP.md`。
+- 完整架构见 `SPEC.md`；渐进计划见 `ROADMAP.md`；**过程教训见 `MEMORY.md`**。
 - 必须读 `SPEC.md` §2/§10（已验证协议事实）再动通信相关代码。
-- **每次新 Session 开始或 compact 之后，先读 `SPEC.md` 做目标对齐再动手**
-  （§1 第一性原理、§4 Agent 层、§5 生命周期、§10.x 已固化事实）。本仓库的多数
-  返工都源于"没读 SPEC 就实现"——SPEC 里往往已经写明了正确做法。
+- **每次新 Session 开始或 compact 之后，先读 `SPEC.md` + `MEMORY.md` 做目标对齐再动手**
+  （SPEC §1 第一性原理、§4 Agent 层、§5 生命周期、§10.x 已固化事实；
+  MEMORY 的「快速自检清单」+ A/B/C 各类教训）。本仓库的多数返工都源于
+  "没读 SPEC 就实现"与"重复踩 MEMORY 里已记录的坑"。
 - **进度快查**: 当前开发阶段/验证状态/下一步见 `ROADMAP.md` 顶部「进度速览」+ 对应版本段；
   真机实测事实（含 OpenTTD Squirrel 字符串坑、标牌可见性）见 `SPEC.md` §10.x；
   Squirrel 可复用 helper（Split/ToInt/SetPhase）的规范实现以 `src/game/squirrel/executor-ai/main.nut` 为准。
@@ -83,21 +84,105 @@ scripts/       # dev 辅助 (gen-squirrel, setup-sandbox)
 5. `audit.jsonl` 里有 `decision` 且带 `trigger`，并有 `action_result`
 6. 决策 **trigger 不全是 `start`**（说明循环在持续运行）
 7. Dashboard `/api/telemetry` 的 `usage.total.input > 0`、`steps.length > 0`
+8. **浏览器控制台干净**，且是**在代码真的执行过的状态**下采集的（见 §5.2）
 
 **新增/修改 `--agent`、loop、tools、telemetry、dashboard 遥测时，必须跑
 `pnpm run test:live` 且上述断言全绿**（见 `test/live/agent-loop.test.ts`）。
 只跑单测不算验证——单测用的是 faux provider，永远无法发现"没接线"。
 
-## 6. 事实记录（重要）
+## 5.2 前端/UI 改动："没有报错"只在代码真的跑过时才成立（血泪教训）
 
-- 任何「调研得出的新事实」（协议细节/API 行为/游戏机制）→ 记入 `SPEC.md` 或 `docs/`；不得只存在聊天里。
-- 架构取舍记录在 SPEC/ADR 风格条目（改了什么、为什么、代价）。
+**背景**：把 Live 页迁 Alpine 后，我报告"三页 0 控制台错误"并与用户交接。
+用户实测发现满屏 `Alpine Expression Error: ... reading 'children'` +
+`Uncaught ReferenceError: m is not defined`。**报错是真的，我的"0 错误"是假的**：
+
+1. 我的 E2E 跑在一次 **`stageViews` 仍为空**的会话上（agent 刚启动，还没到施工阶段），
+   出错的 `<template x-for>` **从未渲染** → 不产生任何错误。
+   **用一个没有数据的状态"验证"了刚写完的组件。**
+2. 探针只监听 `Runtime.exceptionThrown` + `console.error`；Alpine 的表达式错误走
+   **`console.warn`** → **被过滤器丢掉**。
+3. 同类前科：uPlot 图表宿主误用 `<canvas>`，注入的 DOM 成了不渲染的 fallback content，
+   而我当时测的是 **canvas 里的像素**（有像素 ≠ 用户看得见）。
+
+**因此，任何前端/页面改动，验证必须满足：**
+
+1. **在有真实数据的页面状态**下采集（agent 跑出 steps / 多轮 token / stage views 等），
+   而不是空列表的初始态。空态通过 = 没验证。
+2. 采集**全部控制台级别**（至少 error + warn），不能只过滤 error。
+3. 断言**用户能观察到的东西**（元素可见性、DOM 文本、图表 wrapper 的实际盒子尺寸），
+   **不是**代理指标（"有像素"、"没抛异常"、"进程起来了"）。
+4. 迁移/重写动态模板后，**逐个交互元素人工点一遍**：
+   模式开关、下拉、按钮、折叠 —— 因为"静默缺失的 UI"（功能没了但零报错）
+   单测和回归测试都抓不到。本仓库已踩过 3 次：`companyCards()` 只被模板引用从未实现、
+   Providers 的模式开关被整段删掉、`x-ref` 缺失导致两个下拉从未挂载。
+5. 页面脚本的**纯逻辑抽到 `<page>-view.js`** 并写单测；组件只留 IO 与命令式部件。
+   这样"业务规则丢失"能被测试挡住，剩下的"渲染没接上"用第 4 条人工过一遍。
+
+## 6. 事实与教训记录（重要）
+
+按**性质**分流，不要混写：
+
+| 性质 | 写进 | 例 |
+|------|------|-----|
+| **系统事实**（协议/API/游戏机制） | `SPEC.md` 或 `docs/` | "`screenshot minimap` 可在 headless 下工作" |
+| **架构取舍**（改了什么/为什么/代价） | `SPEC.md`（ADR 风格条目） | "为何用 vendored vendor 而非 CDN" |
+| **开发准则**（应当怎么做） | `AGENTS.md` | 本文档 §2/§8/§9 |
+| **过程教训**（踩过的坑/错误模式） | **`MEMORY.md`** | "用空状态验证了组件" |
+
+- 任何「调研得出的新事实」不得只存在聊天里。
+- **`MEMORY.md` 是跨 session 的过程记忆**：每次犯错（尤其重复犯错）后必须追加一条，
+  写清「现象 / 根因 / 规则」，让下一个 session（或 compact 后的自己）不再踩。
+- 准则与教训的分界：**可执行的规则**进 AGENTS（"必须/禁止"），**复盘叙述**进 MEMORY
+  （"我做了什么、为什么错"）。两者可用指针互相引用。
 
 ## 7. 完成定义 (Definition of Done)
 
 一个任务/版本算完成，当且仅当：
 - [ ] 代码有测试且 `pnpm test` 绿
 - [ ] `pnpm run gate` 绿
-- [ ] README/CHANGELOG 已更新（行为/命令/配置变化）
-- [ ] 涉及协议/API 行为的新事实已固化进 SPEC/docs
+- [ ] 涉及 UI/前端时，已按 §5.2 在**有数据的状态**下验证（含 console.warn）
+- [ ] **文档同步**：本阶段受影响的所有文档**一次性**更新完
+      （`CHANGELOG.md` 行为/命令/配置变化 · `ROADMAP.md` 进度与待办 · `README.md` 用法 ·
+      `MEMORY.md` 教训 · `SPEC.md`/`docs/` 事实）
+- [ ] **文档正交**：同一事实只有一个权威位置，其余用**指针**（见 §9）
 - [ ] 没有留下 TODO 假代码、死代码、`console.log` 调试残留
+
+## 8. 提交卫生（禁止碎片化）
+
+**一次逻辑变更 = 一个 commit。**
+
+已提交但**仍属同一次工作**的修正（写错、写漏、补充说明）→ **`git commit --amend`**，
+不要追加 `fix:` / `correct:` / `docs: 补充…` 之类的补丁 commit。
+
+- **本仓库无 remote**（见 `ROADMAP.md` 顶部），因此 amend **是安全默认**。
+- 追加新 commit 的正当理由只有两个：(a) 已经 push / 他人可能基于它工作；
+  (b) 这是**独立的后续目标**，不是本次工作的收尾。
+- 判定标准：**「如果我在写第一版时就知道这些，还会单独提交吗？」** 答"不会"→ amend。
+
+```sh
+git commit --amend                      # 修正最后一次
+git reset --soft HEAD~N && git commit   # 合并最近 N 次为一次
+```
+
+**反例（本仓库真实教训 2026-09-12）**：一次「把待办写入 ROADMAP」的文档工作产出 3 个 commit
+——记录待办 → 补一个环境陷阱 → 修正自己写错的 VCS 说明。三次都是**同一次文档更新的收尾**，
+后两次本应 amend 进第一次。碎片化不仅脏历史，还让"这一版到底改了什么"难以回答。
+
+## 9. 文档职责与正交性
+
+**每个文档只有一个职责；同一事实只在一处权威，其余位置用指针。**
+
+| 文档 | 唯一职责 | **不**应包含 |
+|------|----------|--------------|
+| `AGENTS.md` | 开发规范/铁律/提交卫生/**准则** | 系统细节、版本历史、进度 |
+| `SPEC.md` | 系统**是什么** + 已验证系统事实 | 进度、命令用法、过程教训 |
+| `ROADMAP.md` | 进度与计划（当前阶段/下一步/待办） | 规范条文、协议细节（用指针） |
+| `CHANGELOG.md` | 每版**改了什么**（面向使用者与回滚） | 规范、未来计划 |
+| `README.md` | **怎么用**（命令/配置/架构速览） | 协议字节布局（指向 SPEC） |
+| `MEMORY.md` | **过程教训**（跨 session 记忆） | 系统事实、规范条文 |
+| `docs/*.md` | 单一主题的深入说明 | 被上述文档指针引用，不自我复制 |
+
+**判定方法：改一个事实需要动几个文件？> 1 就是有重复。**
+
+**已知违规**（发现即修）：`ROADMAP.md` 末尾曾复制一份「开发纪律」5 条，与本文档 §2 铁律
+重复表述。已改为指针。跨文档引用统一写成 `见 AGENTS.md §2` 这种形式，不要重述内容。

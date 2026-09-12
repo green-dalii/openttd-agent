@@ -5,7 +5,8 @@
 
 **当前状态: v0.6.0 (决策循环对齐 SPEC + 运行控制)** — 观测 + 决策闭环 + 三页式 Dashboard（Live / Providers / Sessions）、
 39 个内置 provider 目录、token 计量、历史局复盘与运行对比。**盈利验收待真实 LLM key**。
-完整设计见 [`SPEC.md`](SPEC.md)，开发计划见 [`ROADMAP.md`](ROADMAP.md)，开发规范见 [`AGENTS.md`](AGENTS.md)。
+完整设计见 [`SPEC.md`](SPEC.md)，开发计划见 [`ROADMAP.md`](ROADMAP.md)，开发规范见 [`AGENTS.md`](AGENTS.md)，
+踩过的坑与过程教训见 [`MEMORY.md`](MEMORY.md)。
 
 ---
 

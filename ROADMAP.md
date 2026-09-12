@@ -15,8 +15,101 @@
 - ✅ **v0.3.0 — Dashboard 打磨（观测/配置/复盘三页）（2026-09-10 完成）**
 - ✅ **v0.4.0 — Dashboard UX 重构（可搜索选型 / 信息层级 / 图表）（2026-09-11 完成）**
 - ✅ **v0.5.0 — 启动门禁 + Session 生命周期 + 图表语义（2026-09-11 完成）**
-- ⬜ v0.3.1 — 进化闭环（M3）
+- ✅ **v0.6.0 — 决策循环 + 运行控制 + 阶段画面 + 前端重构（2026-09-12 完成，见下）**
+- ⬜ **v0.6.x — 记忆闭环 + Dashboard 收尾（见下方「待办」）** ← **下一步从这里接续**
+- ⬜ v0.3.1 — 进化闭环（M3）＝ 下方「待办」第 1 项
 - ⬜ v0.4.0 — 打磨与广度（M4）
+
+**v0.6.0 已完成**（2026-09-11 → 09-12）:
+决策循环对齐 SPEC（此前只问一次 LLM）· 运行控制 API + 页面按钮 · 阶段画面（真实小地图
++ 缩放 + 图例）· 版本号单源自 `package.json` · 前端依赖审计（实测选型）·
+Intl 替换手写格式化（自带单位阶梯，避免 CLDR 漂移）· uPlot 替换手写折线/柱图 ·
+**三页全部迁 Alpine.js** · 记忆系统的第一片（跨局 metrics 账本）·
+门禁从 306 → **468** 测试。详见 CHANGELOG.md 与 `docs/FRONTEND-DEPENDENCIES-AUDIT.md`。
+
+---
+
+## ⬜ 待办（v0.6.x）— 2026-09-12 记录，尚未开工
+
+> **当前状态**（compact 后从这里接续）:
+> - 三个页面**全部**已迁到 Alpine.js（`live` / `sessions` / `providers`），
+>   每页结构统一为 `<page>-view.js`（纯逻辑，可单测）+ 页面组件（IO + 命令式部件）+ 声明式模板
+> - 门禁: **468 passed / 9 skipped**（`pnpm run typecheck && lint && vendor:check && test`）
+> - 前端依赖: uPlot（折线/柱图）、Alpine.js（渲染层）、Tom Select（**已回退，未使用**）
+> - **本仓库没有配置 git remote**（44 个 commit 全在本地）—— 所有工作都只在本地，没有远程备份
+
+### 1. 记忆闭环（v0.3.1 / M3）— 优先级最高
+
+**现状: 只有 metrics，没有记忆。** 用户核对 SPEC 后发现：每一局（Session）完全独立，
+没有任何跨局总结与注入。
+
+已落地（唯一完成的一片）:
+- `src/evolution/metrics.ts` — `toGameMetric` / `summarise` / `groupBySeed` / `compareArms`（纯函数）
+- `src/evolution/store.ts` — `<dataDir>/evolution/metrics.jsonl`，按 session id 幂等、容忍坏行、原子压缩
+- 记账点: `SessionStore.finalize()` 与启动 reconciler（正常 / 崩溃两条完成路径）
+- **关键设计**: 每条指标记录 `memory.lessonsInjected` / `strategiesInjected` ——
+  这是 SPEC §5.2 #3 对照实验的**自变量**，不记录则"有/无 lessons"不构成对比
+
+仍缺（SPEC 对齐）:
+- [ ] **lessons 蒸馏**: 局终反思 → 短教训（SPEC §5.2 #1）
+- [ ] **策略库**: 把高收益动作模板化入库（SPEC §5.2 #2）
+- [ ] **反思循环**: LLM 复盘成败归因（SPEC §5 流程图）
+- [ ] **注入下一局**: `src/agent/context.ts` 的 `lessonsProvider` 从 v0.2.1 起就是**空 hook**，
+      没有任何东西喂它
+- [ ] **Dashboard 呈现**（SPEC §7 #4）: 跨局指标折线对比 + lessons/策略库浏览 + 手动开关进化注入
+- [ ] **收敛防抖**（SPEC §5.3）: lessons 限量/去重/带来源与时间戳；
+      策略入库需「价值 > 阈值 **且** 已验证局 ≥ 2」；**反思 prompt 必须显式禁止臆测因果**
+
+**注意**: `compareArms` 已实现在样本不足时**拒绝下结论**（少于 3 局/臂即 `conclusive: false`），
+并排除 faux（脚本演示）局。新增的蒸馏/注入必须沿用这个口径，否则会退化成自我感觉良好。
+
+### 2. Token usage 图表：柱图 → 折线图
+
+- 现状: `live.html` 的 `#t-chart` 由 `live.js` 的 `drawTokens()` 调 `C.stackedBars(...)`（堆叠柱）
+- 要求: 改为折线图
+
+**⚠️ 实施前必须先读 `docs/DASHBOARD-UI.md` §6c。** v0.5.0 曾把这张图**从折线改成堆叠柱**，
+理由写在 §6c：token 是**构成**语义（input/output/reasoning 的占比），而且 input 常比 output
+大一个数量级，多条折线会挤成 3px 看不出来。因此这条需求与当时的结论冲突，两种可能：
+  (a) 保留"构成"但改用**多条折线 + 明确刻度**（需先量一下是否真的挤在一起）
+  (b) 明确推翻 §6c 的结论并更新文档
+**不要静默改掉一个曾用实测支撑过的设计决定。**
+
+### 3. KPI 卡片里的 sparkline 消失（重构引入的静默回归）
+
+- `live.html` 仍保留 `<canvas class="kpi-spark" x-show="hasHistory(k.spark)" ...>`
+- **但 `U.paintSparks()` 在重构后再没被调用** —— 模板留了画布，没人画它
+- 旧版 `renderKpis()` 里有 `U.paintSparks(elKpis, [{ data: moneySeries… }, { data: incomeSeries… }])`
+- 影响: Cash / Income 两张卡只剩 delta 数字，**趋势线没了**（无报错，纯静默）
+- 实现提示: `x-ref` 写在 `x-for` 里只有最后一个生效，**不能用 ref 逐个取 canvas**；
+  应在渲染后用 `x-effect` + 选择器批量绘制，或让 `paintSparks` 按 `data-metric` 匹配
+
+### 4. Live 页控制台报错（Alpine 模板违反 `x-for` 契约）
+
+**现象**: 大量 `Alpine Expression Error: Cannot read properties of undefined (reading 'children')`
+（表达式 `stageMarks(v)`），以及一连串 `Uncaught ReferenceError: m is not defined`
+（`m.kind === 'route'`、`m.x1`、`m.y` …），另有 `Uncaught TypeError: … reading 'children'`。
+
+**根因**: `live.html` 的 `<template x-for="m in stageMarks(v)">` 内部放了
+**两个兄弟 `<template x-if>`**。Alpine 的 `x-for` 要求模板内**恰好一个根元素**；
+两个兄弟会破坏其内部遍历（`children` 为 undefined），且内层模板拿不到循环变量 `m`。
+
+**修法**（二选一）:
+- 单根元素: 用一个 `<g>` 包住两个条件分支
+- 或**预先分类**: `stageMarks()` 拆成 `stageRoutes()` / `stagePoints()`，各用一个 `x-for`
+  （更清晰，且避免嵌套 `<template>`）
+
+**为什么我没在测试里发现** → 完整复盘见 `MEMORY.md` A1（三层原因：跑在空数据状态上 /
+探针只过滤 error 漏掉 `console.warn` / 把"无异常"当成"没问题"）。
+**由此沉淀的准则已写进 `AGENTS.md` §5.2**（前端改动的验证要求），不再在此重复。
+
+**验收**: 修完后必须按 `AGENTS.md` §5.2 在**有 stage views 的状态**下重验（含 warn 级别）。
+
+### 5. 环境陷阱（残留进程 / data dir）→ 见 `MEMORY.md` D1
+
+`preflight.test.ts` 有 3 个用例依赖**端口空闲**；残留一个 `--serve` 进程会让门禁以
+"expected false to be true" 假红，看起来像代码回归。清理命令、复核方式与
+`OPENTTD_DATA_DIR` 注意事项**集中在 `MEMORY.md` D1**，此处不重复。
 
 ---
 
@@ -159,9 +252,10 @@
 
 ---
 
-## 开发纪律（见 AGENTS.md 细则）
-1. **TDD**: 先写失败测试 → 实现 → 绿；`@live` 标测试默认跳过，CI/手动 `--live` 跑
-2. **门禁**: 每次提交前 `pnpm run gate` 必须绿（typecheck + lint + test）
-3. **小步**: 每 PR 一个可验证目标；保持主干始终可运行
-4. **零屎山**: 纯函数分离/类型单一事实源/模块职责+禁止项注释
-5. **事实驱动**: 任何协议/行为假设先有源码/实测依据，写进 SPEC/ADR
+## 开发纪律
+
+见 `AGENTS.md`（**唯一权威**）。重点：§2 铁律 · §5 测试与门禁（§5.1 E2E 必证、§5.2 前端验证）·
+§7 完成定义 · §8 提交卫生 · §9 文档职责与正交性。
+
+> 本节**刻意只放指针**：此前这里复制过一份与 `AGENTS.md` §2 重复的「开发纪律」5 条，
+> 属文档重复，已按 `AGENTS.md` §9 改正。
