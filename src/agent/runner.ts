@@ -787,10 +787,15 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 		// the agent sees a frozen world with no progress. This is the silent bug
 		// behind "executor stuck at boot" / "GS not ticking" — see
 		// test/unit/runner-freeze-thaw.test.ts and ROADMAP §4b.
+		// Logged, not silent. `rcon()` only WRITES to the socket - it does not
+		// report whether the game acted on it - so a freeze/thaw pair that never
+		// took effect looked exactly like one that did, and the executor's silence
+		// got blamed on the executor (ROADMAP 4b).
+		console.log(`[agent] freeze #${scheduler.count()}`);
 		try {
 			client?.rcon("pause");
-		} catch {
-			/* already paused is fine */
+		} catch (e) {
+			console.log(`[agent] freeze FAILED: ${e instanceof Error ? e.message : String(e)}`);
 		}
 
 		let plan: DecisionPlan | null = null;
@@ -807,10 +812,11 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 		} finally {
 			// SPEC §1.1 step 5: THAW so the executor can carry the decision out.
 			// Must run whether runDecision succeeded or threw.
+			console.log(`[agent] thaw #${scheduler.count()}`);
 			try {
 				client?.rcon("unpause");
-			} catch {
-				/* ignore */
+			} catch (e) {
+				console.log(`[agent] thaw FAILED: ${e instanceof Error ? e.message : String(e)}`);
 			}
 		}
 

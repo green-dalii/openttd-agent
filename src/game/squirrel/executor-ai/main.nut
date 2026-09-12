@@ -18,6 +18,10 @@ class ExecutorV1 extends AIController {
     _slotA = { label = "A", bp = null, tried = 0 };
     _slotB = { label = "B", bp = null, tried = 0 };
     _lastBeat = -1;
+    _loopSeq = 0;
+    _pf = null;      // persisted pathfinder (see FindSegment)
+    _pfFrom = -1;
+    _pfTo = -1;
     _reportDone = false;
     _slotD = { label = "D", bp = null, tried = 0 };
     _vehicle = -1;
@@ -56,13 +60,27 @@ class ExecutorV1 extends AIController {
             // cannot kill the script (earlier: GetOrderIndex crash here
             // silently stopped all phase reporting while the engine kept
             // charging the bus maintenance).
-            if (AIController.GetTick() - this._lastBeat > 300) {
-                this._lastBeat = AIController.GetTick();
+            //
+            // Keyed on a LOOP COUNTER, not AIController.GetTick() (2026-09-12).
+            // GetTick() returns SCRIPT ticks, and its value differs per script
+            // speed - so `GetTick() > 299` never became true in any real run and
+            // the heartbeat silently never fired. That left the executor with no
+            // liveness channel at all, which is precisely why "stuck at boot" was
+            // undiagnosable: silence looked identical to dead.
+            // With Sleep(5), 40 loops is ~200 script ticks.
+            this._loopSeq++;
+            if (this._loopSeq % 6 == 0) {
                 this._hbSeq++;
                 if (this._stage == "done" && this._vehicle >= 0) {
                     this.DumpBus();
                 } else {
-                    this.SetPhase("hb " + this._stage + " #" + this._hbSeq);
+                    // Include how many NUTZ blueprint signs this AI can actually
+                    // see. The heartbeat is the only channel that keeps reporting
+                    // while the executor is stuck, so it has to carry the one fact
+                    // that separates "no work was published" from "work was
+                    // published but I cannot see it" (ROADMAP 4b). 31-char budget:
+                    // "hb boot #12 s3" is 14.
+                    this.SetPhase("hb " + this._stage + " #" + this._hbSeq + " s" + this.CountNutSigns());
                 }
             }
         } catch (e) {
@@ -115,6 +133,21 @@ class ExecutorV1 extends AIController {
         if (sp != null && sp > 0) e = e.slice(0, sp);
         if (e.len() > 12) e = e.slice(0, 12);
         return e;
+    }
+
+    /* How many NUTZ: signs THIS AI can see via AISignList().
+     * Separate from the GS's own count: the GS reports what it PLACED, this
+     * reports what the executor can READ, and the difference between the two is
+     * exactly the failure we could not previously observe. */
+    function CountNutSigns() {
+        local n = 0;
+        local sl = AISignList();
+        foreach (sid, _ in sl) {
+            local txt = AISign.GetName(sid);
+            if (txt == null) continue;
+            if (txt.len() >= 5 && txt.slice(0, 5) == "NUTZ:") n++;
+        }
+        return n;
     }
 
     /* SetPhase: 公司名编码汇报; ≤31 字符 (OpenTTD 公司名上限). */
@@ -331,7 +364,10 @@ class ExecutorV1 extends AIController {
             }
             if (path == false) {
                 this._roadSegStep = step + 1;
-                if (step > 8) { segLen -= 4; step = 0; }
+                // 40 chunks x 50 iterations = the same ~2000-iteration budget the
+                // old single-tick loop had, but spread over 40 ticks so the AI
+                // yields between them and stays observable.
+                if (step > 40) { segLen -= 4; step = 0; }
                 this.SetPhase("rd s" + this._roadSeg + " r" + step);
                 return; // more search iterations next tick
             }
@@ -404,24 +440,36 @@ class ExecutorV1 extends AIController {
     /* Run Pathfinder.Road from `from` to a single probe `to`. Returns a
      * path node, false (needs more iterations) or null (no path). */
     function FindSegment(from, to) {
-        local pf = this._PF();
-        pf.cost.tile = 100;
-        pf.cost.turn = 50;
-        pf.cost.no_existing_road = 120;
-        pf.cost.slope = 200;
-        pf.cost.bridge_per_tile = 100;
-        pf.cost.tunnel_per_tile = 100;
-        pf.cost.coast = 20;
-        pf.cost.max_bridge_length = 12;
-        pf.cost.max_tunnel_length = 10;
-        pf.InitializePath([from], [to]);
-        local p = false;
-        local i = 0;
-        while (p == false && i < 40) {
-            p = pf.FindPath(50);
-            i++;
+        // ONE search chunk per call, with the pathfinder PERSISTED across calls.
+        //
+        // Was: up to 40 x FindPath(50) in a single tick - 2000 iterations inside
+        // one Tick(). This file already documents that Pathfinder.Road v4 hangs
+        // on long searches ("FindPath(1000) never returns"). Because the search
+        // runs INSIDE Tick(), a hang freezes the entire AI: no heartbeat, no
+        // phase change, no further construction. From the outside that is
+        // indistinguishable from "the executor is dead", which is exactly the
+        // undiagnosable stall in ROADMAP 4b/5 (2026-09-12).
+        //
+        // Yielding between chunks means the AI always gets back to its loop, so
+        // the heartbeat keeps reporting and a slow search is visible as slow
+        // rather than as silence.
+        if (this._pf == null || this._pfFrom != from || this._pfTo != to) {
+            local pf = this._PF();
+            pf.cost.tile = 100;
+            pf.cost.turn = 50;
+            pf.cost.no_existing_road = 120;
+            pf.cost.slope = 200;
+            pf.cost.bridge_per_tile = 100;
+            pf.cost.tunnel_per_tile = 100;
+            pf.cost.coast = 20;
+            pf.cost.max_bridge_length = 12;
+            pf.cost.max_tunnel_length = 10;
+            pf.InitializePath([from], [to]);
+            this._pf = pf;
+            this._pfFrom = from;
+            this._pfTo = to;
         }
-        return p; // node, false (still searching), or null
+        return this._pf.FindPath(50); // node, false (more to do), or null
     }
 
     /* Build road/bridge/tunnel along a path node chain. Returns count of

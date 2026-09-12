@@ -868,3 +868,56 @@ runner.ts，禁止以后再次引入无 finally 的 unpause。
 `EX boot j-1` 不动。本节修复**保证 unpause 必定触发**，但不保证 100% 推进。
 真正的根因可能是 OpenTTD 在 macOS dedicated 下的脚本 tick 时序，
 需进一步观测。ROADMAP §4b 仍是开放的。
+
+## 10.27 执行器"假死"的真正根因：路径搜索占满单个 tick（2026-09-12 实测）
+
+**症状**：执行器长期停在 `EX boot j-1` 或 `EX road_start`，**没有任何心跳、没有任何
+异常上报** —— 静默与死亡无法区分。
+
+### 根因 1：心跳从来没有响过
+
+心跳判据是 `AIController.GetTick() - _lastBeat > 300`。
+`GetTick()` 返回的是**脚本 tick**（`script_controller.hpp`：*"Find at which tick your
+script currently is"*，且 `Sleep` 的注释明确说 *"a script tick is different from
+in-game ticks and differ per script speed"*）。它**从未超过 299**，
+所以心跳一次都没发过。
+
+**后果**：执行器**根本没有存活信号**。这就是"卡住"无法诊断的原因 ——
+沉默和死了长得一模一样。
+
+修复：改用**循环计数器**（`_loopSeq % N`），不再依赖 `GetTick()` 语义。
+
+### 根因 2：`FindSegment` 在**单个 tick 内**最多跑 2000 次路径搜索
+
+```squirrel
+while (p == false && i < 40) { p = pf.FindPath(50); i++; }
+```
+
+而**本文件自己的注释早就写着**：*"Pathfinder.Road v4 + AyStar v6 deadlocks on long
+single searches (>~60 manhattan; probe: FindPath(1000) **never returns**)"*。
+
+搜索在 `Tick()` 内部同步执行，所以 `FindPath` 一旦不返回，**整个 AI 一起冻结**：
+没有心跳、没有阶段变化、没有施工。
+
+修复：把 pathfinder **持久化到成员**（原来每次调用都新建，状态丢失），
+**每次调用只跑一个 chunk**（`FindPath(50)`），在 chunk 之间让出。
+搜索总预算不变（40 chunk × 50 = 原来的 ~2000），但摊到 40 个 tick 上。
+
+**实测对比**（同一命令，80 秒）：
+
+| | 修复前 | 修复后 |
+|---|---|---|
+| 阶段序列 | 停在 `rd s0 r0` 不动 | `rd s0 r0 → r1 → r2` **重试计数在推进** |
+| 心跳 | **从未出现** | `EX hb road #1 s3 j100` |
+
+### 顺带**证伪**了一个假设
+
+心跳里带上了执行器**实际能看到的 NUTZ 标牌数**（`s3`）：
+**执行器能看到全部 3 个标牌**。所以 ROADMAP §4b 里"`AISignList()` 可见性竞态"
+的猜测**是错的** —— 方案下达没问题，问题在施工搜索。
+
+### 还有一条待查（新增）
+
+80 秒内只跑到第 6 次循环（心跳 #1），即 **每轮循环 >6 秒**。
+`Sleep(5)` 不该这么慢 —— 执行器的 **script tick 供给严重不足**，
+这至少部分解释了"施工慢到看起来像卡住"。待查：脚本速度设置。
