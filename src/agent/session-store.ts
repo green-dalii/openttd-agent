@@ -10,6 +10,7 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync, appendFileSync } from "node:fs";
+import { appendMetric } from "../evolution/store.js";
 import path from "node:path";
 import type { TelemetrySnapshot } from "./telemetry.js";
 import type { GameEvent } from "../types.js";
@@ -25,6 +26,17 @@ export type SessionStatus = "running" | "completed" | "aborted" | "error" | "int
 export const STALE_AFTER_MS = 15_000;
 
 /** One durable summary of a session (§2.5). */
+/**
+ * How much cross-game memory this run was given.
+ *
+ * 这是 SPEC §5.2 #3 对照实验的**自变量**：不记录它，"有/无 lessons" 的对比就不成立。
+ * v0.3.1 之前还没有蒸馏与注入，因此默认全 0（即对照组）。
+ */
+export interface MemoryInjected {
+	lessonsInjected: number;
+	strategiesInjected: number;
+}
+
 export interface SessionMeta {
 	id: string;
 	mode: "watch" | "agent" | "v02" | "probe";
@@ -198,6 +210,8 @@ export class SessionStore {
 	readonly id: string;
 	private meta: SessionMeta;
 	private stageCount = 0;
+	/** What cross-game memory this run was given; the experiment's variable. */
+	private memoryInjected: MemoryInjected = { lessonsInjected: 0, strategiesInjected: 0 };
 
 	constructor(dataDir: string, meta?: SessionMeta) {
 		this.dataDir = dataDir;
@@ -348,8 +362,27 @@ export class SessionStore {
 	}
 
 	/** Mark the session finished (writes meta + index one last time). */
+	/**
+	 * Declare what cross-game memory this run received.
+	 *
+	 * Called once the game's opening context has been assembled. Defaults to zero
+	 * (the control arm) which is the honest value until distillation exists.
+	 */
+	setMemoryInjected(memory: Partial<MemoryInjected>): void {
+		this.memoryInjected = {
+			lessonsInjected: Math.max(0, Number(memory.lessonsInjected) || 0),
+			strategiesInjected: Math.max(0, Number(memory.strategiesInjected) || 0),
+		};
+	}
+
 	finalize(patch: Partial<SessionMeta> = {}): SessionMeta {
-		return this.update({ endedAt: Date.now(), ...patch });
+		const meta = this.update({ endedAt: Date.now(), ...patch });
+		// Record the cross-game metric here rather than in the runner: every
+		// completion path (normal, emergency, reconcile) goes through finalize or
+		// the reconciler, so this is the one place that cannot be forgotten.
+		// See src/evolution/metrics.ts (SPEC §5.2 #3).
+		recordMetricSafe(this.dataDir, meta, this.memoryInjected);
+		return meta;
 	}
 
 	private writeMeta(): void {
@@ -384,6 +417,23 @@ export function listSessions(dataDir: string, now: number = Date.now()): Session
 	return list
 		.map((m) => withEffectiveStatus(normalizeMeta(m), now))
 		.sort((a, b) => b.startedAt - a.startedAt);
+}
+
+/**
+ * Append this session's cross-game metric, never throwing.
+ *
+ * 进化账本坏了不该影响一局游戏的收尾 —— 记账是**次要**副作用，收尾是主要职责。
+ * 因此这里吞掉异常，但把原因打到 stderr，避免静默丢数据。
+ */
+function recordMetricSafe(dataDir: string, meta: SessionMeta, injected: MemoryInjected): void {
+	try {
+		appendMetric(dataDir, meta, injected);
+	} catch (e) {
+		// Swallowing this silently would lose data with no trace, so it is
+		// reported here (the one deliberate console use in this file).
+		// eslint-disable-next-line no-console
+		console.error(`[session] could not record evolution metric: ${e instanceof Error ? e.message : e}`);
+	}
 }
 
 /** Read an archived stage image, or null. Rejects traversal and non-PNG names. */
@@ -498,6 +548,8 @@ export function reconcileStaleSessions(dataDir: string, now: number = Date.now()
 				error: meta.error ?? "interrupted: process exited without finalizing",
 			};
 			writeFileSync(path.join(dir, "meta.json"), JSON.stringify(next, null, 2), "utf8");
+			// Same reason as finalize(): an abandoned run still belongs in the ledger.
+			recordMetricSafe(dataDir, next, { lessonsInjected: 0, strategiesInjected: 0 });
 			changed.push(meta.id);
 		} catch {
 			/* a record we cannot rewrite must not break startup */
