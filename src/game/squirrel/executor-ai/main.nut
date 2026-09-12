@@ -345,9 +345,14 @@ class ExecutorV1 extends AIController {
         local step = this._roadSegStep;
         local segLen = (dist <= 22) ? dist : 20;
         local direct = (dist <= 22);
+        // Count probe failures so the give-up message can say WHICH half of the
+        // search failed: "could not pick a goal tile" (terrain/water around us)
+        // versus "picked a goal but no path reaches it" (blocked/bridge needed).
+        // Without this the operator and the agent only saw the search spinning.
+        local probeFails = 0;
         while (segLen >= 4) {
             local goal = direct ? fB : this.SegmentProbe(this._roadCur, fB, segLen);
-            if (!direct && goal < 0) { segLen -= 4; continue; }
+            if (!direct && goal < 0) { probeFails++; segLen -= 4; continue; }
             local path = this.FindSegment(this._roadCur, goal);
             if (path == null) {
                 // No route to this probe: shorten and retry (rate-limited).
@@ -368,7 +373,9 @@ class ExecutorV1 extends AIController {
                 // old single-tick loop had, but spread over 40 ticks so the AI
                 // yields between them and stays observable.
                 if (step > 40) { segLen -= 4; step = 0; }
-                this.SetPhase("rd s" + this._roadSeg + " r" + step);
+                // d<dist> = tiles still to go, p<fails> = goal tiles we could not
+                // find. "EX rd s0 r7 d42 p0 j100" is 25 chars, inside the 31 limit.
+                this.SetPhase("rd s" + this._roadSeg + " r" + step + " d" + dist + " p" + probeFails);
                 return; // more search iterations next tick
             }
             // 3. Lay this segment's path.
@@ -403,8 +410,9 @@ class ExecutorV1 extends AIController {
             }
             return;
         }
-        // Probe could not advance even at short range -> give up cleanly.
-        this.SetPhase("road_stuck:no path from segment " + this._roadSeg);
+        // Probe could not advance even at short range -> give up cleanly, and
+        // SAY WHY: distance still to go + how many probe goals we could not find.
+        this.SetPhase("rd_stuck " + this._roadSeg + " d" + dist + " p" + probeFails);
         this._stage = "done";
     }
 

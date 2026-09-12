@@ -973,3 +973,44 @@ if (_pause_mode.Test(PauseMode::Normal)) {
 `pause_on_join` / `min_active_clients`，于是回落到 OpenTTD 默认
 `pause_on_join = true` —— 对无人驾驶 harness 是错的。现已显式写死
 `pause_on_join = false` / `min_active_clients = 0`（`process-manager.ts` + 单测）。
+
+## 10.29 执行器跑通完整公交线（2026-09-12 真机验收）
+
+修掉 §10.28 的"单向暂停"之后，执行器**首次端到端跑通**：
+
+```
+[agent] RESULT: constructionDone=true  vehicles=3  stations=2  money=267375
+executor phase: EX done stN2 r63 bus j100
+```
+
+| 验收项 | 实测 |
+|---|---|
+| 阶段走完 | `boot → work → stA_ok → stB_ok → road_start → (rd s0…sN) → depot → bus → done` |
+| `constructionDone` | **true** |
+| 车站 | **2** |
+| 车队 | **3**（1 台购入 + 2 台克隆，与其设计一致） |
+| 路 | **63 段** |
+| 车辆状态 | `EX R53 d33 a24 #17` = **RUNNING，速度 53**，距 A 站 33 格，A 站候客 24 |
+
+### 诊断字段（本次新增，让搜索过程可读）
+
+`rd s<段> r<重试> d<剩余格> p<探针失败数>`，例如：
+
+```
+EX rd s0 r0  d61 p0    ← 第 0 段，剩余 61 格，探针从未失败
+EX rd s0 r40 d61 p0    ← 用满 40 个 chunk 预算
+EX rd s0 r0  d61 p0    ← 预算耗尽 → 探针缩短 → 重试计数归零
+EX rd s1 r0  d21 p0    ← 第 1 段，剩余 21 格
+```
+
+**`p0` 是关键数据**：探针**从未失败** → 目标格一直找得到；
+卡住的从来不是"选不到目标"，而是 **pathfinder 需要跑满多次 chunk**。
+这与 §10.27 的修复吻合（把 2000 次迭代摊到 40 个 tick 上），也解释了
+"为什么看起来像卡住但最终能过"。
+
+### 附带事实
+
+`DumpBus()` 是**车辆诊断**通道（`R`=RUNNING / `S`=STOPPED / `D`=IN_DEPOT /
+`@`=AT_STATION / `B`=BROKEN / `X`=CRASHED，后跟速度、距 A 格数、A 站候客数）。
+`done` 之后的阶段字符串**全部来自它**，不是施工阶段。
+`src/agent/executor-status.ts` 的解码器尚未覆盖这一族，待补。
