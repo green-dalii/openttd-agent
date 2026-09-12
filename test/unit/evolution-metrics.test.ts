@@ -16,10 +16,10 @@
 
 import { describe, expect, it } from "vitest";
 import {
+	compareArms,
 	toGameMetric,
 	summarise,
 	groupBySeed,
-	compareArms,
 	MIN_LESSON_SAMPLE,
 	type GameMetric,
 } from "../../src/evolution/metrics.js";
@@ -166,6 +166,53 @@ describe("groupBySeed", () => {
 		expect(Object.keys(g).sort()).toEqual(["7", "9"]);
 		expect(g["7"]!.map((m) => m.id)).toEqual(["a", "b"]);
 		expect(g["9"]!.length).toBe(1);
+	});
+});
+
+describe("compareArms 必须排除被中断的局（2026-09-12）", () => {
+	// 为什么：真机里那 5 条 ledger 记录全是 `status: "interrupted"`、`money: 0`、
+	// `stations: 0`、`constructionDone: null` —— 它们是"世界被暂停"那个 bug 时代
+	// 留下的、被 Ctrl-C 杀掉的对局。它们作为 "without lessons" 的一票会把该臂
+	// 均值拉到 0，于是 M3 对照曲线变成"记忆让成绩变好"的假结论。
+	//
+	// 被中断的局反映的是**操作者按了 Ctrl-C**，不是 agent 的水平 ——
+	// 拿它跟跑完的局比，是把不可比的东西放在一起（MEMORY A2）。
+	const mk = (over: Record<string, unknown>) => ({
+		id: "x", seed: 7, mode: "agent", status: "completed", startedAt: 0, durationMs: 1,
+		appVersion: "0", llmKind: "real", llmModel: "m", constructionDone: true,
+		money: 1000, vehicles: 1, stations: 2, decisions: 3, toolCalls: 1, toolFailures: 0,
+		totalTokens: 10, costTotal: 0,
+		memory: { lessonsInjected: 0, strategiesInjected: 0 },
+		...over,
+	}) as never;
+
+	it("被中断的局不进入任何一臂", () => {
+		const c = compareArms([
+			mk({ status: "completed", memory: { lessonsInjected: 0, strategiesInjected: 0 } }),
+			mk({ status: "interrupted", money: 0, memory: { lessonsInjected: 0, strategiesInjected: 0 } }),
+			mk({ status: "interrupted", money: 0, memory: { lessonsInjected: 0, strategiesInjected: 0 } }),
+		]);
+		// 只剩 1 局 completed，所以两臂都不够 3
+		expect(c.withoutLessons.count).toBe(1);
+		expect(c.conclusive).toBe(false);
+		// 均值不能被那两条 0 拉下去
+		expect(c.withoutLessons.meanMoney).toBe(1000);
+	});
+
+	it("被排除的数量要如实说明（不能悄悄丢）", () => {
+		const c = compareArms([
+			mk({ status: "interrupted", money: 0 }),
+			mk({ status: "interrupted", money: 0 }),
+			mk({ status: "completed" }),
+		]);
+		expect(c.note).toMatch(/interrupted/i);
+		expect(c.note).toMatch(/2/);
+	});
+
+	it("全是中断局时说清楚原因，而不是说'还没有真实对局'", () => {
+		const c = compareArms([mk({ status: "interrupted", money: 0 })]);
+		expect(c.conclusive).toBe(false);
+		expect(c.note).toMatch(/interrupted/i);
 	});
 });
 

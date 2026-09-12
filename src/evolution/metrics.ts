@@ -209,7 +209,23 @@ function armStats(list: GameMetric[]): ArmStats {
  * 1-vs-1 comparison is noise.
  */
 export function compareArms(metrics: GameMetric[]): ArmComparison {
-	const real = (metrics ?? []).filter((m) => m.llmKind !== "faux");
+	// Two exclusions, for two different reasons.
+	//
+	// 1. `faux` (scripted) runs execute a fixed plan, so they say nothing about
+	//    whether the model did better with memory.
+	//
+	// 2. `interrupted` runs (2026-09-12) were killed before they finished. Their
+	//    outcome measures the operator pressing Ctrl-C, not the agent's skill, so
+	//    comparing them with completed runs compares incomparable things
+	//    (MEMORY.md A2). This is not hypothetical: the first five real runs in the
+	//    ledger were all `interrupted` with money/vehicles/stations at 0 - left
+	//    over from the era when the game was silently frozen. Counting them as
+	//    "without-lessons" votes would drag that arm's mean to zero and manufacture
+	//    a "memory makes you better" result out of a bug.
+	const all = metrics ?? [];
+	const scripted = all.filter((m) => m.llmKind === "faux").length;
+	const interrupted = all.filter((m) => m.llmKind !== "faux" && m.status === "interrupted").length;
+	const real = all.filter((m) => m.llmKind !== "faux" && m.status !== "interrupted");
 	const withLessons = real.filter((m) => m.memory.lessonsInjected > 0);
 	const withoutLessons = real.filter((m) => m.memory.lessonsInjected === 0);
 	const a = armStats(withLessons);
@@ -229,7 +245,28 @@ export function compareArms(metrics: GameMetric[]): ArmComparison {
 		].filter(Boolean);
 		// Not a verdict, just what is missing.
 		note = `Not enough runs to compare: need ${missing.join(" and ")}.`;
-		if (!real.length) note = "No real (non-scripted) runs recorded yet.";
+		if (!real.length) {
+			note = "No real (non-scripted) runs recorded yet.";
+			if (interrupted > 0) {
+				// Say WHY nothing is comparable, rather than implying no game was
+				// ever played. Silently dropping rows is how a ledger stops being
+				// trustworthy.
+				note = `No comparable runs: ${interrupted} real run(s) were interrupted before ` +
+					`finishing and are excluded (their outcome is the operator stopping them, ` +
+					`not the agent's result).`;
+			}
+		}
+	}
+
+	// Always disclose what was excluded - silent filtering is how a comparison
+	// starts lying. This applies whether or not there is enough data to compare:
+	// "need 3 more runs" is misleading if two runs were quietly dropped.
+	if (interrupted > 0 || scripted > 0) {
+		const parts: string[] = [];
+		if (interrupted > 0) parts.push(`${interrupted} interrupted`);
+		if (scripted > 0) parts.push(`${scripted} scripted`);
+		note = `Compared ${a.count} with-lessons vs ${b.count} without-lessons run(s); ` +
+			`excluded ${parts.join(" and ")}.`;
 	}
 
 	return {
