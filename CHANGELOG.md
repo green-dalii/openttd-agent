@@ -286,6 +286,31 @@
   现在工具会检查 `vehicles` 并**拒绝**，附上原因与下一步。
   语义澄清见 `SPEC.md` §10.20。
 
+### Fixed（2026-09-12 审计 + 用户报告）
+
+- **KPI 不实时更新，必须手动刷新**。根因：`--watch` 会 `web.publishEvent(ev)`，
+  而**主模式 `--agent` 从不转发事件** → 页面收不到 `event` 帧，
+  公司镜像与历史永不推进，KPI 冻结在连接时的快照上。已补齐并加一致性测试。
+- **Token 图改为堆叠面积图**（用户要求）。过程中否掉了两条错路，都由**像素扫描**判定：
+  ① uPlot 的 `bands` API：`series` 必须是 `[from,to]` 元组（传数字被静默忽略），
+  且改成元组后填充**仍然不出现**；② 仅累积数据不够——后面画的大面积会盖住前面的。
+  最终方案：**倒序绘制（大者先画）+ 不透明填充到轴**，小面积覆盖其下半部分，
+  于是每条系列露出的正好是自己那一段。实测（等分三等份）：纵向连续三段
+  `Reasoning 100px → Output 100px → Input 70px`，无缝、无混色。
+- **Harness 边界收紧**（用户明确要求：不要把经验教训内化进框架）。
+  `SYSTEM_PROMPT` 曾写着"Do NOT issue the same command repeatedly"、
+  "Prefer one solid route"、"add vehicles when queues grow" —— 这些是**策略**，
+  等于把 agent 该自己学的教训直接告诉它。现已改为只给**世界机制**与**交互协议**。
+  我上一轮给 `add_vehicles` 写的"Use observe()…only then scale"同属违规，一并删除。
+  新增机械守卫：SYSTEM_PROMPT、每个工具 description、每个工具拒绝信息
+  都不得出现策略措辞。
+- **`add_vehicles` 谎报成功**：见 `SPEC.md` §10.20。
+
+### Added
+
+- 机械守卫：`test/unit/agent-runtime.test.ts` 的 harness 边界检查
+  （边界定义：契约前提 ✅ / 世界事实与因果 ✅ / 交互协议 ✅ / 策略 ❌）。
+
 ### Fixed
 - **阶段性总结面板恒为空（dead UI）**：Live 页读 `telemetry.checkpoints`，但该字段
   从不存在，且 checkpoint **只在 shutdown 写**。现在 `--agent` 每个 decision turn、

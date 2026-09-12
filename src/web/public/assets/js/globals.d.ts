@@ -92,6 +92,8 @@ interface ChartsModule {
 	line(canvas: any, cfg: any): void;
 	bars(canvas: any, cfg: any): void;
 	stackedBars(canvas: any, cfg: any): void;
+	/** Stacked AREA: composition over turns, drawn as contiguous bands. */
+	stackedArea(canvas: any, cfg: any): void;
 	donut(canvas: any, cfg: any): void;
 	sparkline(canvas: any, data: number[], cfg?: any): void;
 	stageMap(canvas: any, view: any): void;

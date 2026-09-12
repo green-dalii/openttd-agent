@@ -149,13 +149,21 @@ describe("add_vehicles tool", () => {
 		expect(gameScript, "an impossible command must not be sent").toEqual([]);
 	});
 
-	it("车队为空时的提示要告诉模型下一步该做什么", async () => {
+	it("拒绝信息只陈述契约事实，不替 agent 决定下一步", async () => {
+		// 用户的明确边界（2026-09-12）:框架不给策略,教训要留给 agent 自己探索。
+		// 我最初写的是 "Use observe() to watch for vehicles > 0, and only then scale
+		// the fleet" —— 那是**建议**,等于把该由它自己总结的教训直接剧透给它。
+		// 拒绝信息应当像函数签名:说清"这个动作做不到、为什么",不说"你该做什么"。
 		const { sink } = fakeSink();
 		const tool = addVehiclesTool({ sink, state: stateWithVehicles(0) });
 		const res = await tool.execute("c1", { count: 4 });
 		const summary = (res as { details: { summary: string } }).details.summary;
-		// Not just "failed" - the model needs a route out of the dead end.
-		expect(summary).toMatch(/observe|wait|construction|finish/i);
+		// The contract fact that makes it impossible:
+		expect(summary).toMatch(/clone/i);
+		// ...and no steering:
+		for (const banned of ["you should", "prefer", "only then", "use observe", "make sure"]) {
+			expect(summary.toLowerCase(), `advice leaked into a tool refusal: "${banned}"`).not.toContain(banned);
+		}
 	});
 
 	it("公司不存在时同样拒绝（不猜）", async () => {

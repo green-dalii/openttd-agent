@@ -563,6 +563,7 @@
     line: (el, cfg) => delegate("line", el, cfg),
     bars: (el, cfg) => delegate("stackedBars", el, cfg),
     stackedBars: (el, cfg) => delegate("stackedBars", el, cfg),
+    stackedArea: (el, cfg) => delegate("stackedArea", el, cfg),
     stageMap: stageMap,
     donut: donut,
     sparkline: sparkline,

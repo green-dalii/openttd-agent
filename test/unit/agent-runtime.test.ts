@@ -6,6 +6,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { createFauxCore, fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai";
+import { createTools } from "../../src/agent/tools/index.js";
 import { createAgent, defaultConvertToLlm, SYSTEM_PROMPT } from "../../src/agent/runtime.js";
 import { runDecision, runDecisionLoop } from "../../src/agent/loop.js";
 import type { AgentDeps, CommandSink, StateReader } from "../../src/agent/types.js";
@@ -209,5 +210,85 @@ describe("structured plan extraction (SPEC §4.2 step 2)", () => {
 		]);
 		const { plan } = await runDecision(agent, deps, { trigger: "start", tracker: emptyTracker() });
 		expect(plan).toBeNull();
+	});
+});
+
+describe("harness boundary: 框架不替 agent 做决定", () => {
+	// 用户的明确要求（2026-09-12）:
+	//   "不要把经验、教训内化到 Harness 中……经验教训要让 agent 自主探索和学习"。
+	//
+	// 边界怎么划:
+	//   ✅ 工具/子系统的**契约与前提**（"本工具靠克隆头车扩容"）——像函数签名一样必须知道
+	//   ✅ **世界事实与因果**（"施工是异步的"、"贷款产生利息"）——SPEC §4.2 要求框架给
+	//   ✅ **交互协议**（输出 JSON 的键、何时该让出回合）——框架拥有协议
+	//   ❌ **策略**（"你应该…"、"优先…"、"队列长了就加车"）——那是 agent 该自己学的东西
+	//
+	// 为什么必须机械守卫:策略句子读起来很合理,写进去时几乎无感,但它们把
+	// **agent 的探索空间直接删掉**——被剧透的 agent 不会去试错,也就没有可学的教训。
+
+	const STRATEGY_MARKERS: [RegExp, string][] = [
+		[/\byou should\b/i, "you should"],
+		[/\byou must\b/i, "you must"],
+		[/\brecommend/i, "recommend"],
+		[/\bsuggest/i, "suggest"],
+		[/\bprefer\b/i, "prefer"],
+		[/\bbest to\b/i, "best to"],
+		[/\bmake sure to\b/i, "make sure to"],
+		[/\bavoid (?:building|issuing|using)/i, "avoid building/issuing/using"],
+		[/\btry to\b/i, "try to"],
+		[/\bdo not (?:issue|repeat|build|add)\b/i, "do not <action>"],
+		[/\bonly then\b/i, "only then"],
+	];
+
+	function assertNoStrategy(where: string, text: string) {
+		for (const [re, label] of STRATEGY_MARKERS) {
+			expect(re.test(text), `${where}: strategy leaked ("${label}") -> ${text.slice(0, 160)}`).toBe(false);
+		}
+	}
+
+	it("SYSTEM_PROMPT 只给角色/世界事实/协议，不含策略", () => {
+		assertNoStrategy("SYSTEM_PROMPT", SYSTEM_PROMPT);
+	});
+
+	it("SYSTEM_PROMPT 仍然给出必要的事实与协议", () => {
+		// The guard must not be satisfiable by deleting everything useful.
+		expect(SYSTEM_PROMPT).toMatch(/asynchronous/i);
+		expect(SYSTEM_PROMPT).toMatch(/money|loan/i);
+	});
+
+	it("每个工具的 description 不含策略", () => {
+		const tools = createTools(fakeDeps().deps);
+		expect(tools.length).toBeGreaterThan(0);
+		for (const t of tools) {
+			assertNoStrategy(`tool "${t.name}" description`, String(t.description ?? ""));
+		}
+	});
+
+	it("工具的失败/拒绝信息只陈述原因，不给建议", async () => {
+		// The refusal message is where advice sneaks in most easily: it is written
+		// at the exact moment we know what the "right" next move is.
+		const { deps } = fakeDeps();
+		// Drive the tool with a world state that HAS the company (0 vehicles), which is
+		// the case that matters: the refusal must state the contract, not give advice.
+		const withCompany = {
+			...deps,
+			state: {
+				snapshot: () => ({
+					date: { raw: 1, year: 1950, month: 9, day: 1 },
+					companies: new Map([
+						[0, { info: { id: 0, name: "EX rd", isAi: true }, stats: { vehicles: 0, stations: 2 } }],
+					]) as never,
+					recent: [],
+					totalEvents: 0,
+				}),
+			},
+		};
+		const tools = createTools(withCompany);
+		const add = tools.find((t) => t.name === "add_vehicles")!;
+		const res = await add.execute("c1", { count: 1 });
+		const summary = String((res as { details?: { summary?: string } }).details?.summary ?? "");
+		assertNoStrategy("add_vehicles refusal", summary);
+		// ...but it must still state the contract fact that makes it impossible.
+		expect(summary).toMatch(/clone/i);
 	});
 });

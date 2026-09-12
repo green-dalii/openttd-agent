@@ -29,6 +29,8 @@ interface UChartsApi {
 	/** Exposed for tests: the cfg translation, with no uPlot involved. */
 	toLineData: (cfg: unknown) => { data: unknown; opts: unknown };
 	toStackedData: (cfg: unknown) => { data: unknown; opts: unknown };
+	stackedArea: (el: unknown, cfg: unknown) => unknown;
+	toStackedAreaData: (cfg: unknown) => { data: number[][]; opts: Record<string, unknown> };
 	stackedLowerBounds: (items: unknown, si: number, i0: number, i1: number) => number[];
 	stackedUpperBounds: (items: unknown, si: number, i0: number, i1: number) => number[];
 }
@@ -440,3 +442,61 @@ describe("ucharts: stacked upper bounds (uPlot needs BOTH facets)", () => {
 		expect(hi[0]).toBe(1000 + 100 + 50);
 	});
 });
+
+describe("ucharts: stacked AREA (大者先画,逐个覆盖成带)", () => {
+	// 用户要求把 token 图从柱状改成堆叠面积图。
+	//
+	// 试过两条错路(都由**像素扫描**否掉,不是读配置看出来的):
+	//   1. uPlot 的 `bands` API:先说 `series` 需要 [from,to] 元组(传数字被静默忽略),
+	//      改成元组后填充**仍然没有出现** —— 纵向扫描整列只有第一个系列的 fill 有像素。
+	//   2. 折线/柱状那套"累积数据"对面积图也不够:后面画的更大面积会盖住前面的。
+	//
+	// 最终方案:**倒序**绘制(最大的先画),每条都不透明地填到轴。
+	// 之后画的小面积盖住它的下半部分,于是每条系列露出的正好是自己那一段。
+	const cfg = {
+		items: [
+			{ label: "T1", values: [1000, 100, 50] },
+			{ label: "T2", values: [2000, 200, 80] },
+		],
+		series: [
+			{ name: "Input", color: "#5fb3ff" },
+			{ name: "Output", color: "#7bc96f" },
+			{ name: "Reasoning", color: "#c3a6ff" },
+		],
+		maxBars: 24,
+	};
+
+	it("绘制顺序是倒序的(顶部系列先画)", () => {
+		const d = load().api.toStackedAreaData(cfg);
+		const labels = (d.opts.series as { label: string }[]).map((s) => s.label);
+		expect(labels).toEqual(["x", "Reasoning", "Output", "Input"]);
+	});
+
+	it("数据行与倒序后的系列一一对应", () => {
+		const d = load().api.toStackedAreaData(cfg);
+		// row0 = x, row1 = Reasoning(累计 1150/2280), row2 = Output(1100/2200), row3 = Input(1000/2000)
+		expect(d.data[0]).toEqual([0, 1]);
+		expect(d.data[1]).toEqual([1150, 2280]);
+		expect(d.data[2]).toEqual([1100, 2200]);
+		expect(d.data[3]).toEqual([1000, 2000]);
+	});
+
+	it("每条系列都自带不透明 fill,颜色跟随自身而不是按位置分配", () => {
+		const d = load().api.toStackedAreaData(cfg);
+		const series = d.opts.series as { label: string; fill?: string; stroke?: string }[];
+		const byLabel = Object.fromEntries(series.map((s) => [s.label, s]));
+		expect(byLabel.Reasoning!.fill).toBe("#c3a6ff");
+		expect(byLabel.Output!.fill).toBe("#7bc96f");
+		expect(byLabel.Input!.fill).toBe("#5fb3ff");
+		// 不透明是刻意的:半透明会互相混色,看起来像渐变而不是堆叠
+		for (const l of ["Input", "Output", "Reasoning"]) {
+			expect(byLabel[l]!.fill).not.toMatch(/rgba|transparent/);
+		}
+	});
+
+	it("maxBars 只保留最新的若干列", () => {
+		const many = { ...cfg, items: Array.from({ length: 40 }, (_, i) => ({ label: "T" + i, values: [i, 1] })) };
+		expect(load().api.toStackedAreaData(many).data[0]!.length).toBe(24);
+	});
+});
+

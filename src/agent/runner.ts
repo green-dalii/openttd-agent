@@ -256,6 +256,15 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 		callbacks: {
 			onEvent: (ev) => {
 				world.ingest(ev);
+				// Forward to the dashboard. The `--watch` runner has always done this
+				// (src/game/runner.ts) but the agent path did not, so during `--agent`
+				// - the main mode - the page received NO event frames at all: its
+				// company mirror and history never advanced, and the KPIs stayed frozen
+				// at whatever the connect-time snapshot said until a manual reload.
+				// Same shape as the toWireSnapshot bug (MEMORY.md C1): two paths, one of
+				// them missing a piece, and the other path "looking fine" hid it.
+				web?.publishEvent(ev);
+				session.appendEvent(ev);
 				if (ev.kind === "gamescript") {
 					const p = ev.payload as Record<string, unknown>;
 					if (p.cmd === "state") gsStates++;

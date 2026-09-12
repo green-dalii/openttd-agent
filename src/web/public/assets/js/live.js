@@ -261,7 +261,16 @@
           if (!el) return;
           this.$nextTick(() => {
             if (!this.$refs.tokenChart) return;
-            C.stackedBars(el, { items, series, format: this.tokenMetric === "cost" ? U.fmtCost : U.fmtTok, height: 220, maxBars: 24 });
+            // Stacked AREA, not bars: the question is composition over turns, and an
+            // area makes the split readable as a continuous band rather than a row of
+            // separated columns (docs/DASHBOARD-UI.md §6c).
+            C.stackedArea(el, {
+              items,
+              series,
+              format: this.tokenMetric === "cost" ? U.fmtCost : U.fmtTok,
+              height: 220,
+              maxBars: 24,
+            });
           });
         },
 

@@ -246,6 +246,80 @@
     return out;
   }
 
+  /**
+   * Cumulative rows for a STACKED AREA: each series' value is the running total of
+   * itself and everything below it, so the top of the last series is the column total.
+   * Same shape as the bars, but the opts use `bands` rather than bar paths.
+   */
+  function toStackedAreaData(cfg) {
+    const c = cfg || {};
+    const series = c.series || [];
+    let items = (c.items || []).filter(Boolean);
+    const maxBars = c.maxBars || 24;
+    if (items.length > maxBars) items = items.slice(-maxBars);
+
+    const x = [];
+    for (let i = 0; i < items.length; i++) x.push(i);
+
+    // Cumulative from the bottom up: cum[k][i] = sum of values 0..k at column i.
+    const cum = [];
+    const running = new Array(items.length).fill(0);
+    for (let si = 0; si < series.length; si++) {
+      const row = [];
+      for (let i = 0; i < items.length; i++) {
+        const vals = items[i].values || [];
+        const v = Number(vals[si]);
+        running[i] += Number.isFinite(v) ? v : 0;
+        row.push(running[i]);
+      }
+      cum.push(row);
+    }
+
+    // Draw LARGEST first, each filled opaquely down to the axis. The next (smaller)
+    // area paints over the lower part, so what remains visible of each series is
+    // exactly its own band - a stacked area with no transparency blending.
+    //
+    // uPlot's `bands` API was tried first and does not work here: `series` must be a
+    // [from, to] tuple (a bare number is silently ignored), and even with the correct
+    // tuple shape the fills did not appear. Verified by pixel scan, not by reading
+    // the config: only the first series' `fill` ever produced pixels.
+    const rows = [x];
+    const seriesOpts = [{ label: "x" }];
+    for (let si = series.length - 1; si >= 0; si--) {
+      rows.push(cum[si]);
+      const colour = series[si].color || "#5fb3ff";
+      seriesOpts.push({
+        label: series[si].name || `s${si + 1}`,
+        stroke: colour,
+        width: 1.2,
+        fill: colour,
+        points: { show: false },
+      });
+    }
+    return { data: rows, opts: stackedAreaOpts(c, seriesOpts, items) };
+  }
+
+  function stackedAreaOpts(c, seriesOpts, items) {
+    const t = theme();
+    const axis = axisStyle(t);
+    const fmt = fmtOf(c.format);
+    return {
+      height: c.height || 220,
+      padding: [10, 10, 0, 0],
+      cursor: { show: true, points: { show: false } },
+      legend: { show: true, live: true },
+      scales: { x: { time: false } },
+      axes: [
+        {
+          ...axis,
+          values: (_u, vals) => vals.map((v) => (items[v] && items[v].label !== undefined ? String(items[v].label) : "")),
+        },
+        { ...axis, size: 52, values: (_u, vals) => vals.map((v) => fmt(v)) },
+      ],
+      series: seriesOpts,
+    };
+  }
+
   function stackedOpts(c, series, items) {
     const t = theme();
     const axis = axisStyle(t);
@@ -388,11 +462,13 @@
     available: uplotAvailable,
     line: (el, cfg) => mount(el, () => toLineData(cfg)),
     stackedBars: (el, cfg) => mount(el, () => toStackedData(cfg)),
+    stackedArea: (el, cfg) => mount(el, () => toStackedAreaData(cfg)),
     destroy: destroy,
     // Exposed for tests: pure translations with no DOM/uPlot involvement.
     toLineData: toLineData,
     toStackedData: toStackedData,
     stackedLowerBounds: stackedLowerBounds,
     stackedUpperBounds: stackedUpperBounds,
+    toStackedAreaData: toStackedAreaData,
   };
 })();

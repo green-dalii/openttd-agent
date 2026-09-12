@@ -738,3 +738,14 @@ openttd-agent/
 **结论（写入工具契约）**：`add_vehicles` 的前提是**路线已上线且有头车**。
 `src/agent/tools/index.ts` 现在会在 `vehicles == 0`（或公司无 stats）时**拒绝发送**并
 说明原因与下一步，而不是报 `ok=true`。
+
+## 10.21 两个 runner 的事件转发契约（2026-09-12 修正）
+
+`--watch` 与 `--agent` 都必须把规范化事件推给 Dashboard（`web.publishEvent`）。
+
+**曾经只有 `--watch` 做了**（`src/game/runner.ts`），`--agent` 从不转发。
+后果：在**主模式** `--agent` 下，页面收不到任何 `event` 帧 →
+`companies` / `history` 镜像永不推进 → **KPI 冻结在连接时的快照上，必须手动刷新**。
+
+这与 `toWireSnapshot` 的两份实现是同一类缺陷（MEMORY.md C1）：两条路径，
+其中一条少了一段，而另一条的"看起来正常"掩盖了它。现已补齐，并加了一致性测试。

@@ -139,9 +139,11 @@ export function addVehiclesTool(deps: AgentDeps): AgentTool<typeof AddVehiclesSc
 			if (vehicles === null) {
 				return toResult({
 					ok: false,
+					// Contract only. No "call observe() first" - that is strategy, and
+					// strategy in the harness deletes the lesson the agent would learn.
 					summary:
-						`not sent: company ${company} has no reported stats yet, so the fleet cannot be ` +
-						"scaled. Call observe() first to confirm the company exists.",
+						`not sent: company ${company} has no reported stats, so the fleet size is ` +
+						"unknown and cannot be scaled.",
 					data: { company, vehicles: null },
 				});
 			}
@@ -149,10 +151,9 @@ export function addVehiclesTool(deps: AgentDeps): AgentTool<typeof AddVehiclesSc
 				return toResult({
 					ok: false,
 					summary:
-						`not sent: the route has no vehicles yet (vehicles=0). This tool CLONES the ` +
-						"route's lead vehicle, so it cannot create the first one — the executor buys " +
-						"it when construction finishes. Use observe() to watch for vehicles > 0, and " +
-						"only then scale the fleet.",
+						`not sent: company ${company} has 0 vehicles. add_vehicles scales an ` +
+						"existing fleet by cloning the route's lead vehicle; with no vehicles " +
+						"there is nothing to clone.",
 					data: { company, vehicles },
 				});
 			}
@@ -163,8 +164,9 @@ export function addVehiclesTool(deps: AgentDeps): AgentTool<typeof AddVehiclesSc
 			const r: ActionResult = {
 				ok: true,
 				summary:
-					`requested fleet size ${params.count} (company=${company}, currently ${vehicles}). ` +
-					"Fleet changes are applied by the executor on a later tick — verify with observe().",
+					`requested fleet size ${params.count} (company=${company}, vehicles before this ` +
+					`request: ${vehicles}). This reports the REQUEST, not the resulting fleet; ` +
+					"observe() reports the fleet.",
 				data: { ...cmd, vehiclesBefore: vehicles },
 			};
 			return toResult(r);
