@@ -25,6 +25,24 @@ function toResult(r: ActionResult): {
 }
 
 /**
+ * Compact, model-visible view of the towns: id, population and position.
+ *
+ * Population is the demand signal; x/y let the agent judge distance (a big town
+ * across the map may be worse than a small one next door). Deliberately no
+ * ranking beyond population - the ORDER is a fact about the world, the CHOICE is
+ * the agent's.
+ */
+function townSummary(snap: WorldSnapshot): { id: number; pop: number; x: number; y: number }[] {
+	// Sorted here rather than trusting the caller: the order the model sees must
+	// be deterministic, and a plain snapshot (tests, replays) may not have gone
+	// through WorldState.setTowns. Population descending is a fact about the
+	// world; which of them to connect is the agent's call.
+	return (snap.towns ?? [])
+		.map((t) => ({ id: t.id, pop: t.population, x: t.x, y: t.y }))
+		.sort((a, b) => b.pop - a.pop);
+}
+
+/**
  * Summarize a WorldSnapshot into a compact, JSON-safe, LLM-facing object.
  * Pure function — unit-testable without a game.
  */
@@ -42,6 +60,10 @@ export function summarizeState(snap: WorldSnapshot): Record<string, unknown> {
 	return {
 		date: snap.date ? `${snap.date.year}-${String(snap.date.month).padStart(2, "0")}-${String(snap.date.day).padStart(2, "0")}` : null,
 		companies,
+		// Candidate towns, largest first. This is what makes the route choice a
+		// real decision instead of a single button press (SPEC §10.32): the agent
+		// can weigh population against distance and live with the result.
+		towns: (snap.towns ?? []).map((t) => ({ id: t.id, population: t.population, x: t.x, y: t.y })),
 		recentEventCount: snap.recent.length,
 		totalEvents: snap.totalEvents,
 	};
@@ -55,13 +77,21 @@ export function observeTool(deps: AgentDeps): AgentTool<typeof ObserveSchema, Ac
 		name: "observe",
 		label: "Observe Game State",
 		description:
-			"Read the current normalized game state (date, companies with money/loan/income, vehicles, stations). Call before deciding an action.",
+			"Read the current normalized game state: date, companies (money/loan/income/vehicles/stations), and the candidate towns (id, population, x, y) that build_bus_route can connect.",
 		parameters: ObserveSchema,
 		execute: async () => {
-			const state = summarizeState(deps.state.snapshot());
+			const snap = deps.state.snapshot();
+			const state = summarizeState(snap);
 			const r: ActionResult = {
 				ok: true,
-				summary: `date=${state.date ?? "?"} companies=${JSON.stringify(state.companies)}`,
+				// The towns MUST be in the summary, not only in `details`:
+				// toResult() sends just `summary` as the model-visible text, so
+				// anything left in `details` is effectively invisible. Putting the
+				// candidates here is what turns "build a route" from a single
+				// button press into a choice (SPEC §10.32).
+				summary:
+					`date=${state.date ?? "?"} companies=${JSON.stringify(state.companies)} ` +
+					`towns=${JSON.stringify(townSummary(snap))}`,
 				data: state,
 			};
 			return toResult(r);
@@ -82,7 +112,11 @@ export function buildBusRouteTool(deps: AgentDeps): AgentTool<typeof BuildRouteS
 		name: "build_bus_route",
 		label: "Build Bus Route",
 		description:
-			"Plan and construct a bus route between two towns. Omit from_town/to_town to let the planner pick the best pair. Returns immediately (construction is asynchronous in-game).",
+			// States the contract only. The previous text said "Omit from_town/to_town
+			// to let the planner pick the best pair", which told the agent that the
+			// framework would decide for it - one of the two reasons the M3
+			// experiment was saturated (SPEC §10.32).
+			"Construct a bus route between two towns. from_town and to_town are town ids from observe(); when either is omitted the GS picks a pair itself. Returns as soon as the command is delivered - construction is asynchronous in-game, so observe() afterwards to see what actually happened.",
 		parameters: BuildRouteSchema,
 		execute: async (_id, params) => {
 			const company = params.company ?? DEFAULT_COMPANY;

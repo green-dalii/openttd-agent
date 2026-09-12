@@ -299,6 +299,20 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 					const p = ev.payload as Record<string, unknown>;
 					if (p.cmd === "state") {
 						gsStates++;
+						// The GS owns the town list; the agent only reads it. Without
+						// this the agent could not see the options it was choosing
+						// between, which is what made the M3 experiment saturated
+						// (SPEC §10.32).
+						if (Array.isArray(p.town_list)) {
+							world.setTowns(
+								(p.town_list as { id?: unknown; pop?: unknown; x?: unknown; y?: unknown }[]).map((t) => ({
+									id: Number(t.id),
+									population: Number(t.pop),
+									x: Number(t.x),
+									y: Number(t.y),
+								})),
+							);
+						}
 						// Sample the GS's own clock. This is the only way to tell
 						// "the game is not running" from "the executor is not
 						// looping": the GS sends these every 200 ticks, so if the

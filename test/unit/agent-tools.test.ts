@@ -24,6 +24,12 @@ function fakeSink() {
 	return { sink, rcon, gameScript };
 }
 
+/** The text the model actually reads (toResult puts the summary in content[0]). */
+function textOf(res: unknown): string {
+	const c = (res as { content?: { text?: string }[] }).content;
+	return c?.[0]?.text ?? "";
+}
+
 function fakeState(snap: Partial<WorldSnapshot> = {}): StateReader {
 	return {
 		snapshot: () => ({
@@ -31,6 +37,7 @@ function fakeState(snap: Partial<WorldSnapshot> = {}): StateReader {
 			companies: new Map(),
 			recent: [],
 			totalEvents: 0,
+			towns: [],
 			...snap,
 		}),
 	};
@@ -48,6 +55,7 @@ describe("summarizeState", () => {
 			companies: new Map(),
 			recent: [],
 			totalEvents: 0,
+		towns: [],
 		});
 		expect(out.date).toBe("1950-03-01");
 		expect(out.companies).toEqual([]);
@@ -80,6 +88,7 @@ describe("summarizeState", () => {
 			]),
 			recent: [],
 			totalEvents: 0,
+		towns: [],
 		});
 		const c = (out.companies as Array<Record<string, unknown>>)[0]!;
 		expect(c.income).toBe("-21583");
@@ -207,5 +216,52 @@ describe("createTools", () => {
 	it("exposes the first batch with stable names", () => {
 		const names = createTools(deps()).map((t) => t.name);
 		expect(names).toEqual(["observe", "build_bus_route", "add_vehicles", "set_pause"]);
+	});
+});
+
+describe("observe 必须让 agent 看见可选项（SPEC §10.32）", () => {
+	// M3 实验饱和的根因是 agent **看不到**它要在哪些城镇之间选。
+	// observe() 的 summary 是模型唯一能读到的文本（toResult 只发 summary），
+	// 所以城镇必须在 summary 里，只在 details 里等于没给。
+	it("summary 里带 id / 人口 / 坐标", async () => {
+		const d = deps({
+			state: fakeState({
+				towns: [
+					{ id: 9, population: 2279, x: 97, y: 162 },
+					{ id: 1, population: 1391, x: 184, y: 221 },
+				],
+			}),
+		});
+		const t = createTools(d).find((x) => x.name === "observe")!;
+		const res = await t.execute("c1", {});
+		// Read the model-visible TEXT, not JSON.stringify(content): stringifying
+		// re-escapes the inner quotes, so a /"id":9/ pattern could never match and
+		// the test would fail even when the feature works.
+		const text = textOf(res);
+		expect(text).toContain("towns=");
+		expect(text).toMatch(/"id":9/);
+		expect(text).toMatch(/"pop":2279/);
+		expect(text).toMatch(/"x":97/);
+		expect(text).toMatch(/"id":1/);
+	});
+
+	it("按人口降序（顺序是世界的事实，不是建议）", async () => {
+		const d = deps({
+			state: fakeState({
+				towns: [
+					{ id: 1, population: 100, x: 0, y: 0 },
+					{ id: 2, population: 900, x: 1, y: 1 },
+				],
+			}),
+		});
+		const t = createTools(d).find((x) => x.name === "observe")!;
+		const res = await t.execute("c1", {});
+		const text = textOf(res);
+		expect(text.indexOf('"id":2')).toBeLessThan(text.indexOf('"id":1'));
+	});
+
+	it("build_bus_route 的描述不再叫模型别做选择", () => {
+		const t = createTools(deps()).find((x) => x.name === "build_bus_route")!;
+		expect(t.description).not.toMatch(/let the planner pick/i);
 	});
 });

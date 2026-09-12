@@ -38,10 +38,32 @@ class BridgeV1 extends GSController {
                     }
                 }
                 this._sign_count = sc;
+                // Publish the candidate towns, not just how many there are.
+                //
+                // SPEC §10.32: the M3 experiment was saturated because the agent
+                // could not see the options it was choosing between, so every run
+                // ended up doing exactly the same thing. A count is not a choice;
+                // population and position are. Sorted by population so the order is
+                // stable and meaningful; the ORDER states a fact about the world,
+                // it does not recommend one town over another.
+                // Use the GSList API rather than a hand-rolled comparator:
+                // Squirrel has no `<=>` operator, and using one silently stopped
+                // the whole GS from loading ("BridgeV1 GS never heartbeated").
+                local tlist = GSTownList();
+                tlist.Valuate(GSTown.GetPopulation);
+                tlist.Sort(GSList.SORT_BY_VALUE, false);   // largest population first
+                local towns = [];
+                foreach (tid, pop in tlist) {
+                    if (towns.len() >= 10) break;
+                    local loc = GSTown.GetLocation(tid);
+                    towns.push({ id = tid, pop = pop,
+                                 x = GSMap.GetTileX(loc), y = GSMap.GetTileY(loc) });
+                }
                 GSAdmin.Send({
                     cmd = "state", tick = GSController.GetTick(),
                     date = GSDate.GetCurrentDate(),
-                    towns = GSTownList().Count(),
+                    towns = tlist.Count(),
+                    town_list = towns,
                     admin_seen = this._admin_seen,
                     last_cmd = this._last_cmd,
                     signs = sc,

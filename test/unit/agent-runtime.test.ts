@@ -22,7 +22,7 @@ function fakeDeps() {
 			date: { raw: 712223, year: 1950, month: 3, day: 1 },
 			companies: new Map(),
 			recent: [],
-			totalEvents: 0,
+			totalEvents: 0, towns: [],
 		}),
 	};
 	const deps: AgentDeps = { sink, state };
@@ -283,7 +283,7 @@ describe("harness boundary: 框架不替 agent 做决定", () => {
 						[0, { info: { id: 0, name: "EX rd", isAi: true }, stats: { vehicles: 0, stations: 2 } }],
 					]) as never,
 					recent: [],
-					totalEvents: 0,
+					totalEvents: 0, towns: [],
 				}),
 			},
 		};

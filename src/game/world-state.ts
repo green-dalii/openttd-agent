@@ -52,6 +52,25 @@ export interface WorldSnapshot {
 	recent: GameEvent[];
 	/** Monotonic event count (never reset). */
 	totalEvents: number;
+	/**
+	 * Candidate towns, pushed up by the Bridge GS with its periodic state report.
+	 *
+	 * Why this exists (SPEC §10.32): the M3 experiment was saturated because the
+	 * agent had NO decision to make - it could not even see the towns it was
+	 * choosing between, and the tool description told it not to bother choosing.
+	 * A task whose entire content is "press go" cannot show whether experience
+	 * helps, so the options had to become visible before anything else could work.
+	 */
+	towns: TownInfo[];
+}
+
+/** One town as the agent sees it - enough to make a real choice. */
+export interface TownInfo {
+	id: number;
+	/** Population; the main signal for how much passenger demand exists. */
+	population: number;
+	x: number;
+	y: number;
 }
 
 export interface WorldStateOptions {
@@ -65,6 +84,7 @@ export class WorldState {
 	private date: GameDate | null = null;
 	private companies = new Map<number, CompanyState>();
 	private recent: GameEvent[] = [];
+	private towns: TownInfo[] = [];
 	private totalEvents = 0;
 	private recentLimit: number;
 
@@ -158,7 +178,21 @@ export class WorldState {
 			companies: new Map(this.companies),
 			recent: [...this.recent],
 			totalEvents: this.totalEvents,
+			towns: [...this.towns],
 		};
+	}
+
+	/**
+	 * Replace the town list (the GS owns it - the agent only reads it).
+	 *
+	 * Sorted by population descending so the most promising candidates come first;
+	 * the ORDER is a fact about the world, not advice about what to pick.
+	 */
+	setTowns(towns: TownInfo[]): void {
+		this.towns = (Array.isArray(towns) ? towns : [])
+			.filter((t) => t && Number.isFinite(t.id))
+			.map((t) => ({ id: Number(t.id), population: Number(t.population) || 0, x: Number(t.x) || 0, y: Number(t.y) || 0 }))
+			.sort((a, b) => b.population - a.population);
 	}
 
 	getTotalEvents(): number {

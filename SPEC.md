@@ -1168,3 +1168,44 @@ executor: 建 2 站 + 路 + 车库 + 3 台车
 - **地图大小是次要因素**，值得作为难度旋钮保留，但**不是**饱和的原因
 - 真正要做的是**把决策权交还 agent**：暴露城镇信息 + 让它选
 - 在此之前，**任何 M3 实验都不会有信号**，加多少局都一样
+
+## 10.33 把决策权交还 agent：城镇对由它自己选（2026-09-12 实施）
+
+对应 §10.32 的诊断。三处改动：
+
+| # | 改动 | 位置 |
+|---|---|---|
+| 1 | GS 周期状态消息里带上**候选城镇**（id / 人口 / x / y，按人口降序，最多 10 个） | `bridge-gs/main.nut` |
+| 2 | agent 摄入这些城镇，`observe()` 把它交给模型 | `world-state.ts`（`setTowns`）、`runner.ts`、`tools/index.ts` |
+| 3 | `build_bus_route` 描述不再写 *"let the planner pick the best pair"*（那是在叫模型别做选择） | `tools/index.ts` |
+
+### 关键实现细节：必须放进 **summary**
+
+`toResult()` 只把 `summary` 作为模型可见文本发出去；放在 `details` 里的东西
+**模型看不到**。所以城镇写进了 `summary`：
+
+```
+date=1950-01-01 companies=[...] towns=[{"id":9,"pop":2279,"x":97,"y":162}, ...]
+```
+
+### 实测：agent 开始真的选了
+
+改动前的 6 局：`sent build_bus_route (company=0)` —— **从不传城镇**，GS 用 `PickTownPair()` 自己挑。
+
+改动后：
+
+```
+sent build_bus_route (company=0, from=9, to=1)
+GS:  "townA":9,"townB":1
+```
+
+**agent 主动选了人口最高的 town 9（2279）与 town 1（1391）。**
+
+### 两个踩到的坑（都已修）
+
+1. **Squirrel 没有 `<=>` 运算符**。用 `towns.sort(@(a,b) b.pop <=> a.pop)` 导致
+   **整个 GS 加载失败**（`BridgeV1 GS never heartbeated`）。改用 GSList 惯用法：
+   `tlist.Valuate(GSTown.GetPopulation); tlist.Sort(GSList.SORT_BY_VALUE, false);`
+2. 测试里用 `JSON.stringify(content)` 再去匹配 `/"id":9/` 永远不匹配 ——
+   stringify 会把内层引号转义成 `\"`。断言必须读**模型实际读到的文本**
+   （`content[0].text`）。
