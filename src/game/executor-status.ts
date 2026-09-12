@@ -107,6 +107,36 @@ function num(v: string | undefined): number | null {
  * is labelled `unknown`, because silently inventing a meaning would be worse
  * than admitting we do not have one.
  */
+/**
+ * The *stable* identity of an executor phase string — what must be compared to
+ * decide whether anything actually changed.
+ *
+ * Why this exists (2026-09-12, cost: a whole M3 round): the executor reports its
+ * phase through its **company name**, and the runner detected a phase change with
+ * `p.name !== executorPhase` — a full-string comparison. The heartbeat is
+ * `hb <stage> #<seq> s<signs>`, and `seq` increments every loop, so EVERY beat was
+ * a new string and therefore a "phase change". Measured: 197 of 212 decisions were
+ * triggered by the heartbeat, ~36 decisions per game, and money did not move in
+ * 83% of the intervals between them.
+ *
+ * A heartbeat means "nothing happened, I am still alive". Using it as a change
+ * signal is the exact inversion: no news is not news.
+ *
+ * The sequence number is a counter, not state, so it is dropped. Everything else
+ * is kept, because it is state: `hb boot` -> `hb road` is a real transition, and
+ * `s3` -> `s4` means a sign was placed.
+ */
+export function phaseIdentity(phase: string): string {
+	// The phase travels as the executor's company name, so it carries the `EX `
+	// prefix (`EX hb road #28 s3`). The prefix is kept in the rebuilt identity so a
+	// non-heartbeat string still compares by its full text.
+	const m = /^(.*?)hb\s+(\S+)\s*#\d+(\s+s\d+)?$/.exec((phase ?? "").trim());
+	// Rebuild without the counter; keep everything else, because it is state:
+	// the stage (`boot` -> `road`) and the sign count (`s3` -> `s4`) both matter.
+	if (m) return [m[1] + "hb", m[2], m[3] ? m[3].trim() : ""].filter(Boolean).join(" ");
+	return (phase ?? "").trim();
+}
+
 export function decodeExecutorPhase(input: string): ExecutorPhase {
 	const raw = String(input ?? "").trim();
 	const base: ExecutorPhase = {

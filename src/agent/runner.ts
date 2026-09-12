@@ -63,6 +63,7 @@ import { pruningTransformContext } from "./context.js";
 import { loadMemory, makeLessonProvider, memoryCounts, type LoadedMemory } from "../evolution/memory.js";
 import { runReflection } from "../evolution/reflection-run.js";
 import { buildReflectionEvidence } from "../evolution/reflect.js";
+import { phaseIdentity } from "../game/executor-status.js";
 import { evolutionView, setStrategyEnabled } from "../evolution/web-view.js";
 import { AuditLog } from "./audit.js";
 import { isLlmConfigured } from "../config.js";
@@ -342,7 +343,15 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 				}
 				if (ev.kind === "company_info") {
 					const p = ev.payload as { id: number; name: string; isAi: boolean };
-					if (p.isAi && p.name.startsWith("EX ") && p.name !== executorPhase) {
+					// Compare the phase IDENTITY, not the raw string. The heartbeat is
+					// `hb <stage> #<seq> s<signs>` and increments `seq` every loop, so a
+					// raw comparison made every beat look like a phase change: measured
+					// 197 of 212 decisions triggered that way, ~36 per game, with money
+					// unmoved in 83% of the intervals (MEASURED 2026-09-12).
+					// A heartbeat means nothing happened - it must never wake the model.
+					const identity = phaseIdentity(p.name);
+					if (p.isAi && p.name.startsWith("EX ") && identity !== executorPhaseIdentity) {
+						executorPhaseIdentity = identity;
 						executorPhase = p.name;
 						if (p.name.startsWith("EX done")) reachedDone = true;
 						console.log(`[agent] executor phase -> "${p.name}"`);
@@ -753,6 +762,8 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 	// asked to fix it. The scheduler now keeps asking on phase changes, periodic
 	// intervals and notable events until the run ends.
 	// See docs/AGENT-LOOP-AND-CONTROL.md §2.1.
+	/** Last phase *identity* (heartbeat counters stripped) - see phaseIdentity. */
+	let executorPhaseIdentity = "";
 	onPhaseChange = (phase: string) => {
 		recordPhase(tracker, phase);
 		// One snapshot per construction phase: this is the "阶段性游戏画面"
