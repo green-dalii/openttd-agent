@@ -38,30 +38,44 @@ Intl 替换手写格式化（自带单位阶梯，避免 CLDR 漂移）· uPlot 
 > - 前端依赖: uPlot（折线/柱图）、Alpine.js（渲染层）、Tom Select（**已回退，未使用**）
 > - **本仓库没有配置 git remote**（44 个 commit 全在本地）—— 所有工作都只在本地，没有远程备份
 
-### 1. 记忆闭环（v0.3.1 / M3）— 优先级最高
+### 1. 记忆闭环（v0.3.1 / M3）— 🔵 开工中
 
-**现状: 只有 metrics，没有记忆。** 用户核对 SPEC 后发现：每一局（Session）完全独立，
-没有任何跨局总结与注入。
+**目标（SPEC §9 M3 验收）**：**同 seed 带/不带 lessons 各 3 局可出对比曲线**。
+设计见 [`docs/EVOLUTION.md`](docs/EVOLUTION.md)（数据契约 + 三道闸 + 注入路径）。
 
-已落地（唯一完成的一片）:
-- `src/evolution/metrics.ts` — `toGameMetric` / `summarise` / `groupBySeed` / `compareArms`（纯函数）
-- `src/evolution/store.ts` — `<dataDir>/evolution/metrics.jsonl`，按 session id 幂等、容忍坏行、原子压缩
-- 记账点: `SessionStore.finalize()` 与启动 reconciler（正常 / 崩溃两条完成路径）
-- **关键设计**: 每条指标记录 `memory.lessonsInjected` / `strategiesInjected` ——
-  这是 SPEC §5.2 #3 对照实验的**自变量**，不记录则"有/无 lessons"不构成对比
+现状：只有 metrics 记账那一段。`runner.ts` 调 `pruningTransformContext({keepRecent:40})`，
+**从不传 `lessonsProvider`** —— 该 hook 自 v0.2.1 起没人喂。
 
-仍缺（SPEC 对齐）:
-- [ ] **lessons 蒸馏**: 局终反思 → 短教训（SPEC §5.2 #1）
-- [ ] **策略库**: 把高收益动作模板化入库（SPEC §5.2 #2）
-- [ ] **反思循环**: LLM 复盘成败归因（SPEC §5 流程图）
-- [ ] **注入下一局**: `src/agent/context.ts` 的 `lessonsProvider` 从 v0.2.1 起就是**空 hook**，
-      没有任何东西喂它
-- [ ] **Dashboard 呈现**（SPEC §7 #4）: 跨局指标折线对比 + lessons/策略库浏览 + 手动开关进化注入
-- [ ] **收敛防抖**（SPEC §5.3）: lessons 限量/去重/带来源与时间戳；
-      策略入库需「价值 > 阈值 **且** 已验证局 ≥ 2」；**反思 prompt 必须显式禁止臆测因果**
+#### 分阶段（每阶段 TDD：先写失败测试 → 实现 → 绿 → 提交）
 
-**注意**: `compareArms` 已实现在样本不足时**拒绝下结论**（少于 3 局/臂即 `conclusive: false`），
-并排除 faux（脚本演示）局。新增的蒸馏/注入必须沿用这个口径，否则会退化成自我感觉良好。
+- [x] **P1 — lessons 模型 + 蒸馏 + 去重/限量（纯函数）**
+  `src/evolution/lessons.ts`：`Lesson` 类型、`normalizeLessonText()`、
+  `dedupeLessons()`（规范化文本去重、保留高置信度）、`selectLessons({limit})`、
+  `formatForInjection()`
+  **验收**：`evidence` 为空的 lesson 被丢弃；重复文本合并且 `supersededBy` 记录；
+  limit 生效；同等输入输出确定（可单测）
+- [x] **P2 — 策略库 + 入库门槛（纯函数）**
+  `src/evolution/strategies.ts`：`StrategyCard`、`promoteStrategies()`
+  **验收**：`价值>阈值` **且** `已验证局≥2` 两条同时满足才入库（SPEC §5.3 硬性）
+- [ ] **P3 — 学习库持久化**
+  `store.ts` 扩展 `lessons.jsonl` / `strategies.jsonl`（append + read + 幂等，
+  与 metrics 同一套容忍坏行/原子压缩约定）
+  **验收**：坏行不致命；同 id 覆盖；读写往返一致
+- [ ] **P4 — 反思（prompt 构造 + 响应解析，纯函数）**
+  `src/evolution/reflect.ts`：`buildReflectionPrompt()` 内含"禁止臆测因果"；
+  `parseReflection()` 强校验 schema，`evidence` 为空整条丢弃
+  **验收**：臆测性表述与无证据条目都被拒；合法输出解析完整
+- [ ] **P5 — 接进运行生命周期**
+  开局：读库 → `selectLessons()` → 喂 `lessonsProvider` → `setMemoryInjected(真实计数)`；
+  局终：反思 → 蒸馏 → 持久化（**与 metrics 记账互不影响**，各自失败不连带）
+  **验收**：`test/live` 断言注入计数 `> 0` 且出现在 `metrics.jsonl`；
+  反思失败时 metrics 仍落盘
+- [ ] **P6 — Dashboard 进化视图（SPEC §6.1 #4）**
+  跨局指标折线对比 + lessons/策略浏览 + **手动开关注入**（SPEC §5.3 guardrail：
+  默认关、人工确认后才生效）
+
+**红线**：注入默认**关闭**，人类在 UI 确认后才全局生效（SPEC §5.3）。
+一个把错误教训固化进库的系统，比没有记忆的系统更糟。
 
 ### 2. Token usage 图表：柱图 → 折线图
 

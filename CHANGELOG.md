@@ -4,6 +4,23 @@
 
 ## [Unreleased]
 
+### Added（记忆闭环 第 1 片：不变量与门槛）
+
+- `src/evolution/lessons.ts` —— lessons 的数据契约与三道闸（纯函数）：
+  `normalizeLessonText()` / `lessonId()`（FNV-1a，大小写与标点不制造重复记忆）、
+  `fromReflection()`（**证据为空整条丢弃**，不是降级保留）、
+  `dedupeLessons()`（按 id 去重，置信度高者胜、时间断平）、
+  `selectLessons()`（先去重再限量，排除被覆盖与过期的）、`formatForInjection()`。
+- `src/evolution/strategies.ts` —— 策略卡片与 **SPEC §5.3 双重入库门槛**：
+  `evaluatePromotion()` 要求「价值 > 阈值」**且**「已验证局 ≥ 2」，两条缺一不可；
+  `mergeStrategySamples()` 跨局累积（`valuePerRun` 存**每局一个样本**而非均值，
+  否则"验证过几局"无法判定）；`selectStrategies()` 只注入被人工确认的卡片。
+- `src/evolution/types.ts` —— 记忆系统持久化实体的单一事实源（`Lesson` / `StrategyCard`）。
+- `docs/EVOLUTION.md` —— 记忆系统的数据契约、三道闸、注入路径与反思约束。
+
+**设计要点**：注入**默认关闭**（SPEC §5.3：进化引擎只读建议，人工确认后才全局生效）。
+一个把错误教训固化进库的系统，比没有记忆的系统更糟。
+
 ### Fixed
 
 - **Live 页满屏 Alpine 报错**（`reading 'children'` + `m is not defined`）。
