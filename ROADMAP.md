@@ -57,11 +57,11 @@ Intl 替换手写格式化（自带单位阶梯，避免 CLDR 漂移）· uPlot 
 - [x] **P2 — 策略库 + 入库门槛（纯函数）**
   `src/evolution/strategies.ts`：`StrategyCard`、`promoteStrategies()`
   **验收**：`价值>阈值` **且** `已验证局≥2` 两条同时满足才入库（SPEC §5.3 硬性）
-- [ ] **P3 — 学习库持久化**
+- [x] **P3 — 学习库持久化**
   `store.ts` 扩展 `lessons.jsonl` / `strategies.jsonl`（append + read + 幂等，
   与 metrics 同一套容忍坏行/原子压缩约定）
   **验收**：坏行不致命；同 id 覆盖；读写往返一致
-- [ ] **P4 — 反思（prompt 构造 + 响应解析，纯函数）**
+- [x] **P4 — 反思（prompt 构造 + 响应解析，纯函数）**
   `src/evolution/reflect.ts`：`buildReflectionPrompt()` 内含"禁止臆测因果"；
   `parseReflection()` 强校验 schema，`evidence` 为空整条丢弃
   **验收**：臆测性表述与无证据条目都被拒；合法输出解析完整

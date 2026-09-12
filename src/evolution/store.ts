@@ -18,6 +18,8 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { toGameMetric, type GameMetric, type SessionMetaLike } from "./metrics.js";
+import { dedupeLessons, type Lesson } from "./lessons.js";
+import type { StrategyCard } from "./types.js";
 
 /** `<dataDir>/evolution/` — one folder for the whole evolution layer. */
 export function evolutionDir(dataDir: string): string {
@@ -91,5 +93,133 @@ export function compactMetrics(dataDir: string): number {
 	// rename() is atomic within a filesystem, so a crash mid-compaction leaves the
 	// previous ledger intact rather than a truncated one.
 	renameSync(tmp, file);
+	return list.length;
+}
+
+/* ----------------------------- learning library ----------------------------- */
+
+/*
+ * lessons.jsonl / strategies.jsonl 沿用 metrics.jsonl 的约定:
+ * append-only、按 id 收敛、单个坏行不丢整本库、压缩走 temp + rename。
+ *
+ * 一处**刻意不同**于 metrics:lessons 读取时按「更可信者胜」收敛,
+ * 而不是简单的最后一条胜出。理由:追加一条低置信度的重复项不应该把
+ * 一个更好的结论挤掉 —— 而 append-only 的写入路径无法在写时判断哪条更好。
+ */
+
+export function lessonsPath(dataDir: string): string {
+	return path.join(evolutionDir(dataDir), "lessons.jsonl");
+}
+
+export function strategiesPath(dataDir: string): string {
+	return path.join(evolutionDir(dataDir), "strategies.jsonl");
+}
+
+/** Read a JSONL file into objects, skipping (not rethrowing) corrupt lines. */
+function readJsonl<T>(file: string, isValid: (v: unknown) => v is T): T[] {
+	if (!existsSync(file)) return [];
+	let raw: string;
+	try {
+		raw = readFileSync(file, "utf8");
+	} catch {
+		return [];
+	}
+	const out: T[] = [];
+	for (const line of raw.split("\n")) {
+		const t = line.trim();
+		if (!t) continue;
+		try {
+			const parsed: unknown = JSON.parse(t);
+			if (isValid(parsed)) out.push(parsed);
+		} catch {
+			// Skip the damaged line; the rest of the library survives.
+		}
+	}
+	return out;
+}
+
+/** Write via temp + rename so a crash cannot truncate the library. */
+function writeAtomic(file: string, lines: string[]): void {
+	mkdirSync(path.dirname(file), { recursive: true });
+	const tmp = `${file}.tmp`;
+	writeFileSync(tmp, lines.join("\n") + (lines.length ? "\n" : ""), "utf8");
+	// rename() is atomic within a filesystem: a crash mid-compaction leaves the
+	// previous library intact rather than a truncated one.
+	renameSync(tmp, file);
+}
+
+function isLesson(v: unknown): v is Lesson {
+	if (!v || typeof v !== "object") return false;
+	const l = v as Lesson;
+	return typeof l.id === "string" && l.id !== "" && typeof l.text === "string";
+}
+
+function isStrategyCard(v: unknown): v is StrategyCard {
+	if (!v || typeof v !== "object") return false;
+	const c = v as StrategyCard;
+	return (
+		typeof c.id === "string" &&
+		c.id !== "" &&
+		typeof c.action === "string" &&
+		Array.isArray(c.valuePerRun)
+	);
+}
+
+/** Append lessons. Invalid entries are dropped rather than persisted. */
+export function appendLessons(dataDir: string, lessons: Lesson[]): number {
+	const valid = (Array.isArray(lessons) ? lessons : []).filter(isLesson);
+	if (valid.length === 0) return 0;
+	mkdirSync(evolutionDir(dataDir), { recursive: true });
+	appendFileSync(lessonsPath(dataDir), valid.map((l) => `${JSON.stringify(l)}\n`).join(""), "utf8");
+	return valid.length;
+}
+
+/**
+ * Read the lesson library, collapsing duplicates by "most credible wins".
+ *
+ * Reuses `dedupeLessons` so the on-disk view and the in-memory view can never
+ * disagree about which of two same-id lessons survives.
+ */
+export function readLessons(dataDir: string): Lesson[] {
+	return dedupeLessons(readJsonl(lessonsPath(dataDir), isLesson));
+}
+
+export function compactLessons(dataDir: string): number {
+	const list = readLessons(dataDir);
+	writeAtomic(lessonsPath(dataDir), list.map((l) => JSON.stringify(l)));
+	return list.length;
+}
+
+/** Append strategy cards. Cards are full merged snapshots, not deltas. */
+export function appendStrategies(dataDir: string, cards: StrategyCard[]): number {
+	const valid = (Array.isArray(cards) ? cards : []).filter(isStrategyCard);
+	if (valid.length === 0) return 0;
+	mkdirSync(evolutionDir(dataDir), { recursive: true });
+	appendFileSync(
+		strategiesPath(dataDir),
+		valid.map((c) => `${JSON.stringify(c)}\n`).join(""),
+		"utf8",
+	);
+	return valid.length;
+}
+
+/**
+ * Read strategy cards, last wins per id.
+ *
+ * Unlike lessons this is a plain last-wins collapse: a card is written as the
+ * already-merged snapshot (including `valuePerRun` accumulated across games and
+ * the human `enabled` flag), so the newest record is by definition the complete one.
+ */
+export function readStrategies(dataDir: string): StrategyCard[] {
+	const byId = new Map<string, StrategyCard>();
+	for (const c of readJsonl(strategiesPath(dataDir), isStrategyCard)) byId.set(c.id, c);
+	return [...byId.values()].sort((a, b) =>
+		a.createdAt === b.createdAt ? (a.id < b.id ? -1 : 1) : a.createdAt - b.createdAt,
+	);
+}
+
+export function compactStrategies(dataDir: string): number {
+	const list = readStrategies(dataDir);
+	writeAtomic(strategiesPath(dataDir), list.map((c) => JSON.stringify(c)));
 	return list.length;
 }

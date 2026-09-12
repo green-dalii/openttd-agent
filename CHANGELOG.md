@@ -21,6 +21,20 @@
 **设计要点**：注入**默认关闭**（SPEC §5.3：进化引擎只读建议，人工确认后才全局生效）。
 一个把错误教训固化进库的系统，比没有记忆的系统更糟。
 
+- `src/evolution/store.ts` 扩展 —— `lessons.jsonl` / `strategies.jsonl`
+  （与 metrics 同一套约定：append-only、按 id 收敛、单个坏行不丢整本库、
+  压缩走 temp + rename）。**一处刻意不同**：lessons 读取按「更可信者胜」收敛，
+  而不是最后一条胜出——追加一条低置信度重复项不应把更好的结论挤掉。
+- `src/evolution/reflect.ts` —— 局终反思的 prompt 构造与**强校验**解析：
+  `buildReflectionPrompt()`（system 与 user 双处声明"禁止臆测因果"）、
+  `isSpeculative()`（教科书式推测措辞检测，故意收窄以免误杀 `Maytown`/`monthly`）、
+  `parseReflection()`（从散文/代码块里提取 JSON，平衡括号扫描且忽略字符串内的括号）、
+  `reflectToLessons()` / `reflectToStrategies()`。
+
+**一个被测试抓到的真 bug**：`Number(null)` 是 `0`，于是模型漏写 `value`（JSON 里序列化成
+`null`）会被当成"收益为 0"的**有效样本**进入门槛判定。已改为严格转换，缺失/垃圾一律拒绝
+（与之前 `fmtInt(null)` 是同一类错误）。
+
 ### Fixed
 
 - **Live 页满屏 Alpine 报错**（`reading 'children'` + `m is not defined`）。
