@@ -131,6 +131,17 @@
               this.companies = s.companies || {};
               this.recent = s.recent || [];
               this.totalEvents = s.totalEvents;
+              // These three were sent by the server all along but never consumed,
+              // so a page loaded mid-run saw no stages and no memory (MEMORY.md A1:
+              // "no error" only holds if the code actually ran).
+              if (Array.isArray(s.checkpoints)) this.stages = s.checkpoints;
+              if (Array.isArray(s.stages)) {
+                // Upsert, never assign: live frames may have already arrived.
+                for (const v of s.stages) {
+                  this.stageViews = window.LiveView.upsertStageView(this.stageViews, v);
+                }
+              }
+              if (s.memory) this.memory = s.memory;
             },
             onEvent: (ev) => {
               if (this.evPaused) return;

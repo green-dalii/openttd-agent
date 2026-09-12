@@ -232,6 +232,16 @@
   —— 进化层只读视图与 SPEC §5.3 的人工确认闸门（本 API 唯一的写操作）。
   真机验证：读、翻转、持久化、未知 id → 404。契约见 `docs/DASHBOARD-API.md` §3.5。
 
+- **记忆的呈现（P6 前端）**——按时间跨度切成两处，而不是二选一：
+  - **Live 页新增 `Memory in effect` 面板**：显示本局**注入的内容**（不只是计数），
+    零注入时明确写"nothing"（那是对照实验的控制臂，不是空白）。
+  - **新增 `/evolution` 页面**：两臂对照（SPEC §5.2 #3）、跨局列表与现金曲线、
+    lesson 库（含量信度/证据/来源）、策略候选池与**人工确认开关**。
+  - `src/evolution/web-view.ts`：所有**规则判定在服务端**（promotion 门槛、
+    arms 的 `conclusive`），浏览器只显示结论——避免同一规则两份实现后漂移。
+  - `test/unit/web-assets.test.ts` 新增 `script dependency closure` 守卫。
+  详见 `docs/DASHBOARD-UI.md` §5.4。
+
 ### Fixed
 - **阶段性总结面板恒为空（dead UI）**：Live 页读 `telemetry.checkpoints`，但该字段
   从不存在，且 checkpoint **只在 shutdown 写**。现在 `--agent` 每个 decision turn、

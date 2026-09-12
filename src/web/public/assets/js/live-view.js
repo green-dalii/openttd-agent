@@ -94,6 +94,13 @@
       thinking: [],
       stages: [],
       stageViews: [],
+      /**
+       * Cross-game memory injected into THIS game (from the snapshot).
+       *
+       * Shape: { lessonsInjected, strategiesInjected, lessons[], strategies[] }.
+       * Null until the server reports it; the panel stays hidden in that case.
+       */
+      memory: null,
       run: null,
       runControl: false,
       startedAt: null,
@@ -413,6 +420,56 @@
       /** Stage snapshots, newest first (the visual record of progress). */
       stageViewsNewestFirst() {
         return (this.stageViews || []).slice().reverse();
+      },
+
+      /**
+       * "What was this game told?" — the per-game view of the memory system.
+       *
+       * The metrics ledger only records a COUNT (`lessonsInjected: 1`). A count is
+       * unverifiable: it cannot tell you whether the right lesson was injected, or
+       * whether anything was injected at all. This exposes the actual content, which
+       * is the whole reason the panel exists (AGENTS §5.1).
+       */
+      memoryInEffect() {
+        const m = this.memory || {};
+        // Guard the shape: this data crosses the wire, and a malformed field must
+        // degrade to "nothing shown", never to a thrown render error.
+        const rawLessons = Array.isArray(m.lessons) ? m.lessons : [];
+        const rawStrategies = Array.isArray(m.strategies) ? m.strategies : [];
+        const lessons = rawLessons
+          .map((l) => ({
+            text: l && typeof l.text === "string" ? l.text.trim() : "",
+            kind: l && l.kind === "dont" ? "dont" : "do",
+            confidence: U.fmtPct(Number(l && l.confidence) || 0, 0),
+            evidence: (l && Array.isArray(l.evidence) ? l.evidence : []).map(String),
+          }))
+          .filter((l) => l.text);
+        const strategies = rawStrategies
+          .map((c) => {
+            if (!c || !c.action) return null;
+            const params = Object.entries(
+              c.params && typeof c.params === "object" ? c.params : {},
+            )
+              .map(([k, v]) => `${k}=${v}`)
+              .join(", ");
+            return { label: params ? `${c.action} (${params})` : String(c.action) };
+          })
+          .filter((s) => s !== null);
+        const lessonsInjected = Number(m.lessonsInjected) || lessons.length;
+        const strategiesInjected = Number(m.strategiesInjected) || strategies.length;
+        const total = lessonsInjected + strategiesInjected;
+        return {
+          active: total > 0,
+          lessonsInjected,
+          strategiesInjected,
+          lessons,
+          strategies,
+          /** Honest one-liner: "nothing" is a statement, not a blank. */
+          summary:
+            total === 0
+              ? "nothing — this game ran on the base prompt"
+              : `${U.fmtInt(lessonsInjected)} lesson(s) + ${U.fmtInt(strategiesInjected)} strategy card(s)`,
+        };
       },
 
       /** Per-tool performance rows. */

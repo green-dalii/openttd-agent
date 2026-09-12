@@ -153,6 +153,30 @@ Node 给 `1.5B`，Chrome 给 **`1.5bn`**，而我们手写的图表给 `1.5B` �
 ——重复投递不应该产生分歧状态。已加测试：重复投递同一帧后长度不变、
 `new Set(keys).size === list.length`。
 
+### B7. 页面缺一个依赖脚本 = 功能静默消失（2026-09-12，第 3 次同类错误）
+
+**现象**：新建的 Evolution 页图表**永远不出现**——div 存在、可见、1278×120、ref 正确解析、
+`Charts.line` 也在，但 `innerHTML` 是空的，**零控制台输出**。
+
+**根因**：`evolution.html` 漏了 `<script src=".../uplot/uPlot.iife.min.js">`。
+`ucharts.js` 的 `mount()` 第一行就是 `if (!uplotAvailable()) return null;`
+—— 静默返回。同一页面加载了 `ucharts.js`，却没加载它依赖的全局。
+
+**为什么这是"第 3 次"**：同一类错误本仓库已经踩过三次——
+① uPlot 宿主误用 `<canvas>`（注入的 DOM 进了 fallback content）；
+② Providers 的 `x-ref` 缺失（下拉从未挂载）；
+③ 本次缺 vendor 脚本。
+共同点：**功能没了，但没有任何异常**。
+
+**规则**：页面脚本之间的**依赖闭包**必须被静态守卫，不能靠人记得。
+已加入 `test/unit/web-assets.test.ts` 的 `script dependency closure`：
+加载 `ucharts.js` 的页面必须同时加载 uPlot bundle 与样式；加载 `charts.js` 必须加载
+`common.js`；加载 Alpine 必须加载 bridge。
+
+**更普遍的教训**：`if (!dependency) return null;` 这种**静默降级**在页面里是危险的——
+它把"配置错误"伪装成"这里本来就没东西"。若必须降级，至少 `console.error` 一次
+（`ucharts.js` 的 `hostCannotRenderChildren` 就是这么做的，所以那类错误当场就被发现了）。
+
 ---
 
 ## C. 数据与一致性

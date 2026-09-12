@@ -17,7 +17,7 @@ import type { Config } from "../config.js";
 import { WebServer } from "../web/server.js";
 import { createLlmApi } from "./llm-api.js";
 import { listSessions, readSession } from "./session-store.js";
-import { readMetrics, readLessons, readStrategies, setStrategyEnabled } from "../evolution/store.js";
+import { evolutionView, setStrategyEnabled } from "../evolution/web-view.js";
 import { RunSupervisor, type RunMode } from "./supervisor.js";
 import { runAgent } from "./runner.js";
 import { runWatch } from "../game/runner.js";
@@ -101,9 +101,12 @@ export async function runServe(cfg: Config, opts: ServeOptions = {}): Promise<Se
 		// confirmation toggle, which is the one write a human performs here
 		// (SPEC §5.3: the engine advises, the human decides).
 		evolution: {
-			metrics: () => readMetrics(cfg.dataDir),
-			lessons: () => readLessons(cfg.dataDir),
-			strategies: () => readStrategies(cfg.dataDir),
+			// Read fresh on each request: the page must reflect games that finished
+			// after it was loaded.
+			metrics: () => evolutionView(cfg.dataDir).metrics,
+			lessons: () => evolutionView(cfg.dataDir).lessons,
+			strategies: () => evolutionView(cfg.dataDir).strategies,
+			arms: () => evolutionView(cfg.dataDir).arms,
 			setStrategyEnabled: (id, enabled) => setStrategyEnabled(cfg.dataDir, id, enabled),
 		},
 		run: {

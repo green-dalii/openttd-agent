@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Evolution — openttd-agent</title>
+  <link rel="stylesheet" href="/assets/vendor/uplot/uPlot.min.css">
+  <link rel="stylesheet" href="/assets/css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="dot"></span><strong>openttd-agent</strong><span class="dim" id="app-version"></span></div>
+    <nav id="nav" class="nav"></nav>
+  </header>
+
+  <main x-data="evolution" x-init="init()">
+    <div class="group"><h2>Evolution</h2><div class="rule"></div>
+      <span class="dim">what the agent has learned across games — and whether it is working</span></div>
+
+    <p class="notice" x-show="error" x-text="error"></p>
+    <p class="dim" x-show="loading">Loading…</p>
+
+    <p class="notice" x-show="empty()">
+      Nothing recorded yet. Finish a game with <code>--agent</code> and its metrics,
+      lessons and strategy candidates will appear here.
+    </p>
+
+    <!-- ===================== ① is the memory working? ===================== -->
+    <section class="panel" x-show="!loading && !error && !empty()">
+      <div class="panel-head">
+        <h2>Is it working? <span class="dim">记忆有没有用</span></h2>
+        <span class="dim">same seed, with vs without lessons — SPEC §5.2 #3</span>
+      </div>
+      <!-- The verdict comes from the server. Below MIN_LESSON_SAMPLE per arm it
+           says what is missing instead of showing a difference nobody should
+           believe yet (SPEC §5.3 forbids speculative conclusions). -->
+      <p class="verdict" :class="verdictOk() ? 'ok' : 'dim'" x-text="verdictText()"></p>
+      <div class="grid two">
+        <template x-for="a in armCards()" :key="a.label">
+          <div class="panel arm-card">
+            <div class="arm-label" x-text="a.label"></div>
+            <div class="kpis">
+              <div class="kpi"><div class="kpi-k">Runs</div><div class="kpi-v" x-text="a.runs"></div></div>
+              <div class="kpi"><div class="kpi-k">Mean cash</div><div class="kpi-v" x-text="a.money"></div></div>
+              <div class="kpi"><div class="kpi-k">Mean tokens</div><div class="kpi-v" x-text="a.tokens"></div></div>
+              <div class="kpi"><div class="kpi-k">Built</div><div class="kpi-v" x-text="a.built"></div></div>
+            </div>
+            <div class="kpi-hint" x-text="a.hint"></div>
+          </div>
+        </template>
+      </div>
+    </section>
+
+    <!-- ========================= ② across games ========================= -->
+    <section class="panel" x-show="!loading && !error && metrics().length">
+      <div class="panel-head">
+        <h2>Across games <span class="dim">跨局</span></h2>
+        <span class="dim" x-text="gameRows().length + ' recorded'"></span>
+      </div>
+      <div class="chart-box"><div id="evo-chart" x-ref="evoChart" x-effect="drawCurve()"></div></div>
+      <div class="tbl-wrap">
+        <table class="tbl">
+          <thead><tr>
+            <th>Session</th><th>Seed</th><th>LLM</th><th>Memory</th>
+            <th>Cash</th><th>Decisions</th><th>Tokens</th><th>Cost</th>
+          </tr></thead>
+          <tbody>
+            <template x-for="r in gameRows()" :key="r.id">
+              <tr>
+                <td class="mono" x-text="r.id"></td>
+                <td x-text="r.seed"></td>
+                <td x-text="r.llm"></td>
+                <td :class="r.hasMemory ? 'pos' : 'dim'" x-text="r.memory"></td>
+                <td x-text="r.money"></td>
+                <td x-text="r.decisions"></td>
+                <td x-text="r.tokens"></td>
+                <td x-text="r.cost"></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ========================== ③ lessons ========================== -->
+    <section class="panel" x-show="!loading && !error && lessons().length">
+      <div class="panel-head">
+        <h2>Lessons <span class="dim">教训库</span></h2>
+        <span class="dim">distilled from finished games; injected when confirmed</span>
+      </div>
+      <ol class="mem-library">
+        <template x-for="l in lessonRows()" :key="l.text">
+          <li :class="l.kind === 'dont' ? 'mem-dont' : 'mem-do'">
+            <span class="mem-kind" x-text="l.kindLabel"></span>
+            <span class="mem-body">
+              <span x-text="l.text"></span>
+              <span class="dim" x-text="'confidence ' + l.confidence + ' · seed ' + l.seed"></span>
+              <span class="dim" x-text="'evidence: ' + l.evidence"></span>
+            </span>
+            <span class="dim" x-show="l.superseded">superseded</span>
+          </li>
+        </template>
+      </ol>
+    </section>
+
+    <!-- ========================= ④ strategies ========================= -->
+    <section class="panel" x-show="!loading && !error && strategies().length">
+      <div class="panel-head">
+        <h2>Strategy candidates <span class="dim">策略候选</span></h2>
+        <span class="dim" x-text="injectableCount() + ' injectable'"></span>
+      </div>
+      <p class="dim">
+        Injection needs <strong>both</strong> gates: the evidence gate
+        (value above threshold and verified in ≥ 2 games) and human confirmation.
+        The engine only advises — nothing takes effect until you tick it.
+      </p>
+      <ol class="mem-library">
+        <template x-for="s in strategyRows()" :key="s.id">
+          <li class="mem-strat">
+            <span class="mem-kind" x-text="s.injectable ? 'live' : s.promoted ? 'confirmed?' : 'candidate'"></span>
+            <span class="mem-body">
+              <span x-text="s.label"></span>
+              <span class="dim" x-text="s.runs + ' game(s) · avg ' + s.value"></span>
+              <span class="dim" x-show="s.reason" x-text="s.reason"></span>
+            </span>
+            <label class="mem-toggle">
+              <input type="checkbox" :checked="s.enabled" :disabled="busy === s.id"
+                     @change="toggle(s.id, $event.target.checked)">
+              <span>inject</span>
+            </label>
+          </li>
+        </template>
+      </ol>
+    </section>
+  </main>
+
+  <script src="/assets/vendor/alpinejs/alpine.min.js" defer></script>
+  <script src="/assets/js/common.js"></script>
+  <!-- ucharts.js delegates to window.uPlot; without this bundle every chart
+       silently renders nothing (no error, just a blank area). Guarded by
+       web-assets.test.ts "script dependency closure". -->
+  <script src="/assets/vendor/uplot/uPlot.iife.min.js"></script>
+  <script src="/assets/js/charts.js"></script>
+  <script src="/assets/js/ucharts.js"></script>
+  <script src="/assets/js/alpine-bridge.js"></script>
+  <script src="/assets/js/evolution-view.js"></script>
+  <script src="/assets/js/evolution.js"></script>
+</body>
+</html>

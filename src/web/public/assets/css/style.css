@@ -428,3 +428,27 @@ dialog.modal p { color: var(--ink-dim); font-size: 13px; margin: 0 0 var(--sp-4)
 /* Collapsible raw-log section: keeps the firehose out of the way by default. */
 .detail-toggle { cursor: pointer; font-size: 13px; color: var(--ink-dim); padding: 4px 0; }
 .detail-toggle:hover { color: var(--ink); }
+
+/* --- memory in effect (Live): what this game was told ------------------- */
+.memory-note { margin-top: 14px; border-top: 1px solid var(--line, #2a2f3a); padding-top: 12px; }
+.mem-list { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.mem-list li { display: flex; gap: 8px; align-items: baseline; font-size: .86rem; line-height: 1.45; }
+.mem-kind {
+  flex: 0 0 auto; font-size: .68rem; text-transform: uppercase; letter-spacing: .04em;
+  padding: 1px 6px; border-radius: 4px; background: rgba(255, 255, 255, .08);
+}
+.mem-do .mem-kind { color: #7bc96f; }
+.mem-dont .mem-kind { color: #e06c75; }
+.mem-strat .mem-kind { color: #5fb3ff; }
+
+/* --- evolution page: memory library + arm comparison -------------------- */
+.verdict { font-size: .95rem; margin: 6px 0 14px; }
+.verdict.ok { color: #7bc96f; }
+.arm-card { margin: 0; }
+.arm-label { font-weight: 600; margin-bottom: 8px; }
+.arm-card .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.mem-library { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.mem-library li { display: flex; gap: 10px; align-items: flex-start; font-size: .88rem; line-height: 1.5; }
+.mem-body { display: flex; flex-direction: column; gap: 2px; flex: 1 1 auto; min-width: 0; }
+.mem-body .dim { font-size: .78rem; }
+.mem-toggle { flex: 0 0 auto; display: flex; gap: 5px; align-items: center; font-size: .78rem; cursor: pointer; }

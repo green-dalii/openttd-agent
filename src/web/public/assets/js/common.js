@@ -784,6 +784,7 @@ function renderNav(active) {
     ["/", "Live"],
     ["/providers", "Providers"],
     ["/sessions", "Sessions"],
+    ["/evolution", "Evolution"],
   ];
   return `<nav class="nav">${items
     .map(([href, label]) =>

@@ -59,9 +59,10 @@ import type { SessionTotals } from "./session-store.js";
 import { createLlmApi } from "./llm-api.js";
 import { WebServer } from "../web/server.js";
 import { pruningTransformContext } from "./context.js";
-import { loadMemory, makeLessonProvider, memoryCounts } from "../evolution/memory.js";
+import { loadMemory, makeLessonProvider, memoryCounts, type LoadedMemory } from "../evolution/memory.js";
 import { runReflection } from "../evolution/reflection-run.js";
 import { buildReflectionEvidence } from "../evolution/reflect.js";
+import { evolutionView, setStrategyEnabled } from "../evolution/web-view.js";
 import { AuditLog } from "./audit.js";
 import { isLlmConfigured } from "../config.js";
 import { toWireSnapshot } from "../game/wire-snapshot.js";
@@ -424,6 +425,10 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 	// --- dashboard (same shape as watch mode; docs/DASHBOARD-API.md §3) ---
 	// Supervised mode attaches to an existing server (one port, one fan-out).
 	const attachedWeb = opts.web as WebServer | undefined;
+	// The snapshot has to report what memory this game was given, but `loadMemory()`
+	// runs further down (after the provider is built). Holding it here avoids a
+	// temporal-dead-zone read when a client connects before the library is loaded.
+	let runMemory: LoadedMemory = { lessons: [], strategies: [], lines: [] };
 	const wired = {
 		version: APP_VERSION,
 		getSnapshot: () => ({
@@ -433,12 +438,37 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 			// Backlog for late subscribers / reloads (docs/DASHBOARD-UI.md §7).
 			checkpoints: session.current().checkpoints,
 			stages: stageViews.slice(-24),
+			// What this game was TOLD, not just how many items were counted.
+			// The ledger records `lessonsInjected: 1`; without the content that count
+			// is unverifiable, and "we think it is wired" is the exact failure this
+			// repo has already paid for once (AGENTS §5.1).
+			memory: {
+				lessonsInjected: runMemory.lessons.length,
+				strategiesInjected: runMemory.strategies.length,
+				lessons: runMemory.lessons.map((l) => ({
+					text: l.text,
+					kind: l.kind,
+					confidence: l.confidence,
+					evidence: l.evidence,
+				})),
+				strategies: runMemory.strategies.map((c) => ({ action: c.action, params: c.params })),
+			},
 		}),
 		telemetry: () => telemetry.snapshot(),
 		sessions: {
 			list: () => listSessions(cfg.dataDir),
 			read: (id: string, limit?: number) => readSession(cfg.dataDir, id, limit ? { limit } : {}),
 			stageFile: (id: string, file: string) => readStageFile(cfg.dataDir, id, file),
+		},
+		// Same evolution view as the supervised server, so an unsupervised run
+		// serves the identical contract instead of a second implementation.
+		evolution: {
+			metrics: () => evolutionView(cfg.dataDir).metrics,
+			lessons: () => evolutionView(cfg.dataDir).lessons,
+			strategies: () => evolutionView(cfg.dataDir).strategies,
+			arms: () => evolutionView(cfg.dataDir).arms,
+			setStrategyEnabled: (id: string, enabled: boolean) =>
+				setStrategyEnabled(cfg.dataDir, id, enabled),
 		},
 	};
 	let web: WebServer | null = null;
@@ -569,6 +599,8 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 	const memory = loadMemory(cfg.dataDir);
 	const memoryProvider = makeLessonProvider(memory);
 	const injected = memoryCounts(memory);
+	// Publish it for the dashboard (per-game truth: what THIS game was told).
+	runMemory = memory;
 	session.setMemoryInjected(injected);
 	if (injected.lessonsInjected || injected.strategiesInjected) {
 		console.log(

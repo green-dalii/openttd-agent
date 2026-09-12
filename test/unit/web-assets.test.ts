@@ -229,4 +229,48 @@ describe("front-end assets", () => {
 			);
 		}
 	});
+
+	describe("script dependency closure", () => {
+		// A page script that needs a global will silently do nothing if the script
+		// defining it is missing - no error, just a blank area. That happened three
+		// times (canvas host for uPlot, missing vendor script on the Evolution page,
+		// missing x-ref for the comboboxes), so it is asserted structurally now.
+
+		/** Pages that load a given script. */
+		function pagesLoading(script: string): { name: string; html: string }[] {
+			return HTML_FILES().map((f) => ({
+				name: f,
+				html: readFileSync(join(PUBLIC_DIR, f), "utf8"),
+			})).filter((p) => p.html.includes(script));
+		}
+
+		it("every page loading ucharts.js also loads the uPlot vendor bundle", () => {
+			const offenders = pagesLoading("ucharts.js").filter(
+				(p) => !p.html.includes("uplot/uPlot.iife.min.js"),
+			);
+			expect(
+				offenders.map((p) => p.name),
+				"these pages load ucharts.js but never load window.uPlot, so charts silently render nothing",
+			).toEqual([]);
+		});
+
+		it("every page loading ucharts.js also loads the uPlot stylesheet", () => {
+			const offenders = pagesLoading("ucharts.js").filter(
+				(p) => !p.html.includes("uplot/uPlot.min.css"),
+			);
+			expect(offenders.map((p) => p.name)).toEqual([]);
+		});
+
+		it("every page loading charts.js also loads common.js (it depends on window.UI)", () => {
+			const offenders = pagesLoading("charts.js").filter((p) => !p.html.includes("js/common.js"));
+			expect(offenders.map((p) => p.name)).toEqual([]);
+		});
+
+		it("every Altair page loading Alpine also loads the bridge", () => {
+			const offenders = pagesLoading("alpine.min.js").filter(
+				(p) => !p.html.includes("alpine-bridge.js"),
+			);
+			expect(offenders.map((p) => p.name)).toEqual([]);
+		});
+	});
 });

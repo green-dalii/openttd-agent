@@ -68,8 +68,10 @@ export interface EvolutionHooks {
 	metrics: () => unknown[];
 	/** Distilled lessons. */
 	lessons: () => unknown[];
-	/** The strategy candidate pool. */
+	/** The strategy candidate pool (already annotated with the promotion verdict). */
 	strategies: () => unknown[];
+	/** Arm comparison (SPEC §5.2 #3). Computed server-side so it is defined once. */
+	arms?: () => unknown;
 	/** Flip the human confirmation flag on one strategy card (SPEC §5.3 guardrail). */
 	setStrategyEnabled?: (id: string, enabled: boolean) => boolean;
 }
@@ -133,6 +135,7 @@ export const PAGES: Record<string, string> = {
 	"/": "pages/live.html",
 	"/providers": "pages/providers.html",
 	"/sessions": "pages/sessions.html",
+	"/evolution": "pages/evolution.html",
 };
 
 /**
@@ -504,6 +507,7 @@ export class WebServer {
 					metrics: this.evolutionHooks.metrics(),
 					lessons: this.evolutionHooks.lessons(),
 					strategies: this.evolutionHooks.strategies(),
+					arms: this.evolutionHooks.arms ? this.evolutionHooks.arms() : null,
 				});
 			}
 

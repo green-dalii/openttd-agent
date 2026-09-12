@@ -86,6 +86,15 @@ interface LiveModel {
 	categoryChips(): { cat: string; label: string; n: number; off: boolean }[];
 	notice(): { show: boolean; kind: string; title: string; body: string; canStart: boolean };
 	nowSummary(): { state: string; brain: string; lastDecision: string; intent: string; action: string };
+	memory: unknown;
+	memoryInEffect(): {
+		active: boolean;
+		lessonsInjected: number;
+		strategiesInjected: number;
+		lessons: { text: string; kind: string; confidence: string; evidence: string[] }[];
+		strategies: { label: string }[];
+		summary: string;
+	};
 	stageList(): unknown[];
 	stageViewsNewestFirst(): { index?: number; image?: string }[];
 	companiesEmpty(): boolean;
@@ -583,5 +592,78 @@ describe("live-view: stage view upsert (Alpine :key must stay unique)", () => {
 		const next = upsert(original, stamp(1));
 		expect(original).toHaveLength(1);
 		expect(next).toHaveLength(2);
+	});
+});
+
+describe("live-view: memory in effect (本局被注入了什么)", () => {
+	// The snapshot carries what this game was TOLD. The ledger only has a count, and
+	// a count cannot tell you whether the intended lesson was the one injected - so
+	// the page shows content. This is the surface that makes "is it wired?"
+	// answerable by looking, rather than by reading logs.
+	function withMemory(mem: unknown) {
+		const { model } = load();
+		model.memory = mem;
+		return model;
+	}
+
+	it("没有记忆时明确说'什么都没注入',而不是留空", () => {
+		const m = withMemory(null);
+		const out = m.memoryInEffect();
+		expect(out.active).toBe(false);
+		expect(out.summary).toMatch(/nothing/i);
+		expect(out.lessons).toEqual([]);
+	});
+
+	it("有记忆时给出计数与摘要", () => {
+		const out = withMemory({
+			lessonsInjected: 2,
+			strategiesInjected: 1,
+			lessons: [
+				{ text: "build near towns", kind: "do", confidence: 0.8, evidence: ["money +1"] },
+				{ text: "avoid long routes", kind: "dont", confidence: 0.5, evidence: ["money -1"] },
+			],
+			strategies: [{ action: "build_bus_route", params: { distance: 24 } }],
+		}).memoryInEffect();
+		expect(out.active).toBe(true);
+		expect(out.lessonsInjected).toBe(2);
+		expect(out.strategiesInjected).toBe(1);
+		expect(out.lessons).toHaveLength(2);
+		expect(out.summary).toContain("2");
+	});
+
+	it("保留 do / dont 的区分与证据(用户要能判断这条建议是否可信)", () => {
+		const out = withMemory({
+			lessons: [{ text: "avoid long routes", kind: "dont", confidence: 0.5, evidence: ["money -1 in 1953"] }],
+		}).memoryInEffect();
+		expect(out.lessons[0]!.kind).toBe("dont");
+		expect(out.lessons[0]!.evidence).toEqual(["money -1 in 1953"]);
+	});
+
+	it("策略卡渲染成可读的一行(含参数)", () => {
+		const out = withMemory({
+			strategies: [{ action: "build_bus_route", params: { distance: 24 } }],
+		}).memoryInEffect();
+		expect(out.strategies[0]!.label).toContain("build_bus_route");
+		expect(out.strategies[0]!.label).toContain("distance=24");
+	});
+
+	it("计数缺失时回退到实际条目数(不显示 0 却有内容)", () => {
+		const out = withMemory({ lessons: [{ text: "a", kind: "do", evidence: ["e"] }] }).memoryInEffect();
+		expect(out.lessonsInjected).toBe(1);
+		expect(out.active).toBe(true);
+	});
+
+	it("容忍垃圾/缺字段(不抛异常,不渲染空条目)", () => {
+		const out = withMemory({
+			lessons: [{}, null, { text: "  " }, { text: "ok", kind: "do", evidence: [] }],
+			strategies: [null, { params: {} }, { action: "build_road" }],
+		}).memoryInEffect();
+		expect(out.lessons.map((l) => l.text)).toEqual(["ok"]);
+		expect(out.strategies.map((s) => s.label)).toEqual(["build_road"]);
+	});
+
+	it("非数组字段不会炸掉渲染", () => {
+		expect(() => withMemory({ lessons: "nope", strategies: 42 }).memoryInEffect()).not.toThrow();
+		expect(withMemory({ lessons: "nope" }).memoryInEffect().lessons).toEqual([]);
 	});
 });

@@ -100,6 +100,29 @@
         <h3>Last action</h3>
         <p class="now-text" x-text="nowSummary().action"></p>
       </div>
+      <!-- What this game was TOLD. Kept on the Live page (not just the Evolution
+           page) because it is per-game context: without it, the agent's decisions
+           are not explainable, and `lessonsInjected: 1` in the ledger is an
+           unverifiable count. -->
+      <!-- Shown whenever the server has told us what this game was given, INCLUDING
+           the zero case: "nothing" is the control arm of the experiment and is a
+           statement worth reading, not a blank. Hidden only before any snapshot
+           arrives (no game context yet). -->
+      <div class="now-intent memory-note" x-show="memory !== null">
+        <h3>Memory in effect <span class="dim">跨局记忆注入</span></h3>
+        <p class="now-text" x-text="memoryInEffect().summary"></p>
+        <ul class="mem-list">
+          <template x-for="l in memoryInEffect().lessons" :key="l.text">
+            <li :class="l.kind === 'dont' ? 'mem-dont' : 'mem-do'">
+              <span class="mem-kind" x-text="l.kind === 'dont' ? 'avoid' : 'do'"></span>
+              <span x-text="l.text"></span>
+            </li>
+          </template>
+          <template x-for="s in memoryInEffect().strategies" :key="s.label">
+            <li class="mem-strat"><span class="mem-kind">worked</span><span x-text="s.label"></span></li>
+          </template>
+        </ul>
+      </div>
     </section>
 
     <!-- ========================== ② RESULT ========================== -->
