@@ -75,6 +75,9 @@ export function resolveRunOptions(
 		...opts.runOptions,
 		// Explicit top-level flag wins over the bag only when the bag is silent.
 		offlineDemo: opts.runOptions?.offlineDemo ?? opts.offlineDemo ?? false,
+		// Memory is ON by default (it is how the agent self-evolves); an explicit
+		// false from any caller turns it off for the M3 control arm.
+		injectMemory: opts.runOptions?.injectMemory ?? true,
 		web,
 		control,
 	};

@@ -44,7 +44,7 @@ interface CliArgs {
 	llmApi?: string;
 	/** Explicitly allow the scripted (non-LLM) demo brain in agent mode. */
 	offlineDemo?: boolean;
-	/** Opt in to seeding the agent with cross-game memory. Default: off. */
+	/** Seed the agent with cross-game memory. Default: on (self-evolution). */
 	injectMemory?: boolean;
 	/** Skip non-safety preflight checks (ports/gsFiles) for debugging. */
 	skipPreflight?: boolean;
@@ -63,7 +63,7 @@ function parseArgs(argv: string[]): CliArgs {
 	let llmModel: string | undefined;
 	let llmApi: string | undefined;
 	let offlineDemo = false;
-	let injectMemory = false;
+	let injectMemory = true;
 	let skipPreflight = false;
 	for (let i = 0; i < argv.length; i++) {
 		const a = argv[i]!;
@@ -101,8 +101,9 @@ function parseArgs(argv: string[]): CliArgs {
 			case "--offline-demo":
 				offlineDemo = true;
 				break;
-			case "--inject-memory":
-				injectMemory = true;
+			case "--no-memory":
+				// Control arm of the M3 experiment: same seed, no cross-game memory.
+				injectMemory = false;
 				break;
 			case "--skip-preflight":
 				skipPreflight = true;
@@ -173,10 +174,10 @@ Usage:
                                          brain decide (requires a configured LLM;
                                          see Startup gate below) and observe
                                          construction (--demo-seconds N).
-                                         --inject-memory  Seed the agent with cross-game
-                                                          memory (OFF by default: this is an
-                                                          RL harness, the agent is meant to
-                                                          learn from the environment).
+                                         --no-memory      Start from zero: do NOT seed the
+                                                          agent with cross-game memory.
+                                                          (Memory is ON by default - it is
+                                                          how the agent self-evolves.)
   --year N           start year (default 1950)
   --seed N           map seed (default random)
   --timeout-ms N     probe: max wait for first economy (default 15000)

@@ -48,7 +48,19 @@ describe("decision context", () => {
 		expect(ctx.sinceLastDecision.incomeDelta).toBe(4000);
 		expect(ctx.sinceLastDecision.vehiclesDelta).toBe(3);
 		expect(ctx.sinceLastDecision.elapsedGameDays).toBe(180);
-		expect(ctx.sinceLastDecision.phases).toEqual(["EX stA_ok j100", "EX hb road #1 j100"]);
+		// 阶段必须交给模型**解码后**的事实，而不是执行器的电报体。
+		// 之前这里断言的是原始串 "EX stA_ok j100" / "EX hb road #1 j100" ——
+		// 那等于把语法只存在于 Squirrel 源码里的噪声丢给模型。
+		expect(ctx.sinceLastDecision.phases).toHaveLength(1);
+		const p0 = ctx.sinceLastDecision.phases[0]!;
+		expect(p0.phase).toBe("stA_ok");
+		expect(p0.description).toMatch(/station A/i);
+		expect(p0.error).toBe(false);
+		// 心跳被折叠进上一条，而不是单独占一行
+		expect(p0.description).toMatch(/heartbeat/i);
+		// 原始串不再出现在给模型的文本里
+		expect(p0.description).not.toContain("EX ");
+		expect(p0.description).not.toContain("j100");
 		expect(ctx.sinceLastDecision.actions[0]).toMatchObject({ tool: "add_vehicles", ok: true });
 	});
 

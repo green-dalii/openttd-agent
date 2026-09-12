@@ -144,24 +144,23 @@ describe("memory: loadMemory(开局读库)", () => {
 		expect(lines[0]).not.toMatch(/^(do|avoid|don't)\b/i);
 	});
 
-	it("默认**不注入**：本局是干净的 RL 环境（项目范围 2026-09-12）", () => {
-		// 这是本次审核的核心修正。之前只要库里有内容就会被自动注入，
-		// 于是"agent 靠环境学习"悄悄变成了"harness 把结论递给 agent"。
+	it("默认**注入**：跨局记忆是自我进化的机制（项目决定 2026-09-12）", () => {
+		// 曾经我把默认改成了"关闭"，理由是不给 agent 递结论。项目所有者否了：
+		// **跨局记忆当然要存在，这是 agent 能自进化的关键。**
+		// 所以约束落在**内容**上（只能是 agent 自己观察到的记录，不能是 harness 的建议），
+		// 而不是"记忆存在与否"。
 		appendLessons(dir, [lesson({ text: "keep depots close" })]);
 		appendStrategies(dir, [card({ enabled: true })]);
 
-		const off = loadMemory(dir, { now: NOW });
+		const on = loadMemory(dir, { now: NOW });
+		expect(on.lines.length).toBeGreaterThan(0);
+		expect(memoryCounts(on).lessonsInjected).toBe(1);
+
+		// 关掉时必须连库都不读，这样记的 0 才是真话（M3 对照组的自变量）
+		const off = loadMemory(dir, { now: NOW, inject: false });
 		expect(off.lines).toEqual([]);
 		expect(off.lessons).toEqual([]);
-		expect(off.strategies).toEqual([]);
-
-		// 而且计数必须诚实：没注入就记 0，否则 M3 对照实验的自变量是假的
-		const counts = memoryCounts(off);
-		expect(counts.lessonsInjected).toBe(0);
-		expect(counts.strategiesInjected).toBe(0);
-
-		// 显式 opt-in 时才装载
-		expect(loadMemory(dir, { now: NOW, inject: true }).lines.length).toBeGreaterThan(0);
+		expect(memoryCounts(off).lessonsInjected).toBe(0);
 	});
 
 	it("provider 是纯函数式的:多次调用结果一致(同局内不得漂移)", () => {

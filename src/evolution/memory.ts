@@ -30,18 +30,21 @@ export interface LoadMemoryOptions {
 	/** Max strategy cards to inject. Defaults to MAX_STRATEGIES_INJECTED. */
 	strategyLimit?: number;
 	/**
-	 * Actually put the library into the agent's context. DEFAULT FALSE.
+	 * Put the library into the agent's context. DEFAULT TRUE.
 	 *
-	 * Why the default is off (project scope, restated 2026-09-12): this is an RL
-	 * harness. Initialisation is supposed to hand the agent BACKGROUND KNOWLEDGE
-	 * about what the game is and how to operate it - nothing else. Everything the
-	 * agent learns must come from interacting with the environment.
+	 * Cross-game memory is the mechanism of self-evolution: without it every game
+	 * starts from zero and the agent can never accumulate anything. So it is ON.
 	 *
-	 * Cross-game memory is the one place where the harness would hand the agent a
-	 * conclusion it did not reach itself, so it is opt-in and never a silent
-	 * default. Before this flag existed, simply HAVING a library injected it.
-	 * With `inject: false` the library is not even read: the metrics then record
-	 * 0 injected, which is the truth for that run.
+	 * The project scope (SPEC §10.22) constrains the CONTENT, not the existence:
+	 * what is injected must be a record of what the agent itself observed in
+	 * earlier games, never the harness's advice. That is why lessons are phrased
+	 * as statements about the past (`Previously ...`) rather than imperatives
+	 * (`DO:` / `AVOID:`), and why remembered strategies only enter after a human
+	 * confirms them (SPEC §5.3).
+	 *
+	 * Set false for the control arm of the M3 experiment (same seed, with vs
+	 * without memory). When off the library is not read at all, so the recorded
+	 * count of 0 is a fact rather than "read but not injected".
 	 */
 	inject?: boolean;
 }
@@ -57,7 +60,7 @@ export function loadMemory(dataDir: string, opts: LoadMemoryOptions = {}): Loade
 	// Nothing is injected unless explicitly asked for. Returning early (rather
 	// than reading and then discarding) also keeps `lessonsInjected: 0` honest:
 	// the count must describe what the agent actually received.
-	if (opts.inject !== true) return { lessons: [], strategies: [], lines: [] };
+	if (opts.inject === false) return { lessons: [], strategies: [], lines: [] };
 	const now = opts.now ?? Date.now();
 	let lessons: Lesson[] = [];
 	let strategies: StrategyCard[] = [];

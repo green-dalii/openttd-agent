@@ -27,6 +27,8 @@ class ExecutorV1 extends AIController {
     _roadCur = -1;       // segmented-road: current front reached
     _roadSeg = 0;
     _roadSegStep = 0;
+    _lastLaid = -1;      // tile reached by the most recent LayPath (contiguous)
+    _layErr = "";        // why the last LayPath stopped early
     _dumpSeq = 0;
     _hbSeq = 0;
     // Pathfinder.Road class (library, imported once at load). Local sandbox
@@ -100,6 +102,19 @@ class ExecutorV1 extends AIController {
             this.SetPhase("done stN" + n + " r" + segs + " " + v);
         }
         // stage "done": all S4 construction finished; loop idle.
+    }
+
+    /* Short error text for the phase channel. SetPhase truncates at 31 chars, so
+     * keep only the first token of the engine's error string ("Flat land
+     * required" -> "Flat"). The full string is useless if it gets cut mid-word. */
+    function ShortErr() {
+        local e = this._layErr;
+        if (e == null || e == "") e = "" + AIError.GetLastErrorString();
+        if (e == null || e == "" || e == "(null)") return "unknown";
+        local sp = e.find(" ");
+        if (sp != null && sp > 0) e = e.slice(0, sp);
+        if (e.len() > 12) e = e.slice(0, 12);
+        return e;
     }
 
     /* SetPhase: 公司名编码汇报; ≤31 字符 (OpenTTD 公司名上限). */
@@ -326,7 +341,10 @@ class ExecutorV1 extends AIController {
                 // Lay failure (terrain/funds): retry a shorter probe next
                 // tick instead of aborting the whole route.
                 if (step >= 6) {
-                    this.SetPhase("road_stuck");
+                    // Report WHY: without the reason the agent (and the operator)
+                    // cannot tell terrain from funds from obstruction, so it
+                    // cannot learn anything from the failure (SPEC §10.20).
+                    this.SetPhase("road_stuck:" + this.ShortErr());
                     this._stage = "done";
                     return;
                 }
@@ -334,8 +352,11 @@ class ExecutorV1 extends AIController {
                 this.SetPhase("rd layr" + (step + 1));
                 return;
             }
-            // Advance to the reached goal tile (end of this segment).
-            this._roadCur = this.LastTileOf(path);
+            // Advance to the tile we actually reached, NOT to the path's goal.
+            // If only part of the path was laid, claiming the goal would skip the
+            // unbuilt middle. _lastLaid is always contiguous with _roadCur now
+            // that LayPath builds away from us.
+            this._roadCur = this._lastLaid >= 0 ? this._lastLaid : this._roadCur;
             this._roadSeg++;
             this._roadSegStep = 0;
             local nd = AIMap.DistanceManhattan(this._roadCur, fB);
@@ -347,7 +368,7 @@ class ExecutorV1 extends AIController {
             return;
         }
         // Probe could not advance even at short range -> give up cleanly.
-        this.SetPhase("road_stuck");
+        this.SetPhase("road_stuck:no path from segment " + this._roadSeg);
         this._stage = "done";
     }
 
@@ -406,35 +427,59 @@ class ExecutorV1 extends AIController {
     /* Build road/bridge/tunnel along a path node chain. Returns count of
      * segments laid. */
     function LayPath(path) {
+        // Flatten the parent chain first. FindPath returns the GOAL node and
+        // GetParent() walks back toward the source, so the chain is
+        // [goal, ..., source].
+        local chain = [];
+        local n = path;
+        while (n != null) { chain.append(n.GetTile()); n = n.GetParent(); }
+
+        // Build SOURCE -> GOAL, i.e. walk the chain backwards.
+        //
+        // Why the direction matters (fixed 2026-09-12): building goal->source
+        // meant a partial failure left a road island near the goal that was NOT
+        // connected to the tile we were standing on, while the caller still
+        // advanced the front all the way to the goal. The route then had an
+        // invisible hole in the middle. Building away from where we already are
+        // keeps every laid segment contiguous with the road behind us, so a
+        // partial failure is always a safe place to stop and retry.
         local segs = 0;
-        while (path != null) {
-            local par = path.GetParent();
-            if (par != null) {
-                local from = path.GetTile();
-                local to = par.GetTile();
-                if (AIMap.DistanceManhattan(from, to) == 1) {
-                    local ok1 = AIRoad.BuildRoad(from, to);
-                    if (!ok1 && AIError.GetLastError() != AIError.ERR_ALREADY_BUILT) {
+        this._lastLaid = -1;
+        for (local i = chain.len() - 1; i > 0; i--) {
+            local from = chain[i];
+            local to = chain[i - 1];
+            if (AIMap.DistanceManhattan(from, to) == 1) {
+                local ok1 = AIRoad.BuildRoad(from, to);
+                if (!ok1 && AIError.GetLastError() != AIError.ERR_ALREADY_BUILT) {
+                    this._layErr = "" + AIError.GetLastErrorString();
+                    return segs > 0 ? segs : -1;
+                }
+                AIRoad.BuildRoad(to, from);
+                this._builtRoad.append([from, to]);
+                segs++;
+                this._lastLaid = to;
+            } else if (!AIBridge.IsBridgeTile(from) && !AITunnel.IsTunnelTile(from)) {
+                if (AIRoad.IsRoadTile(from)) AITile.DemolishTile(from);
+                if (AITunnel.GetOtherTunnelEnd(from) == to) {
+                    if (!AITunnel.BuildTunnel(AIVehicle.VT_ROAD, from)) {
+                        this._layErr = "" + AIError.GetLastErrorString();
                         return segs > 0 ? segs : -1;
                     }
-                    AIRoad.BuildRoad(to, from);
-                    this._builtRoad.append([from, to]);
-                    segs++;
-                } else if (!AIBridge.IsBridgeTile(from) && !AITunnel.IsTunnelTile(from)) {
-                    if (AIRoad.IsRoadTile(from)) AITile.DemolishTile(from);
-                    if (AITunnel.GetOtherTunnelEnd(from) == to) {
-                        if (!AITunnel.BuildTunnel(AIVehicle.VT_ROAD, from)) return segs;
-                    } else {
-                        local bl = AIBridgeList_Length(AIMap.DistanceManhattan(from, to) + 1);
-                        bl.Valuate(AIBridge.GetMaxSpeed);
-                        bl.Sort(AIList.SORT_BY_VALUE, false);
-                        if (!AIBridge.BuildBridge(AIVehicle.VT_ROAD, bl.Begin(), from, to)) return segs;
+                } else {
+                    local bl = AIBridgeList_Length(AIMap.DistanceManhattan(from, to) + 1);
+                    bl.Valuate(AIBridge.GetMaxSpeed);
+                    bl.Sort(AIList.SORT_BY_VALUE, false);
+                    if (!AIBridge.BuildBridge(AIVehicle.VT_ROAD, bl.Begin(), from, to)) {
+                        this._layErr = "" + AIError.GetLastErrorString();
+                        return segs > 0 ? segs : -1;
                     }
-                    this._builtRoad.append([from, to]);
-                    segs++;
                 }
+                this._builtRoad.append([from, to]);
+                segs++;
+                this._lastLaid = to;
+            } else {
+                this._lastLaid = to;
             }
-            path = par;
         }
         return segs;
     }

@@ -80,10 +80,9 @@ export interface AgentRunOptions {
 	 */
 	offlineDemo?: boolean;
 	/**
-	 * Opt IN to seeding the agent with cross-game memory. Default FALSE: this is
-	 * an RL harness, and a run must begin with background knowledge only, so the
-	 * agent's policy comes from the environment rather than from the harness.
-	 * See src/evolution/memory.ts LoadMemoryOptions.inject.
+	 * Seed the agent with cross-game memory. Default TRUE - this is the mechanism
+	 * of self-evolution (src/evolution/memory.ts). Set false only for the control
+	 * arm of the M3 experiment.
 	 */
 	injectMemory?: boolean;
 	/** Max decision turns to run (default 1). */
@@ -637,7 +636,7 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 	// Load the library once, before the agent is assembled, so the opening context
 	// already carries previous games' lessons. Injection is off unless the library
 	// actually has confirmed content (see docs/EVOLUTION.md §3).
-	const memory = loadMemory(cfg.dataDir, { inject: opts.injectMemory === true });
+	const memory = loadMemory(cfg.dataDir, { inject: opts.injectMemory !== false });
 	const memoryProvider = makeLessonProvider(memory);
 	const injected = memoryCounts(memory);
 	// Publish it for the dashboard (per-game truth: what THIS game was told).

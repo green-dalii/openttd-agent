@@ -136,7 +136,11 @@ describe("runDecision / runDecisionLoop", () => {
 		const user = [...msgs].reverse().find((m) => m.role === "user")!;
 		const text = typeof user.content === "string" ? user.content : JSON.stringify(user.content);
 		expect(text).toContain("phase_change");
-		expect(text).toContain("EX hb road #1");
+		// The executor phase reaches the model DECODED. The old assertion here
+		// demanded the raw telegraph string "EX hb road #1", which meant the
+		// model was handed a grammar that exists only in the Squirrel source.
+		expect(text).toContain("still working on");
+		expect(text).not.toContain("EX hb road");
 		expect(text).toContain("build_bus_route");
 		expect(text).toContain("elapsedGameDays");
 		// No steering language anywhere.

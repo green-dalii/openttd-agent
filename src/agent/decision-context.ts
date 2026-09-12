@@ -13,6 +13,8 @@
  *   - 依赖 IO、时间或全局状态（纯函数，便于单测）。
  */
 
+import { decodePhaseWindow } from "../game/executor-status.js";
+
 /** One company's comparable numbers in the payload. */
 export interface CompanyNumbers {
 	id: number;
@@ -147,7 +149,16 @@ export function buildDecisionContext(input: DecisionContextInput): {
 		incomeDelta: number;
 		vehiclesDelta: number;
 		stationsDelta: number;
-		phases: string[];
+		/**
+		 * Executor phase changes since the last decision, DECODED.
+		 *
+		 * Raw phase strings (`EX rd s0 r0 j100`) are internal telemetry: their
+		 * grammar lives only in the Squirrel source, so handing them to the model
+		 * is handing it noise. Decoding is an interface-vocabulary fix, not
+		 * advice - the model still decides what a phase means for its plan.
+		 * src/game/executor-status.ts.
+		 */
+		phases: { phase: string; description: string; error: boolean }[];
 		actions: ActionRecord[];
 		notableEvents: string[];
 	};
@@ -164,7 +175,13 @@ export function buildDecisionContext(input: DecisionContextInput): {
 		now: input.now,
 		sinceLastDecision: {
 			...delta,
-			phases: [...input.since.phases],
+			// Heartbeats are collapsed by decodePhaseWindow: 40 identical
+			// "still alive" lines would bury the one line that actually changed.
+			phases: decodePhaseWindow(input.since.phases).map((d) => ({
+				phase: d.phase,
+				description: d.description,
+				error: d.error,
+			})),
 			actions: [...input.since.actions],
 			notableEvents: [...input.since.notableEvents],
 		},
