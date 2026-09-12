@@ -215,11 +215,13 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 	const world = new WorldState();
 	let client: AdminClient | null = null;
 	let stopRequested = false;
-	let resolveStop: (() => void) | null = null;
+	// `stopRequested` alone is enough now that the decision loop checks it every
+	// tick and owns the run length. There used to be a `resolveStop` promise here
+	// purely to break a `Promise.race` that sat AFTER the loop - i.e. a wait that
+	// could never start before the loop had already finished (SPEC §10.30).
 	const requestStop = () => {
 		if (stopRequested) return;
 		stopRequested = true;
-		resolveStop?.();
 	};
 	process.once("SIGINT", requestStop);
 	process.once("SIGTERM", requestStop);
@@ -758,7 +760,21 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 
 	const decisionTickMs = opts.decisionTickMs ?? 1_000;
 	const maxDecisions = opts.maxDecisions ?? 0; // 0 = bounded only by run length
+	// `seconds` bounds the RUN, and it has to be checked INSIDE the loop.
+	//
+	// Measured 2026-09-12: `--demo-seconds 190` ran for 28 minutes and 251
+	// decisions before I killed it. The run was healthy - the limit simply did
+	// not exist: the loop was `while (!stopRequested)` with no deadline, and
+	// `opts.seconds` was only consulted AFTER the loop in a
+	// `Promise.race([stopPromise, sleep(seconds)])`, which by then could only
+	// shorten a wait that had already ended. An unbounded game length makes a
+	// controlled experiment (M3: same seed, 3 runs per arm) impossible.
+	const deadline = opts.seconds && opts.seconds > 0 ? Date.now() + opts.seconds * 1000 : null;
 	while (!stopRequested) {
+		if (deadline !== null && Date.now() >= deadline) {
+			console.log(`[agent] run length reached (${opts.seconds}s) - stopping`);
+			break;
+		}
 		const nowDay = gameDaysSinceStart(deps);
 		if (waitUntil && nowDay - waitUntil.from >= waitUntil.gameDays) {
 			waitUntil = null;
@@ -869,16 +885,9 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 		console.log(`[agent] decision ${scheduler.count()} (${due.trigger}) at ${snap.date ? formatGameDate(snap.date) : "?"}`);
 	}
 
-	const stopPromise = new Promise<void>((res) => {
-		resolveStop = res;
-		const check = () => (stopRequested ? res() : setTimeout(check, 300));
-		check();
-	});
-	if (opts.seconds && opts.seconds > 0) {
-		await Promise.race([stopPromise, sleep(opts.seconds * 1000)]);
-	} else {
-		await stopPromise;
-	}
+	// The loop owns the run length now (see `deadline` above): it exits either
+	// because we were asked to stop (`stopRequested`, set by requestStop) or
+	// because the deadline passed. There is nothing left to wait for here.
 	clearInterval(obs);
 
 	const snap = world.snapshot();

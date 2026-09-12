@@ -1022,3 +1022,40 @@ and 24 passenger(s) waiting at station A"；`B`/`X`（抛锚/撞毁）标为 `er
 **顺带修掉一个"自信地给出错误含义"的分支**：解码器里原有一个猜测性的
 `@` → "正在扫描车站选址"分支，会**遮蔽**真正的车辆位置探针格式，
 于是 agent 拿到的是**错的**解释。已删除 —— **没有含义好过错误的含义**。
+
+## 10.30 `seconds` 从未限制运行长度（2026-09-12 实测）
+
+真机现象：`--demo-seconds 190` 实际跑了 **28 分钟 / 251 次决策**才被手动杀掉。
+运行本身是**健康的**（20 台车、游戏内过了 2 年），只是**没有上限**。
+
+根因：决策循环是 `while (!stopRequested)`，**不含任何截止检查**。
+`opts.seconds` 只在循环**之后**被用：
+
+```ts
+if (opts.seconds && opts.seconds > 0) {
+    await Promise.race([stopPromise, sleep(opts.seconds * 1000)]);
+}
+```
+
+它限制的是"循环结束后还要再等多久" —— 一个**永远走不到**的分支。
+`maxDecisions` 也一样：只有在调度器产生一次决策时才检查。
+
+**后果**：任何"跑 N 秒"的意图都不成立。对 M3 对照实验
+（同 seed、每臂 3 局）这是致命的 —— 局长不可控，实验无法进行。
+
+**修复**：把截止时间算进循环：
+
+```ts
+const deadline = opts.seconds && opts.seconds > 0 ? Date.now() + opts.seconds * 1000 : null;
+while (!stopRequested) {
+    if (deadline !== null && Date.now() >= deadline) { ...; break; }
+```
+
+循环现在已经拥有运行长度，循环之后那段 `Promise.race` 随之删除
+（连同只服务于它的 `resolveStop`）。
+
+**实测**：`--demo-seconds 60` → **76 秒**（60s 运行 + ~16s 启动），
+日志 `[agent] run length reached (60s) - stopping`，metrics 正常落盘。
+
+**守卫**：`test/unit/runner-freeze-thaw.test.ts` 断言循环体前 12 行内出现
+`deadline` 与其比较。
