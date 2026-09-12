@@ -9,15 +9,26 @@
 <link rel="stylesheet" href="/assets/vendor/uplot/uPlot.min.css" />
 </head>
 <body>
+<!--
+  Providers page.
+
+  呈现层由 Alpine.js 驱动（见 docs/FRONTEND-DEPENDENCIES-AUDIT.md §3.4 阶段 4）。
+  凭据面板的分支最多（env 变量 / 已存 key / 需要 OAuth / 完全没配），因此那些判断
+  全在 providers-view.js 的可测纯函数里，模板只负责画出来。
+-->
+<div x-data="providers" x-init="init()">
 <header>
   <div class="brand">
     <h1>openttd-agent <span class="dim">providers</span></h1>
     <div id="nav"></div>
   </div>
   <div class="runbar">
-    <div class="item"><span class="lbl">Catalog</span><span id="p-catalog" class="val">…</span></div>
-    <div class="item"><span class="lbl">Ready now</span><span id="p-ready" class="val">…</span></div>
-    <div class="item"><span class="lbl">Selected</span><span id="p-selected" class="val dim">…</span></div>
+    <div class="item"><span class="lbl">Catalog</span>
+      <span class="val" x-text="providerCount() || '…'"></span></div>
+    <div class="item"><span class="lbl">Ready now</span>
+      <span class="val" x-text="providers.length ? readyCount() : '…'"></span></div>
+    <div class="item"><span class="lbl">Selected</span>
+      <span class="val dim" x-text="selectionLabel()"></span></div>
   </div>
 </header>
 
@@ -32,65 +43,76 @@
         <div id="p-mode"></div>
       </div>
 
-      <div id="catalog-fields">
+      <div x-show="catalogFieldsVisible()">
         <div class="field">
           <label for="prov-cbx">Provider</label>
-          <div id="prov-cbx"></div>
+          <div id="prov-cbx" x-ref="provBox"></div>
         </div>
         <div class="field">
           <label for="model-cbx">Model</label>
-          <div id="model-cbx"></div>
+          <div id="model-cbx" x-ref="modelBox"></div>
         </div>
 
-        <div id="auth-box">
-          <h3>Credentials <span id="auth-status"></span></h3>
-          <p class="hint" id="auth-hint"></p>
+        <div>
+          <h3>Credentials
+            <span class="badge" :class="authPanel().badgeCls" x-show="authPanel().badge"
+                  x-text="authPanel().badge"></span></h3>
+          <p class="hint" x-text="authPanel().hint"></p>
           <div class="field">
             <label for="auth-key">API key</label>
+            <!-- Never echoed back: this field is write-only for the server. -->
             <input id="auth-key" type="password" autocomplete="off" spellcheck="false"
-                   placeholder="paste a key (stored locally, never echoed back)" />
+                   x-model="catalogKey" :placeholder="authPanel().placeholder" />
           </div>
         </div>
       </div>
 
-      <div id="custom-fields" hidden>
+      <div x-show="customFieldsVisible()">
         <p class="hint">
           Talk to your own OpenAI-compatible server (llama.cpp, vLLM, a gateway, a proxy).
           Nothing about this endpoint is inferred — you supply the URL and the API shape.
         </p>
         <div class="field">
           <label for="auth-base">Base URL</label>
-          <input id="auth-base" type="text" placeholder="http://127.0.0.1:8080/v1" spellcheck="false" />
+          <input id="auth-base" type="text" x-model="form.baseUrl"
+                 placeholder="http://127.0.0.1:8080/v1" spellcheck="false" />
         </div>
         <div class="field">
           <label for="auth-api">API shape</label>
-          <select id="auth-api">
+          <select id="auth-api" x-model="form.api">
             <option value="openai-completions">openai-completions</option>
             <option value="anthropic-messages">anthropic-messages</option>
           </select>
         </div>
         <div class="field">
           <label for="auth-model">Model id</label>
-          <input id="auth-model" type="text" placeholder="llama-3.1-8b-instruct" spellcheck="false" />
+          <input id="auth-model" type="text" x-model="form.model"
+                 placeholder="llama-3.1-8b-instruct" spellcheck="false" />
         </div>
         <div class="field">
           <label for="auth-key-custom">API key <span class="dim">(optional)</span></label>
-          <input id="auth-key-custom" type="password" autocomplete="off"
+          <input id="auth-key-custom" type="password" autocomplete="off" x-model="form.key"
                  placeholder="leave blank if your server needs none" />
         </div>
       </div>
 
       <div class="actions">
-        <button type="button" id="save" class="primary">Save configuration</button>
-        <button type="button" id="clear-key" class="danger">Clear stored key</button>
-        <span class="form-msg" id="form-msg"></span>
+        <button type="button" id="save" class="primary" :disabled="!saveReady()"
+                @click="save()" x-text="saving ? 'Saving…' : 'Save configuration'"></button>
+        <button type="button" id="clear-key" class="danger" :disabled="!canClearKey()"
+                @click="clearKey()">Clear stored key</button>
+        <span class="form-msg" :class="msg.kind" x-text="msg.text"></span>
       </div>
     </div>
 
     <!-- right: what will actually happen -->
     <div class="panel">
       <div class="panel-head"><h2>How the agent will run</h2></div>
-      <div id="effective"></div>
+      <table class="kv">
+        <template x-for="[k, v] in effectiveRows()" :key="k">
+          <tr><td x-text="k"></td><td x-text="v"></td></tr>
+        </template>
+      </table>
       <h3>Where this is stored</h3>
       <p class="hint">
         Selection → <code>&lt;OPENTTD_DATA_DIR&gt;/llm.json</code><br />
@@ -99,16 +121,35 @@
       </p>
       <h3>Ready providers</h3>
       <p class="hint">Providers whose key is already present in this machine's environment — no pasting needed.</p>
-      <div id="ready-list" class="scroll-y"></div>
+      <div class="scroll-y">
+        <table class="kv" x-show="readyProviders().length">
+          <template x-for="p in readyProviders()" :key="p.id">
+            <tr>
+              <td><code x-text="p.id"></code></td>
+              <td class="num"><span class="badge ok"
+                x-text="p.auth.source === 'env' ? (p.auth.envVar || 'env') : 'stored key'"></span></td>
+            </tr>
+          </template>
+        </table>
+        <p class="hint" x-show="!readyProviders().length">
+          None yet — pick a provider and paste a key, or export one in your shell.
+        </p>
+        <p class="empty" x-show="catalogError" x-text="catalogError"></p>
+      </div>
     </div>
   </section>
 </main>
+</div>
 
 <script src="/assets/js/common.js"></script>
   <!-- uPlot must come before ucharts.js, which reads window.uPlot. -->
   <script src="/assets/vendor/uplot/uPlot.iife.min.js"></script>
   <script src="/assets/js/ucharts.js"></script>
   <script src="/assets/js/charts.js"></script>
+<!-- Alpine must load before the bridge and the page component (they extend it). -->
+<script src="/assets/vendor/alpinejs/alpine.min.js" defer></script>
+<script src="/assets/js/alpine-bridge.js"></script>
+<script src="/assets/js/providers-view.js"></script>
 <script src="/assets/js/providers.js"></script>
 </body>
 </html>
