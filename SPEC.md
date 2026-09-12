@@ -921,3 +921,55 @@ single searches (>~60 manhattan; probe: FindPath(1000) **never returns**)"*。
 80 秒内只跑到第 6 次循环（心跳 #1），即 **每轮循环 >6 秒**。
 `Sleep(5)` 不该这么慢 —— 执行器的 **script tick 供给严重不足**，
 这至少部分解释了"施工慢到看起来像卡住"。待查：脚本速度设置。
+
+## 10.28 控制台 `pause` 是**单向**的 —— 这就是"执行器假死"的最终根因（2026-09-12 实测）
+
+### 事实
+
+`rcon("pause")` 会把 `Commands::Pause(PauseMode::Normal, true)` **投进游戏循环的命令队列**。
+游戏一旦暂停，**那个循环就不再排空队列**，于是随后投进去的 unpause **永远不会执行**。
+
+OpenTTD `src/console_cmds.cpp` 原文：
+
+```cpp
+// unpause
+if (_pause_mode.Test(PauseMode::Normal)) {
+    Command<Commands::Pause>::Post(PauseMode::Normal, false);   // 只有这一条路
+} else if (_pause_mode.Test(PauseMode::Error)) {
+    "Game is in error state and cannot be unpaused via console."
+} else if (_pause_mode.Any()) {
+    "Game cannot be unpaused manually; disable pause_on_join/min_active_clients."
+}
+```
+
+`unpause` **只清 `PauseMode::Normal`**；只要还有任何其它 pause 位，它就**拒绝**。
+
+### 实测证据（决定性）
+
+| | 带 `rcon("pause")` | 去掉之后 |
+|---|---|---|
+| 游戏日历（120–170 秒） | `712225 → 712226`（**1 天**） | `712225 → 712299`（**74 天**，1000 tick 走 15 天 = 正常速） |
+| GS 状态消息 | 正常发送（3200 脚本 tick） | 正常发送 |
+| 执行器阶段 | 停在 `EX boot j-1` | `boot → work → stA_ok → road_start → rd s0 r0…r7` |
+| 心跳 | **从未出现** | `EX hb road #1 s3` / `#2 s3` 正常 |
+
+"脚本在跑、世界不动"就是暂停的指纹：GS 在发状态，日历却不动。
+
+### 结论与修正
+
+**决策循环不再暂停游戏**（`src/agent/runner.ts`）。SPEC §1.1 step 2 的设计意图
+（"别让世界在 LLM 思考时动"）由另一套机制承担，而且更诚实：
+
+- 观察在**询问之前**取（`preSnap`）
+- `sinceLastDecision` 如实汇报期间的变化（金额/收入/车辆/阶段/动作）
+- 模型看到的是"世界在我思考时**确实动了**，这是变化量"，而不是"世界没动"这个假象
+
+**守卫**：`test/unit/runner-freeze-thaw.test.ts` —— 决策循环 ±60 行内不得出现
+控制台 pause/unpause（先剥离注释，否则会误伤解释这段陷阱的注释本身）。
+
+### 顺带修正的配置事实
+
+沙箱 `openttd.cfg` 的 `[network]` 块是**整块替换**的，原先没有写
+`pause_on_join` / `min_active_clients`，于是回落到 OpenTTD 默认
+`pause_on_join = true` —— 对无人驾驶 harness 是错的。现已显式写死
+`pause_on_join = false` / `min_active_clients = 0`（`process-manager.ts` + 单测）。

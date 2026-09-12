@@ -295,7 +295,20 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 				else if (bootEvents.length < BOOT_EVENT_CAP) bootEvents.push(ev);
 				if (ev.kind === "gamescript") {
 					const p = ev.payload as Record<string, unknown>;
-					if (p.cmd === "state") gsStates++;
+					if (p.cmd === "state") {
+						gsStates++;
+						// Sample the GS's own clock. This is the only way to tell
+						// "the game is not running" from "the executor is not
+						// looping": the GS sends these every 200 ticks, so if the
+						// DATE does not advance, the game is stopped; if the date
+						// advances but the executor stays silent, the executor is
+						// starved of script ticks (ROADMAP 4b follow-up).
+						if (gsStates % 5 === 1) {
+							console.log(
+								`[agent] GS state #${gsStates} date=${String(p.date)} towns=${String(p.towns)} signs=${String(p.signs)}`,
+							);
+						}
+					}
 					else {
 						console.log(`[agent] GS: ${JSON.stringify(p)}`);
 						// Remember the coordinates the executor acknowledged, so each
@@ -776,30 +789,36 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 		session.appendAudit({ type: "decision", ts: Date.now(), turn: scheduler.count(), trigger: due.trigger, state: preState });
 
 		const history = session.current().checkpoints.map((c) => c.note);
-		// SPEC §1.1 step 2: FREEZE while the LLM thinks. OpenTTD is a continuous
-		// clock; without pausing, the world moves on and the model's decision lands
-		// against a state it never saw.
+		// SPEC §1.1 step 2 (REVISED 2026-09-12): the framework NO LONGER pauses the
+		// game around a decision.
 		//
-		// The unpause is in a `finally` for a real reason (2026-09-12): without
-		// this, ANY exception from agent.prompt() — network blip, faux core
-		// exhausting its canned responses, anything — leaves the game paused
-		// forever. The GS then stops ticking, the executor stops advancing, and
-		// the agent sees a frozen world with no progress. This is the silent bug
-		// behind "executor stuck at boot" / "GS not ticking" — see
-		// test/unit/runner-freeze-thaw.test.ts and ROADMAP §4b.
-		// Logged, not silent. `rcon()` only WRITES to the socket - it does not
-		// report whether the game acted on it - so a freeze/thaw pair that never
-		// took effect looked exactly like one that did, and the executor's silence
-		// got blamed on the executor (ROADMAP 4b).
-		console.log(`[agent] freeze #${scheduler.count()}`);
-		try {
-			client?.rcon("pause");
-		} catch (e) {
-			console.log(`[agent] freeze FAILED: ${e instanceof Error ? e.message : String(e)}`);
-		}
-
+		// The original design froze the world so it could not move under the LLM.
+		// In practice the freeze was ONE-WAY. `rcon("pause")` posts
+		// `Commands::Pause(PM_NORMAL, true)` into the game loop; once paused that
+		// loop stops draining the queue, so the matching unpause posted afterwards
+		// never runs. OpenTTD's console handler documents the trap exactly:
+		//
+		//   if (_pause_mode.Test(PauseMode::Normal)) { Post(PM_NORMAL, false); }
+		//   else if (_pause_mode.Any())
+		//     "Game cannot be unpaused manually; disable
+		//      pause_on_join/min_active_clients."
+		//
+		// MEASURED (2026-09-12): with the pause in place the game calendar advanced
+		// 1 day in 120s while the GS kept sending state (3200 script ticks) - i.e.
+		// scripts ran while the world stood still, the signature of a paused game.
+		// With the pause removed the calendar advanced 13.5 days per 1000 ticks and
+		// the executor went boot -> work -> stA_ok -> road_start.
+		//
+		// Every "executor is stuck at boot" / "no heartbeat" / "GS not ticking"
+		// symptom we chased for days was this one call.
+		//
+		// What protects decision quality instead: the observation is taken BEFORE
+		// the model is asked, and `sinceLastDecision` reports everything that
+		// changed while it thought (money/income/vehicles/phases/actions). The model
+		// is told the truth about a world that kept moving, rather than a
+		// comforting lie about one that never did.
 		let plan: DecisionPlan | null = null;
-		try {
+		{
 			const out = await runDecision(agent, deps, {
 				trigger: due.trigger,
 				tracker,
@@ -809,15 +828,6 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 			});
 			plan = out.plan;
 			telemetry.onActivity?.();
-		} finally {
-			// SPEC §1.1 step 5: THAW so the executor can carry the decision out.
-			// Must run whether runDecision succeeded or threw.
-			console.log(`[agent] thaw #${scheduler.count()}`);
-			try {
-				client?.rcon("unpause");
-			} catch (e) {
-				console.log(`[agent] thaw FAILED: ${e instanceof Error ? e.message : String(e)}`);
-			}
 		}
 
 		// SPEC §4.2 step 5: honour the model's own wake-up ("或等待条件满足").

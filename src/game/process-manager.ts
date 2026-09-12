@@ -227,7 +227,26 @@ export class OpenTTDProcessManager {
 			`server_admin_port = ${this.cfg.adminPort}\n` +
 			"server_admin_chat = true\n" +
 			"allow_insecure_admin_login = true\n" +
-			"server_game_type = local\n";
+			"server_game_type = local\n" +
+			// The harness must be able to UNPAUSE the game itself.
+			//
+			// Root cause of the "executor stuck at boot" saga (2026-09-12): the
+			// GS was demonstrably ticking (3200 script ticks) while the game
+			// calendar advanced ONE day in 120 seconds - script ticks moving, the
+			// world frozen, which is the signature of a paused game. OpenTTD's own
+			// message explains why the unpause did nothing:
+			//
+			//   "Game cannot be unpaused manually; disable
+			//    pause_on_join/min_active_clients."
+			//
+			// This block REPLACES [network] wholesale. Omitting these two keys made
+			// OpenTTD fall back to its default pause_on_join = true, and a server
+			// that pauses when someone joins is simply wrong for an autonomous
+			// agent: after the pause the console unpause is refused, the world
+			// stops, and every downstream symptom (no executor progress, no
+			// heartbeat, no date advance) looks like a broken executor.
+			"pause_on_join = false\n" +
+			"min_active_clients = 0\n";
 		const re = /^\[network\][\s\S]*?(?=^\[)/m;
 		if (re.test(text)) {
 			text = text.replace(re, netBlock);

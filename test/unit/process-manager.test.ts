@@ -101,6 +101,31 @@ describe("OpenTTDProcessManager config templates", () => {
 	});
 });
 
+describe("sandbox config: 自动驾驶必须能解除暂停（2026-09-12 真机根因）", () => {
+	it("生成的 [network] 必须显式关闭 pause_on_join", async () => {
+		// 真机症状：GS 在发状态（3200 ticks），但游戏日历 120 秒只走了 **1 天**。
+		// 脚本 tick 在走、世界不走 = 游戏被暂停。而 OpenTTD 自己的提示写着：
+		//   "Game cannot be unpaused manually; disable pause_on_join/min_active_clients."
+		// 也就是说 `rcon("unpause")` 会被**静默拒绝**。
+		//
+		// 原 patchOpenttdCfg 在替换 [network] 块时**没有写这两项**，于是 OpenTTD
+		// 回落到默认 pause_on_join = true —— 一个"有人加入就暂停"的服务器，
+		// 对无人驾驶的 harness 是错的。
+		const dir = await mkdtemp(join(tmpdir(), "ottd-pause-"));
+		try {
+			const cfgPath = join(dir, "openttd.cfg");
+			await writeFile(cfgPath, "[network]\nserver_name = old\n\n[gui]\nx = 1\n", "utf8");
+			const mgr = new OpenTTDProcessManager(baseCfg(dir));
+			await mgr.ensureSandboxConfig();
+			const out = await readFile(cfgPath, "utf8");
+			expect(out).toMatch(/^pause_on_join = false$/m);
+			expect(out).toMatch(/^min_active_clients = 0$/m);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+});
+
 describe("OpenTTDProcessManager lifecycle", () => {
 	it("isRunning() false before start and after stop of a dead child", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "ottd-pm-"));
