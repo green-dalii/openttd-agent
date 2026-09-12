@@ -9,132 +9,396 @@
 <link rel="stylesheet" href="/assets/vendor/uplot/uPlot.min.css" />
 </head>
 <body>
-<header>
-  <div class="brand">
-    <h1>openttd-agent <span class="dim">live</span></h1>
-    <div id="nav"></div>
-  </div>
-  <div class="runbar">
-    <div class="item"><span class="lbl">Connection</span><span id="g-link" class="pill idle">…</span></div>
-    <div class="item"><span class="lbl">Session</span><span id="g-session" class="val dim">—</span></div>
-    <div class="item"><span class="lbl">Game date</span><span id="g-date" class="val">—</span></div>
-    <div class="item"><span class="lbl">Elapsed</span><span id="g-elapsed" class="val">—</span></div>
-    <!-- Run controls (only present in --serve mode; hidden otherwise) -->
-    <div class="item" id="run-controls" hidden>
-      <span class="lbl">Run</span>
-      <span id="run-state" class="pill idle">idle</span>
-      <span class="run-actions">
-        <button type="button" id="run-start-agent" class="btn sm primary">Start agent</button>
-        <button type="button" id="run-start-watch" class="btn sm">Observe only</button>
-        <button type="button" id="run-pause" class="btn sm">Pause</button>
-        <button type="button" id="run-stop" class="btn sm danger">Stop</button>
-      </span>
+<!--
+  Live page — information architecture, ordered by the question the user asks.
+
+  第一性原理（docs/DASHBOARD-UI.md §5.1）: 页面必须按**用户实际会问的顺序**回答：
+    ① Now       它在做什么？（还活着吗、在想什么、卡住了吗）
+    ② Result    公司赢了吗？（结果）
+    ③ Progress  它做成了什么？（唯一的视觉证据：阶段性总结 + 画面）
+    ④ Thinking  它真的在推理吗？（智能的证据）
+    ⑤ Cost      花了多少？（成本，不是结果）
+    ⑥ Detail    原始日志（调试用，默认收起）
+  旧版把「Agent 域」与「Economy 域」分成两块，于是"在赚钱吗"和"花了多少 token"
+  混在同一条 KPI 里，而唯一能判断智能的步骤流被埋在中间，阶段图在页面最底部。
+
+  呈现层由 Alpine.js 声明式驱动；所有判断都在 live-view.js 的可测纯函数里。
+-->
+<div x-data="live" x-init="init()">
+  <header>
+    <div class="brand">
+      <h1>openttd-agent <span class="dim">live</span></h1>
+      <div id="nav"></div>
     </div>
-  </div>
-</header>
+    <div class="runbar">
+      <div class="item"><span class="lbl">Connection</span>
+        <span class="pill" :class="linkOk ? 'ok' : link === 'waiting for server…' ? 'idle' : 'bad'"
+              x-text="link"></span></div>
+      <div class="item"><span class="lbl">Session</span><span class="val dim" x-text="sessionId || '—'"></span></div>
+      <div class="item"><span class="lbl">Game date</span>
+        <span class="val" x-text="date ? $fmt.gameDate(date) : '—'"></span></div>
+      <div class="item"><span class="lbl">Elapsed</span><span class="val" x-text="elapsed"></span></div>
+      <div class="item" x-show="runControl" :hidden="!runControl">
+        <span class="lbl">Run</span>
+        <span class="pill" :class="runState() === 'running' ? 'ok' : runState() === 'idle' ? 'idle' : 'bad'"
+              x-text="runState() + (run && run.mode ? ' · ' + run.mode : '')"></span>
+        <span class="run-actions">
+          <button type="button" class="btn sm primary" :disabled="runBusy() || runState() !== 'idle'"
+                  @click="startRun('agent')">Start agent</button>
+          <button type="button" class="btn sm" :disabled="runBusy() || runState() !== 'idle'"
+                  @click="startRun('watch')">Observe only</button>
+          <button type="button" class="btn sm" :disabled="runBusy() || runState() === 'idle'"
+                  @click="pauseResume()" x-text="runState() === 'paused' ? 'Resume' : 'Pause'"></button>
+          <button type="button" class="btn sm danger" :disabled="runBusy() || runState() === 'idle'"
+                  @click="stopRun()">Stop</button>
+        </span>
+      </div>
+    </div>
+  </header>
 
-<main>
-  <!-- Explains a non-agent run and offers the fix (agent must be started). -->
-  <section class="notice" id="notice" hidden></section>
+  <main>
+    <!-- The honest empty state: SAY why the panels are empty. -->
+    <section class="notice" x-show="notice().show" :class="notice().kind === 'err' ? 'notice err' : 'notice'">
+      <div class="notice-body">
+        <strong x-text="notice().title"></strong><br />
+        <span x-text="notice().body"></span>
+        <div class="notice-actions" x-show="notice().canStart">
+          <button type="button" class="btn sm primary" @click="startRun('agent')">Start agent</button>
+          <a class="btn sm" href="/providers">Configure provider</a>
+        </div>
+        <div class="notice-actions" x-show="notice().hint">
+          <span class="dim" x-text="notice().hint"></span>
+        </div>
+      </div>
+    </section>
 
-  <!-- 1. Is it working? (answers: is the company making money) -->
-  <section class="kpis" id="kpis"></section>
+    <!-- ============================ ① NOW ============================ -->
+    <div class="group"><h2>Now</h2><div class="rule"></div>
+      <span class="dim">what the agent is doing right now</span></div>
+    <section class="panel">
+      <div class="now-grid">
+        <div class="now-cell">
+          <span class="now-k">Brain</span>
+          <span class="now-v" :class="brainIsReal ? '' : 'warn'" x-text="nowSummary().brain"></span>
+        </div>
+        <div class="now-cell">
+          <span class="now-k">Last decision</span>
+          <span class="now-v" x-text="nowSummary().lastDecision || '—'"></span>
+        </div>
+        <div class="now-cell">
+          <span class="now-k">Turns</span>
+          <span class="now-v" x-text="nowSummary().turns"></span>
+        </div>
+        <div class="now-cell">
+          <span class="now-k">Phase</span>
+          <span class="now-v" x-text="latestPhase()"></span>
+        </div>
+      </div>
+      <div class="now-intent">
+        <h3>Current intent</h3>
+        <p class="now-text" x-text="nowSummary().intent"></p>
+        <h3>Last action</h3>
+        <p class="now-text" x-text="nowSummary().action"></p>
+      </div>
+    </section>
 
-  <!-- 2. How is the agent doing? -->
-  <div class="group"><h2>Agent</h2><div class="rule"></div>
-    <span class="dim" id="t-brain"></span></div>
-  <!-- Row 1: the chart needs the wide column; runtime figures are narrow. -->
-  <section class="grid split-21">
-    <div class="panel">
+    <!-- ========================== ② RESULT ========================== -->
+    <div class="group"><h2>Result</h2><div class="rule"></div>
+      <span class="dim">is the company winning — outcome, not cost</span></div>
+    <section class="kpis">
+      <template x-for="k in resultKpis()" :key="k.k">
+        <div class="kpi">
+          <div class="kpi-k" x-text="k.k"></div>
+          <div class="kpi-v" x-text="k.v"></div>
+          <div class="kpi-hint" x-show="k.hint" x-text="k.hint"></div>
+          <div class="kpi-hint" x-show="k.delta !== undefined && k.delta !== null"
+               :class="k.delta > 0 ? 'pos' : k.delta < 0 ? 'neg' : 'dim'"
+               x-text="(k.delta > 0 ? '+' : '') + $fmt.money(k.delta)"></div>
+          <canvas class="kpi-spark" x-show="hasHistory(k.spark)" x-ref="spark" :data-metric="k.spark"></canvas>
+        </div>
+      </template>
+    </section>
+    <section class="panel">
       <div class="panel-head">
-        <h2>Token usage</h2>
-        <div class="actions">
-          <div id="token-metric"></div>
-          <span class="dim" id="token-summary"></span>
+        <h2>Cash history</h2>
+        <div class="actions"><div x-ref="cashMetric"></div></div>
+      </div>
+      <!-- A <div>, never a <canvas>: uPlot injects its chart as DOM children, and
+           a canvas host would make them fallback content nobody renders. -->
+      <div class="chart-box"><div id="chart" x-ref="cashChart" x-effect="drawCash()"></div></div>
+      <div class="legend"><span class="lg dim" x-text="'showing ' + cashMetric"></span></div>
+    </section>
+    <section class="kpis" x-show="!companiesEmpty()">
+      <template x-for="c in companyCards()" :key="c.id">
+        <div class="kpi">
+          <div class="kpi-k ccard-head">
+            <span x-text="c.name + ' #' + c.id"></span>
+            <span class="tag" :class="c.isAi ? 'tag-script' : 'tag-company'" x-text="c.isAi ? 'AI' : 'human'"></span>
+          </div>
+          <div class="kpi-v" :class="c.neg ? 'neg' : 'pos'" x-text="c.money"></div>
+          <div class="kpi-hint" x-text="c.value"></div>
+          <div class="kpi-hint" x-text="c.fleet"></div>
+        </div>
+      </template>
+    </section>
+    <section class="panel" x-show="companiesEmpty()">
+      <p class="empty">No company yet — the observer starts an AI and watches its economy.</p>
+    </section>
+
+    <!-- ========================= ③ PROGRESS ========================= -->
+    <div class="group"><h2>Progress</h2><div class="rule"></div>
+      <span class="dim">what it has actually accomplished</span></div>
+    <section class="grid two">
+      <div class="panel">
+        <div class="panel-head"><h2>Staged summaries <span class="dim">阶段性总结</span></h2>
+          <span class="dim" x-text="stages.length ? stages.length + ' recorded' : ''"></span></div>
+        <ol class="timeline">
+          <template x-for="c in stageList()" :key="c.gameDate + '-' + c.turn">
+            <li>
+              <span class="t-meta" x-text="c.gameDate + ' · turn ' + c.turn + ' · ' + $fmt.clock(c.at)"></span>
+              <span x-text="c.note"></span>
+            </li>
+          </template>
+          <li class="empty" x-show="!stages.length">No staged summary yet — one is recorded as the run progresses.</li>
+        </ol>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><h2>Stage views <span class="dim">阶段性画面</span></h2>
+          <span class="dim">real minimap, zoomed to the work</span></div>
+        <div class="stage-snaps">
+          <template x-for="v in stageViewsNewestFirst()" :key="v.index ?? (v.gameDate + '-' + (v.phase || ''))">
+            <div class="snap">
+              <div class="snap-map">
+                <template x-if="stageImageUrl(v)">
+                  <div>
+                    <div class="snap-img" :style="stageBackdrop(v)" role="img"></div>
+                    <svg class="snap-ov" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+                      <template x-for="m in stageMarks(v)" :key="m.kind + (m.label || '') + (m.x1 ?? m.x)">
+                        <template x-if="m.kind === 'route'">
+                          <line class="ov-route" :x1="m.x1" :y1="m.y1" :x2="m.x2" :y2="m.y2"></line>
+                        </template>
+                        <template x-if="m.kind !== 'route'">
+                          <circle :class="m.kind === 'town' ? 'ov-town' : m.kind === 'depot' ? 'ov-depot' : 'ov-other'"
+                                  :cx="m.x" :cy="m.y" :r="m.kind === 'town' ? 3 : 2.2"></circle>
+                        </template>
+                      </template>
+                    </svg>
+                    <span class="snap-zoom" x-text="stageZoom(v)"></span>
+                  </div>
+                </template>
+                <template x-if="!stageImageUrl(v)">
+                  <canvas class="snap-fallback" :data-stage="stageKey(v)" height="130"></canvas>
+                </template>
+              </div>
+              <div class="snap-meta">
+                <span x-text="v.gameDate || '—'"></span>
+                <span x-text="(v.phase || '').slice(0, 22)"></span>
+              </div>
+              <div class="snap-meta">
+                <span x-text="stageFleet(v)"></span>
+                <span x-text="stageMoney(v)"></span>
+              </div>
+            </div>
+          </template>
+          <p class="empty" x-show="!stageViews.length">
+            No stage view yet — one is captured at each construction phase.
+          </p>
+          <div class="snap-legend">
+            <div class="snap-legend-row">
+              <span class="lg-lead">overlay (drawn by us)</span>
+              <template x-for="x in legendOurs" :key="x.label">
+                <span class="lg" :class="x.cls"><i></i><span x-text="x.label"></span></span>
+              </template>
+            </div>
+            <div class="snap-legend-row">
+              <span class="lg-lead">base map (OpenTTD's terrain minimap)</span>
+              <template x-for="x in legendBase" :key="x.label">
+                <span class="lg"><i :style="'background:' + x.color"></i><span x-text="x.label"></span></span>
+              </template>
+            </div>
+          </div>
         </div>
       </div>
-      <div class="chart-box" id="t-chart-box"><div id="t-chart"></div></div>
-      <div class="legend" id="t-legend"></div>
-      <h3>Per-turn detail</h3>
-      <div class="scroll-y" id="t-turn-table"></div>
-    </div>
-    <div class="panel">
-      <div class="panel-head"><h2>Runtime</h2></div>
-      <div id="t-usage"></div>
-      <h3>Tool performance</h3>
-      <div class="scroll-y" id="t-tools"></div>
-    </div>
-  </section>
+    </section>
 
-  <!-- Row 2: steps (live feed) beside reasoning (also a feed) - both grow. -->
-  <section class="grid two">
-    <div class="panel">
-      <div class="panel-head"><h2>Agent steps <span class="dim" id="steps-count">(0)</span></h2>
-        <div class="actions">
-          <div id="step-filter"></div>
-          <label class="check"><input id="steps-autoscroll" type="checkbox" checked /> <span>follow</span></label>
+    <!-- ========================= ④ THINKING ========================= -->
+    <div class="group"><h2>Thinking</h2><div class="rule"></div>
+      <span class="dim">the evidence that it is reasoning, not just acting</span></div>
+    <section class="grid two">
+      <div class="panel">
+        <div class="panel-head"><h2>Agent steps
+            <span class="dim" x-text="'(' + visibleSteps().length + (visibleSteps().length === steps.length ? '' : '/' + steps.length) + ')'"></span></h2>
+          <div class="actions">
+            <div x-ref="stepFilter"></div>
+            <label class="check"><input type="checkbox" x-model="follow" @change="setPref('steps.follow', follow)" />
+              <span>follow</span></label>
+          </div>
+        </div>
+        <!-- The list scrolls ITSELF (UI.scrollToEnd); scrollIntoView would scroll the page. -->
+        <ol class="steps" x-ref="stepList">
+          <template x-for="s in visibleSteps()" :key="s.id || (s.turn + '-' + s.kind + '-' + (s.tool || s.model || ''))">
+            <li class="step" :class="s.kind === 'tool' ? (s.ok ? 'tool-ok' : 'tool-bad') : 'msg'">
+              <div class="step-head">
+                <span class="badge" :class="s.kind === 'tool' && s.ok === false ? 'bad' : ''"
+                      x-text="s.kind === 'tool' ? 'tool' : 'LLM'"></span>
+                <span class="badge" x-text="'turn ' + s.turn"></span>
+                <span class="step-title" x-text="s.kind === 'tool' ? (s.tool + ' — ' + (s.summary || '')) : (s.model || 'assistant')"></span>
+                <span class="dim" x-show="s.durationMs !== undefined" x-text="$fmt.duration(s.durationMs)"></span>
+                <span class="dim" x-show="s.usage"
+                      x-text="s.usage ? $fmt.tok(s.usage.totalTokens) + ' tok · ' + $fmt.cost(s.usage.costTotal) : ''"></span>
+              </div>
+              <template x-if="s.thinking">
+                <details class="think"><summary>reasoning</summary><pre x-text="s.thinking"></pre></details>
+              </template>
+              <div class="step-text" x-show="s.text" x-text="s.text"></div>
+              <template x-if="stepRaw && s.args !== undefined">
+                <details><summary>args</summary><pre x-text="JSON.stringify(s.args, null, 2)"></pre></details>
+              </template>
+              <template x-if="stepRaw && s.data">
+                <details><summary>result</summary><pre x-text="JSON.stringify(s.data, null, 2)"></pre></details>
+              </template>
+            </li>
+          </template>
+          <li class="empty" x-show="!visibleSteps().length"
+              x-text="'No steps ' + (stepFilter === 'all' ? 'yet' : 'match this filter') + '.'"></li>
+        </ol>
+        <label class="check" style="margin-top:6px">
+          <input type="checkbox" x-model="stepRaw" /><span>show args/result</span>
+        </label>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><h2>Reasoning
+            <span class="dim" x-text="thinking.length ? '(' + thinking.length + ')' : ''"></span></h2>
+          <span class="dim">newest first</span></div>
+        <ol class="thinking-list">
+          <template x-for="x in thinkingNewestFirst()" :key="x.ts + '-' + x.turn">
+            <li>
+              <span class="badge" x-text="'turn ' + x.turn"></span>
+              <span class="dim" x-text="$fmt.clock(x.ts)"></span>
+              <pre x-text="x.text"></pre>
+            </li>
+          </template>
+          <li class="empty" x-show="!thinking.length">No reasoning captured yet.</li>
+        </ol>
+      </div>
+    </section>
+
+    <!-- =========================== ⑤ COST =========================== -->
+    <div class="group"><h2>Cost</h2><div class="rule"></div>
+      <span class="dim">what this run is spending</span></div>
+    <section class="kpis">
+      <template x-for="k in costKpis()" :key="k.k">
+        <div class="kpi">
+          <div class="kpi-k" x-text="k.k"></div>
+          <div class="kpi-v" x-text="k.v"></div>
+          <div class="kpi-hint" x-show="k.hint" x-text="k.hint"></div>
+        </div>
+      </template>
+    </section>
+    <section class="grid split-21">
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Token usage</h2>
+          <div class="actions">
+            <div x-ref="tokenMetric"></div>
+            <span class="dim" x-text="tokenSummary()"></span>
+          </div>
+        </div>
+        <div class="chart-box"><div id="t-chart" x-ref="tokenChart" x-effect="drawTokens()"></div></div>
+        <h3>Per-turn detail</h3>
+        <div class="scroll-y">
+          <table class="kv">
+            <tr><th>Turn</th><th class="num">In</th><th class="num">Out</th><th class="num">Reason</th>
+              <th class="num">Cache</th><th class="num">Total</th><th class="num">Cost</th><th class="num">Steps</th></tr>
+            <template x-for="r in turnRows()" :key="r.turn">
+              <tr><td x-text="r.turn"></td><td class="num" x-text="r.input"></td><td class="num" x-text="r.output"></td>
+                <td class="num" x-text="r.reasoning"></td><td class="num" x-text="r.cache"></td>
+                <td class="num" x-text="r.total"></td><td class="num" x-text="r.cost"></td>
+                <td class="num" x-text="r.steps"></td></tr>
+            </template>
+          </table>
+          <p class="empty" x-show="!turnRows().length">
+            No LLM turns recorded yet — token usage appears after the first decision.
+          </p>
         </div>
       </div>
-      <ol id="steps" class="steps"></ol>
-    </div>
-    <div class="panel">
-      <div class="panel-head"><h2>Reasoning <span class="dim" id="think-count"></span></h2>
-        <span class="dim">newest first</span></div>
-      <ol id="t-thinking" class="thinking-list"></ol>
-    </div>
-  </section>
-
-  <!-- 3. Economy -->
-  <div class="group"><h2>Economy</h2><div class="rule"></div></div>
-  <section id="companies" class="kpis"></section>
-  <section class="panel">
-    <div class="panel-head">
-      <h2>Cash history</h2>
-      <div class="actions"><div id="cash-metric"></div></div>
-    </div>
-    <div class="chart-box" id="chart-box"><div id="chart"></div></div>
-    <div class="legend" id="cash-legend"></div>
-  </section>
-
-  <!-- 4. What just happened? -->
-  <div class="group"><h2>Activity</h2><div class="rule"></div>
-    <span class="dim" id="ev-total"></span></div>
-  <section class="panel">
-    <div class="panel-head">
-      <h2>Event stream <span class="dim">(newest first)</span></h2>
-      <div class="actions">
-        <input id="ev-search" class="filter" type="search" placeholder="Search events…" />
-        <button type="button" id="ev-pause" class="btn sm">Pause</button>
-        <label class="check"><input id="ev-raw" type="checkbox" /> <span>raw JSON</span></label>
+      <div class="panel">
+        <div class="panel-head"><h2>Runtime</h2></div>
+        <table class="kv">
+          <template x-for="[k, v] in runtimeRows()" :key="k">
+            <tr><td x-text="k"></td><td class="num" x-text="v"></td></tr>
+          </template>
+        </table>
+        <h3>Tool performance</h3>
+        <div class="scroll-y">
+          <table class="kv">
+            <tr><th>Tool</th><th class="num">Calls</th><th class="num">Failed</th><th class="num">Avg</th></tr>
+            <template x-for="r in toolRows()" :key="r.tool">
+              <tr><td x-text="r.tool"></td><td class="num" x-text="$fmt.int(r.calls)"></td>
+                <td class="num" :class="r.failures ? 'neg' : ''" x-text="$fmt.int(r.failures)"></td>
+                <td class="num" x-text="$fmt.duration(r.avgDurationMs)"></td></tr>
+            </template>
+          </table>
+          <p class="empty" x-show="!toolRows().length">No tool calls yet.</p>
+        </div>
       </div>
-    </div>
-    <div class="event-tools"><div class="filters" id="ev-filters"></div></div>
-    <ol id="events" class="events"></ol>
-  </section>
+    </section>
 
-  <!-- 5. Staged summaries: filled DURING the run (docs/DASHBOARD-UI.md §7) -->
-  <section class="panel">
-    <div class="panel-head"><h2>Staged summaries <span class="dim">阶段性总结</span></h2>
-      <span class="dim" id="stage-count"></span></div>
-    <ol id="stages" class="timeline"></ol>
-  </section>
-
-  <section class="panel">
-    <div class="panel-head">
-      <h2>Stage views <span class="dim">阶段性画面</span></h2>
-      <span class="dim">real minimap captured from the game
-        (<code>screenshot minimap</code>) — captured per construction stage</span>
-    </div>
-    <div class="stage-snaps" id="stage-snaps"></div>
-  </section>
-</main>
+    <!-- =========================== ⑥ DETAIL =========================== -->
+    <div class="group"><h2>Detail</h2><div class="rule"></div>
+      <span class="dim">raw log for debugging — collapsed by default so it does not bury the answers</span></div>
+    <section class="panel">
+      <details>
+        <summary class="detail-toggle">
+          Event stream — <span x-text="eventTotal() + ' collected'"></span>
+          <span class="dim" x-text="'· ' + visibleEvents().length + ' shown (newest first)'"></span>
+        </summary>
+        <div class="panel-head" style="margin-top:10px">
+          <div class="actions">
+            <input class="filter" type="search" placeholder="Search events…" x-model="evSearch" />
+            <button type="button" class="btn sm" @click="togglePause()" x-text="evPaused ? 'Resume' : 'Pause'"></button>
+            <label class="check"><input type="checkbox" x-model="evRaw" /><span>raw JSON</span></label>
+          </div>
+        </div>
+        <div class="event-tools">
+          <div class="filters">
+            <template x-for="c in categoryChips()" :key="c.cat">
+              <button type="button" class="chip" :class="{ off: c.off }" @click="toggleCategory(c.cat)">
+                <span x-text="c.label"></span><span class="n" x-text="c.n"></span>
+              </button>
+            </template>
+          </div>
+        </div>
+        <ol class="events">
+          <template x-for="ev in visibleEvents()" :key="ev.seq">
+            <li class="ev">
+              <span class="seq" x-text="ev.seq"></span>
+              <span class="tag" :class="$ui.categoryClass($ui.categoryOf(ev.kind))"
+                    x-text="$ui.categoryLabel($ui.categoryOf(ev.kind))"></span>
+              <span class="kind" x-text="ev.kind"></span>
+              <span class="brief" x-text="$ui.briefOf(ev)"></span>
+              <button class="raw-toggle" type="button" @click="toggleRaw($event)">json</button>
+              <pre class="raw" :hidden="!evRaw" x-text="JSON.stringify(ev.payload, null, 2)"></pre>
+            </li>
+          </template>
+          <li class="empty" x-show="!visibleEvents().length">Nothing matches the current filters.</li>
+        </ol>
+      </details>
+    </section>
+  </main>
+</div>
 
 <script src="/assets/js/common.js"></script>
-  <!-- uPlot must come before ucharts.js, which reads window.uPlot. -->
-  <script src="/assets/vendor/uplot/uPlot.iife.min.js"></script>
-  <script src="/assets/js/ucharts.js"></script>
-  <script src="/assets/js/charts.js"></script>
+<!-- uPlot must come before ucharts.js, which reads window.uPlot. -->
+<script src="/assets/vendor/uplot/uPlot.iife.min.js"></script>
+<script src="/assets/js/ucharts.js"></script>
+<script src="/assets/js/charts.js"></script>
 <script src="/assets/js/stage-view-ui.js"></script>
+<!-- Alpine must load before the bridge and the page component (they extend it). -->
+<script src="/assets/vendor/alpinejs/alpine.min.js" defer></script>
+<script src="/assets/js/alpine-bridge.js"></script>
+<script src="/assets/js/live-view.js"></script>
 <script src="/assets/js/live.js"></script>
 </body>
 </html>

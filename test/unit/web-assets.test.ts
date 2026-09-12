@@ -61,6 +61,9 @@ describe("front-end assets", () => {
 			const refs = [...html.matchAll(/(?:href|src)="\/([^"]+)"/g)].map((m) => m[1]!);
 			expect(refs.length, `${page} has no asset refs`).toBeGreaterThan(0);
 			for (const ref of refs) {
+				// In-app links point at a ROUTE, not a file: `/providers` is served by
+				// PAGES, so only asset refs must exist on disk.
+				if (Object.keys(PAGES).includes(`/${ref}`)) continue;
 				expect(existsSync(join(PUBLIC_DIR, ref)), `${page} -> /${ref}`).toBe(true);
 			}
 		}
@@ -197,8 +200,13 @@ describe("front-end assets", () => {
 
 	it("marks the scripted demo brain as not a real LLM", () => {
 		// A faux run must never be mistakable for a real one in the UI.
-		const src = read("assets/js/live.js");
+		// The wording lives in the Live view model now that the page renders
+		// declaratively, so the rule is asserted where it lives.
+		const src = read("assets/js/live-view.js");
 		expect(src).toMatch(/not a real LLM|scripted demo/i);
+		// And the console check in web-server.test.ts scans pages; keep the wording
+		// in exactly one place so it cannot drift.
+		expect(src).toContain("brainLabel");
 	});
 
 	it("keeps secrets out of the front end and out of local storage", () => {

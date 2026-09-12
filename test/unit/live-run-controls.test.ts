@@ -1,118 +1,264 @@
 /**
- * Unit tests — Live page run controls, through the real user path.
+ * Unit tests — Live page run controls, through the real code path.
  *
- * 职责: 点击真实按钮 → 断言**发出/没发出**什么请求、UI 如何反馈。
+ * 职责: 断言"点 Start agent 到底发出了什么请求"，以及一次都没发出时如何反馈。
+ *
  * 这个文件存在的唯一理由是一个真实事故（2026-09-11）:
- *
  *   `pnpm run cli --serve` 下点 "start agent" 报
  *   `Request failed: ReferenceError: Cannot access 'body' before initialization`，
- *   浏览器控制台**干净**。原因: live.js 的 post() 里
- *   `const body = await r.json()` 遮蔽了同名参数 `body`，
- *   `JSON.stringify(body)` 在参数求值阶段落进 TDZ 抛错 ——
- *   **在 fetch 之前就抛了，所以一个字节都没发出去**，
- *   异常又被 catch 成 toast。
+ *   浏览器控制台**干净**。原因: post() 里 `const body = await r.json()` 遮蔽了
+ *   同名参数 `body`，`JSON.stringify(body)` 在 fetch 之前就落进 TDZ ——
+ *   **一个字节都没发出去**，异常又被 catch 成 toast。
  *
- *   语法检查（node --check）、静态符号检查、curl 直打 API 全部通过，
- *   因为它们都没走"用户点击"这条路径。本文件补上这条路。
+ * 迁移到 Alpine 后（阶段 4）事件绑定改为 `@click`，DOM 上没有 `.onclick` 属性，
+ * 因此这里改为**直接驱动组件方法**（`startRun` / `pauseResume` / `stopRun`）。
+ * 这仍然覆盖那次事故的路径（请求构造 + 错误反馈），只是不再依赖手写的事件绑定，
+ * Alpine 自身的指令由真机 E2E 覆盖。
  *
- * 禁止: 断言具体 DOM 结构（会与样式改动耦合）；只断言"发了什么请求 + 如何反馈"。
+ * 禁止: 断言 Alpine 模板结构；只断言"发了什么请求 + 如何反馈"。
  */
 
 import { describe, expect, it } from "vitest";
-import { loadFrontend } from "./helpers/frontend-harness.js";
+import { readFileSync } from "node:fs";
+import vm from "node:vm";
+import { join } from "node:path";
+import { PUBLIC_DIR } from "../../src/web/server.js";
 
-const SCRIPTS = ["assets/js/common.js", "assets/js/charts.js", "assets/js/live.js"];
-
-/** Serve mode: /api/run exists and is idle. */
-function serveMode(status: Record<string, unknown> = { state: "idle", mode: "agent" }) {
-	return loadFrontend({
-		page: "live.html",
-		scripts: SCRIPTS,
-		respond: [
-			{ match: "/api/run/start", json: { state: "starting", mode: "agent" } },
-			{ match: "/api/run/stop", json: { state: "idle" } },
-			{ match: "/api/run/pause", json: { state: "paused" } },
-			{ match: "/api/run/resume", json: { state: "running" } },
-			{ match: "/api/run", json: status },
-		],
-	});
+interface FetchCall {
+	url: string;
+	method: string;
+	body?: string;
+}
+interface ToastCall {
+	msg: string;
+	kind?: string;
+}
+interface Component {
+	startRun(mode: string): Promise<boolean>;
+	pauseResume(): Promise<boolean>;
+	stopRun(): Promise<boolean>;
+	runState(): string;
+	runBusy(): boolean;
+	runControl: boolean;
+	run: unknown;
+	init?(): unknown;
+	[key: string]: unknown;
 }
 
-/** Watch-only mode: /api/run answers 404, so the controls stay hidden. */
-function noServeMode() {
-	return loadFrontend({
-		page: "live.html",
-		scripts: SCRIPTS,
-		respond: [{ match: "/api/run", status: 404, json: { error: "run control disabled" } }],
-	});
+/**
+ * Load the real Alpine component.
+ *
+ * `@click` bindings are Alpine's job, so the component factory is captured from
+ * `Alpine.data()` and driven directly — that is the same code the browser runs.
+ */
+function load(
+	opts: { run?: unknown; startStatus?: number; startError?: string; fetchThrows?: boolean } = {},
+) {
+	const fetchLog: FetchCall[] = [];
+	const toasts: ToastCall[] = [];
+	let registered: (() => Component) | null = null;
+
+	const respond = (url: string) => {
+		if (url.includes("/api/run/start")) {
+			return {
+				ok: (opts.startStatus ?? 200) < 400,
+				status: opts.startStatus ?? 200,
+				json: () =>
+					Promise.resolve(
+						opts.startError
+							? { error: opts.startError }
+							: { state: "starting", mode: "agent" },
+					),
+			};
+		}
+		if (url.includes("/api/run/pause")) {
+			return { ok: true, status: 200, json: () => Promise.resolve({ state: "paused" }) };
+		}
+		if (url.includes("/api/run/resume")) {
+			return { ok: true, status: 200, json: () => Promise.resolve({ state: "running" }) };
+		}
+		if (url.includes("/api/run/stop")) {
+			return { ok: true, status: 200, json: () => Promise.resolve({ state: "idle" }) };
+		}
+		return { ok: true, status: 200, json: () => Promise.resolve(opts.run ?? { state: "idle" }) };
+	};
+
+	const sandbox: Record<string, unknown> = {
+		document: {
+			getElementById: () => null,
+			addEventListener: (name: string, fn: () => void) => {
+				if (name === "alpine:init") fn();
+			},
+			querySelector: () => null,
+			querySelectorAll: () => [],
+			createElement: () => ({ style: {}, classList: { add: () => {} }, appendChild: () => {} }),
+			body: { appendChild: () => {} },
+			documentElement: {},
+		},
+		fetch: (url: string, init?: { method?: string; body?: unknown }) => {
+			fetchLog.push({
+				url: String(url),
+				method: String(init?.method ?? "GET").toUpperCase(),
+				...(init?.body === undefined ? {} : { body: String(init.body) }),
+			});
+			if (opts.fetchThrows) return Promise.reject(new Error("connection refused"));
+			return Promise.resolve(respond(String(url)));
+		},
+		console,
+		JSON,
+		Object,
+		Array,
+		Number,
+		String,
+		Math,
+		Date,
+		Set,
+		Map,
+		Intl,
+		Promise,
+		Error,
+		setInterval: () => 0,
+		clearInterval: () => {},
+		setTimeout: () => 0,
+		UI: {
+			$: () => null,
+			esc: (v: unknown) => String(v),
+			toast: (msg: string, kind?: string) => toasts.push({ msg: String(msg), ...(kind ? { kind } : {}) }),
+			renderNav: () => "",
+			renderNavInto: () => {},
+			segmented: () => {},
+			combobox: () => null,
+			confirmDialog: () => Promise.resolve(true),
+			getPref: (_k: string, d: unknown) => d,
+			setPref: () => {},
+			connectWs: () => ({ close: () => {} }),
+			scrollToEnd: () => false,
+			pickColor: () => "#5ac8fa",
+			fmtInt: (v: unknown) => String(v),
+			fmtMoney: (v: unknown) => `£${v}`,
+			fmtTok: (v: unknown) => `${v}t`,
+			fmtCost: (v: unknown) => `$${v}`,
+			fmtDuration: (v: unknown) => `${v}ms`,
+			fmtAgo: (v: unknown) => `${v}ago`,
+			fmtClock: (v: unknown) => `c${v}`,
+			fmtPct: (v: number, d?: number) => `${(v * 100).toFixed(d ?? 1)}%`,
+			fmtGameDate: (v: unknown) => String(v),
+			categoryOf: () => "other",
+			categoryLabel: (c: unknown) => String(c),
+			categoryClass: (c: unknown) => `t-${c}`,
+			categoryCounts: () => ({ counts: {}, total: 0, order: [] }),
+			eventMatches: () => true,
+			briefOf: () => "",
+		},
+		Charts: { line: () => {}, stackedBars: () => {}, stageMap: () => {} },
+		StageViewUI: { backdropStyle: () => "", overlayMarks: () => [], LEGEND: { ours: [], base: [] } },
+		LiveView: {
+			create: () =>
+				({
+					link: "", sessionId: null, date: null, companies: {}, recent: [], telemetry: null,
+					steps: [], thinking: [], stages: [], stageViews: [], run: null, runControl: false,
+					startedAt: null, evSearch: "", evHidden: new Set(), cashMetric: "money",
+					tokenMetric: "total", stepFilter: "all", stepRaw: false, evRaw: false, follow: true,
+					cashMetrics: [], tokenMetrics: [],
+					primaryCompany: () => ({}), resultKpis: () => [], costKpis: () => [],
+					companiesEmpty: () => true, cashSeries: () => [], cashLabels: () => [],
+					tokenSeries: () => [], tokenItems: () => [], visibleSteps: () => [],
+					categoryChips: () => [], visibleEvents: () => [], eventTotal: () => 0,
+					notice: () => ({ show: false, kind: "", title: "", body: "", canStart: false, hint: "" }),
+					// Reads `this.run` like the real model, so the pause/resume branch
+					// is driven by the component's actual state.
+					runState(this: { run?: { state?: string } }) {
+						return (this.run && this.run.state) || "idle";
+					},
+					runBusy(this: { run?: { state?: string } }) {
+						const st = (this.run && this.run.state) || "idle";
+						return st === "starting" || st === "stopping";
+					},
+					brainLabel: () => "",
+					nowSummary: () => ({ state: "idle", brain: "", lastDecision: "", intent: "", action: "—", turns: "" }),
+					stageList: () => [], stageViewsNewestFirst: () => [], toolRows: () => [],
+					runtimeRows: () => [], turnRows: () => [], thinkingNewestFirst: () => [],
+					toggleCategorySet: () => new Set(),
+				}) as never,
+			CASH_METRICS: [],
+			TOKEN_METRICS: [],
+		},
+		Alpine: {
+			data: (_name: string, factory: () => Component) => { registered = factory; },
+			magic: () => {},
+			store: () => {},
+		},
+	};
+	sandbox.window = sandbox;
+	sandbox.globalThis = sandbox;
+	vm.createContext(sandbox);
+	const src = readFileSync(join(PUBLIC_DIR, "assets/js/live.js"), "utf8");
+	vm.runInContext(src, sandbox);
+
+	const factory = registered as (() => Component) | null;
+	if (!factory) throw new Error("live.js did not register an Alpine component");
+	const component = factory();
+	// Wire the $refs/$nextTick the real component reads.
+	(component as Record<string, unknown>).$nextTick = (fn: () => void) => fn();
+	(component as Record<string, unknown>).$refs = {};
+	if (opts.run !== undefined) component.run = opts.run;
+	component.runControl = true;
+
+	return { component, fetchLog, toasts };
 }
 
-describe("Live run controls (real click path)", () => {
+describe("Live run controls (real code path)", () => {
 	it("start agent actually sends POST /api/run/start", async () => {
-		const h = serveMode();
-		await h.flush();
-		await h.click("run-start-agent");
-
-		expect(h.errorToast()).toBeNull();
-		const calls = h.callsTo("/api/run/start", "POST");
+		const { component, fetchLog, toasts } = load();
+		await component.startRun("agent");
+		const calls = fetchLog.filter((c) => c.url.includes("/api/run/start") && c.method === "POST");
 		expect(calls).toHaveLength(1);
 		expect(JSON.parse(calls[0]!.body ?? "{}")).toEqual({ mode: "agent" });
+		expect(toasts.filter((t) => t.kind === "err")).toEqual([]);
 	});
 
-	it("start watch sends the watch mode", async () => {
-		const h = serveMode();
-		await h.flush();
-		await h.click("run-start-watch");
-		expect(h.callsTo("/api/run/start", "POST")[0]?.body).toBe(JSON.stringify({ mode: "watch" }));
-	});
-
-	it("no click on any control ever reports a swallowed ReferenceError", async () => {
-		// The regression guard: this is the exact failure the user hit. Any TDZ /
-		// shadowing error in the request path lands here as an err toast.
-		const h = serveMode();
-		await h.flush();
-		for (const id of ["run-start-agent", "run-start-watch", "run-pause"]) {
-			await h.click(id);
-		}
-		const errs = h.toasts.filter((t) => t.kind === "err").map((t) => t.msg);
+	it("never reports a swallowed ReferenceError", async () => {
+		// The exact failure the user hit: any TDZ/shadowing bug in the request path
+		// would land here as an err toast.
+		const { component, toasts } = load();
+		await component.startRun("agent");
+		await component.startRun("watch");
+		await component.pauseResume();
+		const errs = toasts.filter((t) => t.kind === "err").map((t) => t.msg);
 		expect(errs.filter((m) => /ReferenceError|before initialization/.test(m))).toEqual([]);
 	});
 
+	it("start watch sends the watch mode", async () => {
+		const { component, fetchLog } = load();
+		await component.startRun("watch");
+		expect(fetchLog.find((c) => c.url.includes("/start"))!.body).toBe(JSON.stringify({ mode: "watch" }));
+	});
+
 	it("pause posts to /api/run/pause when running, resume when paused", async () => {
-		const running = serveMode({ state: "running" });
-		await running.flush();
-		await running.click("run-pause");
-		expect(running.callsTo("/api/run/pause", "POST")).toHaveLength(1);
+		const running = load({ run: { state: "running" } });
+		await running.component.pauseResume();
+		expect(running.fetchLog.filter((c) => c.url.includes("/api/run/pause"))).toHaveLength(1);
 
-		const paused = serveMode({ state: "paused" });
-		await paused.flush();
-		await paused.click("run-pause");
-		expect(paused.callsTo("/api/run/resume", "POST")).toHaveLength(1);
+		const paused = load({ run: { state: "paused" } });
+		await paused.component.pauseResume();
+		expect(paused.fetchLog.filter((c) => c.url.includes("/api/run/resume"))).toHaveLength(1);
 	});
 
-	it("surfaces a 409 from start instead of failing silently", async () => {
-		const h = loadFrontend({
-			page: "live.html",
-			scripts: SCRIPTS,
-			respond: [
-				{ match: "/api/run/start", status: 409, json: { error: "a run is already active" } },
-				{ match: "/api/run", json: { state: "running", mode: "agent" } },
-			],
+	it("surfaces a server-side refusal instead of failing silently", async () => {
+		const { component, toasts } = load({
+			startStatus: 409,
+			startError: "no provider/model configured",
 		});
-		await h.flush();
-		await h.click("run-start-agent");
-		expect(h.errorToast()).toContain("already active");
+		const ok = await component.startRun("agent");
+		expect(ok).toBe(false);
+		expect(toasts.some((t) => t.kind === "err" && t.msg.includes("no provider/model"))).toBe(true);
 	});
 
-	it("hides the control bar when there is no /api/run (watch-only run)", async () => {
-		const h = noServeMode();
-		await h.flush();
-		expect(h.el("run-controls").hidden).toBe(true);
-	});
-
-	it("exposes the control bar in serve mode", async () => {
-		const h = serveMode();
-		await h.flush();
-		expect(h.el("run-controls").hidden).toBe(false);
+	it("turns a dead server into a message, not an unhandled rejection", async () => {
+		// The request failing outright must still resolve, with a visible message:
+		// an uncaught rejection here would leave the button looking dead.
+		const { component, toasts } = load({ fetchThrows: true });
+		await expect(component.startRun("agent")).resolves.toBe(false);
+		expect(toasts.some((t) => t.kind === "err" && t.msg.includes("Request failed"))).toBe(true);
 	});
 });

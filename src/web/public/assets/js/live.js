@@ -1,781 +1,337 @@
-/* Live dashboard — game state + agent telemetry.
+/* Live page — Alpine component (WS wiring + imperative widgets).
  *
- * 职责: 消费 WS snapshot/event/telemetry/step/checkpoint 帧，按**信息紧迫性**分层渲染
- *   （见 docs/DASHBOARD-UI.md §0/§5.1）：
- *   1) KPI 条（在赚钱吗） 2) Agent（token/工具/步骤/思考） 3) 经济曲线 4) 事件流 5) 阶段总结
- * 事实来源: docs/DASHBOARD-UI.md（呈现契约）、docs/DASHBOARD-API.md §2/§4/§5（数据契约）。
- * 禁止: 在此页面写业务状态（服务端是真源）；不自造 WS 字段；密钥类信息一律不渲染。
+ * 职责: 只做三件事 ——
+ *   1) 接 WebSocket 帧，把数据灌进 view model（`live-view.js` 的纯逻辑）
+ *   2) 挂载必须命令式创建的部件：uPlot 图表、分段开关、分段筛选器
+ *   3) 暴露模板用到的少量辅助（阶段图 URL/缩放/标记、事件原始 JSON 开关）
+ *   所有"这是什么、该显示什么"的判断都在 live-view.js 里（可单测）。
+ *
+ * 为什么这样分层（docs/FRONTEND-DEPENDENCIES-AUDIT.md §3.4 阶段 4）:
+ *   迁移到 Alpine 的风险不是"指令写错"，而是**把业务规则弄丢**。
+ *   规则留在纯函数里，这一层退化为机械翻译，规则就不会悄悄消失。
+ *
+ * 事实来源: docs/DASHBOARD-UI.md §5.1、docs/DASHBOARD-API.md §4（WS 帧）。
+ * 禁止: 在此写展示规则（放 live-view.js）；不让图表/列表抢走页面滚动
+ *   （见 UI.scrollToEnd — `scrollIntoView` 会滚动整个文档）。
  */
 "use strict";
 (function () {
   const U = window.UI;
   const C = window.Charts;
-  const $ = U.$;
-  $("nav").innerHTML = U.renderNav("/");
 
+  /** Bounded feeds (mirrors live-view.js; the arrays are trimmed here on ingest). */
   const MAX_EVENTS = 600;
   const MAX_STEPS = 400;
 
-  const state = {
-    connected: false,
-    date: null,
-    companies: {},
-    recent: [],
-    totalEvents: 0,
-    telemetry: null,
-    steps: [],
-    thinking: [],
-    checkpoints: [],
-    stages: [],
-    startedAt: null,
-    run: null,          // supervisor status (serve mode only)
-    runControl: false,  // whether /api/run exists
-    paused: false,
-    evSearch: "",
-    stepFilter: "all",
-    hidden: new Set(U.getPref("ev.hidden", [])),
-    cashMetric: U.getPref("cash.metric", "money"),
-    tokenMetric: U.getPref("token.metric", "total"),
-  };
+  document.addEventListener("alpine:init", function () {
+    window.Alpine.data("live", function () {
+      // The pure model owns every derivation; this object adds IO and widgets.
+      const model = window.LiveView.create();
 
-  const elLink = $("g-link"), elDate = $("g-date"), elSession = $("g-session"),
-        elElapsed = $("g-elapsed"),
-        elKpis = $("kpis"), elStream = $("events"), elSteps = $("steps"),
-        elStepsCount = $("steps-count"), elStages = $("stages"), elStageCount = $("stage-count"),
-        elFilters = $("ev-filters"), elRaw = $("ev-raw"), elEvTotal = $("ev-total"),
-        elEvSearch = $("ev-search"), elEvPause = $("ev-pause"),
-        elAutoScroll = $("steps-autoscroll");
+      return {
+        ...model,
 
-  /* ------------------------------ WS ------------------------------ */
-  U.connectWs({
-    onLink: (text, cls) => {
-      elLink.textContent = text;
-      elLink.className = "pill " + (cls === "ok" ? "ok" : "bad");
-      state.connected = cls === "ok";
-      renderKpis();
-    },
-    onSnapshot: (snap) => {
-      state.date = snap.date || null;
-      state.companies = snap.companies || {};
-      state.totalEvents = snap.totalEvents || 0;
-      state.recent = (snap.recent || []).slice();
-      // Server owns the curve: seed from it so a reload of a long run still
-      // shows the full cash history instead of restarting from one point.
-      for (const [id, c] of Object.entries(snap.companies || {})) {
-        if (c && Array.isArray(c.history) && c.history.length) {
-          state.companies[id] = { ...(state.companies[id] || {}), ...c, history: c.history.slice() };
-        }
-      }
-      // Late subscribers/reloads get the staged-summary backlog here.
-      state.checkpoints = Array.isArray(snap.checkpoints) ? snap.checkpoints.slice() : [];
-      state.stages = Array.isArray(snap.stages) ? snap.stages.slice() : state.stages;
-      if (snap.sessionId) state.sessionId = snap.sessionId;
-      if (snap.telemetry) applyTelemetry(snap.telemetry, true);
-      if (snap.run) state.run = snap.run;
-      renderAll();
-      renderNotice();
-    },
-    onEvent: (ev) => {
-      if (!state.startedAt) state.startedAt = Date.now();
-      state.recent = [...state.recent, ev].slice(-MAX_EVENTS);
-      state.totalEvents = Math.max(state.totalEvents + 1, state.recent.length);
-      fold(ev);
-      if (state.paused) return; // user is reading; keep collecting but do not repaint
-      renderKpis();
-      renderCompanies();
-      renderChart();
-      renderEvents();
-    },
-    onTelemetry: (t) => { applyTelemetry(t, false); renderTelemetry(); renderNotice(); },
-    onStep: (step) => {
-      if (!state.startedAt) state.startedAt = Date.now();
-      pushStep(step);
-      renderSteps();
-    },
-    onCheckpoint: (cp) => {
-      state.checkpoints = [...state.checkpoints, cp];
-      renderStages();
-    },
-    onRun: (r) => { state.run = r; renderRunControls(); renderNotice(); },
-    onStage: (v) => { state.stages = [...state.stages, v].slice(-24); renderStageViews(); },
-    onStageImage: (info) => {
-      // A real captured minimap arrived for one stage; swap it in.
-      const i = Number(info && info.index);
-      if (Number.isFinite(i) && state.stages[i]) state.stages[i].image = info.file;
-      renderStageViews();
-    },
-  });
+        /* ------------------------------ state ------------------------------ */
+        linkOk: false,
+        evPaused: false,
 
-  /* --------------------------- run controls --------------------------- */
-  /* Present only in --serve mode; the buttons drive /api/run/* so the user can
-     start/stop/pause a run without restarting the process
-     (docs/AGENT-LOOP-AND-CONTROL.md §3). */
-  const elRunBox = $("run-controls"), elRunState = $("run-state");
+        /* ------------------------------- init ------------------------------- */
+        init() {
+          U.renderNavInto("nav", "/");
+          // Persisted view preferences.
+          this.cashMetric = U.getPref("cash.metric", "money");
+          this.tokenMetric = U.getPref("token.metric", "total");
+          this.follow = U.getPref("steps.follow", true);
+          this.evHidden = new Set(U.getPref("ev.hidden", []));
 
-  /**
-   * POST a run-control command and render the resulting state.
-   *
-   * 注意: 请求体变量名**不能**叫 `body` —— 它会遮蔽同名的 `payload` 参数并落进
-   *   TDZ，于是 `JSON.stringify` 在 fetch 之前就抛 ReferenceError，
-   *   按钮一个字节都发不出去（2026-09-11 事故，见 live-run-controls.test.ts）。
-   */
-  async function post(path, payload) {
-    try {
-      const r = await fetch(path, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(payload || {}),
-      });
-      const reply = await r.json().catch(() => ({}));
-      if (!r.ok) { U.toast(reply.error || `HTTP ${r.status}`, "err", 7000); return false; }
-      state.run = reply;
-      renderRunControls();
-      renderNotice();
-      return true;
-    } catch (e) {
-      U.toast("Request failed: " + e, "err");
-      return false;
-    }
-  }
+          this.$nextTick(() => {
+            // Segmented controls are created imperatively (shared with other pages).
+            if (this.$refs.cashMetric) {
+              U.segmented(this.$refs.cashMetric, {
+                options: window.LiveView.CASH_METRICS,
+                value: () => this.cashMetric,
+                onChange: (id) => { this.cashMetric = id; U.setPref("cash.metric", id); this.drawCash(); },
+              });
+            }
+            if (this.$refs.tokenMetric) {
+              U.segmented(this.$refs.tokenMetric, {
+                options: window.LiveView.TOKEN_METRICS,
+                value: () => this.tokenMetric,
+                onChange: (id) => { this.tokenMetric = id; U.setPref("token.metric", id); this.drawTokens(); },
+              });
+            }
+            if (this.$refs.stepFilter) {
+              U.segmented(this.$refs.stepFilter, {
+                options: [
+                  { id: "all", label: "All" },
+                  { id: "message", label: "LLM" },
+                  { id: "tool", label: "Tools" },
+                  { id: "failed", label: "Failures" },
+                ],
+                value: () => this.stepFilter,
+                onChange: (id) => { this.stepFilter = id; this.afterSteps(); },
+              });
+            }
+          });
 
-  function renderRunControls() {
-    if (!state.runControl) { elRunBox.hidden = true; return; }
-    elRunBox.hidden = false;
-    const st = (state.run && state.run.state) || "idle";
-    elRunState.textContent = st + (state.run && state.run.mode ? ` · ${state.run.mode}` : "");
-    elRunState.className = "pill " + (st === "running" ? "ok" : st === "paused" ? "idle" : st === "idle" ? "idle" : "bad");
-    const busy = st === "starting" || st === "stopping";
-    $("run-start-agent").disabled = busy || st !== "idle";
-    $("run-start-watch").disabled = busy || st !== "idle";
-    $("run-stop").disabled = busy || st === "idle";
-    $("run-pause").disabled = busy || st === "idle";
-    $("run-pause").textContent = st === "paused" ? "Resume" : "Pause";
-  }
+          this.connect();
+          this.loadRun();
+          // Elapsed time must tick without a busy repaint loop.
+          this.elapsedTimer = setInterval(() => { if (this.startedAt) this.elapsed = U.fmtDuration(Date.now() - this.startedAt); }, 5000);
+        },
 
-  $("run-start-agent").onclick = () => post("/api/run/start", { mode: "agent" });
-  $("run-start-watch").onclick = () => post("/api/run/start", { mode: "watch" });
-  $("run-stop").onclick = async () => {
-    const ok = await U.confirmDialog({
-      title: "Stop the run?",
-      body: "The game will shut down and the session is finalised as aborted. Recorded data is kept.",
-      confirm: "Stop run",
-    });
-    if (ok) post("/api/run/stop");
-  };
-  $("run-pause").onclick = () => {
-    const st = (state.run && state.run.state) || "idle";
-    post(st === "paused" ? "/api/run/resume" : "/api/run/pause");
-  };
+        /* ------------------------------- run ------------------------------- */
+        async loadRun() {
+          try {
+            const r = await fetch("/api/run");
+            if (r.ok) {
+              this.runControl = true;
+              this.run = await r.json();
+            }
+          } catch {
+            /* run control disabled */
+          }
+        },
 
-  /** Explain WHY there is no agent telemetry, and offer the action to take. */
-  function renderNotice() {
-    const el = $("notice");
-    const t = state.telemetry;
-    const brain = t && t.brain;
-    const hasBrain = Boolean(brain && brain.kind === "real");
-    const runState = (state.run && state.run.state) || "idle";
-    const err = state.run && state.run.error;
+        async post(path, payload) {
+          try {
+            const r = await fetch(path, {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify(payload || {}),
+            });
+            const reply = await r.json().catch(() => ({}));
+            if (!r.ok) { U.toast(reply.error || `HTTP ${r.status}`, "err", 7000); return false; }
+            this.run = reply;
+            return true;
+          } catch (e) {
+            U.toast("Request failed: " + e, "err");
+            return false;
+          }
+        },
 
-    if (err) {
-      el.hidden = false;
-      el.className = "notice err";
-      el.innerHTML = `<div class="notice-body"><strong>Could not start</strong><br>${U.esc(err)}</div>`;
-      return;
-    }
-    if (hasBrain) { el.hidden = true; return; }
+        startRun(mode) { return this.post("/api/run/start", { mode }); },
+        pauseResume() { return this.post(this.runState() === "paused" ? "/api/run/resume" : "/api/run/pause"); },
+        async stopRun() {
+          const ok = await U.confirmDialog({
+            title: "Stop the run?",
+            body: "The game will shut down and the session is finalised as aborted. Recorded data is kept.",
+            confirm: "Stop run",
+          });
+          if (ok) await this.post("/api/run/stop");
+        },
 
-    // No real LLM in this run: say so plainly instead of showing empty panels.
-    el.hidden = false;
-    el.className = "notice";
-    const isServe = state.runControl;
-    const idle = isServe && runState === "idle";
-    el.innerHTML = `<div class="notice-body">
-      <strong>${idle ? "No run is active" : "This run has no LLM"}</strong><br>
-      ${idle
-        ? "Start a run to see the agent's decisions, token usage and steps."
-        : "Token usage and LLM steps only exist when an agent is driving. This run only observes the built-in game AI, so those panels stay empty by design."}
-      ${isServe ? `<div class="notice-actions">
-        <button type="button" class="btn sm primary" id="notice-start">Start agent</button>
-        <a class="btn sm" href="/providers">Configure provider</a>
-      </div>` : `<div class="notice-actions"><span class="dim">Restart with <code>pnpm run cli --serve</code> to control runs from here.</span></div>`}
-    </div>`;
-  }
+        /* -------------------------------- ws -------------------------------- */
+        connect() {
+          const handlers = {
+            // connectWs reports the link state itself; no polling needed.
+            onLink: (text, cls) => { this.link = text; this.linkOk = cls === "ok"; },
+            onSnapshot: (s) => {
+              this.date = s.date;
+              this.companies = s.companies || {};
+              this.recent = s.recent || [];
+              this.totalEvents = s.totalEvents;
+            },
+            onEvent: (ev) => {
+              if (this.evPaused) return;
+              this.recent = [...this.recent, ev].slice(-MAX_EVENTS);
+              this.fold(ev);
+            },
+            onTelemetry: (t) => this.applyTelemetry(t, true),
+            onStep: (s) => { this.pushStep(s); this.afterSteps(); },
+            onCheckpoint: (cp) => { this.stages = [...this.stages, cp]; },
+            onRun: (r) => { this.run = r; },
 
-  function applyTelemetry(t, replace) {
-    state.telemetry = t;
-    if (Array.isArray(t.steps)) state.steps = replace ? t.steps.slice() : mergeSteps(state.steps, t.steps);
-    state.thinking = Array.isArray(t.recentThinking) ? t.recentThinking : [];
-  }
+            onStage: (v) => {
+              this.stageViews = [...this.stageViews, v].slice(-24);
+              this.$nextTick(() => this.drawStageFallbacks());
+            },
+            onStageImage: (info) => {
+              // A real captured minimap arrived for one stage; swap it in.
+              const i = Number(info && info.index);
+              const hit = this.stageViews.find((x) => x.index === i);
+              if (hit) hit.image = info.file;
+            },
+          };
+          return U.connectWs(handlers);
+        },
 
-  /** Telemetry snapshots repeat the tail of the step list; keep one copy of each. */
-  function mergeSteps(local, incoming) {
-    const seen = new Set(local.map((s) => s && s.id));
-    const merged = local.slice();
-    for (const s of incoming) {
-      if (s && !seen.has(s.id)) { merged.push(s); seen.add(s.id); }
-    }
-    return merged.slice(-MAX_STEPS);
-  }
+        /** Fold one event into the local company/date mirror (live view only). */
+        fold(ev) {
+          const p = ev.payload || {};
+          if (ev.kind === "date") this.date = p;
+          else if (ev.kind === "company_new") {
+            this.companies[p.id] = this.companies[p.id] || { info: null, economy: null, stats: null, history: [] };
+          } else if (ev.kind === "company_info") {
+            const c = (this.companies[p.id] = this.companies[p.id] || { economy: null, stats: null, history: [] });
+            c.info = p;
+          } else if (ev.kind === "company_stats") {
+            const c = (this.companies[p.id] = this.companies[p.id] || { info: null, economy: null, history: [] });
+            c.stats = p;
+          } else if (ev.kind === "company_economy") {
+            const c = (this.companies[p.id] = this.companies[p.id] || { info: null, stats: null, history: [] });
+            c.economy = p;
+            if (p.money !== undefined) {
+              // Mirror the server's point shape so seeding and live appends agree.
+              c.history = [...(c.history || []), {
+                at: ev.ts,
+                year: this.date ? this.date.year : null,
+                month: this.date ? this.date.month : null,
+                money: Number(p.money),
+                loan: Number(p.loan || 0),
+                income: Number(p.income || 0),
+              }].slice(-400);
+            }
+          }
+        },
 
-  function pushStep(step) {
-    if (!step || typeof step !== "object") return;
-    if (state.steps.some((s) => s && s.id === step.id)) return;
-    state.steps = [...state.steps, step].slice(-MAX_STEPS);
-  }
+        applyTelemetry(t, replace) {
+          this.telemetry = t;
+          if (Array.isArray(t.steps)) {
+            this.steps = replace ? t.steps.slice() : this.mergeSteps(this.steps, t.steps);
+          }
+          this.thinking = Array.isArray(t.recentThinking) ? t.recentThinking : [];
+          this.$nextTick(() => { this.afterSteps(); });
+        },
 
-  function fold(ev) {
-    const p = ev.payload || {};
-    if (ev.kind === "date") state.date = p;
-    else if (ev.kind === "company_new") {
-      state.companies[p.id] = state.companies[p.id] || { info: null, economy: null, stats: null, history: [] };
-    } else if (ev.kind === "company_info") {
-      const c = (state.companies[p.id] = state.companies[p.id] || { economy: null, stats: null, history: [] });
-      c.info = p;
-    } else if (ev.kind === "company_stats") {
-      const c = (state.companies[p.id] = state.companies[p.id] || { info: null, economy: null, history: [] });
-      c.stats = p;
-    } else if (ev.kind === "company_economy") {
-      const c = (state.companies[p.id] = state.companies[p.id] || { info: null, stats: null, history: [] });
-      c.economy = p;
-      if (p.money !== undefined) {
-        // Mirror the server's point shape so seeding and live appends agree.
-        c.history = [...(c.history || []), {
-          at: ev.ts,
-          year: state.date ? state.date.year : null,
-          month: state.date ? state.date.month : null,
-          money: Number(p.money),
-          loan: Number(p.loan || 0),
-          income: Number(p.income || 0),
-        }].slice(-400);
-      }
-    }
-  }
+        /** Telemetry snapshots repeat the tail of the step list; keep one of each. */
+        mergeSteps(local, incoming) {
+          const seen = new Set(local.map((s) => s && s.id));
+          const merged = local.slice();
+          for (const s of incoming) {
+            if (s && !seen.has(s.id)) { merged.push(s); seen.add(s.id); }
+          }
+          return merged.slice(-MAX_STEPS);
+        },
 
-  /* ---------------------------- render ---------------------------- */
-  function renderAll() {
-    renderHeader();
-    renderStageViews();
-    renderKpis();
-    renderCompanies();
-    renderChart();
-    renderEvents();
-    renderTelemetry();
-    renderSteps();
-    renderStages();
-  }
+        pushStep(step) {
+          if (!step || typeof step !== "object") return;
+          if (this.steps.some((s) => s && s.id === step.id)) return;
+          this.steps = [...this.steps, step].slice(-MAX_STEPS);
+        },
 
-  function primaryCompany() {
-    const ids = Object.keys(state.companies || {});
-    if (!ids.length) return {};
-    // The agent plays company 0; fall back to the first company seen.
-    return state.companies["0"] || state.companies[ids[0]] || {};
-  }
+        /** Follow the newest step INSIDE the list; never move the page. */
+        afterSteps() {
+          this.$nextTick(() => {
+            if (this.follow && this.$refs.stepList) U.scrollToEnd(this.$refs.stepList);
+          });
+        },
 
-  function renderHeader() {
-    elDate.textContent = state.date ? U.fmtGameDate(state.date) : "—";
-    elSession.textContent = (state.telemetry && state.telemetry.sessionId) || state.sessionId || "—";
-    // Mode/brain is surfaced by the Agent panel heading and the notice banner;
-    // the header only carries the run-state pill now.
-    if (state.startedAt) elElapsed.textContent = U.fmtDuration(Date.now() - state.startedAt);
-  }
+        /* ---------------------------- widgets ---------------------------- */
+        /**
+         * Draw the cash curve.
+         *
+         * 关键: 响应式读取必须发生在 effect 的同步作用域内，否则 Alpine 追踪不到
+         * 依赖、数据异步到达后不会重画（真机上表现为"图表一直空着"）。
+         * 所以这里先把要画的数据读出来，再排队绘制。
+         */
+        drawCash() {
+          const series = this.cashSeries();
+          const labels = this.cashLabels();
+          const el = this.$refs.cashChart;
+          if (!el) return;
+          this.$nextTick(() => {
+            if (!this.$refs.cashChart) return;
+            C.line(el, { series, labels, format: U.fmtMoney, area: series.length === 1, height: 260 });
+          });
+        },
 
-  /** KPI strip = the "is it working / is it making money" answer (docs §5.1). */
-  function renderKpis() {
-    const c = primaryCompany();
-    const e = c.economy || {};
-    const s = c.stats || {};
-    const hist = (c.history || []);
-    const t = state.telemetry;
-    const u = (t && t.usage && t.usage.total) || {};
+        /** Draw the per-turn composition chart (same synchronous-read rule). */
+        drawTokens() {
+          const items = this.tokenItems();
+          const series = this.tokenSeries();
+          const el = this.$refs.tokenChart;
+          if (!el) return;
+          this.$nextTick(() => {
+            if (!this.$refs.tokenChart) return;
+            C.stackedBars(el, { items, series, format: this.tokenMetric === "cost" ? U.fmtCost : U.fmtTok, height: 220, maxBars: 24 });
+          });
+        },
 
-    const seriesOf = (key) => hist.map((h) => Number(h[key])).filter((v) => Number.isFinite(v));
-    const moneySeries = seriesOf("money");
-    const incomeSeries = seriesOf("income");
-    const delta = (arr) => (arr.length > 1 ? arr[arr.length - 1] - arr[arr.length - 2] : undefined);
+        /** Stages without a captured PNG fall back to the schematic diagram. */
+        drawStageFallbacks() {
+          const box = document.querySelector(".stage-snaps");
+          if (!box) return;
+          for (const cv of box.querySelectorAll("canvas.snap-fallback")) {
+            const key = cv.getAttribute("data-stage");
+            const view = this.stageViews.find((v) => this.stageKey(v) === key);
+            if (view && window.Charts && window.Charts.stageMap) window.Charts.stageMap(cv, view);
+          }
+        },
 
-    const tiles = [
-      {
-        label: "Cash",
-        value: U.fmtMoney(e.money),
-        delta: delta(moneySeries),
-        deltaFmt: (v) => U.fmtMoney(v),
-        spark: moneySeries.slice(-40),
-        color: "#ffb347",
-      },
-      {
-        label: "Income / yr",
-        value: U.fmtMoney(e.income),
-        delta: delta(incomeSeries),
-        deltaFmt: (v) => U.fmtMoney(v),
-        spark: incomeSeries.slice(-40),
-        color: "#7bc96f",
-      },
-      { label: "Company value", value: U.fmtMoney(e.companyValue) },
-      { label: "Loan", value: U.fmtMoney(e.loan) },
-      {
-        label: "Fleet",
-        value: `${U.fmtInt(s.vehicles ?? 0)} <span class="dim">veh</span>`,
-        hint: `${U.fmtInt(s.stations ?? 0)} stations`,
-      },
-      {
-        label: "Tokens used",
-        value: U.fmtTok(u.totalTokens),
-        hint: `${U.fmtCost(u.costTotal)} · ${U.fmtInt((t && t.totals && t.totals.toolCalls) || 0)} tool calls`,
-      },
-    ];
-    elKpis.innerHTML = tiles.map((k) => U.kpi(k)).join("");
-    // Aligned to the tile order above so each tile gets its own trend.
-    if (hist.length > 1) {
-      U.paintSparks(elKpis, [
-        { data: moneySeries.slice(-40), color: "#ffb347" },
-        { data: incomeSeries.slice(-40), color: "#7bc96f" },
-      ]);
-    }
-  }
+        /* --------------------- stage view helpers --------------------- */
+        stageKey(v) {
+          return `${v.gameDate || ""}-${v.phase || ""}-${v.index ?? ""}`;
+        },
+        stageImageUrl(v) {
+          if (!v.image) return "";
+          const sid = (this.telemetry && this.telemetry.sessionId) || this.sessionId;
+          if (!sid) return "";
+          return `/api/sessions/${encodeURIComponent(sid)}/stages/${encodeURIComponent(v.image)}`;
+        },
+        stageBackdrop(v) {
+          const url = this.stageImageUrl(v);
+          if (!url || !window.StageViewUI) return "";
+          return window.StageViewUI.backdropStyle(url, v.focus);
+        },
+        stageMarks(v) {
+          return window.StageViewUI ? window.StageViewUI.overlayMarks(v) : [];
+        },
+        stageZoom(v) {
+          return v.focus ? `${v.focus.scale.toFixed(1)}×` : "full";
+        },
+        stageFleet(v) {
+          const veh = (v.companies || []).reduce((a, c) => a + (c.vehicles || 0), 0);
+          const stn = (v.companies || []).reduce((a, c) => a + (c.stations || 0), 0);
+          return `${U.fmtInt(veh)} veh · ${U.fmtInt(stn)} stn`;
+        },
+        stageMoney(v) {
+          return U.fmtMoney(v.companies && v.companies[0] ? v.companies[0].money : 0);
+        },
+        get legendOurs() { return window.StageViewUI ? window.StageViewUI.LEGEND.ours : []; },
+        get legendBase() { return window.StageViewUI ? window.StageViewUI.LEGEND.base : []; },
 
-  function renderCompanies() {
-    const ids = Object.keys(state.companies || {});
-    if (!ids.length) {
-      $("companies").innerHTML = '<div class="empty">No company yet — the observer starts an AI and watches its economy.</div>';
-      return;
-    }
-    $("companies").innerHTML = ids.map((id) => {
-      const c = state.companies[id] || {};
-      const i = c.info || { name: `Company ${id}`, isAi: false };
-      const e = c.economy || {};
-      const s = c.stats || {};
-      const neg = Number(e.money || 0) < 0;
-      return `<div class="kpi">
-        <div class="kpi-k ccard-head">
-          <span>${U.esc(i.name || `Company ${id}`)} <span class="dim">#${U.esc(id)}</span></span>
-          <span class="tag ${i.isAi ? "tag-script" : "tag-company"}">${i.isAi ? "AI" : "human"}</span>
-        </div>
-        <div class="kpi-v ${neg ? "neg" : "pos"}">${U.fmtMoney(e.money)}</div>
-        <div class="kpi-hint">value ${U.fmtMoney(e.companyValue)} · loan ${U.fmtMoney(e.loan)}</div>
-        <div class="kpi-hint">${U.fmtInt(s.vehicles ?? "—")} veh · ${U.fmtInt(s.stations ?? "—")} stn
-          ${i.manager ? ` · ${U.esc(i.manager)}` : ""}</div>
-      </div>`;
-    }).join("");
-  }
-
-  /** Axis label for a history point ("1950-02", "—" before the first date). */
-  function pointLabel(hist) {
-    return hist.map((h) => (h.year == null
-      ? "—"
-      : `${h.year}-${String(h.month ?? 1).padStart(2, "0")}`));
-  }
-
-  function cashSeries() {
-    const ids = Object.keys(state.companies || {});
-    return ids.map((id, idx) => ({
-      name: (state.companies[id] || {}).info ? state.companies[id].info.name : `Company ${id}`,
-      color: U.pickColor(idx),
-      data: ((state.companies[id] || {}).history || []).map((h) => Number(h[state.cashMetric] || 0)),
-    })).filter((s) => s.data.length);
-  }
-
-  function renderChart() {
-    const box = $("chart");
-    const series = cashSeries();
-    const labels = pointLabel((Object.values(state.companies)[0] || {}).history || []);
-    C.line(box, {
-      series,
-      labels,
-      format: U.fmtMoney,
-      area: series.length === 1,
-      height: 260,
-    });
-    // uPlot's legend renders the colour key + live values itself, so this only
-    // annotates what it cannot know: which metric the axis is showing.
-    $("cash-legend").innerHTML =
-      `<span class="lg dim">showing ${U.esc(state.cashMetric)}</span>`;
-  }
-
-  function renderEvents() {
-    const { counts, order } = U.categoryCounts(state.recent);
-    const visible = order.filter((c) => !state.hidden.has(c));
-    if (elFilters.childElementCount !== order.length) {
-      elFilters.innerHTML = order.map((c) =>
-        `<button type="button" class="chip ${state.hidden.has(c) ? "off" : ""}" data-cat="${U.esc(c)}">` +
-        `${U.esc(U.categoryLabel(c))}<span class="n">${counts[c]}</span></button>`).join("");
-      for (const b of elFilters.querySelectorAll(".chip")) {
-        b.onclick = () => {
-          const cat = b.getAttribute("data-cat");
-          state.hidden.has(cat) ? state.hidden.delete(cat) : state.hidden.add(cat);
-          U.setPref("ev.hidden", [...state.hidden]);
-          b.classList.toggle("off", state.hidden.has(cat));
-          renderEvents();
-        };
-      }
-    } else {
-      for (const b of elFilters.querySelectorAll(".chip")) {
-        const cat = b.getAttribute("data-cat");
-        const n = b.querySelector(".n");
-        if (n) n.textContent = String(counts[cat] || 0);
-      }
-    }
-
-    elEvTotal.textContent = `${U.fmtInt(counts.total)} collected · ${visible.length} categories shown`;
-    const shown = state.recent
-      .filter((e) => !state.hidden.has(U.categoryOf(e.kind)))
-      .filter((e) => U.eventMatches(e, state.evSearch))
-      .slice(-160)
-      .reverse(); // newest first: the Live page is a "what just happened" feed
-    elStream.innerHTML = shown.map(renderEvent).join("") ||
-      `<li class="empty">Nothing matches the current filters.</li>`;
-    bindRawToggles(elStream);
-  }
-
-  function renderEvent(ev) {
-    const cat = U.categoryOf(ev.kind);
-    return `<li class="ev">
-      <span class="seq">${U.esc(ev.seq)}</span>
-      <span class="tag ${U.categoryClass(cat)}">${U.esc(U.categoryLabel(cat))}</span>
-      <span class="kind">${U.esc(ev.kind)}</span>
-      <span class="brief">${U.esc(U.briefOf(ev))}</span>
-      <button class="raw-toggle" type="button">json</button>
-      <pre class="raw" ${elRaw.checked ? "" : "hidden"}>${U.esc(JSON.stringify(ev.payload, null, 2))}</pre>
-    </li>`;
-  }
-
-  function bindRawToggles(root) {
-    for (const b of root.querySelectorAll(".raw-toggle")) {
-      b.onclick = () => {
-        const pre = b.parentElement.querySelector(".raw");
-        if (pre) pre.hidden = !pre.hidden;
+        /* --------------------------- small bits --------------------------- */
+        hasHistory(metric) {
+          return Boolean(metric) && this.cashSeries().some((s) => s.data.length > 1);
+        },
+        brainIsReal() {
+          const b = this.telemetry && this.telemetry.brain;
+          return Boolean(b && b.kind === "real");
+        },
+        latestPhase() {
+          const last = this.stages.length ? this.stages[this.stages.length - 1] : null;
+          return (last && last.note ? String(last.note).split(":")[0].slice(0, 40) : "—");
+        },
+        tokenSummary() {
+          const rows = this.turnRows();
+          if (!rows.length) return "";
+          const isCost = this.tokenMetric === "cost";
+          const total = rows.reduce((a, r) => a + Number(this.rawTurnTotal(r.turn, isCost)), 0);
+          return isCost
+            ? `${U.fmtCost(total)} across ${rows.length} turns`
+            : `${rows.length} turn${rows.length === 1 ? "" : "s"} · ${U.fmtTok(total)} total`;
+        },
+        /** Raw per-turn value for the summary line. */
+        rawTurnTotal(turn, isCost) {
+          const t = this.telemetry;
+          const row = ((t && t.usage && t.usage.byTurn) || []).find((r) => r.turn === turn);
+          if (!row || !row.usage) return 0;
+          return isCost ? Number(row.usage.costTotal) || 0 : Number(row.usage.totalTokens) || 0;
+        },
+        setPref(key, value) { U.setPref(key, value); },
+        /** Flip an event category and remember the choice (model owns the set). */
+        toggleCategory(cat) {
+          this.evHidden = this.toggleCategorySet(cat);
+          U.setPref("ev.hidden", [...this.evHidden]);
+        },
+        toggleRaw(ev) {
+          const pre = ev.currentTarget.parentElement.querySelector(".raw");
+          if (pre) pre.hidden = !pre.hidden;
+        },
+        togglePause() { this.evPaused = !this.evPaused; },
+        get elapsed() { return this.startedAt ? U.fmtDuration(Date.now() - this.startedAt) : "—"; },
       };
-    }
-  }
-
-  function renderTelemetry() {
-    const t = state.telemetry;
-    const brain = $("t-brain");
-    if (!t) {
-      brain.textContent = "no brain — observer only (run with --agent to see token/step telemetry)";
-      $("t-usage").innerHTML =
-        `<p class="empty">Watch mode observes the game only — no LLM telemetry.` +
-        ` Start with <code>--agent</code> to see token usage, reasoning and steps.</p>`;
-      $("t-tools").innerHTML = "";
-      $("t-thinking").innerHTML = "";
-      $("t-turn-table").innerHTML = "";
-      $("token-summary").textContent = "";
-      $("think-count").textContent = "";
-      C.stackedBars($("t-chart"), { items: [], series: [], height: 220 });
-      $("t-legend").innerHTML = "";
-      return;
-    }
-    const b = t.brain || {};
-    brain.textContent = b.kind
-      ? `${b.kind === "real" ? "real LLM" : "⚠ scripted demo (not a real LLM)"} · ${b.provider || "—"} / ${b.model || "—"}`
-      : "not configured";
-
-    const u = (t.usage && t.usage.total) || {};
-    const totals = t.totals || {};
-    const failureRate = totals.toolCalls ? totals.toolFailures / totals.toolCalls : 0;
-    const rows = [
-      ["Turns", `${U.fmtInt(t.activeTurn || 0)} active / ${U.fmtInt(t.turns || 0)} total`],
-      ["Decisions", U.fmtInt(totals.decisions)],
-      ["Tool calls", `${U.fmtInt(totals.toolCalls)}`],
-      ["Tool failures", `${U.fmtInt(totals.toolFailures)} <span class="dim">(${U.fmtPct(failureRate)})</span>`],
-      ["Input tokens", U.fmtTok(u.input)],
-      ["Output tokens", U.fmtTok(u.output)],
-      ["Reasoning", U.fmtTok(u.reasoning)],
-      ["Cache r/w", `${U.fmtTok(u.cacheRead)} / ${U.fmtTok(u.cacheWrite)}`],
-      ["Total tokens", U.fmtTok(u.totalTokens)],
-      ["Cost", U.fmtCost(u.costTotal)],
-      ["Last activity", U.fmtAgo(t.lastActivityAt)],
-    ];
-    $("t-usage").innerHTML = `<table class="kv">${rows
-      .map(([k, v]) => `<tr><td>${U.esc(k)}</td><td class="num">${v}</td></tr>`).join("")}</table>`;
-
-    renderTokenChart();
-
-    const byTool = (t.usage && t.usage.byTool) || [];
-    $("t-tools").innerHTML = byTool.length
-      ? `<table class="kv"><tr><th>Tool</th><th class="num">Calls</th><th class="num">Failed</th><th class="num">Avg</th></tr>` +
-        byTool.map((r) => `<tr><td>${U.esc(r.tool)}</td><td class="num">${U.fmtInt(r.calls)}</td>
-          <td class="num ${r.failures ? "neg" : ""}">${U.fmtInt(r.failures)}</td>
-          <td class="num">${U.fmtDuration(r.avgDurationMs)}</td></tr>`).join("") + `</table>`
-      : `<p class="empty">No tool calls yet.</p>`;
-
-    const th = state.thinking || [];
-    $("think-count").textContent = th.length ? `(${th.length})` : "";
-    $("t-thinking").innerHTML = th.length
-      ? th.slice().reverse().map((x) =>
-          `<li><span class="badge">turn ${U.esc(x.turn)}</span> <span class="dim">${U.esc(U.fmtClock(x.ts))}</span>
-            <pre>${U.esc(x.text)}</pre></li>`).join("")
-      : `<li class="empty">No reasoning captured yet.</li>`;
-  }
-
-  /** Read a CSS custom property (single place: charts read colours too). */
-  function cssColor(name, fallback) {
-    const v = getComputedStyle(document.documentElement).getPropertyValue(name);
-    return (v && v.trim()) || fallback;
-  }
-
-  /* Metric switch for the per-turn chart (tokens vs cost) — view pref (docs §6). */
-  const TOKEN_METRICS = [
-    { id: "total", label: "Tokens", hint: "input / output / reasoning per turn" },
-    { id: "cost", label: "Cost", hint: "spend per turn" },
-  ];
-  U.segmented($("token-metric"), {
-    options: TOKEN_METRICS,
-    value: () => state.tokenMetric,
-    onChange: (id) => { state.tokenMetric = id; U.setPref("token.metric", id); renderTokenChart(); },
-  });
-
-  function renderTokenChart() {
-    const t = state.telemetry;
-    const byTurn = (t && t.usage && t.usage.byTurn) || [];
-    if (!byTurn.length) {
-      C.stackedBars($("t-chart"), { items: [], series: [], height: 220 });
-      $("t-legend").innerHTML = "";
-      $("t-turn-table").innerHTML =
-        `<p class="empty">No LLM turns recorded yet — token usage appears after the first decision.</p>`;
-      return;
-    }
-
-    const isCost = state.tokenMetric === "cost";
-    let series;
-    let items;
-    if (isCost) {
-      series = [{ name: "Cost", color: "#e5c07b" }];
-      items = byTurn.map((r) => ({
-        label: `T${r.turn}`,
-        values: [Number((r.usage || {}).costTotal) || 0],
-        sub: `${U.fmtInt((r.usage || {}).totalTokens)} tokens`,
-      }));
-    } else {
-      // Composition, not comparison: input dwarfs output/reasoning, so stacking
-      // is the only honest way to show both the per-turn total and its split.
-      const color = cssColor("--c2", "#5fb3ff");
-      series = [
-        { name: "Input", color },
-        { name: "Output", color: cssColor("--c3", "#7bc96f") },
-        { name: "Reasoning", color: cssColor("--c4", "#c3a6ff") },
-        { name: "Cache read", color: cssColor("--c7", "#56d4dd") },
-      ];
-      items = byTurn.map((r) => {
-        const u = r.usage || {};
-        return {
-          label: `T${r.turn}`,
-          values: [u.input || 0, u.output || 0, u.reasoning || 0, u.cacheRead || 0],
-          sub: `${U.fmtInt(u.totalTokens)} tokens in ${U.fmtInt(r.steps)} step(s)`,
-        };
-      });
-    }
-
-    const shown = items.slice(-24);
-    C.stackedBars($("t-chart"), {
-      items: shown,
-      series,
-      format: isCost ? U.fmtCost : U.fmtTok,
-      height: 220,
-      maxBars: 24,
     });
-
-    const totals = U.utilTotals(shown);
-    $("token-summary").textContent = isCost
-      ? `${U.fmtCost(U.utilTotals(shown))} across ${shown.length} turns`
-      : `peak ${U.fmtTok(Math.max.apply(null, shown.map((x) => U.utilTotals([x]))))} per turn`;
-    $("t-legend").innerHTML =
-      `<span class="lg dim">${items.length > shown.length
-        ? `showing last ${shown.length} of ${items.length} turns`
-        : `${items.length} turn${items.length === 1 ? "" : "s"}`}` +
-      `${isCost ? "" : ` · ${U.fmtTok(totals)} total`}</span>`;
-
-    $("t-turn-table").innerHTML =
-      `<table class="kv"><tr><th>Turn</th><th class="num">In</th><th class="num">Out</th>` +
-      `<th class="num">Reason</th><th class="num">Cache</th><th class="num">Total</th>` +
-      `<th class="num">Cost</th><th class="num">Steps</th></tr>` +
-      byTurn.slice().reverse().map((r) => {
-        const u = r.usage || {};
-        return `<tr><td>${U.esc(r.turn)}</td><td class="num">${U.fmtTok(u.input)}</td>
-          <td class="num">${U.fmtTok(u.output)}</td><td class="num">${U.fmtTok(u.reasoning)}</td>
-          <td class="num">${U.fmtTok(u.cacheRead)}</td><td class="num">${U.fmtTok(u.totalTokens)}</td>
-          <td class="num">${U.fmtCost(u.costTotal)}</td><td class="num">${U.fmtInt(r.steps)}</td></tr>`;
-      }).join("") + `</table>`;
-  }
-
-  /* Step filter (all / llm / tools / failures) — a real control, not a wall. */
-  U.segmented($("step-filter"), {
-    options: [
-      { id: "all", label: "All" },
-      { id: "message", label: "LLM" },
-      { id: "tool", label: "Tools" },
-      { id: "failed", label: "Failures" },
-    ],
-    value: () => state.stepFilter,
-    onChange: (id) => { state.stepFilter = id; renderSteps(); },
   });
-
-  function stepVisible(s) {
-    switch (state.stepFilter) {
-      case "message": return s.kind === "message";
-      case "tool": return s.kind === "tool";
-      case "failed": return s.kind === "tool" && s.ok === false;
-      default: return true;
-    }
-  }
-
-  function renderSteps() {
-    const all = state.steps;
-    const shown = all.filter(stepVisible).slice(-200);
-    elStepsCount.textContent = `(${shown.length}${shown.length === all.length ? "" : `/${all.length}`})`;
-    elSteps.innerHTML = shown.map((s) => {
-      const cls = s.kind === "tool" ? (s.ok ? "tool-ok" : "tool-bad") : "msg";
-      return `<li class="step ${cls}">
-        <div class="step-head">
-          <span class="badge${s.kind === "tool" && s.ok === false ? " bad" : ""}">${s.kind === "tool" ? "tool" : "LLM"}</span>
-          <span class="badge">turn ${U.esc(s.turn)}</span>
-          <span class="step-title">${U.esc(s.kind === "tool" ? `${s.tool} — ${s.summary || ""}` : (s.model || "assistant"))}</span>
-          ${s.durationMs !== undefined ? `<span class="dim">${U.fmtDuration(s.durationMs)}</span>` : ""}
-          ${s.usage ? `<span class="dim">${U.fmtTok(s.usage.totalTokens)} tok · ${U.fmtCost(s.usage.costTotal)}</span>` : ""}
-        </div>
-        ${s.thinking ? `<details class="think"><summary>reasoning</summary><pre>${U.esc(s.thinking)}</pre></details>` : ""}
-        ${s.text ? `<div class="step-text">${U.esc(s.text)}</div>` : ""}
-        ${s.args !== undefined ? `<details><summary>args</summary><pre>${U.esc(JSON.stringify(s.args, null, 2))}</pre></details>` : ""}
-        ${s.data ? `<details><summary>result</summary><pre>${U.esc(JSON.stringify(s.data, null, 2))}</pre></details>` : ""}
-      </li>`;
-    }).join("") || `<li class="empty">No steps ${state.stepFilter === "all" ? "yet" : "match this filter"}.</li>`;
-    // Follow only inside this list. `scrollIntoView` used to scroll the whole
-    // document on every appended step, yanking the page away from the reader.
-    if (elAutoScroll.checked) U.scrollToEnd(elSteps);
-  }
-
-  function renderStages() {
-    const stages = state.checkpoints || [];
-    elStageCount.textContent = stages.length ? `${stages.length} recorded` : "";
-    elStages.innerHTML = stages.length
-      ? stages.slice().reverse().map((c) => `<li>
-          <span class="t-meta">${U.esc(c.gameDate)} · turn ${U.esc(c.turn)} · ${U.esc(U.fmtClock(c.at))}</span>
-          ${U.esc(c.note)}</li>`).join("")
-      : `<li class="empty">No staged summary yet — one is recorded as the run progresses.</li>`;
-  }
-
-  /** Stage snapshots: one small map diagram per construction phase. */
-  function renderStageViews() {
-    const box = $("stage-snaps");
-    if (!box) return;
-    const views = state.stages || [];
-    if (!views.length) {
-      box.innerHTML = `<p class="empty">No stage view yet — one is captured at each construction phase.</p>`;
-      return;
-    }
-    const SV = window.StageViewUI;
-    const shown = views.slice(-12);
-    const sessionId = (state.telemetry && state.telemetry.sessionId) || state.sessionId || "";
-    box.innerHTML = shown.map((v, i) => {
-      const hasImg = Boolean(v.image && sessionId);
-      const url = hasImg
-        ? `/api/sessions/${encodeURIComponent(sessionId)}/stages/${encodeURIComponent(v.image)}`
-        : "";
-      // Zoom to the construction window: at 256x256 the raw minimap is 1 px per
-      // tile, so an unscaled capture changes by only a pixel or two per stage.
-      const style = hasImg && SV ? SV.backdropStyle(url, v.focus) : "";
-      const marks = SV ? SV.overlayMarks(v) : [];
-      const overlay = SV
-        ? (`<svg class="snap-ov" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">` +
-            marks.map((m) => {
-              if (m.kind === "route") {
-                return `<line class="ov-route" x1="${m.x1.toFixed(2)}" y1="${m.y1.toFixed(2)}" ` +
-                  `x2="${m.x2.toFixed(2)}" y2="${m.y2.toFixed(2)}"><title>${U.esc(m.label)}</title></line>`;
-              }
-              const cls = m.kind === "town" ? "ov-town" : m.kind === "depot" ? "ov-depot" : "ov-other";
-              const r = m.kind === "town" ? 3 : 2.2;
-              return `<circle class="${cls}" cx="${m.x.toFixed(2)}" cy="${m.y.toFixed(2)}" r="${r}">` +
-                `<title>${U.esc(m.label)}</title></circle>`;
-            }).join("") +
-            `</svg>`)
-        : "";
-      const z = v.focus ? `${v.focus.scale.toFixed(1)}×` : "full";
-      return `
-      <div class="snap">
-        <div class="snap-map">
-          ${hasImg
-            ? `<div class="snap-img" style="${style}" role="img"
-                    aria-label="minimap of ${U.esc(v.gameDate || "stage")}, zoomed ${z}"></div>`
-            : `<canvas data-i="${i}" height="130"></canvas>`}
-          ${overlay}
-          ${hasImg ? `<span class="snap-zoom">${U.esc(z)}</span>` : ""}
-        </div>
-        <div class="snap-meta">
-          <span>${U.esc(v.gameDate || "—")}</span>
-          <span>${U.esc((v.phase || "").slice(0, 22))}${(v.phase || "").length > 22 ? "…" : ""}</span>
-        </div>
-        <div class="snap-meta">
-          <span>${U.fmtInt((v.companies || []).reduce((a, c) => a + (c.vehicles || 0), 0))} veh</span>
-          <span>${U.fmtInt((v.companies || []).reduce((a, c) => a + (c.stations || 0), 0))} stn</span>
-          <span>${U.fmtMoney(v.companies && v.companies[0] ? v.companies[0].money : 0)}</span>
-        </div>
-      </div>`;
-    }).join("") + stageLegend();
-    // Only the stages without a captured image need the schematic diagram.
-    box.querySelectorAll(".snap-map canvas").forEach((cv) => {
-      const i = Number(cv.getAttribute("data-i"));
-      if (window.Charts && window.Charts.stageMap) window.Charts.stageMap(cv, shown[i]);
-    });
-  }
-
-  /**
-   * The legend.
-   *
-   * Split on purpose: the route/town/depot marks are OURS (so we can vouch for
-   * them), while the base map colours come from OpenTTD's own terrain minimap
-   * and are only labelled as observed. Mixing the two would imply we control
-   * the game's palette.
-   */
-  function stageLegend() {
-    const SV = window.StageViewUI;
-    if (!SV) return "";
-    const ours = SV.LEGEND.ours.map((x) =>
-      `<span class="lg ${x.cls}"><i></i>${U.esc(x.label)}</span>`).join("");
-    const base = SV.LEGEND.base.map((x) =>
-      `<span class="lg"><i style="background:${x.color}"></i>${U.esc(x.label)}</span>`).join("");
-    return `<div class="snap-legend">
-      <div class="snap-legend-row"><span class="lg-lead">overlay (drawn by us)</span>${ours}</div>
-      <div class="snap-legend-row"><span class="lg-lead">base map (OpenTTD's terrain minimap)</span>${base}</div>
-    </div>`;
-  }
-
-  /* ---------------------------- controls ---------------------------- */
-  elRaw.onchange = renderEvents;
-  elEvSearch.oninput = () => { state.evSearch = elEvSearch.value.trim(); renderEvents(); };
-  elEvPause.onclick = () => {
-    state.paused = !state.paused;
-    elEvPause.textContent = state.paused ? "Resume" : "Pause";
-    elEvPause.classList.toggle("primary", state.paused);
-    if (!state.paused) { renderAll(); U.toast("Live view resumed", "ok", 1500); }
-  };
-  elAutoScroll.onchange = () => U.setPref("steps.follow", elAutoScroll.checked);
-
-  /* Cash chart metric switch (money / loan / income). */
-  U.segmented($("cash-metric"), {
-    options: [
-      { id: "money", label: "Cash" },
-      { id: "loan", label: "Loan" },
-      { id: "income", label: "Income" },
-    ],
-    value: () => state.cashMetric,
-    onChange: (id) => { state.cashMetric = id; U.setPref("cash.metric", id); renderChart(); },
-  });
-
-  elAutoScroll.checked = U.getPref("steps.follow", true);
-  renderAll();
-
-  // Discover whether run control is available (serve mode) and its state.
-  (async () => {
-    try {
-      const r = await fetch("/api/run");
-      if (r.ok) {
-        state.runControl = true;
-        state.run = await r.json();
-      }
-    } catch { /* control disabled */ }
-    renderRunControls();
-    renderNotice();
-  })();
-  // Keep "elapsed" honest without a busy 1s repaint loop: refresh it on the
-  // events we already receive, plus a slow tick for quiet periods.
-  setInterval(() => { if (state.startedAt) renderHeader(); }, 5000);
 })();

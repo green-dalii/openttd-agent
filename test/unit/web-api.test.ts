@@ -217,6 +217,9 @@ describe("WebServer REST", () => {
 			const refs = [...html.matchAll(/(?:href|src)="\/([^"]+)"/g)].map((m) => m[1]!);
 			expect(refs.length, page).toBeGreaterThan(0);
 			for (const ref of refs) {
+				// In-app links point at a ROUTE, not a file (`/providers` is served by
+				// PAGES), so only asset refs must exist on disk.
+				if (Object.keys(PAGES).includes(`/${ref}`)) continue;
 				expect(existsSync(join(PUBLIC_DIR, ref)), `${page} -> ${ref}`).toBe(true);
 			}
 		}

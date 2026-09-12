@@ -295,7 +295,7 @@ label.check input { accent-color: var(--accent); }
 .event-tools { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; margin-bottom: var(--sp-2); }
 .event-tools .filter { flex: 1 1 160px; }
 .filters { display: flex; flex-wrap: wrap; gap: 5px; }
-ol.events { list-style: none; margin: 0; padding: 0; max-height: 460px; overflow-y: auto;
+ol.events { max-height: 420px; overflow-y: auto; list-style: none; margin: 0; padding: 0; max-height: 460px; overflow-y: auto;
   font-family: var(--mono); font-size: 11.5px; }
 ol.events.short { max-height: 320px; }
 ol.events li.ev { padding: 5px 6px; border-bottom: 1px solid #1e272f; display: flex; gap: var(--sp-2);
@@ -401,3 +401,26 @@ dialog.modal p { color: var(--ink-dim); font-size: 13px; margin: 0 0 var(--sp-4)
   header { padding: var(--sp-2) var(--sp-3); }
   main { padding: var(--sp-3) var(--sp-3) 48px; }
 }
+
+/* ---------------------------------------------------------------------------
+   Live page — the "Now" panel.
+   Answers the first question a returning operator has ("is it alive, what is it
+   doing"), which the previous layout scattered across a step feed.
+   --------------------------------------------------------------------------- */
+.now-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--sp-3); margin-bottom: var(--sp-3); }
+.now-cell { display: flex; flex-direction: column; gap: 2px; }
+.now-k { font-size: 10.5px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.now-v { font-family: var(--mono); font-size: 12.5px; }
+.now-v.warn { color: var(--warn, #ff9f0a); }
+.now-intent { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); }
+.now-intent h3 { margin: 0 0 4px; }
+.now-text { margin: 0; font-size: 12.5px; color: var(--ink-dim);
+  background: var(--bg-sunken); border: 1px solid var(--line); border-radius: var(--r-sm);
+  padding: 8px 10px; max-height: 120px; overflow-y: auto; white-space: pre-wrap; }
+@media (max-width: 900px) { .now-intent { grid-template-columns: 1fr; } }
+/* The schematic fallback for a stage with no captured image. */
+.stage-snaps canvas.snap-fallback { width: 100%; border-radius: var(--r-sm); }
+/* Collapsible raw-log section: keeps the firehose out of the way by default. */
+.detail-toggle { cursor: pointer; font-size: 13px; color: var(--ink-dim); padding: 4px 0; }
+.detail-toggle:hover { color: var(--ink); }
