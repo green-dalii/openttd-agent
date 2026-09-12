@@ -25,11 +25,8 @@ class BridgeV1 extends GSController {
                 // (measured 2026-09-12: the boot-time probe produced nothing,
                 // while this same periodic send reaches the agent every time).
                 // The delay is the point: it proves the channel is live first.
-                // The probe is NOT auto-run: phase 1 passed and it spends the
-                // company's money, so arming it would sabotage every game.
-                // Reachable as the `probe_cm` command for re-verification.
-                // Phase 1b (depot/engine/buy/order/start) is written but has NOT
-                // been run to completion - see docs/EXECUTOR-ARCHITECTURE.md.
+                // DISARMED for verification (probe is interfering with the
+                // executor's route; verify the fix first, run the probe separately).
                 local sl = GSSignList();
                 local sc = 0;
                 local names = [];

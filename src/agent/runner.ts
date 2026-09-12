@@ -28,7 +28,7 @@ import type { AgentOptions } from "@earendil-works/pi-agent-core";
 import type { Model } from "@earendil-works/pi-ai";
 /** pi-agent-core's StreamFn, via AgentOptions. */
 type AgentOptionsStreamFn = AgentOptions["streamFn"];
-import { runDecision } from "./loop.js";
+import { runDecision, type DecisionPlan } from "./loop.js";
 import { DecisionScheduler } from "./scheduler.js";
 import { buildStageView } from "./stage-view.js";
 import { captureMinimap, MINIMAP_REL_PATH } from "../game/minimap.js";
@@ -779,26 +779,39 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 		// SPEC §1.1 step 2: FREEZE while the LLM thinks. OpenTTD is a continuous
 		// clock; without pausing, the world moves on and the model's decision lands
 		// against a state it never saw.
+		//
+		// The unpause is in a `finally` for a real reason (2026-09-12): without
+		// this, ANY exception from agent.prompt() — network blip, faux core
+		// exhausting its canned responses, anything — leaves the game paused
+		// forever. The GS then stops ticking, the executor stops advancing, and
+		// the agent sees a frozen world with no progress. This is the silent bug
+		// behind "executor stuck at boot" / "GS not ticking" — see
+		// test/unit/runner-freeze-thaw.test.ts and ROADMAP §4b.
 		try {
 			client?.rcon("pause");
 		} catch {
 			/* already paused is fine */
 		}
 
-		const { plan } = await runDecision(agent, deps, {
-			trigger: due.trigger,
-			tracker,
-			gameDay: gameDaysSinceStart(deps),
-			history,
-			...(executorPhase ? { phase: executorPhase } : {}),
-		});
-		telemetry.onActivity?.();
-
-		// SPEC §1.1 step 5: THAW so the executor can carry the decision out.
+		let plan: DecisionPlan | null = null;
 		try {
-			client?.rcon("unpause");
-		} catch {
-			/* ignore */
+			const out = await runDecision(agent, deps, {
+				trigger: due.trigger,
+				tracker,
+				gameDay: gameDaysSinceStart(deps),
+				history,
+				...(executorPhase ? { phase: executorPhase } : {}),
+			});
+			plan = out.plan;
+			telemetry.onActivity?.();
+		} finally {
+			// SPEC §1.1 step 5: THAW so the executor can carry the decision out.
+			// Must run whether runDecision succeeded or threw.
+			try {
+				client?.rcon("unpause");
+			} catch {
+				/* ignore */
+			}
 		}
 
 		// SPEC §4.2 step 5: honour the model's own wake-up ("或等待条件满足").

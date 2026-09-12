@@ -848,3 +848,23 @@ GS 还能直接收 admin 消息、直接用 `GSAdmin.Send` 发结构化 JSON。
    `"cmd":"state"` 出现 0 次，说明 GS 的周期性代码块根本没执行 ——
    怀疑游戏被 pause 住（与 §10.21 的事件转发、ROADMAP §4b 的 `boot` 停顿同源）。
    **这是当前挡住施工与探针的唯一拦路石。**
+
+## 10.26 决策循环的 freeze/thaw 必须有 finally（2026-09-12 实证）
+
+`src/agent/runner.ts` 在决策前 `rcon("pause")`、决策后 `rcon("unpause")`。
+最初两份 rcon 各自包在独立的 `try { ... } catch { /* ignore */ }` 里，**unpause 不在
+finally 里** —— 如果 `runDecision()`（含 `agent.prompt()`）抛错，unpause 永不执行。
+
+**后果**：游戏永久暂停 → GS 不 tick → 周期块不执行 → 执行器不推进。
+agent 拿到一个冻结的世界，看起来像"半成品"，**实际上是 unhandled-pause bug**。
+
+**修复**：把 pause/runDecision/unpause 包进 `try { ... } finally { rcon("unpause") }`。
+
+**结构性守卫**：`test/unit/runner-freeze-thaw.test.ts` —— 静态扫描
+runner.ts，禁止以后再次引入无 finally 的 unpause。
+
+**未做的事（截至 2026-09-12）**：真机测试仍呈现 **flakiness** —— 同一命令
+`--agent --offline-demo --seed 7` 偶尔执行器推进到 `EX road_start`，偶尔停在
+`EX boot j-1` 不动。本节修复**保证 unpause 必定触发**，但不保证 100% 推进。
+真正的根因可能是 OpenTTD 在 macOS dedicated 下的脚本 tick 时序，
+需进一步观测。ROADMAP §4b 仍是开放的。
