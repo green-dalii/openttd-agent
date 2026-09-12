@@ -174,8 +174,13 @@ export interface ArmComparison {
 	withoutLessons: ArmStats;
 	/** Right arm minus left arm, or null when either side is empty. */
 	moneyDelta: number | null;
-	/** True only when BOTH arms have MIN_LESSON_SAMPLE runs. */
+	/** True only when BOTH arms have MIN_LESSON_SAMPLE runs AND the arms are comparable. */
 	conclusive: boolean;
+	/**
+	 * True when the two arms finished at different stages, which makes money
+	 * uninterpretable. See `compareArms` for the measurement behind this.
+	 */
+	confounded: boolean;
 	/** Human-readable caveat; always set when `conclusive` is false. */
 	note: string;
 }
@@ -235,6 +240,20 @@ export function compareArms(metrics: GameMetric[]): ArmComparison {
 	const moneyDelta =
 		a.meanMoney === null || b.meanMoney === null ? null : a.meanMoney - b.meanMoney;
 
+	// Money is only comparable if both arms got equally far. A run that never
+	// finished construction has spent nothing on vehicles or route, so its money
+	// is HIGHER precisely BECAUSE it failed. "More money" means "built less".
+	//
+	// Measured 2026-09-12 (SPEC §10.34): across six runs, the single run that
+	// finished construction had the LOWEST money, and this function reported a
+	// confident +6342 for the arm that built NOTHING (builtRate 0.00 vs 0.33).
+	// The number was real and its sign meant the opposite of what it looked like.
+	// This is MEMORY.md A2 (never compare incomparable things) one level down: the
+	// existing exclusions catch runs that never finished, not arms that differ.
+	const buildGap =
+		a.builtRate === null || b.builtRate === null ? 0 : Math.abs(a.builtRate - b.builtRate);
+	const confounded = buildGap >= BUILD_RATE_GAP;
+
 	let note = "";
 	if (!enough) {
 		const missing = [
@@ -261,19 +280,42 @@ export function compareArms(metrics: GameMetric[]): ArmComparison {
 	// Always disclose what was excluded - silent filtering is how a comparison
 	// starts lying. This applies whether or not there is enough data to compare:
 	// "need 3 more runs" is misleading if two runs were quietly dropped.
-	if (interrupted > 0 || scripted > 0) {
-		const parts: string[] = [];
-		if (interrupted > 0) parts.push(`${interrupted} interrupted`);
-		if (scripted > 0) parts.push(`${scripted} scripted`);
-		note = `Compared ${a.count} with-lessons vs ${b.count} without-lessons run(s); ` +
-			`excluded ${parts.join(" and ")}.`;
-	}
+	const parts: string[] = [];
+	if (interrupted > 0) parts.push(`${interrupted} interrupted`);
+	if (scripted > 0) parts.push(`${scripted} scripted`);
+
+	const compared =
+		`Compared ${a.count} with-lessons vs ${b.count} without-lessons run(s)`;
+
+	// The exclusion clause is ALWAYS present when something was dropped, whatever
+	// else the note says. An earlier version let a "need 3 more runs" note replace
+	// it, which re-hid the very thing the disclosure exists to reveal.
+	const excluded = parts.length ? ` Excluded ${parts.join(" and ")}.` : "";
+	const body = note ? `${note}${excluded}` : `${compared}.${excluded}`;
+
+	// A confounded comparison leads with the warning, but still discloses
+	// exclusions: "+6342" must never be readable without the sentence that says
+	// its sign means the opposite.
+	const confoundNote =
+		`${compared}, but they are NOT comparable: the arms finished construction ` +
+		`at different rates (${fmtRate(a.builtRate)} vs ${fmtRate(b.builtRate)}). ` +
+		`A run that never built spends nothing, so its money is higher BECAUSE it ` +
+		`failed - the money delta above is not a benefit.`;
 
 	return {
 		withLessons: a,
 		withoutLessons: b,
 		moneyDelta,
-		conclusive: enough,
-		note,
+		confounded,
+		conclusive: enough && !confounded,
+		note: confounded ? `${confoundNote}${excluded}` : body,
 	};
+}
+
+/** Below this built-rate gap the arms are treated as having reached the same stage. */
+const BUILD_RATE_GAP = 1 / 3;
+
+/** Render a built rate for a human, including the unknown case. */
+function fmtRate(r: number | null): string {
+	return r === null ? "unknown" : `${Math.round(r * 100)}%`;
 }

@@ -278,3 +278,64 @@ describe("compareArms", () => {
 		expect(c.moneyDelta).toBeNull();
 	});
 });
+
+describe("compareArms 必须拒绝被 confound 的结论（2026-09-12）", () => {
+	const mk = (over: Record<string, unknown>) => ({
+		id: "x", seed: 7, mode: "agent", status: "completed", startedAt: 0, durationMs: 1,
+		appVersion: "0", llmKind: "real", llmModel: "m", constructionDone: true,
+		money: 1000, vehicles: 1, stations: 2, decisions: 3, toolCalls: 1, toolFailures: 0,
+		totalTokens: 10, costTotal: 0,
+		memory: { lessonsInjected: 0, strategiesInjected: 0 },
+		...over,
+	}) as never;
+
+	// 真实数据：6 局里唯一建成的那局**钱最少**（建线要花钱），但 compareArms
+	// 给"什么都没建成"的那臂报了 +6342，而且 conclusive=true。
+	// 数字是真的，符号的含义与它看起来的**相反**。
+	//
+	// 这是 MEMORY A2「不要比较不可比的东西」的下一层：原有的排除只挡住
+	// "没跑完的局"，挡不住"两臂停在不同阶段"。
+	const arm = (injected: number, done: boolean, money: number) =>
+		mk({ constructionDone: done, money, memory: { lessonsInjected: injected, strategiesInjected: 0 } });
+
+	it("两臂建成率不同时，拒绝下结论", () => {
+		const c = compareArms([
+			// with lessons：3 局全部没建成（钱高，因为没花钱）
+			arm(5, false, 286094), arm(5, false, 284359), arm(5, false, 286094),
+			// without lessons：1 局建成（钱低，因为买车了）+ 2 局没建成
+			arm(0, true, 267068), arm(0, false, 284359), arm(0, false, 286094),
+		]);
+		expect(c.withLessons.builtRate).toBe(0);
+		expect(c.withoutLessons.builtRate).toBeCloseTo(1 / 3);
+		// 样本量是够的……
+		expect(c.withLessons.count).toBe(3);
+		expect(c.withoutLessons.count).toBe(3);
+		// ……但结论必须被拒绝
+		expect(c.confounded).toBe(true);
+		expect(c.conclusive).toBe(false);
+		// 而且必须说清楚"钱的符号意思是反的"，不能让人只看到 +6342
+		expect(c.note).toMatch(/NOT comparable/);
+		expect(c.note).toMatch(/not a benefit/);
+		expect(c.note).toMatch(/0% vs 33%/);
+	});
+
+	it("两臂建成率相同时，照常下结论", () => {
+		const c = compareArms([
+			arm(5, true, 1100), arm(5, true, 1100), arm(5, true, 1100),
+			arm(0, true, 1000), arm(0, true, 1000), arm(0, true, 1000),
+		]);
+		expect(c.confounded).toBe(false);
+		expect(c.conclusive).toBe(true);
+		expect(c.moneyDelta).toBe(100);
+		expect(c.note).not.toMatch(/NOT comparable/);
+	});
+
+	it("被排除的局即使在 confound 时也必须如实说明", () => {
+		const c = compareArms([
+			arm(5, false, 100), arm(5, false, 100), arm(5, false, 100),
+			arm(0, true, 100), arm(0, true, 100), arm(0, true, 100),
+			mk({ status: "interrupted", memory: { lessonsInjected: 0, strategiesInjected: 0 } }),
+		]);
+		expect(c.note).toMatch(/interrupted/i);
+	});
+});
