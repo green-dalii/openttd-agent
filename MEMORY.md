@@ -84,17 +84,30 @@
 **规则**：迁移或重写动态模板后，**逐个交互元素人工点一遍**（开关、下拉、按钮、折叠），
 并断言 DOM 有内容。见 `AGENTS.md` §5.2 第 4 条。
 
-### B2. Alpine `x-for` 的模板内必须**恰好一个根元素**（2026-09-12）
+### B2. `<template>` **不能放在 `<svg>` 内部**（2026-09-12，我两次误判才找到真因）
 
-**现象**：`<template x-for="m in stageMarks(v)">` 内放了两个兄弟 `<template x-if>` →
-满屏 `Cannot read properties of undefined (reading 'children')` +
-`Uncaught ReferenceError: m is not defined`（循环变量丢失）。
+**现象**：Live 页满屏
+`Alpine Expression Error: Cannot read properties of undefined (reading 'children')`
+以及一连串 `Uncaught ReferenceError: m is not defined`（`m.x1`、`m.y` …）。
 
-**根因**：Alpine 的 `x-for` 依赖模板内单一根节点做遍历与作用域绑定；两个兄弟破坏其内部
-`children` 遍历，且内层模板拿不到 `m`。
+**我的第一次误判**：我以为根因是「`x-for` 内放了两个兄弟 `<template x-if>`，违反了
+「模板内恰好一个根元素」。改成两个平铺 `x-for` 后 **错误依旧**。
 
-**规则**：`x-for` 内只放一个根元素。需要多分支时：① 用一个 `<g>`/`<div>` 包住；
-② 更好——把数据**预分类**成多个数组，各用一个平铺的 `x-for`（更清晰，也避免嵌套 `<template>`）。
+**真因**（Chrome 实测证据）：
+```js
+{ expr: 'm in stageRoutes(v)', ns: 'SVG', isHTMLTemplate: false, contentDefined: false }
+```
+`<template>` 在 `<svg>` 内部被 HTML 解析器当作 **SVG 命名空间元素**，而不是
+`HTMLTemplateElement`。它的 `.content` 是 `undefined`，于是 Alpine 的 `x-for` 读
+`.content.children` 直接抛错，循环变量也永远不会绑定。
+
+**规则**：需要在 SVG 里画动态内容时，**把 SVG 标记拼成字符串，用 `x-html` 注入**
+（注入时处于 HTML 解析上下文，`<svg>` 命名空间才正确），生成逻辑做成纯函数以便单测。
+已在静态守卫里锁住：`lintTemplatesInsideSvg()`。
+
+**教训**：报错信息里的**元素上下文**（` line.ov-route`）是关键线索——它告诉我 Alpine
+正在处理 SVG 里的节点。我第一次只看了表达式（`stageMarks(v)`）就下结论，
+把一个**解析层**问题当成了**模板结构**问题。
 
 ### B3. 响应式读取必须在 effect 的**同步作用域**内（2026-09-12）
 
@@ -127,6 +140,18 @@ Node 给 `1.5B`，Chrome 给 **`1.5bn`**，而我们手写的图表给 `1.5B` �
 **规则**：`Intl` 只负责**数字本身**；单位阶梯（k/M/B/T）是**我们自己的词表**
 （`COMPACT_UNITS`），KPI 与图表必须共用同一份实现。已加两个测试锁定：
 ① 一个拒绝 compact 的"敌对 Intl"；② `fmtTok(v) === charts.util.fmtCompact(v)`。
+
+### B6. Alpine `x-for` 的 `:key` 必须唯一，否则**整段列表渲染为空**（2026-09-12）
+
+**现象**：`stageViews` 里确实有 2 条数据，但 `.stage-snaps` **一个节点都没渲染**，
+且**无任何控制台报错**。
+
+**根因**：两条记录的 `index` 都是 `0`（同一帧被投递了两次），而 `index` 是 `x-for` 的 `:key`。
+**重复 key 让 Alpine 渲染出 0 个节点**，而不是 2 个或 1 个。
+
+**规则**：`:key` 必须唯一。更重要的是，**列表写入要幂等（upsert by 稳定 id），不要盲 append**
+——重复投递不应该产生分歧状态。已加测试：重复投递同一帧后长度不变、
+`new Set(keys).size === list.length`。
 
 ---
 

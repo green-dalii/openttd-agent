@@ -51,6 +51,18 @@ scripts/       # dev 辅助 (gen-squirrel, setup-sandbox)
 
 新增模块必须归位；拿不准问（或放 `src/util/` 纯工具）。
 
+### 3.1 临时/一次性脚本（不得污染仓库根目录）
+
+一次性的探针、验证、抓包脚本（CDP 探针、临时断言、手动触发脚本等）**一律放 `.scratch/`**，
+并在用完时删除。**禁止**丢在仓库根目录。
+
+- `.scratch/` 已在 `.gitignore` 中；根目录的 `probe*.mjs` / `vfy*.mjs` 也被 ignore。
+- 根目录**只允许** `eslint.config.mjs` 这一个 `.mjs`（它有明确归属）。
+- 为什么：根目录的临时文件极易被 `git add -A` 顺手提交（本仓库真实发生：
+  CDP 探针 `probe2.mjs` 被提交进 `10eb8ef`），既脏仓库又让下一个人以为它有用。
+- 判定：**如果这个脚本不是产品的一部分、也不进 `test/`，它就不该被 commit。**
+- 由 `test/unit/repo-hygiene.test.ts` 静态守卫。
+
 ## 4. 技术栈/风格
 
 - Node >= 22.19, TS strict, ESM。

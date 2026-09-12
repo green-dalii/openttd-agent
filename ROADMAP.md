@@ -75,35 +75,43 @@ Intl 替换手写格式化（自带单位阶梯，避免 CLDR 漂移）· uPlot 
   (b) 明确推翻 §6c 的结论并更新文档
 **不要静默改掉一个曾用实测支撑过的设计决定。**
 
-### 3. KPI 卡片里的 sparkline 消失（重构引入的静默回归）
+### ✅ 3. KPI 卡片里的 sparkline 消失 —— **已修复（2026-09-12）**
 
-- `live.html` 仍保留 `<canvas class="kpi-spark" x-show="hasHistory(k.spark)" ...>`
-- **但 `U.paintSparks()` 在重构后再没被调用** —— 模板留了画布，没人画它
-- 旧版 `renderKpis()` 里有 `U.paintSparks(elKpis, [{ data: moneySeries… }, { data: incomeSeries… }])`
-- 影响: Cash / Income 两张卡只剩 delta 数字，**趋势线没了**（无报错，纯静默）
-- 实现提示: `x-ref` 写在 `x-for` 里只有最后一个生效，**不能用 ref 逐个取 canvas**；
-  应在渲染后用 `x-effect` + 选择器批量绘制，或让 `paintSparks` 按 `data-metric` 匹配
+- 根因:重构后模板里留着 `<canvas class="kpi-spark">`,但 **`U.paintSparks()` 再没被调用**
+- 修复:`.kpis` 上加 `x-ref="kpiBox" x-effect="drawSparks()"`;`drawSparks()` **同步**读
+  `sparkSpecs()`(在异步边界之前,否则 Alpine 追踪不到依赖 → 图永远不画)
+- 顺手修掉一个**真 bug**:旧 `hasHistory(metric)` **忽略参数**,查的是"当前选中的现金指标",
+  于是 Cash 有历史时 "Income / yr" 也会显示趋势线
+- 新增纯函数:`primaryHistory()` / `sparkSeries(metric)` / `hasSpark(metric)` / `sparkSpecs()`
+- **实测**:319 个历史点 → money/income 两张 sparkline 可见(219×26),
+  实际绘制像素 4340 / 1568
 
-### 4. Live 页控制台报错（Alpine 模板违反 `x-for` 契约）
+### ✅ 4. Live 页控制台报错 —— **已修复（2026-09-12，真因与我最初判断不同）**
 
-**现象**: 大量 `Alpine Expression Error: Cannot read properties of undefined (reading 'children')`
-（表达式 `stageMarks(v)`），以及一连串 `Uncaught ReferenceError: m is not defined`
-（`m.kind === 'route'`、`m.x1`、`m.y` …），另有 `Uncaught TypeError: … reading 'children'`。
+**现象**:满屏 `Alpine Expression Error: ... reading 'children'` +
+`Uncaught ReferenceError: m is not defined`。
 
-**根因**: `live.html` 的 `<template x-for="m in stageMarks(v)">` 内部放了
-**两个兄弟 `<template x-if>`**。Alpine 的 `x-for` 要求模板内**恰好一个根元素**；
-两个兄弟会破坏其内部遍历（`children` 为 undefined），且内层模板拿不到循环变量 `m`。
+**真因**（Chrome 实测）:`<template>` 放在 `<svg>` 内部会被解析成 **SVG 命名空间元素**,
+不是 `HTMLTemplateElement` —— `.content` 为 `undefined`,Alpine 的 `x-for` 读
+`.content.children` 直接抛错,循环变量永不绑定。
+```js
+{ expr: 'm in stageRoutes(v)', ns: 'SVG', isHTMLTemplate: false, contentDefined: false }
+```
+> ⚠️ **我最初的诊断（"x-for 内有两个兄弟根"）是错的**。按它改完错误依旧。
+> 复盘见 `MEMORY.md` B2。
 
-**修法**（二选一）:
-- 单根元素: 用一个 `<g>` 包住两个条件分支
-- 或**预先分类**: `stageMarks()` 拆成 `stageRoutes()` / `stagePoints()`，各用一个 `x-for`
-  （更清晰，且避免嵌套 `<template>`）
+**修复**:overlay 标记改为**字符串生成**(`overlaySvg()`,`x-html` 注入),生成逻辑是纯函数可单测。
 
-**为什么我没在测试里发现** → 完整复盘见 `MEMORY.md` A1（三层原因：跑在空数据状态上 /
-探针只过滤 error 漏掉 `console.warn` / 把"无异常"当成"没问题"）。
-**由此沉淀的准则已写进 `AGENTS.md` §5.2**（前端改动的验证要求），不再在此重复。
+**新增静态守卫**(防止同类再犯):
+- `lintTemplatesInsideSvg()` —— `.scratch` 之外,任何页面 HTML 里 `<svg>` 内含 `<template>` 即失败
+- `lintAlpineTemplates()` —— 顺手锁住 `x-for`/`x-if` 的"恰好一个根元素"
+- `lintXForKeys()` —— `x-for` 必须有 `:key`
 
-**验收**: 修完后必须按 `AGENTS.md` §5.2 在**有 stage views 的状态**下重验（含 warn 级别）。
+**验证**(按 `AGENTS.md` §5.2,在**有数据的状态**下):6 个 stage view 全部渲染,
+overlay 里 5 条路线 + 15 个标记,`non-log console msgs: 0`。
+
+**关联发现**:同一帧被投递两次会产生重复 `:key`,导致**整段列表渲染 0 个节点**(见 `MEMORY.md` B6),
+已改为幂等 upsert(`LiveView.upsertStageView`)。
 
 ### 5. 环境陷阱（残留进程 / data dir）→ 见 `MEMORY.md` D1
 

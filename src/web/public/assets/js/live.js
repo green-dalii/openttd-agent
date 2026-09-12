@@ -143,14 +143,20 @@
             onRun: (r) => { this.run = r; },
 
             onStage: (v) => {
-              this.stageViews = [...this.stageViews, v].slice(-24);
+              // Upsert by archive index, never append: a re-delivered frame used to
+              // create a second entry with the same `index`, and since `index` is the
+              // Alpine x-for :key, duplicate keys made the whole stage list render
+              // ZERO nodes (measured: 2 same-key items -> 0 `.snap`). See MEMORY.md B2.
+              this.stageViews = window.LiveView.upsertStageView(this.stageViews, v);
               this.$nextTick(() => this.drawStageFallbacks());
             },
             onStageImage: (info) => {
               // A real captured minimap arrived for one stage; swap it in.
               const i = Number(info && info.index);
-              const hit = this.stageViews.find((x) => x.index === i);
-              if (hit) hit.image = info.file;
+              this.stageViews = window.LiveView.upsertStageView(this.stageViews, {
+                index: i,
+                image: info && info.file,
+              });
             },
           };
           return U.connectWs(handlers);
@@ -274,8 +280,11 @@
           if (!url || !window.StageViewUI) return "";
           return window.StageViewUI.backdropStyle(url, v.focus);
         },
-        stageMarks(v) {
-          return window.StageViewUI ? window.StageViewUI.overlayMarks(v) : [];
+        // Marks are injected as an SVG markup string via x-html. A <template> inside
+        // <svg> is SVG-namespaced with no `.content`, which breaks Alpine's x-for
+        // ("reading 'children'") and never binds the loop variable. See MEMORY.md B2.
+        stageOverlay(v) {
+          return window.StageViewUI ? window.StageViewUI.overlaySvg(v) : "";
         },
         stageZoom(v) {
           return v.focus ? `${v.focus.scale.toFixed(1)}×` : "full";
@@ -292,8 +301,22 @@
         get legendBase() { return window.StageViewUI ? window.StageViewUI.LEGEND.base : []; },
 
         /* --------------------------- small bits --------------------------- */
+        /** Whether a metric has enough history to draw its KPI sparkline. */
         hasHistory(metric) {
-          return Boolean(metric) && this.cashSeries().some((s) => s.data.length > 1);
+          return this.hasSpark(metric);
+        },
+        /**
+         * Paint the KPI sparklines.
+         *
+         * Reads the series **synchronously** (not inside $nextTick), so Alpine's
+         * x-effect can actually track the dependency and re-run when new history
+         * arrives. Reading across an async boundary is invisible to the tracker and
+         * leaves a permanently blank canvas (MEMORY.md B3).
+         */
+        drawSparks() {
+          const el = this.$refs.kpiBox;
+          if (!el || !window.UI) return;
+          U.paintSparks(el, this.sparkSpecs());
         },
         brainIsReal() {
           const b = this.telemetry && this.telemetry.brain;

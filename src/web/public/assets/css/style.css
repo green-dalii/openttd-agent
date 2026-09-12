@@ -121,6 +121,10 @@ main { padding: var(--sp-4) var(--sp-5) 64px; max-width: 1360px; margin: 0 auto;
   image-rendering: pixelated; }
 .snap-map canvas { width: 100%; border-radius: var(--r-sm); }
 /* Our overlay: the only marks we can vouch for, so they are visually distinct. */
+/* The overlay arrives as an injected SVG string (x-html). The wrapper must not
+   create a box of its own, so the absolute-positioned <svg> inside it still
+   anchors to .snap-map. */
+.snap-ov-wrap { display: contents; }
 .snap-ov { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .snap-ov .ov-route { stroke: #ffd479; stroke-width: 0.9; stroke-dasharray: 2 1.4; opacity: .95; }
 .snap-ov .ov-town { fill: #ff5f6d; fill-opacity: .85; stroke: #fff; stroke-width: .35; }

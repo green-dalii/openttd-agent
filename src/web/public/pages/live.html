@@ -105,7 +105,7 @@
     <!-- ========================== ② RESULT ========================== -->
     <div class="group"><h2>Result</h2><div class="rule"></div>
       <span class="dim">is the company winning — outcome, not cost</span></div>
-    <section class="kpis">
+    <section class="kpis" x-ref="kpiBox" x-effect="drawSparks()">
       <template x-for="k in resultKpis()" :key="k.k">
         <div class="kpi">
           <div class="kpi-k" x-text="k.k"></div>
@@ -114,7 +114,10 @@
           <div class="kpi-hint" x-show="k.delta !== undefined && k.delta !== null"
                :class="k.delta > 0 ? 'pos' : k.delta < 0 ? 'neg' : 'dim'"
                x-text="(k.delta > 0 ? '+' : '') + $fmt.money(k.delta)"></div>
-          <canvas class="kpi-spark" x-show="hasHistory(k.spark)" x-ref="spark" :data-metric="k.spark"></canvas>
+          <!-- Painted by drawSparks() (UI.paintSparks matches tiles by position,
+               aligned to resultKpis()). No x-ref here: a ref inside x-for only
+               keeps the last element, so it cannot address each canvas. -->
+          <canvas class="kpi-spark" x-show="hasHistory(k.spark)" :data-metric="k.spark"></canvas>
         </div>
       </template>
     </section>
@@ -172,17 +175,11 @@
                 <template x-if="stageImageUrl(v)">
                   <div>
                     <div class="snap-img" :style="stageBackdrop(v)" role="img"></div>
-                    <svg class="snap-ov" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-                      <template x-for="m in stageMarks(v)" :key="m.kind + (m.label || '') + (m.x1 ?? m.x)">
-                        <template x-if="m.kind === 'route'">
-                          <line class="ov-route" :x1="m.x1" :y1="m.y1" :x2="m.x2" :y2="m.y2"></line>
-                        </template>
-                        <template x-if="m.kind !== 'route'">
-                          <circle :class="m.kind === 'town' ? 'ov-town' : m.kind === 'depot' ? 'ov-depot' : 'ov-other'"
-                                  :cx="m.x" :cy="m.y" :r="m.kind === 'town' ? 3 : 2.2"></circle>
-                        </template>
-                      </template>
-                    </svg>
+                    <!-- Marks are injected as an SVG *string*, never as <template> nodes:
+                         a <template> inside <svg> is parsed as an SVG element with no
+                         `.content`, so Alpine's x-for throws "reading 'children'" and the
+                         loop variable never binds. See MEMORY.md B2. -->
+                    <div class="snap-ov-wrap" x-html="stageOverlay(v)"></div>
                     <span class="snap-zoom" x-text="stageZoom(v)"></span>
                   </div>
                 </template>

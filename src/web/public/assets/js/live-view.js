@@ -59,6 +59,28 @@
    * State is mutated by the WS handlers in live.js; every derivation below is a
    * pure function of that state, which is what makes the page testable.
    */
+  /**
+   * Upsert a stage view into the list, keyed by archive `index`.
+   *
+   * 为什么必须幂等而非 append:同一帧可能被投递两次(重连 / 监听器重复注册),
+   * 盲追加会产生两条 `index` 相同的记录 —— 而 `index` 是 Alpine `x-for` 的 `:key`,
+   * 重复 key 会让整段列表**渲染不出任何节点**(实测:2 条同 key → 0 个 `.snap`),
+   * 且第 2 条没有图片(后到的 stageImage 只会补到第一个同 index 的记录上)。
+   * 用 upsert 后,重复投递不再产生分歧。
+   */
+  function upsertStageView(list, v) {
+    const arr = Array.isArray(list) ? list.slice() : [];
+    const incoming = v && typeof v === "object" ? v : null;
+    if (!incoming) return arr;
+    const i = arr.findIndex((x) => x && x.index === incoming.index);
+    if (i === -1) arr.push(incoming);
+    // 保留已有的 image(后到的补图帧可能先于/后于本体帧到达)
+    else arr[i] = Object.assign({}, arr[i], incoming, {
+      image: incoming.image || arr[i].image,
+    });
+    return arr.slice(-24);
+  }
+
   function create() {
     return {
       /* ------------------------------ state ------------------------------ */
@@ -95,6 +117,42 @@
         const ids = Object.keys(this.companies || {});
         if (!ids.length) return {};
         return this.companies["0"] || this.companies[ids[0]] || {};
+      },
+
+      /** Server-owned history of the primary company (oldest → newest). */
+      primaryHistory() {
+        return this.primaryCompany().history || [];
+      },
+
+      /**
+       * History of one named metric, non-finite points dropped.
+       *
+       * Named per-metric on purpose: `hasHistory(metric)` used to consult the
+       * *selected* cash metric regardless of its argument, so "Income / yr" showed
+       * a sparkline whenever *Cash* had history. The argument was decorative.
+       */
+      sparkSeries(metric) {
+        if (!metric) return [];
+        return this.primaryHistory()
+          .map((h) => Number(h[metric]))
+          .filter((v) => Number.isFinite(v));
+      },
+
+      /** Whether a metric has enough points to draw a sparkline. */
+      hasSpark(metric) {
+        return this.sparkSeries(metric).length > 1;
+      },
+
+      /**
+       * Sparkline specs aligned to `resultKpis()` order (null where there is no
+       * series). `UI.paintSparks` matches tiles by position, and both lists come
+       * from `resultKpis()`, so they cannot drift apart.
+       */
+      sparkSpecs() {
+        return this.resultKpis().map((k) => {
+          const data = this.sparkSeries(k.spark);
+          return data.length > 1 ? { data } : null;
+        });
       },
 
       /**
@@ -425,6 +483,7 @@
   }
 
   window.LiveView = {
+    upsertStageView: upsertStageView,
     create: create,
     CASH_METRICS: CASH_METRICS,
     TOKEN_METRICS: TOKEN_METRICS,

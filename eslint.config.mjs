@@ -45,7 +45,15 @@ export default tseslint.config(
 		// Vendored third-party bundles are not our code and must not be edited:
 		// `pnpm run vendor:check` guarantees they match upstream byte-for-byte.
 		// Linting a minified file only produces thousands of meaningless findings.
-		ignores: ["node_modules/", "dist/", "coverage/", "src/web/public/assets/vendor/"],
+		ignores: [
+			"node_modules/",
+			"dist/",
+			"coverage/",
+			"src/web/public/assets/vendor/",
+			// Throwaway CDP probes / verification scripts (AGENTS.md §3.1). They are
+			// deliberately not part of the product and must not fail the gate.
+			".scratch/",
+		],
 	},
 	...tseslint.configs.recommended,
 	{

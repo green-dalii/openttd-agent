@@ -87,6 +87,94 @@
     );
   }
 
+  /**
+   * 把 overlayMarks 的混合列表拆成两类。
+   *
+   * 为什么需要拆分:Alpine 的 `x-for` 要求模板内**恰好一个根元素**。
+   * 用 `<template x-if>` 在一个 `x-for` 里分支(route vs point)会放两个兄弟根,
+   * 导致 "Cannot read properties of undefined (reading 'children')" 且内层拿不到循环变量。
+   * 拆成两个数组、各用一个平铺的 `x-for`,既避开这个坑,渲染路径也更直。
+   */
+  function routesOf(marks) {
+    return (marks || []).filter((m) => m && m.kind === "route");
+  }
+
+  /** 非路线的标记(城镇 / 车库 / 其他)。 */
+  function pointsOf(marks) {
+    return (marks || []).filter((m) => m && m.kind !== "route");
+  }
+
+  /** 点标记的 CSS 类——颜色只由 kind 决定,放在这里以便单测锁定。 */
+  function pointClass(m) {
+    if (!m) return "ov-other";
+    return m.kind === "town" ? "ov-town" : m.kind === "depot" ? "ov-depot" : "ov-other";
+  }
+
+  /** 点标记半径:城镇按人口加权(更大 = 更显眼)。 */
+  function pointRadius(m) {
+    return m && m.kind === "town" ? 3 : 2.2;
+  }
+
+  /** 数字→属性文本,非有限值一律丢弃(避免 "NaN" 进入 SVG)。 */
+  function num(v) {
+    const n = Number(v);
+    return Number.isFinite(n) ? String(Math.round(n * 100) / 100) : null;
+  }
+
+  /** 把文本转义成可安全放进双引号属性的形式。 */
+  function escAttr(s) {
+    return String(s == null ? "" : s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  /**
+   * Render the overlay as a complete `<svg>` **markup string**.
+   *
+   * 为什么不直接在 HTML 里写 `<template x-for>`:`<template>` 放在 `<svg>` 内部
+   * 会被 HTML 解析器当作 **SVG 命名空间元素**,而不是 `HTMLTemplateElement`。
+   * 它的 `.content` 是 `undefined`,于是 Alpine 的 `x-for` 读 `.content.children`
+   * 直接抛 "Cannot read properties of undefined (reading 'children')",
+   * 并且循环变量 `m` 永远不会绑定(表现为满屏 `m is not defined`)。
+   * 实测证据(Chrome,2026-09-12):
+   *   { expr: 'm in stageRoutes(v)', ns: 'SVG', isHTMLTemplate: false, contentDefined: false }
+   *
+   * 所以标记改成**字符串拼接**,再由 `x-html` 注入一个 HTML 容器——注入时
+   * `<svg>` 处于 HTML 解析上下文,命名空间才是对的。生成逻辑是纯函数,可在 Node 单测。
+   */
+  function overlaySvg(view) {
+    const marks = overlayMarks(view);
+    const routes = routesOf(marks);
+    const points = pointsOf(marks);
+    if (!routes.length && !points.length) return "";
+
+    const parts = [];
+    for (const m of routes) {
+      const x1 = num(m.x1), y1 = num(m.y1), x2 = num(m.x2), y2 = num(m.y2);
+      if (x1 === null || y1 === null || x2 === null || y2 === null) continue;
+      parts.push(
+        `<line class="ov-route" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"></line>`,
+      );
+    }
+    for (const m of points) {
+      const x = num(m.x), y = num(m.y);
+      if (x === null || y === null) continue;
+      parts.push(
+        `<circle class="${pointClass(m)}" cx="${x}" cy="${y}" r="${pointRadius(m)}"></circle>`,
+      );
+    }
+    if (!parts.length) return "";
+
+    // aria-label 里放计数,便于无障碍与断言;坐标是百分比(0-100)。
+    const label = `overlay: ${routes.length} route(s), ${points.length} marker(s)`;
+    return (
+      `<svg class="snap-ov" viewBox="0 0 100 100" preserveAspectRatio="none"` +
+      ` aria-label="${escAttr(label)}">${parts.join("")}</svg>`
+    );
+  }
+
   /** The legend: what we draw (exact), plus an honest note about the base map. */
   const LEGEND = {
     ours: [
@@ -108,6 +196,11 @@
     inWindow: inWindow,
     backdropStyle: backdropStyle,
     overlayMarks: overlayMarks,
+    routesOf: routesOf,
+    pointsOf: pointsOf,
+    pointClass: pointClass,
+    pointRadius: pointRadius,
+    overlaySvg: overlaySvg,
     LEGEND: LEGEND,
   };
 })();

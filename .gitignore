@@ -8,3 +8,9 @@ coverage/
 data/
 .sandbox/
 *.sav
+
+# Scratch / throwaway scripts (CDP probes, one-off verification scripts).
+# Keep them out of the repo root: use .scratch/ and delete when done.
+/.scratch/
+/probe*.mjs
+/vfy*.mjs

@@ -23,6 +23,13 @@ interface StageUi {
 	inWindow: (p: number, centre: number, scale: number) => number;
 	backdropStyle: (url: string, focus: { x: number; y: number; scale: number }) => string;
 	overlayMarks: (view: unknown) => { kind: string; [k: string]: unknown }[];
+	overlaySvg: (view?: unknown) => string;
+	// Marks are split so each Alpine x-for sees a flat, single-rooted list
+	// (MEMORY.md B2). Kept here so the page cannot silently lose the split.
+	routesOf: (marks?: unknown) => { kind: string; [k: string]: unknown }[];
+	pointsOf: (marks?: unknown) => { kind: string; [k: string]: unknown }[];
+	pointClass: (m?: unknown) => string;
+	pointRadius: (m?: unknown) => number;
 	LEGEND: { ours: unknown[]; base: unknown[] };
 }
 
@@ -156,6 +163,137 @@ describe("stage view UI", () => {
 			const labels = (s.LEGEND.base as { label: string }[]).map((b) => b.label).join(" ");
 			expect(labels).toMatch(/water/i);
 			expect(labels).toMatch(/land/i);
+		});
+	});
+
+	describe("mark splitting (Alpine x-for contract)", () => {
+		// Alpine's x-for allows exactly ONE root element per template. Branching
+		// with <template x-if> inside one x-for puts two siblings in the template,
+		// which breaks Alpine's traversal. Split the marks instead.
+		const marks = [
+			{ kind: "route", x1: 1, y1: 2, x2: 3, y2: 4 },
+			{ kind: "town", x: 5, y: 6 },
+			{ kind: "depot", x: 7, y: 8 },
+		];
+
+		it("routesOf keeps only routes", () => {
+			const s = api();
+			const r = s.routesOf(marks) as { kind: string }[];
+			expect(r).toHaveLength(1);
+			expect(r[0]!.kind).toBe("route");
+		});
+
+		it("pointsOf keeps everything that is not a route", () => {
+			const s = api();
+			const r = s.pointsOf(marks) as { kind: string }[];
+			expect(r.map((m) => m.kind)).toEqual(["town", "depot"]);
+		});
+
+		it("the two halves partition the input (nothing lost, nothing duplicated)", () => {
+			const s = api();
+			const r = s.routesOf(marks).length;
+			const p = s.pointsOf(marks).length;
+			expect(r + p).toBe(marks.length);
+		});
+
+		it("tolerates undefined/empty input", () => {
+			const s = api();
+			expect(s.routesOf(undefined)).toEqual([]);
+			expect(s.pointsOf(undefined)).toEqual([]);
+			expect(s.routesOf([])).toEqual([]);
+		});
+
+		it("skips null entries instead of throwing", () => {
+			const s = api();
+			expect((s.pointsOf([null, { kind: "town", x: 1, y: 1 }]) as unknown[]).length).toBe(1);
+		});
+
+		it("pointClass maps kinds to the classes the CSS defines", () => {
+			const s = api();
+			expect(s.pointClass({ kind: "town" })).toBe("ov-town");
+			expect(s.pointClass({ kind: "depot" })).toBe("ov-depot");
+			expect(s.pointClass({ kind: "other" })).toBe("ov-other");
+			expect(s.pointClass(null)).toBe("ov-other");
+		});
+
+		it("pointRadius makes towns bigger than depots", () => {
+			const s = api();
+			expect(s.pointRadius({ kind: "town" })).toBeGreaterThan(s.pointRadius({ kind: "depot" }));
+		});
+	});
+
+	describe("overlaySvg (why marks are string-built, not templated)", () => {
+		// A <template> inside <svg> is SVG-namespaced with no `.content`, so Alpine's
+		// x-for throws "reading 'children'" and the loop var never binds. Measured in
+		// Chrome: { ns: 'SVG', isHTMLTemplate: false, contentDefined: false }.
+		// So the marks are generated as a string and injected with x-html.
+		// Coordinates are normalized 0..1 world positions; inWindow() maps them to
+		// window percentages: ((p - centre) * scale + 0.5) * 100.
+		const view = {
+			focus: { x: 0.5, y: 0.5, scale: 1 },
+			routes: [{ label: "A-B", from: { x: 0.2, y: 0.2 }, to: { x: 0.6, y: 0.6 } }],
+			markers: [
+				{ kind: "town", label: "T", x: 0.4, y: 0.4 },
+				{ kind: "depot", label: "D", x: 0.45, y: 0.45 },
+			],
+		};
+
+		it("emits a single well-formed <svg> with <line> and <circle>", () => {
+			const svg = api().overlaySvg(view);
+			expect(svg.startsWith("<svg ")).toBe(true);
+			expect(svg.endsWith("</svg>")).toBe(true);
+			expect(svg).toContain("<line class=\"ov-route\"");
+			expect(svg).toContain("<circle class=\"ov-town\"");
+			expect(svg).toContain("<circle class=\"ov-depot\"");
+			// no template element may ever appear in the injected markup
+			expect(svg).not.toContain("<template");
+		});
+
+		it("carries viewBox/preserveAspectRatio so it scales over the cropped image", () => {
+			const svg = api().overlaySvg(view);
+			expect(svg).toContain('viewBox="0 0 100 100"');
+			expect(svg).toContain('preserveAspectRatio="none"');
+		});
+
+		it("returns empty string when there is nothing to draw", () => {
+			expect(api().overlaySvg({ focus: { x: 0.5, y: 0.5, scale: 1 } })).toBe("");
+			expect(api().overlaySvg(undefined)).toBe("");
+			expect(api().overlaySvg({ routes: [], markers: [] })).toBe("");
+		});
+
+		it("never emits NaN into a coordinate attribute", () => {
+			const svg = api().overlaySvg({
+				focus: { x: 0.5, y: 0.5, scale: 1 },
+				markers: [
+					{ kind: "town", x: 0.33, y: 0.66 },
+					{ kind: "town", x: Number.NaN, y: 0.1 },
+					{ kind: "town", x: 0.4, y: Number.POSITIVE_INFINITY },
+				],
+			});
+			expect(svg).not.toContain("NaN");
+			expect(svg).not.toContain("Infinity");
+			// the two unusable markers are dropped, only the valid one remains
+			expect((svg.match(/<circle/g) || []).length).toBe(1);
+		});
+
+		it("markup carries no user-controlled text (labels never reach the SVG)", () => {
+			// The aria-label is built from counts only, so hostile labels cannot be
+			// injected. This is why there is no escaping bug to have here.
+			const svg = api().overlaySvg({
+				focus: { x: 0.5, y: 0.5, scale: 1 },
+				routes: [{ label: 'x"><script>alert(1)</script>', from: { x: 0.4, y: 0.4 }, to: { x: 0.6, y: 0.6 } }],
+			});
+			expect(svg).not.toContain("<script>");
+			expect(svg).not.toContain("alert(1)");
+			expect(svg).toContain('aria-label="overlay: 1 route(s), 0 marker(s)"');
+		});
+
+		it("omits routes whose endpoints are outside the window", () => {
+			const svg = api().overlaySvg({
+				focus: { x: 0.05, y: 0.05, scale: 1 },
+				routes: [{ from: { x: 0.95, y: 0.95 }, to: { x: 0.99, y: 0.99 } }],
+			});
+			expect(svg).toBe("");
 		});
 	});
 });

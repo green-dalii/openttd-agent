@@ -2,6 +2,39 @@
 
 本文件遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### Fixed
+
+- **Live 页满屏 Alpine 报错**（`reading 'children'` + `m is not defined`）。
+  真因与最初判断不同：`<template>` 放在 `<svg>` 内部会被 HTML 解析器当作 **SVG 命名空间元素**，
+  不是 `HTMLTemplateElement`，`.content` 为 `undefined`，Alpine 的 `x-for` 读 `.content.children`
+  直接抛错且循环变量永不绑定。修复：overlay 标记改为**字符串生成**（`overlaySvg()` + `x-html`），
+  生成逻辑为纯函数、可单测。**副作用**：我最初的诊断（"x-for 内有两个兄弟根"）是错的，
+  按它改完错误依旧——复盘见 `MEMORY.md` B2。
+- **KPI 卡片里的 sparkline 在重构后消失**：模板里留着 `<canvas class="kpi-spark">`，
+  但 `U.paintSparks()` 再没被调用。现在由 `x-effect="drawSparks()"` 驱动，
+  且**同步**读取数据（跨异步边界读会让 Alpine 追踪不到依赖，图永远不画）。
+- **`hasHistory(metric)` 忽略参数**：它查的是"当前选中的现金指标"，于是 Cash 有历史时
+  "Income / yr" 也显示趋势线。改为按指标查询（`sparkSeries(metric)`）。
+- **重复 `:key` 导致整段列表渲染为空**：同一 stage 帧被投递两次 → 两条 `index` 相同的记录，
+  而 `index` 是 `x-for` 的 `:key`，**重复 key 让 Alpine 渲染出 0 个节点**且无任何报错。
+  列表写入改为幂等 upsert（`LiveView.upsertStageView`）。
+
+### Added
+
+- **`MEMORY.md`** —— 跨 session 的**过程教训**记录（现象/根因/规则），
+  与 `SPEC.md`（系统事实）、`AGENTS.md`（开发准则）分工正交。
+- `AGENTS.md` §5.2 前端验证准则：验证必须在**代码真的执行过的状态**下进行、
+  必须采集全部控制台级别（含 `warn`）、断言用户可观察的结果、
+  重写动态模板后逐个交互元素人工过一遍。
+- `AGENTS.md` §8 提交卫生（禁止碎片化，同一次工作的收尾用 `--amend`）；
+  §9 文档职责与正交性（同一事实只有一个权威位置，其余用指针）。
+- `AGENTS.md` §3.1 临时脚本一律放 `.scratch/`（已被 `.gitignore`）。
+- 静态守卫 `test/unit/alpine-templates.test.ts`：页面 HTML 里 `<svg>` 内含 `<template>`、
+  `x-for`/`x-if` 根元素数量不为 1、`x-for` 缺 `:key` —— 任一命中即测试失败。
+- `test/unit/repo-hygiene.test.ts`：防止探针脚本再被提交进仓库。
+
 ## [0.6.0] - 2026-09-11
 
 > **本轮的主要工作是"把实现拉回 SPEC"**，而不是加功能。审计真机 Session 日志发现，

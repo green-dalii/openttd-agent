@@ -71,7 +71,11 @@ interface LiveModel {
 	stepFilter: string;
 	// derivations
 	primaryCompany(): Record<string, unknown>;
-	resultKpis(): { k: string; v: string; hint?: string }[];
+	primaryHistory(): Record<string, unknown>[];
+	sparkSeries(metric?: string): number[];
+	hasSpark(metric?: string): boolean;
+	sparkSpecs(): ({ data: number[] } | null)[];
+	resultKpis(): { k: string; v: string; hint?: string; spark?: string }[];
 	costKpis(): { k: string; v: string; hint?: string }[];
 	cashSeries(): { name: string; data: number[]; color: string }[];
 	cashLabels(): string[];
@@ -83,9 +87,21 @@ interface LiveModel {
 	notice(): { show: boolean; kind: string; title: string; body: string; canStart: boolean };
 	nowSummary(): { state: string; brain: string; lastDecision: string; intent: string; action: string };
 	stageList(): unknown[];
+	stageViewsNewestFirst(): { index?: number; image?: string }[];
 	companiesEmpty(): boolean;
 	companyCards(): { id: string; name: string; isAi: boolean; neg: boolean; money: string; value: string; fleet: string }[];
 	toggleCategorySet(cat: string): Set<string>;
+}
+
+/** The LiveView module itself (module-level pure helpers live on it). */
+function liveViewModule(): { upsertStageView: (l: unknown, x: unknown) => unknown } {
+	const sandbox: Record<string, unknown> = { console, JSON, Object, Array, Number, String, Math, Date, Set, Map, Intl };
+	sandbox.UI = uiStub();
+	sandbox.window = sandbox;
+	sandbox.globalThis = sandbox;
+	vm.createContext(sandbox);
+	vm.runInContext(SRC, sandbox);
+	return (sandbox.window as { LiveView: { upsertStageView: (l: unknown, x: unknown) => unknown } }).LiveView;
 }
 
 function load(): { model: LiveModel } {
@@ -423,5 +439,149 @@ describe("company cards", () => {
 	it("is empty when there is no company", () => {
 		const { model } = load();
 		expect(model.companyCards()).toEqual([]);
+	});
+});
+
+describe("live-view: KPI sparkline series", () => {
+	// Regression (2026-09-12): the rewrite left <canvas class="kpi-spark"> in the
+	// template but dropped the U.paintSparks() call, so Cash and Income simply had
+	// no trend line and nothing errored. Separately, hasHistory(metric) ignored its
+	// argument and consulted the *selected* cash metric, so "Income / yr" claimed
+	// history whenever Cash had any.
+	function withHist(history: Record<string, number>[]) {
+		const { model } = load();
+		model.companies = { "0": company({ history }) } as unknown as Record<string, unknown>;
+		return model;
+	}
+
+	it("sparkSeries returns the named metric, in order", () => {
+		const m = withHist([
+			{ money: 10, income: 1 },
+			{ money: 20, income: 2 },
+			{ money: 30, income: 3 },
+		]);
+		expect(m.sparkSeries("money")).toEqual([10, 20, 30]);
+		expect(m.sparkSeries("income")).toEqual([1, 2, 3]);
+	});
+
+	it("sparkSeries drops non-finite points (missing metric must not become NaN)", () => {
+		const m = withHist([{ money: 10 }, { money: 20 }, { money: 30 }]);
+		expect(m.sparkSeries("income")).toEqual([]);
+		expect(m.sparkSeries("money")).toEqual([10, 20, 30]);
+	});
+
+	it("sparkSeries tolerates no metric / no company", () => {
+		expect(withHist([]).sparkSeries("money")).toEqual([]);
+		expect(withHist([]).sparkSeries(undefined)).toEqual([]);
+		const { model: empty } = load();
+		expect(empty.sparkSeries("money") as unknown as number[]).toEqual([]);
+	});
+
+	it("hasSpark needs more than one point", () => {
+		expect(withHist([{ money: 1 }]).hasSpark("money")).toBe(false);
+		expect(withHist([{ money: 1 }, { money: 2 }]).hasSpark("money")).toBe(true);
+	});
+
+	it("hasSpark is per-metric, not per-selected-metric (the old bug)", () => {
+		const m = withHist([{ money: 5 }, { money: 6 }]);
+		expect(m.hasSpark("money")).toBe(true);
+		// Cash has two points; Income has none. The old implementation returned true
+		// for both because it looked at cashMetric.
+		expect(m.hasSpark("income")).toBe(false);
+	});
+
+	it("sparkSpecs aligns to resultKpis order and is null where there is no series", () => {
+		const m = withHist([{ money: 1, income: 2 }, { money: 3, income: 4 }]);
+		const specs = m.sparkSpecs();
+		const kpis = m.resultKpis();
+		expect(specs.length).toBe(kpis.length);
+		// Tile i and spec i must describe the same KPI - that is the invariant
+		// UI.paintSparks relies on when it matches tiles positionally.
+		kpis.forEach((k, i) => {
+			if (specs[i]) expect(specs[i]!.data.length).toBeGreaterThan(1);
+			else expect(k.spark ? m.hasSpark(k.spark) : false).toBe(false);
+		});
+	});
+
+	it("sparkSpecs has no entry for KPIs without a spark field", () => {
+		const m = withHist([{ money: 1, income: 2 }, { money: 3, income: 4 }]);
+		const specs = m.sparkSpecs();
+		m.resultKpis().forEach((k, i) => {
+			if (!k.spark) expect(specs[i]).toBeNull();
+		});
+	});
+});
+
+describe("live-view: stage view upsert (Alpine :key must stay unique)", () => {
+	// Regression (2026-09-12): onStage appended blindly, so a re-delivered frame
+	// produced TWO entries with the same `index`. `index` is the Alpine x-for :key,
+	// and duplicate keys made the stage list render ZERO nodes with no console error.
+	function upsert(list: unknown, v: unknown) {
+		const fn = liveViewModule().upsertStageView as (
+			l: unknown,
+			x: unknown,
+		) => { index?: number; image?: string }[];
+		return fn(list, v);
+	}
+	const stamp = (i: number, extra: Record<string, unknown> = {}) => ({ index: i, gameDate: "1950-01-01", ...extra });
+
+	it("appends a new index", () => {
+		const a = upsert([], stamp(0));
+		expect(a).toHaveLength(1);
+		const b = upsert(a, stamp(1));
+		expect(b.map((x) => x.index)).toEqual([0, 1]);
+	});
+
+	it("replaces (not duplicates) a re-delivered index", () => {
+		// the exact bug: same frame twice -> two entries, both index 0
+		let list = upsert([], stamp(0));
+		list = upsert(list, stamp(0));
+		expect(list).toHaveLength(1);
+		expect(new Set(list.map((x) => x.index)).size).toBe(list.length);
+	});
+
+	it("keeps the image when a later frame for the same index lacks it", () => {
+		// stageImage frames carry only {index, file}; the body frame may arrive later
+		let list = upsert([], stamp(0, { image: "000.png" }));
+		list = upsert(list, stamp(0));
+		expect(list[0]!.image).toBe("000.png");
+	});
+
+	it("lets a later frame supply the image", () => {
+		let list = upsert([], stamp(0));
+		list = upsert(list, stamp(0, { image: "000.png" }));
+		expect(list[0]!.image).toBe("000.png");
+	});
+
+	it("never merges different indexes", () => {
+		let list = upsert([], stamp(0, { image: "000.png" }));
+		list = upsert(list, stamp(1, { image: "001.png" }));
+		expect(list.map((x) => x.image)).toEqual(["000.png", "001.png"]);
+	});
+
+	it("is idempotent under repeated delivery (the double-listener case)", () => {
+		let list: { index?: number }[] = [];
+		for (let i = 0; i < 5; i++) list = upsert(list, stamp(3, { image: "003.png" }));
+		expect(list).toHaveLength(1);
+	});
+
+	it("caps the list at 24 entries", () => {
+		let list: { index?: number }[] = [];
+		for (let i = 0; i < 40; i++) list = upsert(list, stamp(i));
+		expect(list).toHaveLength(24);
+		expect(list[list.length - 1]!.index).toBe(39);
+	});
+
+	it("ignores junk instead of throwing", () => {
+		expect(upsert(undefined, undefined)).toEqual([]);
+		expect(upsert([], null)).toEqual([]);
+		expect(upsert([stamp(0)], undefined)).toHaveLength(1);
+	});
+
+	it("does not mutate the input array", () => {
+		const original = [stamp(0)];
+		const next = upsert(original, stamp(1));
+		expect(original).toHaveLength(1);
+		expect(next).toHaveLength(2);
 	});
 });
