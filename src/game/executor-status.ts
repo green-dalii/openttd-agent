@@ -127,14 +127,36 @@ function num(v: string | undefined): number | null {
  * `s3` -> `s4` means a sign was placed.
  */
 export function phaseIdentity(phase: string): string {
-	// The phase travels as the executor's company name, so it carries the `EX `
-	// prefix (`EX hb road #28 s3`). The prefix is kept in the rebuilt identity so a
-	// non-heartbeat string still compares by its full text.
-	const m = /^(.*?)hb\s+(\S+)\s*#\d+(\s+s\d+)?$/.exec((phase ?? "").trim());
-	// Rebuild without the counter; keep everything else, because it is state:
-	// the stage (`boot` -> `road`) and the sign count (`s3` -> `s4`) both matter.
-	if (m) return [m[1] + "hb", m[2], m[3] ? m[3].trim() : ""].filter(Boolean).join(" ");
-	return (phase ?? "").trim();
+	const s = (phase ?? "").trim();
+	// Strip the COUNTERS, keep the STATE.
+	//
+	// The phase string mixes two things:
+	//   state  - stage, segment, tiles remaining, sign count   -> real news
+	//   count  - heartbeat seq (`#28`), retry counter (`r7`)   -> just ticking
+	//
+	// Measured (2026-09-12, /tmp/hbfix2): 119 phase strings collapsed to a handful
+	// of real situations. `rd s0 r0..r40 d144` is ONE situation - the executor
+	// retrying a segment it cannot finish - reported 40 times as if it were 40
+	// events. A rising retry counter is the signature of being STUCK.
+	//
+	// Both were waking the model on every tick, which is why a 200s game produced
+	// ~36 decisions with money unmoved in 83% of them.
+	return s
+		.replace(/(\bhb\s+\S+\s*)#\d+/, "$1")
+		.replace(/(\brd\s+\S+\s*)r\d+/, "$1")
+		.replace(/\s+/g, " ");
+}
+
+/**
+ * True when this phase is only a heartbeat.
+ *
+ * A heartbeat means "nothing happened, I am still alive", so it must NEVER open a
+ * decision window - that is the inversion that cost a whole M3 round. Returning the
+ * flag lets the caller keep the liveness signal (it is how we know the executor is
+ * alive at all) without turning it into a trigger.
+ */
+export function isHeartbeatPhase(phase: string): boolean {
+	return /(^|\s)hb\s/.test((phase ?? "").trim());
 }
 
 export function decodeExecutorPhase(input: string): ExecutorPhase {

@@ -181,24 +181,43 @@ describe("phaseIdentity — 心跳不是「变化」（2026-09-12，代价：整
 	// 心跳的语义**恰恰是**"什么都没发生，我还活着"。把它当成变化信号，
 	// 等于用"没有新闻"去触发一次新闻发布。
 	it("同一阶段的心跳序列号递增 → 同一个 identity", () => {
-		expect(phaseIdentity("EX hb road #28 s3")).toBe(phaseIdentity("EX hb road #29 s3"));
-		expect(phaseIdentity("EX hb boot #1 s0")).toBe(phaseIdentity("EX hb boot #2 s0"));
+		expect(phaseIdentity("EX hb road #28 s3 j1")).toBe(phaseIdentity("EX hb road #29 s3 j1"));
+		expect(phaseIdentity("EX hb boot #1 s0 j-1")).toBe(phaseIdentity("EX hb boot #2 s0 j-1"));
 	});
 
 	it("阶段真的变了 → identity 不同", () => {
-		expect(phaseIdentity("EX hb boot #9 s0")).not.toBe(phaseIdentity("EX hb road #9 s3"));
+		expect(phaseIdentity("EX hb boot #9 s0 j1")).not.toBe(phaseIdentity("EX hb road #9 s3 j1"));
 	});
 
 	it("标牌数变化是有意义的，不能被抹掉", () => {
-		expect(phaseIdentity("EX hb road #9 s3")).not.toBe(phaseIdentity("EX hb road #9 s4"));
+		expect(phaseIdentity("EX hb road #9 s3 j1")).not.toBe(phaseIdentity("EX hb road #9 s4 j1"));
 	});
 
 	it("非心跳阶段原样保留", () => {
-		expect(phaseIdentity("EX rd s1 r0 d104 p0")).toBe("EX rd s1 r0 d104 p0");
-		expect(phaseIdentity("EX done stN2 r63 bus")).toBe("EX done stN2 r63 bus");
+		// 重试计数器 r<k> 也是计数器：同一段路重试 40 次是**一个**局面（卡住了），
+// 不是 40 条新闻。
+		expect(phaseIdentity("EX rd s1 r0 d104 p0 j1")).toBe(phaseIdentity("EX rd s1 r40 d104 p0 j1"));
+		expect(phaseIdentity("EX rd s1 r0 d104 p0 j1")).toBe("EX rd s1 d104 p0 j1");
+		expect(phaseIdentity("EX done stN2 r63 bus j1")).toBe("EX done stN2 r63 bus j1");
 	});
 
 	it("不同阶段的进度变化仍然是变化", () => {
-		expect(phaseIdentity("EX rd s0 r0 d104")).not.toBe(phaseIdentity("EX rd s1 r0 d104"));
+		expect(phaseIdentity("EX rd s0 r0 d104 j1")).not.toBe(phaseIdentity("EX rd s1 r0 d104 j1"));
+	});
+
+	it("测试必须用真实观测到的字符串（带尾部 j<money>）", () => {
+		// 教训：第一版测试用的是我自己**臆想**的格式 `EX hb road #28 s3`，
+		// 而真实格式是 `EX hb road #28 s3 j1`。测试全绿，修复却毫无作用
+		// （复测：心跳仍触发 28 次）。**断言必须建立在真实样本上。**
+		const real = [
+			"EX hb boot #1 s0 j-1",
+			"EX hb road #28 s3 j1",
+			"EX hb road #29 s3 j1",
+			"EX rd s1 r0 d104 p0 j1",
+			"EX done stN2 r63 bus j1",
+		];
+		expect(phaseIdentity(real[1]!)).toBe(phaseIdentity(real[2]!));
+		expect(phaseIdentity(real[3]!)).toBe("EX rd s1 d104 p0 j1");
+		expect(phaseIdentity(real[4]!)).toBe(real[4]);
 	});
 });

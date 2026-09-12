@@ -15,10 +15,14 @@
  * 而任何"断言 preflight 看得到 offlineDemo"的测试都会通过，
  * 因为它测的正是没坏的那一半。所以这里的断言必须落在 **launcher 实际收到的 opts** 上。
  */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { runServe } from "../../src/agent/serve.js";
 import { loadConfig, type Config } from "../../src/config.js";
 import { resolveRunOptions } from "../../src/agent/serve.js";
+
+const ROOT = process.cwd();
 
 /**
  * 最小可用配置：不碰真机、不碰网络。走 loadConfig 而不是手写对象，
@@ -92,5 +96,29 @@ describe("serve 接线: Start 按钮转交给 runner 的参数", () => {
 			expect(r.web).toBe("WEB");
 			expect(r.control).toBe("CTL");
 		});
+	});
+});
+
+describe("runner 的所有回调状态必须在 AdminClient 之前声明（TDZ 守卫）", () => {
+	// 这个缺陷已经出现 4 次（MEMORY A5）。每次形状都一样：某个 `let x` 写在
+	// 第一次赋值处，而 `onEvent` 在 **boot 期间**就会触发 → x 处于暂时性死区
+	// → 回调里每次访问都抛 → 症状千奇百怪（"GS never heartbeated"、
+	// "Cannot access 'x' before initialization"），但根因只有一个。
+	//
+	// 与其等第 5 次，不如让门禁挡住：**回调会碰到的顶层 let，必须声明在
+	// `new AdminClient` 之前**。
+	it("executorPhase / executorPhaseIdentity / web / session 都先于 AdminClient", () => {
+		const src = readFileSync(join(ROOT, "src/agent/runner.ts"), "utf8");
+		const adminIdx = src.indexOf("client = new AdminClient");
+		expect(adminIdx, "runner.ts must still construct AdminClient").toBeGreaterThan(0);
+		for (const name of ["executorPhase", "executorPhaseIdentity", "web", "sessionRef"]) {
+			const decl = new RegExp(`let\\s+${name}\\b`).exec(src);
+			expect(decl, `runner.ts should declare ${name}`).not.toBeNull();
+			expect(
+				decl!.index,
+				`\`let ${name}\` must be declared ABOVE \`new AdminClient\` or it is in the ` +
+					`temporal dead zone when the boot-time event callback fires (MEMORY A5)`,
+			).toBeLessThan(adminIdx);
+		}
 	});
 });
