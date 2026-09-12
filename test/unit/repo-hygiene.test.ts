@@ -110,3 +110,36 @@ describe("repo hygiene: 文档正交性（AGENTS.md §9）", () => {
 		expect(s, "MEMORY should point at SPEC instead of restating protocol facts").toMatch(/SPEC\.md/);
 	});
 });
+
+describe("交接文档必须可执行（2026-09-12）", () => {
+	// 教训：ROADMAP 里曾写着 `pnpm exec tsx -e '...'` 这种单行命令，但它**跑不通**
+	// （eval 模式解析不了带 .js 的 ESM import）。交接文档里的命令必须是实测过的，
+	// 否则 compact 之后接手的人会卡在第一步。
+	it("ROADMAP 的**可执行代码块**里不出现 tsx -e 单行命令", () => {
+		const s = readFileSync(join(ROOT, "ROADMAP.md"), "utf8");
+		// 只看 ``` 围起来的代码块：散文里提到"这个写法不工作"是应该保留的
+		// 说明，不是一条会跑失败的命令。
+		const blocks = [...s.matchAll(/```[a-z]*\n([\s\S]*?)```/g)].map((m) => m[1]!);
+		expect(blocks.length).toBeGreaterThan(0);
+		for (const b of blocks) expect(b).not.toMatch(/tsx\s+-e\s/);
+	});
+
+	it("ROADMAP 引用的脚本真实存在", () => {
+		const s = readFileSync(join(ROOT, "ROADMAP.md"), "utf8");
+		const refs = [...s.matchAll(/(scripts\/[a-z0-9-]+\.ts)/g)].map((m) => m[1]!);
+		expect(refs.length).toBeGreaterThan(0);
+		for (const r of refs) {
+			expect(existsSync(join(ROOT, r)), `ROADMAP references missing ${r}`).toBe(true);
+		}
+	});
+
+	it("ROADMAP 引用的 SPEC 小节真实存在", () => {
+		const road = readFileSync(join(ROOT, "ROADMAP.md"), "utf8");
+		const spec = readFileSync(join(ROOT, "SPEC.md"), "utf8");
+		const secs = [...road.matchAll(/§(10\.\d+)/g)].map((m) => m[1]!);
+		expect(secs.length).toBeGreaterThan(0);
+		for (const sec of new Set(secs)) {
+			expect(spec.includes(`## ${sec}`), `ROADMAP cites §${sec} which SPEC does not have`).toBe(true);
+		}
+	});
+});

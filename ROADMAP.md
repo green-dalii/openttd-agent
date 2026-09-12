@@ -20,7 +20,7 @@
 | **M0** 环境钉死 | 二进制 / 隔离 data dir / admin auth | ✅ |
 | **M1** 观测闭环 | 规范事件 + Web 仪表盘 | ✅ |
 | **M2** 最小决策闭环 | bridge GS + executor + Pi Agent 决策 | ✅ **真机验收通过**（2 站 / 3 车 / 63 段路，SPEC §10.29） |
-| **M3** 进化闭环 | 局终结算 + 反思 + lessons + 注入下局 + 对比图 | ✅ **首次真实对照完成**（资金无差异、token −16%、任务已饱和；SPEC §10.31） |
+| **M3** 进化闭环 | 局终结算 + 反思 + lessons + 注入下局 + 对比图 | 🔵 **引擎完成；第一次 A/B 无效**（agent 当时无决策可做，§10.31/§10.32）。决策空间已交还（§10.33），**待用新空间重跑 → NEXT-1** |
 | **M4** 打磨 | 策略库 / replay / 自愈 / 多模型基线 | ⬜ |
 
 ---
@@ -48,45 +48,112 @@
 
 ## 待办
 
-### 0. RL Harness 范围审核（已完成 2026-09-12）
+> **接手须知（2026-09-12 收尾状态）**
+> - `git` 干净，`pnpm run gate` 全绿（780 passed / 9 skipped）。
+> - **开工前必读**：`SPEC.md` §10.20–§10.33（这几节是最近一轮的全部结论），
+>   以及 `docs/EXECUTOR-ARCHITECTURE.md`。
+> - **无 remote**：所有提交都是本地的，不要 push。
+> - **subagent 不可用**（缺 `@earendil-works/pi-server`，已核实 5+ 次）——所有活都内联做。
 
-结果见 `docs/RL-HARNESS-SCOPE-AUDIT.md`：7 条注入通道全部逐条判定。
-2 处违反已修（`DO:`/`AVOID:` 祈使句注入、有库就自动注入）。
-**1 处待你决定**：跨局记忆系统本身是否该存在（建议保留能力、默认关闭；已如此）。
-另修 3 个「门禁看得到、runner 收不到」的转发缺陷（含 `--agent --offline-demo` 一直没生效）。
+---
 
-### ✅ 1. M3 验收：**已完成（2026-09-12）**——结果见 SPEC §10.31
+### 🔴 NEXT-1：用新的决策空间重跑 M3（**当前唯一有科学意义的一步**）
 
-实现已完成（见 `CHANGELOG.md` v0.6.x；设计见 `docs/EVOLUTION.md`），
-但**还没有真实数据**。验收（SPEC §9）：**同 seed 带 / 不带 lessons 各 3 局，出对比曲线**。
+**为什么**：`SPEC.md` §10.31 的第一次 A/B **无效** —— 两臂无差异，
+根因不是地图太小，而是 **agent 当时没有决策可做**（看不到城镇、
+工具描述还叫它别选）。§10.33 已把决策权交还（实测 agent 开始传 `from=9,to=1`）。
+**决策空间变了，实验必须重跑。**
 
-- [x] 用真实 LLM 跑 6 局（同 seed，3 局注入 lessons、3 局不注入）——**已跑完**
-- [x] `/evolution` 页 `verdictOk()` 为真、两臂卡片有数（3 vs 3）
-- [x] 结果固化进 SPEC §10.31
-- [x] **根因已定位（2026-09-12，见 SPEC §10.32）**：不是地图太小，是
-      **agent 没有决策可做** —— 它看不到城镇（`observe()` 无城镇数据），
-      工具描述还写着"不用选，planner 替你挑最优"。
-      实测：地图放大 16 倍（256²→1024²），`PickTownPair()` 仍挑同样的 tile 62,136，
-      站数仍为 2 —— **变大的只有 harness 自己的施工难度**。
-- [x] **已实施（2026-09-12，见 SPEC §10.33）**：GS 上报候选城镇 → agent 看得见 →
-      实测它开始主动选（`from=9, to=1`，挑的是人口最高的两个）。
-- [ ] **用新的决策空间重跑 M3**：现在的对照实验**才有意义** ——
-      之前 agent 没有决策，两臂必然无差异。重跑前要先确认局长足够
-      （`--demo-seconds 200` 现在真的生效了）。
-- [ ] 地图大小作为**难度旋钮**保留（large 实测 280 秒建不完，说明它确实更难），
-      但要等决策空间存在之后再用来做实验。
+**怎么做**（照抄即可）：
 
-**注意**：注入默认**关闭**（SPEC §5.3 人工确认闸门）。要先在 `/evolution` 页确认策略卡片，
-或在库中放入 lessons，否则 6 局都会落在「无记忆」臂。
+```bash
+# 真实 key 已在 /tmp/openttd-agent-data/{credentials,llm}.json（provider=minimax-cn, model=MiniMax-M3）
+rm -rf /tmp/m3b && mkdir -p /tmp/m3b
+cp /tmp/openttd-agent-data/credentials.json /tmp/openttd-agent-data/llm.json /tmp/m3b/
 
-### ✅ 2. Token usage 图表 → **堆叠面积图**（已完成 2026-09-12）
+# 对照臂 3 局（--no-memory；反思仍会写 lessons 进库）
+for i in 1 2 3; do
+  pkill -f "OpenTTD.app/Contents/MacOS/openttd"; sleep 3
+  OPENTTD_DATA_DIR=/tmp/m3b pnpm run cli --agent --seed 7 --no-memory --demo-seconds 200 > /tmp/m3b-a$i.log 2>&1
+done
+# 处理臂 3 局（默认注入）
+for i in 1 2 3; do
+  pkill -f "OpenTTD.app/Contents/MacOS/openttd"; sleep 3
+  OPENTTD_DATA_DIR=/tmp/m3b pnpm run cli --agent --seed 7 --demo-seconds 200 > /tmp/m3b-b$i.log 2>&1
+done
 
-- 已改为**堆叠面积图**（你的要求），实现与验证见 `CHANGELOG.md`
-- 关键：倒序绘制（大者先画）+ 不透明填充到轴，小面积覆盖其下半部分
-- 实测：纵向连续三段 `Reasoning → Output → Input`，无缝、无混色
-- **`docs/DASHBOARD-UI.md` §6c 需要同步更新**（它记录的结论仍是"堆叠柱"）
+# 读结论（规则全在服务端 metrics.ts，不在浏览器里重算）
+pnpm exec tsx scripts/m3-verdict.ts /tmp/m3b
+```
 
-### 3. M4 打磨（未开工，SPEC §9）
+> 收尾时实测：`pnpm exec tsx -e '...'` **不工作**（eval 模式解析不了带 `.js` 的 ESM import）。
+> 所以结论读取落成了 `scripts/m3-verdict.ts`。
+
+**验收**：`arms.conclusive === true`，并把结果固化进 `SPEC.md`（**真假结论都要记**）。
+
+**⚠️ 先确认一件事**：`--demo-seconds 200` 是否足够建成？
+第一次 A/B 用 200 秒时 6/6 全部 `constructionDone=true`。
+若新局普遍 `false`，说明局长不够，调大再跑（否则指标又被截断）。
+
+**⚠️ 仍然可能饱和**：即使 agent 现在会选城镇，**它仍然只能下"建一条线"这一个决定**。
+若这次两臂还是无差异，**不要再加局数** —— 那是决策空间仍然太窄的信号，
+应转去做 NEXT-2。
+
+---
+
+### 🔴 NEXT-2：继续扩决策空间（若 NEXT-1 无信号）
+
+NEXT-1 只补了"选哪个城镇对"。要让 lessons 真正有作用点，还需要**选择有后果**：
+
+- [ ] **车队规模由 agent 定**：`add_vehicles` 目前只能克隆头车，且 0 车时拒绝（§10.20）。
+      改成"买 N 台"或"克隆到 N 台"，让 agent 权衡运力与维护成本。
+- [ ] **多条线路**：目前 `_stage = "done"` 后执行器永久 idle（**一次性状态机**）。
+      要让 agent 能下第二条线的指令 —— 这需要先做 NEXT-4（GS 常驻）。
+- [ ] **预算约束**：agent 面对有限资金时才有取舍。
+- [ ] **`observe()` 补上地形/距离/成本估计** —— 有选项才谈得上"选得好不好"。
+
+**判定标准**：一个改动只有让"不同选择导致**不同且可学习**的结果"时才值得做。
+
+---
+
+### 🟠 NEXT-3：地图大小作为难度旋钮（等决策空间够宽之后再开）
+
+`OPENTTD_MAP_SIZE=small|medium|large`（256²/512²/1024²）。
+
+**已实测的事实**（`SPEC.md` §10.32）：large（1024²）下同一 seed 仍然挑 **同一个 tile 62,136**，
+站数仍是 2，但 **280 秒建不完**（`constructionDone=false`）。
+
+→ 地图变大改变的是 **harness 的施工难度**，不是 **agent 的自由度**。
+在决策空间够宽之前，它只会让实验更慢、更可能截断。
+
+---
+
+### 🟠 NEXT-4：GS-only 架构改造（调研完成，实施待做）
+
+**根因**：`SPEC.md` §10 选了 Executor AI + 标牌邮箱，起因是"AI 不能直接收 admin 消息"。
+这条约束派生出三个**结构性**残疾：标牌中继命令、**31 字符公司名回报**、
+**一次性状态机**（一局只能建一条线）。
+
+**关键发现**：那条约束**根本不必要**。OpenTTD 源码证实
+（`script_companymode.hpp` / `script_road.hpp` / `script_vehicle.hpp` 均 `@api ai game`）：
+GS 在 company mode 下能施工，文档原文是 *"this is like the real player is executing
+the commands"*。→ **Executor AI 是可以删掉的组件。**
+完整证据与四阶段计划见 `docs/EXECUTOR-ARCHITECTURE.md`。
+
+- [x] **阶段一：已通过** —— 真机证实 GS 可对公司施工并**扣公司的钱**
+      （`money 298825 → 298518`）。见 SPEC §10.25
+- [ ] **阶段 1b：买车/订单/启动** —— `probe_cm` 探针代码已写（含 depot/engine/buy/order/start），
+      但**从未成功触发过**。当时的拦路石（游戏被暂停）已修（§10.28），**现在值得重试**。
+      注意：探针要**在 GS periodic tick 里自触发**（启动时触发会被静默丢弃，见 §10.25.1）
+- [ ] 阶段二：执行器逻辑移入 GS，结构化上报（替掉 31 字符公司名）
+- [ ] 阶段三：删除 Executor AI + 标牌邮箱
+- [ ] 阶段四：扩动作面（真人的操作类别，见架构文档 §3）
+
+**这条线是 NEXT-2 的"多条线路"的前置条件**（GS 常驻才能接新指令）。
+
+---
+
+### 🟡 NEXT-5：M4 打磨（SPEC §9，未开工）
 
 - [ ] 铁路 / 货运 tool 扩展
 - [ ] replay（结构化事件时间线回放，D10）
@@ -94,116 +161,23 @@
 - [ ] 对照模型基线（多 provider）
 - [ ] 前端：各页面的空态 / 错误态一致性审计
 
-### 3b. 执行器架构改造：GS-only（调研完成，待实施）
+---
 
-**根因（不是"没写完"，是选错架构）**：`SPEC.md` §10 选了 Executor AI + 标牌邮箱，
-起因是"AI 不能直接收 admin 消息"。这条约束派生出三个**结构性**残疾：
-标牌中继命令、31 字符公司名回报、一次性状态机。
+### 📌 已完成但值得知道的事（细节在 SPEC，不在这里复述）
 
-**关键发现**：那条约束**根本不必要**。OpenTTD 源码证实
-（`script_companymode.hpp` / `script_road.hpp` / `script_vehicle.hpp`，均 `@api ai game`）：
-GS 在 company mode 下可以施工，且文档原文是
-*"this is like the real player is executing the commands"*。
-→ **Executor AI 是一个可以删掉的组件。**
-`SPEC.md` L355 早已预警此事（"架构可简化为 GS-only"），但那个 spike 从未做。
+| 事 | 一句话 | 位置 |
+|---|---|---|
+| 执行器跑通完整公交线 | 2 站 / 3 车 / 63 段路，车在跑 | SPEC §10.29 |
+| 控制台 `pause` 是单向的 | **"执行器假死"的最终根因** | SPEC §10.28 |
+| 心跳从来没响过 | 判据用了脚本 tick，执行器一直没有存活信号 | SPEC §10.27 |
+| `--demo-seconds` 从来没用 | 决策循环无截止检查 | SPEC §10.30 |
+| `compareArms` 曾会把 bug 算成结论 | 未排除 `interrupted` 局 | 见 `CHANGELOG` |
+| 决策权交还 agent | 城镇可选，实测 `from=9,to=1` | SPEC §10.33 |
+| 执行器解码器 | 含车辆遥测族 `R/S/D/@/B/X` | SPEC §10.29 |
 
-**已完成**：调研 + 证据 + 四阶段实施计划 → `docs/EXECUTOR-ARCHITECTURE.md`
-**已完成的实测**：`probe_cm` 探针已写出并跑过一轮，得到一条负面事实
-（第二条 admin 连接发不到 GS，见 SPEC §10.24）；该探针改动因改动过程出错已回退。
+---
 
-- [x] **阶段一：已通过**（真机证实 GS 可对公司施工并扣公司钱，见 SPEC §10.25）
-- [x] **§10.26 已修**：决策循环 unpause 永久化（try/finally + 静态守卫）。
-  **但真机仍 flakiness** —— 同一命令偶发"执行器推进"，偶发"停在 boot"。
-  真机里 phase-1b 探针（`probe_cm` 完整版）两次运行都未触发。
-- [ ] **阶段 1b：买车/订单/启动** —— 代码已写但仍未验证。
-- [ ] 阶段二：执行器逻辑移入 GS，结构化上报
-- [ ] 阶段三：删除 Executor AI + 标牌邮箱
-- [ ] 阶段四：扩动作面（真人在用的操作类别，见文档 §3）
-
-### 4. Harness 给 agent 的信息是否足够（**本次审计的核心问题**）
-
-你的问题："是不是 Harness 给 agent 传递游戏环境和参数不足？为什么持续亏钱、
-看不到智能反馈、也不新增车辆赚钱？"
-
-审计结论（分三层，**不要混为一谈**）：
-
-1. **agent 确实看到了亏损** —— `sinceLastDecision` 里有 `moneyDelta` / `incomeDelta` /
-   `vehiclesDelta` / `phases` / `actions` / `notableEvents`（`src/agent/decision-context.ts`）。
-   它不是在盲跑。
-2. **但它的动作面无法解决真正的问题**。可用工具只有
-   `observe` / `build_bus_route` / `add_vehicles` / `set_pause`。
-   而当前亏钱的**根因是执行器卡在 `road` 阶段**（见第 3 项）—— 这 4 个工具没有一个能改变它。
-   所以"看不到智能反馈"不是模型不聪明，是**它做什么都不起作用**。
-3. **执行器的阶段字符串对 agent 是不透明的**。`EX rd s0 r0 j100` / `EX hb road #11`
-   在 Squirrel 里有明确语法（`rd`=修路、`s0`=第 0 段、`r0`=重试 0），
-   但 agent 只拿到原始字符串。**这是 Harness 该补的"事实"**（属于接口词汇表，
-   不是策略）：不解释它，agent 看到的就只是噪声。
-
-- [ ] 把执行器阶段字符串的**语法**作为事实提供给 agent（不是"看到 rd 就该等"这种建议）
-- [ ] 评估动作面是否足以让 agent 影响盈亏（当前不足；这是 M2「手」的能力问题，
-      不是 agent 的智力问题）
-
-### 4b. 执行器启动期的**不稳定**（新发现，2026-09-12）
-
-同一命令（`--agent --offline-demo --seed 7`）三次运行，执行器行为不一致：
-
-| 运行 | 结果 |
-|---|---|
-| ex1 | 停在 `EX boot j-1`，方案已下发（GS ack 3 个标牌），执行器**没接** |
-| ex3 | 同上 |
-| ex2 | 正常推进 `work → stA_ok → stB_ok → road_start`（ack 后 4 秒内） |
-
-GS 侧坐标每次一致（`tileA 34878 / depot 38478`），所以不是 GS 的随机性。
-**未定位根因**：怀疑是 `AISignList()` 的可见性与启动竞态，但**尚未证实**。
-在此之前，任何"执行器已经好了"的结论都不能成立。
-
-- [x] **根因已定位并修复（2026-09-12）—— 共三层**：
-  1. **控制台 `pause` 是单向的**（最终根因）：`rcon("pause")` 投进命令队列后
-     循环停摆，unpause 永不执行 → 游戏永久暂停 → 世界不动。
-     实测：带 pause 时日历 120 秒走 1 天；去掉后走 74 天。**见 SPEC §10.28**
-  2. **心跳从未响过**：判据用了 `AIController.GetTick()`（脚本 tick），永不超过阈值
-     → 执行器**没有存活信号**，"卡住"与"死了"无法区分。见 SPEC §10.27
-  3. **`FindSegment` 在单 tick 内跑 2000 次搜索**：`FindPath` 一旦不返回，
-     整个 AI 一起冻结。见 SPEC §10.27
-- [x] **顺带证伪**："`AISignList()` 可见性竞态"是错的 —— 心跳实测 `s3`（3 个标牌全可见）
-- [ ] **执行器如今活着并在推进，但仍停在 `rd s0`**（r0→r7 反复重试）。
-  这才是原本第 5 项那个"路修不通"的真问题 —— 现在它**可观测**了。
-
-### ✅ 5. 执行器跑通完整公交线（**已解决** 2026-09-12）
-
-修掉 §10.28 之后实测：`constructionDone=true`、**2 站 / 3 车 / 63 段路**、
-车辆 `R53`（RUNNING，速度 53）。见 **SPEC §10.29**。
-
-诊断字段 `rd s<段> r<重试> d<剩余> p<探针失败>` 显示 **`p0`**：
-探针从未失败，卡点从来是 pathfinder 需要的 chunk 数，不是地形。
-
-
-用户在 e2e 中观察到：两个站点已建成（`stations: 2`），但执行器长期停在**修路**阶段
-（心跳 `hb road #11`、阶段 `rd s0 r0`），从未进入 `bus` 阶段去买第一台车。
-后果是车队恒为 0，而 `add_vehicles` 在 0 车时不可能生效（见 `SPEC.md` §10.20）。
-
-- [ ] 复现：跑一局，观察阶段是否稳定停在 `road`
-- [ ] 定位 `PhaseRoad()` 无法推进的原因（贪心分段 + 探针回退逻辑；
-      可能是地形/资金导致每段都失败，但**没有可观测的失败原因**——目前只有 `road_stuck`）
-- [ ] 让失败可诊断：把 `LayPath`/`FindSegment` 的失败原因（地形、资金、已有建筑）
-      带进阶段字符串，否则只能靠猜
-
-**为什么值得优先**：这是"手"是否真的能施工的核心问题；没有它，agent 再聪明也无法
-让公司赚钱（M2/M3 的盈利能力都依赖它）。
-
-### 5b. 执行器解码器补齐车辆遥测族（**已做** 2026-09-12）
-
-`R/S/D/@/B/X` 六种车辆状态 + 速度 / 距 A 格数 / A 站候客数已解码，
-`B`/`X` 标为 error。同时删掉了一个会把 `@` 解释成"扫描选址"的**错误**分支
-（它遮蔽真实格式，给 agent 错的含义）。见 SPEC §10.29。
-
-### 5c. `--demo-seconds` 从来没生效（**已修** 2026-09-12）
-
-决策循环无截止检查，`seconds` 只在循环之后使用 → 跑 190 秒的设置实际跑了 28 分钟。
-对 M3 对照实验是致命的（局长不可控）。已修 + 守卫，见 SPEC §10.30。
-实测 `--demo-seconds 60` → 76 秒。
-
-### 6. 已知未收口项（非阻塞）
+### 🟡 NEXT-6：已知未收口项（非阻塞）
 
 - **文档守卫**：`test/unit/alpine-templates.test.ts` 只查结构，未查「页面引用了不存在的元素 id」。
   同类静默失败已出现 3 次（`MEMORY.md` B7），值得再加一条静态检查。

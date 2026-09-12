@@ -11,11 +11,16 @@ TypeScript/Node (ESM, `type: module`) 单体框架：外部进程通过 **Admin 
 
 - 完整架构见 `SPEC.md`；渐进计划见 `ROADMAP.md`；**过程教训见 `MEMORY.md`**。
 - 必须读 `SPEC.md` §2/§10（已验证协议事实）再动通信相关代码。
-- **每次新 Session 开始或 compact 之后，先读 `SPEC.md` + `MEMORY.md` 做目标对齐再动手**
-  （SPEC §1 第一性原理、§4 Agent 层、§5 生命周期、§10.x 已固化事实；
-  MEMORY 的「快速自检清单」+ A/B/C 各类教训）。本仓库的多数返工都源于
-  "没读 SPEC 就实现"与"重复踩 MEMORY 里已记录的坑"。
-- **进度快查**: 当前开发阶段/验证状态/下一步见 `ROADMAP.md` 顶部「进度速览」+ 对应版本段；
+- **每次新 Session 开始或 compact 之后，按这个顺序读，再动手**：
+  1. **`ROADMAP.md`** —— 顶部有 🔴 **NEXT-1/2/… 待办清单与可照抄的命令**；
+     compact 后**从这里接续**，不要凭印象猜进度。
+  2. **`SPEC.md` §10.20–§10.33** —— 最近一轮的全部实测结论（暂停是单向的、
+     心跳从未响过、`--demo-seconds` 没生效、M3 饱和的根因、决策权交还）。
+  3. **`MEMORY.md`** —— 快速自检清单 + A/B/C 各类教训。
+  4. **`docs/EXECUTOR-ARCHITECTURE.md`** —— GS-only 改造的证据与四阶段计划。
+  **本仓库的多数返工都源于"没读 SPEC 就实现"与"重复踩 MEMORY 里已记录的坑"；
+  而最近一轮的返工源于"没读 ROADMAP 就继续"，故把它放在第一位。**
+- **进度快查**: 当前开发阶段/验证状态/下一步见 `ROADMAP.md` 的「进度速览」+「待办」；
   真机实测事实（含 OpenTTD Squirrel 字符串坑、标牌可见性）见 `SPEC.md` §10.x；
   Squirrel 可复用 helper（Split/ToInt/SetPhase）的规范实现以 `src/game/squirrel/executor-ai/main.nut` 为准。
 
