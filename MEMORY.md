@@ -278,6 +278,29 @@ let {y0: t, y1: n} = disp; null != t && null != n && ( ... )
 **规则**：写 prompt/工具文案时问一句 —— **"这句话是在描述世界，还是在替它做决定？"**
 后者一律删掉。守卫见 `test/unit/agent-runtime.test.ts`。
 
+### A5. 「门禁看得到、runner 收不到」——同一 bug 出现了三次（2026-09-12）
+
+**现象**：`--serve --offline-demo` / `--agent --offline-demo` 都会打印
+"running the explicit offline demo"，然后**立刻抛 "no LLM configured"**。
+
+**根因**：`offlineDemo` **preflight 直接读 `args`**（所以门禁放行），
+但两条启动路径的 `runOpts` / `runAgent(...)` 都是**手写的对象字面量**，谁都没转发它。
+
+三个实例：
+1. `serve.ts` 的 `runOpts` 只放了 `web` / `control`；
+2. `cli/run.ts` 的 `--serve` 分支手写 `runOptions`；
+3. `cli/run.ts` 的 `--agent` 分支同样漏掉。
+
+**为什么危险**：这比"没有这个 flag"更糟 —— **它谎报了将要发生的事**。
+而且任何"断言 preflight 读到了 offlineDemo"的测试都会通过，因为它测的正是没坏的那一半。
+
+**规则**：
+- 一个选项被**谁**决定、被**谁**消费，必须只有一个真值来源；
+  门禁与 runner 必须读**同一个已解析的值**（`resolveRunOptions`）。
+- 测试的断言必须落在 **launcher 实际收到的 opts** 上，不能落在"门禁认识这个字段"上。
+  "断言一个谓词，不等于断言一次体验"（A1 的同一形状）。
+- 手写 `runOpts` 字面量本身就是气味：新增选项时它不会报错，只会静静丢掉。
+
 ---
 
 ## C. 数据与一致性

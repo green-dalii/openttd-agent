@@ -218,15 +218,27 @@ describe("lessons: selectLessons(注入前的过滤与限量)", () => {
 });
 
 describe("lessons: formatForInjection", () => {
-	it("把 do/dont 渲染成可辨认的两类文本", () => {
+	it("把 do/dont 渲染成**对过去的陈述**，不是命令", () => {
+		// 项目范围（2026-09-12 重申）：这是 RL harness，注入的是"环境反馈"，
+		// 不是"策略"。所以绝不能出现 DO / AVOID / 你应该 这类祈使句 ——
+		// 那等于把 agent 本该自己从环境里学到的结论直接告诉它。
 		const out = formatForInjection([
 			lesson({ kind: "do", text: "build near towns" }),
 			lesson({ kind: "dont", text: "build far from towns", id: lessonId("x") }),
 		]);
 		expect(out).toHaveLength(2);
 		expect(out[0]).toContain("build near towns");
-		expect(out[0]).toMatch(/do/i);
-		expect(out[1]).toMatch(/avoid|don't|dont/i);
+		expect(out[1]).toContain("build far from towns");
+		for (const line of out) {
+			// 祈使/建议措辞一律不允许
+			expect(line).not.toMatch(/^(DO|AVOID|DON'T)\b/i);
+			expect(line).not.toMatch(/\byou should\b|\byou must\b|\bprefer\b|\balways\b|\bnever\b/i);
+			// 必须读起来像对发生过什么事的陈述
+			expect(line).toMatch(/previously/i);
+		}
+		// 两类仍然可辨认（否则 agent 分不清成功还是失败）
+		expect(out[0]).toMatch(/paid off/i);
+		expect(out[1]).toMatch(/did not pay off/i);
 	});
 
 	it("每条都是单行(注入进 prompt 的文本不能带换行)", () => {

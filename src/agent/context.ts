@@ -48,7 +48,7 @@ export function pruningTransformContext(
 		if (lessons.length === 0) return recent;
 		const reminder: AgentMessage = {
 			role: "user",
-			content: `Lessons from previous games:\n- ${lessons.join("\n- ")}`,
+			content: `Recorded outcomes from your own previous games:\n- ${lessons.join("\n- ")}`,
 		} as AgentMessage;
 		return [reminder, ...recent];
 	};

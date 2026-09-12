@@ -87,7 +87,7 @@ const FACTS = {
 
 describe("memory: loadMemory(开局读库)", () => {
 	it("空库 -> 空记忆,provider 返回空数组(不注入任何东西)", () => {
-		const mem = loadMemory(dir, { now: NOW });
+		const mem = loadMemory(dir, { now: NOW, inject: true });
 		expect(mem.lessons).toEqual([]);
 		expect(mem.strategies).toEqual([]);
 		expect(makeLessonProvider(mem)()).toEqual([]);
@@ -97,14 +97,14 @@ describe("memory: loadMemory(开局读库)", () => {
 	it("装载已确认的策略与被选中的 lessons", () => {
 		appendLessons(dir, [lesson({ text: "a" }), lesson({ text: "b" })]);
 		appendStrategies(dir, [card()]);
-		const mem = loadMemory(dir, { now: NOW });
+		const mem = loadMemory(dir, { now: NOW, inject: true });
 		expect(mem.lessons).toHaveLength(2);
 		expect(mem.strategies).toHaveLength(1);
 	});
 
 	it("未人工确认的策略不装载(SPEC §5.3 guardrail)", () => {
 		appendStrategies(dir, [card({ enabled: false })]);
-		expect(loadMemory(dir, { now: NOW }).strategies).toEqual([]);
+		expect(loadMemory(dir, { now: NOW, inject: true }).strategies).toEqual([]);
 	});
 
 	it("被覆盖/过期的 lessons 不装载", () => {
@@ -112,7 +112,7 @@ describe("memory: loadMemory(开局读库)", () => {
 			lesson({ text: "live" }),
 			lesson({ text: "dead", supersededBy: "x", confidence: 0.9 }),
 		]);
-		const mem = loadMemory(dir, { now: NOW });
+		const mem = loadMemory(dir, { now: NOW, inject: true });
 		expect(mem.lessons.map((l) => l.text)).toEqual(["live"]);
 	});
 
@@ -121,13 +121,13 @@ describe("memory: loadMemory(开局读库)", () => {
 			dir,
 			Array.from({ length: 30 }, (_, i) => lesson({ text: `l${i}` })),
 		);
-		expect(loadMemory(dir, { now: NOW, limit: 3 }).lessons).toHaveLength(3);
+		expect(loadMemory(dir, { now: NOW, limit: 3, inject: true }).lessons).toHaveLength(3);
 	});
 
 	it("注入行数的计数与实际注入内容一致(记账必须诚实)", () => {
 		appendLessons(dir, [lesson({ text: "a" }), lesson({ text: "b" })]);
 		appendStrategies(dir, [card()]);
-		const mem = loadMemory(dir, { now: NOW });
+		const mem = loadMemory(dir, { now: NOW, inject: true });
 		const lines = makeLessonProvider(mem)();
 		const counts = memoryCounts(mem);
 		expect(counts.lessonsInjected).toBe(2);
@@ -135,16 +135,38 @@ describe("memory: loadMemory(开局读库)", () => {
 		expect(lines).toHaveLength(3);
 	});
 
-	it("注入内容可辨认(区分'跨局建议'与'本局观察')", () => {
+	it("注入内容是可辨认的'对过去的陈述'，不是祈使句", () => {
 		appendLessons(dir, [lesson({ text: "keep depots close" })]);
-		const lines = makeLessonProvider(loadMemory(dir, { now: NOW }))();
+		const lines = makeLessonProvider(loadMemory(dir, { now: NOW, inject: true }))();
 		expect(lines.join(" ")).toContain("keep depots close");
-		expect(lines[0]).toMatch(/do|avoid/i);
+		// RL harness：只能给"发生过什么"，不能给"该做什么"
+		expect(lines[0]).toMatch(/previously/i);
+		expect(lines[0]).not.toMatch(/^(do|avoid|don't)\b/i);
+	});
+
+	it("默认**不注入**：本局是干净的 RL 环境（项目范围 2026-09-12）", () => {
+		// 这是本次审核的核心修正。之前只要库里有内容就会被自动注入，
+		// 于是"agent 靠环境学习"悄悄变成了"harness 把结论递给 agent"。
+		appendLessons(dir, [lesson({ text: "keep depots close" })]);
+		appendStrategies(dir, [card({ enabled: true })]);
+
+		const off = loadMemory(dir, { now: NOW });
+		expect(off.lines).toEqual([]);
+		expect(off.lessons).toEqual([]);
+		expect(off.strategies).toEqual([]);
+
+		// 而且计数必须诚实：没注入就记 0，否则 M3 对照实验的自变量是假的
+		const counts = memoryCounts(off);
+		expect(counts.lessonsInjected).toBe(0);
+		expect(counts.strategiesInjected).toBe(0);
+
+		// 显式 opt-in 时才装载
+		expect(loadMemory(dir, { now: NOW, inject: true }).lines.length).toBeGreaterThan(0);
 	});
 
 	it("provider 是纯函数式的:多次调用结果一致(同局内不得漂移)", () => {
 		appendLessons(dir, [lesson({ text: "a" })]);
-		const provider = makeLessonProvider(loadMemory(dir, { now: NOW }));
+		const provider = makeLessonProvider(loadMemory(dir, { now: NOW, inject: true }));
 		expect(provider()).toEqual(provider());
 	});
 
@@ -152,8 +174,8 @@ describe("memory: loadMemory(开局读库)", () => {
 		appendLessons(dir, [lesson({ text: "a" })]);
 		// corrupt the store and reload
 		rmSync(path.join(dir, "evolution", "lessons.jsonl"));
-		expect(() => loadMemory(dir, { now: NOW })).not.toThrow();
-		expect(loadMemory(dir, { now: NOW }).lessons).toEqual([]);
+		expect(() => loadMemory(dir, { now: NOW, inject: true })).not.toThrow();
+		expect(loadMemory(dir, { now: NOW, inject: true }).lessons).toEqual([]);
 	});
 });
 
@@ -298,7 +320,7 @@ describe("memory: 注入到底有没有进到 prompt(接线证明)", () => {
 	// store -> loadMemory -> provider -> transformContext -> messages.
 	it("装载的 lesson 真的出现在送往模型的消息里", async () => {
 		appendLessons(dir, [lesson({ text: "keep depots close to towns" })]);
-		const mem = loadMemory(dir, { now: NOW });
+		const mem = loadMemory(dir, { now: NOW, inject: true });
 		const transform = pruningTransformContext({
 			keepRecent: 5,
 			lessonsProvider: makeLessonProvider(mem),
@@ -312,14 +334,14 @@ describe("memory: 注入到底有没有进到 prompt(接线证明)", () => {
 
 	it("策略卡也进入注入(不只是 lesson)", async () => {
 		appendStrategies(dir, [card()]);
-		const mem = loadMemory(dir, { now: NOW });
+		const mem = loadMemory(dir, { now: NOW, inject: true });
 		const transform = pruningTransformContext({ lessonsProvider: makeLessonProvider(mem) });
 		const out = await transform([{ role: "user", content: "hi" } as never]);
 		expect(JSON.stringify(out)).toContain("build_bus_route");
 	});
 
 	it("空记忆时不注入任何额外消息(没有 memory 的游戏不受影响)", async () => {
-		const mem = loadMemory(dir, { now: NOW });
+		const mem = loadMemory(dir, { now: NOW, inject: true });
 		const transform = pruningTransformContext({ lessonsProvider: makeLessonProvider(mem) });
 		const msgs = [{ role: "user", content: "hi" } as never];
 		const out = await transform(msgs);

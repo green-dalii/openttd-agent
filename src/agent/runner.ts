@@ -39,6 +39,7 @@ import {
 	recordPhase,
 	type DecisionTracker,
 } from "./decision-context.js";
+import type { GameEvent } from "../types.js";
 import type { AgentDeps } from "./types.js";
 import { summarizeState } from "./tools/index.js";
 import { fauxAssistantMessage, fauxToolCall, createFauxCore } from "@earendil-works/pi-ai";
@@ -78,6 +79,13 @@ export interface AgentRunOptions {
 	 * (docs/STARTUP-AND-LIFECYCLE.md §1).
 	 */
 	offlineDemo?: boolean;
+	/**
+	 * Opt IN to seeding the agent with cross-game memory. Default FALSE: this is
+	 * an RL harness, and a run must begin with background knowledge only, so the
+	 * agent's policy comes from the environment rather than from the harness.
+	 * See src/evolution/memory.ts LoadMemoryOptions.inject.
+	 */
+	injectMemory?: boolean;
 	/** Max decision turns to run (default 1). */
 	maxTurns?: number;
 	/**
@@ -251,6 +259,26 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 	// Set below (after the session exists) so events during boot are still safe.
 	let onPhaseChange: ((phase: string) => void) | null = null;
 	let onNotableEvent: ((summary: string) => void) | null = null;
+
+	// --- forward declarations, deliberately ABOVE `new AdminClient` -------------
+	//
+	// The admin callbacks below fire DURING boot, i.e. before the SessionStore
+	// (further down) and the dashboard (much further down) are constructed. A
+	// `let web` declared next to its assignment is in the temporal dead zone when
+	// those callbacks run: reading it throws "Cannot access 'web' before
+	// initialization", which kills every callback, so the GS never heartbeats and
+	// the run aborts with a message that points nowhere near the real cause.
+	//
+	// Anything the callbacks touch must therefore be declared here. `web` starts
+	// null because there is genuinely nothing to publish to yet.
+	let web: WebServer | null = null;
+	let sessionRef: SessionStore | null = null;
+	// Events that arrive before the session exists are BUFFERED, not dropped.
+	// They are handshake/connect frames; dropping them silently would make the
+	// audit trail begin mid-conversation with no record of why.
+	const bootEvents: GameEvent[] = [];
+	const BOOT_EVENT_CAP = 256;
+
 	client = new AdminClient({
 		cfg,
 		callbacks: {
@@ -264,7 +292,8 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 				// Same shape as the toWireSnapshot bug (MEMORY.md C1): two paths, one of
 				// them missing a piece, and the other path "looking fine" hid it.
 				web?.publishEvent(ev);
-				session.appendEvent(ev);
+				if (sessionRef) sessionRef.appendEvent(ev);
+				else if (bootEvents.length < BOOT_EVENT_CAP) bootEvents.push(ev);
 				if (ev.kind === "gamescript") {
 					const p = ev.payload as Record<string, unknown>;
 					if (p.cmd === "state") gsStates++;
@@ -378,6 +407,10 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 
 	// Session record + telemetry (dashboard: sessions page, token accounting).
 	const session = new SessionStore(cfg.dataDir);
+	// Unblock the boot callbacks that were buffering while this did not exist.
+	sessionRef = session;
+	for (const ev of bootEvents) session.appendEvent(ev);
+	bootEvents.length = 0;
 	session.create({
 		id: newSessionId(cfg.seed),
 		mode: "agent",
@@ -480,7 +513,6 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 				setStrategyEnabled(cfg.dataDir, id, enabled),
 		},
 	};
-	let web: WebServer | null = null;
 	if (attachedWeb) {
 		attachedWeb.attach(wired);
 		web = attachedWeb;
@@ -605,7 +637,7 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 	// Load the library once, before the agent is assembled, so the opening context
 	// already carries previous games' lessons. Injection is off unless the library
 	// actually has confirmed content (see docs/EVOLUTION.md §3).
-	const memory = loadMemory(cfg.dataDir);
+	const memory = loadMemory(cfg.dataDir, { inject: opts.injectMemory === true });
 	const memoryProvider = makeLessonProvider(memory);
 	const injected = memoryCounts(memory);
 	// Publish it for the dashboard (per-game truth: what THIS game was told).

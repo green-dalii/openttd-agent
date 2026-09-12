@@ -29,6 +29,21 @@ export interface LoadMemoryOptions {
 	limit?: number;
 	/** Max strategy cards to inject. Defaults to MAX_STRATEGIES_INJECTED. */
 	strategyLimit?: number;
+	/**
+	 * Actually put the library into the agent's context. DEFAULT FALSE.
+	 *
+	 * Why the default is off (project scope, restated 2026-09-12): this is an RL
+	 * harness. Initialisation is supposed to hand the agent BACKGROUND KNOWLEDGE
+	 * about what the game is and how to operate it - nothing else. Everything the
+	 * agent learns must come from interacting with the environment.
+	 *
+	 * Cross-game memory is the one place where the harness would hand the agent a
+	 * conclusion it did not reach itself, so it is opt-in and never a silent
+	 * default. Before this flag existed, simply HAVING a library injected it.
+	 * With `inject: false` the library is not even read: the metrics then record
+	 * 0 injected, which is the truth for that run.
+	 */
+	inject?: boolean;
 }
 
 /**
@@ -39,6 +54,10 @@ export interface LoadMemoryOptions {
  * shift under it mid-run, and the recorded injection count would be ambiguous.
  */
 export function loadMemory(dataDir: string, opts: LoadMemoryOptions = {}): LoadedMemory {
+	// Nothing is injected unless explicitly asked for. Returning early (rather
+	// than reading and then discarding) also keeps `lessonsInjected: 0` honest:
+	// the count must describe what the agent actually received.
+	if (opts.inject !== true) return { lessons: [], strategies: [], lines: [] };
 	const now = opts.now ?? Date.now();
 	let lessons: Lesson[] = [];
 	let strategies: StrategyCard[] = [];

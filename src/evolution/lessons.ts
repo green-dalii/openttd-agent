@@ -201,6 +201,12 @@ export function formatForInjection(list: Lesson[]): string[] {
 		.filter((l) => l && typeof l.text === "string" && l.text.trim())
 		.map((l) => {
 			const text = l.text.replace(/\s+/g, " ").trim();
-			return l.kind === "dont" ? `AVOID: ${text}` : `DO: ${text}`;
+			// FACTS ABOUT THE PAST, not instructions. `DO:` / `AVOID:` are
+			// imperatives - they tell the agent what to do, which is exactly what
+			// this harness must not do (project scope, 2026-09-12). The agent is
+			// told what was observed before and decides what it means.
+			return l.kind === "dont"
+				? `Previously an action like this did not pay off: ${text}`
+				: `Previously an action like this paid off: ${text}`;
 		});
 }

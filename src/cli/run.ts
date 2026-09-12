@@ -44,6 +44,8 @@ interface CliArgs {
 	llmApi?: string;
 	/** Explicitly allow the scripted (non-LLM) demo brain in agent mode. */
 	offlineDemo?: boolean;
+	/** Opt in to seeding the agent with cross-game memory. Default: off. */
+	injectMemory?: boolean;
 	/** Skip non-safety preflight checks (ports/gsFiles) for debugging. */
 	skipPreflight?: boolean;
 }
@@ -61,6 +63,7 @@ function parseArgs(argv: string[]): CliArgs {
 	let llmModel: string | undefined;
 	let llmApi: string | undefined;
 	let offlineDemo = false;
+	let injectMemory = false;
 	let skipPreflight = false;
 	for (let i = 0; i < argv.length; i++) {
 		const a = argv[i]!;
@@ -98,6 +101,9 @@ function parseArgs(argv: string[]): CliArgs {
 			case "--offline-demo":
 				offlineDemo = true;
 				break;
+			case "--inject-memory":
+				injectMemory = true;
+				break;
 			case "--skip-preflight":
 				skipPreflight = true;
 				break;
@@ -132,8 +138,13 @@ function parseArgs(argv: string[]): CliArgs {
 		}
 	}
 	return {
+		// Every parsed flag MUST appear here. Forgetting one does not fail to
+		// compile: `args.foo` is simply undefined, so the flag silently does
+		// nothing while the help text still advertises it. Fourth instance of
+		// "parsed but dropped" found on 2026-09-12 (MEMORY.md A5).
 		mode, year, seed, timeoutMs, aiName, webPort, demoSeconds,
 		llmBaseUrl, llmApiKey, llmModel, llmApi, offlineDemo, skipPreflight,
+		injectMemory,
 	};
 }
 
@@ -162,6 +173,10 @@ Usage:
                                          brain decide (requires a configured LLM;
                                          see Startup gate below) and observe
                                          construction (--demo-seconds N).
+                                         --inject-memory  Seed the agent with cross-game
+                                                          memory (OFF by default: this is an
+                                                          RL harness, the agent is meant to
+                                                          learn from the environment).
   --year N           start year (default 1950)
   --seed N           map seed (default random)
   --timeout-ms N     probe: max wait for first economy (default 15000)
@@ -220,6 +235,15 @@ async function main(): Promise<number> {
 			webPort: args.webPort,
 			offlineDemo: args.offlineDemo,
 			skipPreflight: args.skipPreflight,
+			runOptions: {
+				// Only what the CLI can actually express today. Decision cadence is
+				// not exposed as a flag yet (it is a library option); when it is,
+				// it must be added here too or the Start button will silently keep
+				// using defaults - exactly the bug this forwarding fixes.
+				offlineDemo: args.offlineDemo,
+				injectMemory: args.injectMemory,
+				seconds: args.demoSeconds,
+			},
 		});
 		console.log("[serve] Ctrl-C to stop");
 		await serve.done;
@@ -266,6 +290,15 @@ async function main(): Promise<number> {
 				// Agent mode also serves the live dashboard (telemetry). Undefined
 				// when not requested => CLI-only run.
 				webPort: args.webPort,
+				// These two MUST be forwarded. Both are read by the preflight gate
+				// directly from `args`, so omitting them here produced a gate that
+				// approved a run the runner then refused: `--agent --offline-demo`
+				// printed "running the explicit offline demo" and immediately threw
+				// "no LLM configured". Third instance of this pattern (see
+				// resolveRunOptions in serve.ts) - a flag the gate sees and the
+				// runner does not.
+				offlineDemo: args.offlineDemo,
+				injectMemory: args.injectMemory,
 			});
 		} catch (e) {
 			console.error("[agent] ERROR:", e instanceof Error ? e.message : e);

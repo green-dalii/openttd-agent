@@ -30,8 +30,54 @@ export interface ServeOptions {
 	offlineDemo?: boolean;
 	/** Skip non-safety preflight checks. */
 	skipPreflight?: boolean;
+	/**
+	 * Options forwarded verbatim to the run the Start button launches.
+	 *
+	 * Why this exists as one bag rather than individual fields: the previous
+	 * hand-built `runOpts` dropped every option that was not `web`/`control`,
+	 * including `offlineDemo`. The failure was invisible from the CLI because
+	 * preflight reads `opts.offlineDemo` directly - so `--serve --offline-demo`
+	 * printed "running the explicit offline demo" and then the runner threw
+	 * "no LLM configured". A gate that accepts an option the runner never
+	 * receives is worse than a missing flag: it lies about what will happen.
+	 */
+	runOptions?: {
+		offlineDemo?: boolean;
+		injectMemory?: boolean;
+		seconds?: number;
+		planTowns?: { from?: number; to?: number };
+		maxTurns?: number;
+		decisionMinGapMs?: number;
+		decisionIntervalDays?: number;
+		decisionTickMs?: number;
+		maxDecisions?: number;
+	};
 	/** Hook for tests: run something else instead of the real runners. */
 	launcher?: (mode: RunMode, cfg: Config, opts: Record<string, unknown>) => Promise<number>;
+}
+
+/**
+ * The options the Start button hands to the runner.
+ *
+ * Extracted and exported because it must be resolved EXACTLY ONCE and shared by
+ * two consumers that previously disagreed: the preflight gate and the runner.
+ * When the gate reads one value and the runner reads another, a run can be
+ * approved on the basis of a setting the runner never receives - or refused on
+ * the basis of one the runner would have honoured. Either way the user is told
+ * something untrue about what is about to happen.
+ */
+export function resolveRunOptions(
+	opts: Pick<ServeOptions, "offlineDemo" | "runOptions">,
+	web: unknown,
+	control: unknown,
+): Record<string, unknown> {
+	return {
+		...opts.runOptions,
+		// Explicit top-level flag wins over the bag only when the bag is silent.
+		offlineDemo: opts.runOptions?.offlineDemo ?? opts.offlineDemo ?? false,
+		web,
+		control,
+	};
 }
 
 export interface ServeHandle {
@@ -60,7 +106,9 @@ export async function runServe(cfg: Config, opts: ServeOptions = {}): Promise<Se
 			// and surface the reason verbatim to the page.
 			const pre = await runPreflight(cfg, {
 				mode,
-				offlineDemo: opts.offlineDemo,
+				// Same resolved value the runner will get. Reading opts.offlineDemo
+				// here directly was a second source of truth - see resolveRunOptions.
+				offlineDemo: opts.runOptions?.offlineDemo ?? opts.offlineDemo ?? false,
 				skipUnsafe: opts.skipPreflight,
 			});
 			if (!pre.ok) {
@@ -70,14 +118,13 @@ export async function runServe(cfg: Config, opts: ServeOptions = {}): Promise<Se
 						: "preflight refused to start",
 				);
 			}
-			const runOpts = {
-				web,
-				control: { onReady: (h: { stop: () => void; pause: () => void; resume: () => void }) => {
+			const runOpts = resolveRunOptions(opts, web, {
+				onReady: (h: { stop: () => void; pause: () => void; resume: () => void }) => {
 					hooks.stop = h.stop;
 					hooks.pause = h.pause;
 					hooks.resume = h.resume;
-				} },
-			};
+				},
+			});
 			const launch = opts.launcher ?? defaultLauncher;
 			// Run in the background: the supervisor tracks completion via onStopped.
 			void launch(mode, cfg, runOpts)
