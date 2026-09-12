@@ -9,6 +9,7 @@ import path from "node:path";
 import {
 	applyLlmSettingsFile,
 	loadLlmSettingsFile,
+	resolveLlmSource,
 	saveLlmSettingsFile,
 	settingsPath,
 	toSettingsView,
@@ -235,5 +236,28 @@ describe("buildProvider", () => {
 		expect(built.model.provider).toBe("test-llm");
 		expect(built.model.baseUrl).toBe("http://127.0.0.1:9/v1");
 		expect(typeof built.streamFn).toBe("function");
+	});
+});
+
+describe("resolveLlmSource: 全新安装应落在内置目录,而不是自定义端点", () => {
+	// A fresh install has nothing configured, and the page mirrors this decision.
+	// Returning "custom" here opened the Providers page on "Custom endpoint" with a
+	// disabled Save and a prompt for a base URL the user does not have - a first
+	// impression that reads like a broken page.
+	it("完全未配置 -> catalog(内置目录才是默认入口)", () => {
+		expect(resolveLlmSource({} as never)).toBe("catalog");
+	});
+
+	it("显式 source 优先", () => {
+		expect(resolveLlmSource({ source: "custom" } as never)).toBe("custom");
+		expect(resolveLlmSource({ source: "catalog" } as never)).toBe("catalog");
+	});
+
+	it("有 baseUrl -> custom(自定义端点一定带 baseUrl)", () => {
+		expect(resolveLlmSource({ baseUrl: "http://127.0.0.1:9110/v1" } as never)).toBe("custom");
+	});
+
+	it("只给了内置 providerId(旧配置无 source) -> catalog", () => {
+		expect(resolveLlmSource({ providerId: "deepseek" } as never)).toBe("catalog");
 	});
 });

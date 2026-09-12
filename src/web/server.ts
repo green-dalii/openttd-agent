@@ -8,7 +8,7 @@
  */
 
 import http from "node:http";
-import { promises as fs } from "node:fs";
+import { promises as fs, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer, type WebSocket } from "ws";
@@ -346,7 +346,18 @@ export class WebServer {
 			}
 			const data = await fs.readFile(filePath);
 			const ext = path.extname(filePath).toLowerCase();
-			res.writeHead(200, { "content-type": MIME[ext] ?? "application/octet-stream" });
+			const type = MIME[ext] ?? "application/octet-stream";
+			// Static assets are served with an ETag and `no-cache` (revalidate, but you
+			// may reuse). Without ANY validator the browser is allowed to reuse its
+			// heuristic copy, so a refresh can keep running last week's JS - which makes
+			// a fixed bug look unfixed. This is a no-build-chain app whose JS changes on
+			// every commit, so revalidation must be the default.
+			const etag = `W/"${data.length.toString(16)}-${statEtag(filePath)}"`;
+			if (req.headers["if-none-match"] === etag) {
+				res.writeHead(304, { etag, "cache-control": "no-cache" }).end();
+				return;
+			}
+			res.writeHead(200, { "content-type": type, etag, "cache-control": "no-cache" });
 			res.end(data);
 		} catch {
 			res.writeHead(404).end("not found");
@@ -560,4 +571,13 @@ async function readBody(req: http.IncomingMessage, maxBytes = 64 * 1024): Promis
 		chunks.push(buf);
 	}
 	return Buffer.concat(chunks).toString("utf8");
+}
+
+/** mtime as an ETag component; 0 when unavailable so the tag stays deterministic. */
+function statEtag(file: string): string {
+	try {
+		return Math.floor(statSync(file).mtimeMs).toString(36);
+	} catch {
+		return "0";
+	}
 }

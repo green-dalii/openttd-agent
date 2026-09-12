@@ -41,7 +41,12 @@ describe("llm dashboard api", () => {
 		const dir = tmp();
 		try {
 			const v = apiFor(dir).llm.get() as View;
-			expect(v.selection.source).toBe("custom");
+			// A completely unconfigured install reports "catalog": the built-in provider
+			// list is the intended entry point. It used to report "custom", which made a
+			// fresh Providers page open on "Custom endpoint" with a disabled Save and a
+			// prompt for a base URL the user does not have - a first run that reads as a
+			// broken page. A real custom endpoint always carries a baseUrl.
+			expect(v.selection.source).toBe("catalog");
 			expect(v.selection.providerId).toBe("");
 			expect(v.status.configured).toBe(false);
 			expect(v.status.hasStoredKey).toBe(false);

@@ -56,12 +56,9 @@
               { id: "custom", label: "Custom endpoint", hint: "Your own OpenAI-compatible server" },
             ],
             value: () => (this.custom ? "custom" : "catalog"),
-            onChange: (id) => {
-              this.custom = id === "custom";
-              // The selects are hidden with x-show, so just refresh their labels.
-              if (this.provCbx) this.provCbx.refresh();
-              if (this.modelCbx) this.modelCbx.refresh();
-            },
+            // setMode (view model) keeps the catalog/custom selections apart and
+            // refreshes the selects, which are hidden rather than unmounted.
+            onChange: (id) => this.setMode(id),
           });
         },
 
@@ -115,7 +112,9 @@
             if (sel.api) this.form.api = sel.api;
             if (sel.model) this.form.model = sel.model;
             if (this.custom) {
-              this.providerId = sel.providerId || "";
+              // Remember the catalog choice from a previous switch when there is one,
+              // so flipping modes does not lose it.
+              this.providerId = this.lastCatalogProvider || "";
             } else if (sel.providerId) {
               await this.selectProvider(sel.providerId);
               if (sel.model) this.model = sel.model;

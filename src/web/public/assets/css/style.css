@@ -452,3 +452,11 @@ dialog.modal p { color: var(--ink-dim); font-size: 13px; margin: 0 0 var(--sp-4)
 .mem-body { display: flex; flex-direction: column; gap: 2px; flex: 1 1 auto; min-width: 0; }
 .mem-body .dim { font-size: .78rem; }
 .mem-toggle { flex: 0 0 auto; display: flex; gap: 5px; align-items: center; font-size: .78rem; cursor: pointer; }
+
+
+/* A disabled button must LOOK disabled. Without this it renders identically to an
+   enabled one, so clicking it silently does nothing and reads as "the save is
+   broken" - which is exactly what happened (MEMORY.md B8). */
+button:disabled,
+button[disabled] { opacity: .45; cursor: not-allowed; }
+.actions .save-why { font-size: .82rem; color: var(--warn, #e5c07b); align-self: center; }

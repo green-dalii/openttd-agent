@@ -106,9 +106,17 @@ export function toSettingsView(llm: LlmConfig): LlmSettingsView {
  * Decide catalog vs custom. Explicit `source` wins; legacy configs (no source)
  * are inferred: a blank baseUrl with a known built-in provider id is a catalog
  * selection, otherwise it is a custom endpoint.
+ *
+ * A completely EMPTY config resolves to "catalog": the built-in catalog is the
+ * intended entry point, and answering "custom" made a fresh install open the
+ * Providers page on "Custom endpoint" - a disabled Save prompting for a base URL
+ * the user does not have. A real custom endpoint always carries a baseUrl.
  */
 export function resolveLlmSource(llm: LlmConfig): "catalog" | "custom" {
 	if (llm.source === "catalog" || llm.source === "custom") return llm.source;
-	if (!llm.baseUrl && llm.providerId && isCatalogProvider(llm.providerId)) return "catalog";
+	if (!llm.baseUrl) {
+		if (!llm.providerId) return "catalog";
+		if (isCatalogProvider(llm.providerId)) return "catalog";
+	}
 	return "custom";
 }

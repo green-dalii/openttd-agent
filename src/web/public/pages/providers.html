@@ -97,6 +97,10 @@
       </div>
 
       <div class="actions">
+        <!-- The reason must be visible next to a disabled button: a disabled control
+             that looks enabled and explains nothing is indistinguishable from a bug
+             (this was a real reported failure - see MEMORY.md B8). -->
+        <span class="save-why" x-show="!saveReady()" x-text="saveHint()"></span>
         <button type="button" id="save" class="primary" :disabled="!saveReady()"
                 @click="save()" x-text="saving ? 'Saving…' : 'Save configuration'"></button>
         <button type="button" id="clear-key" class="danger" :disabled="!canClearKey()"

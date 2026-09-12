@@ -29,6 +29,15 @@
       providerId: "",
       model: "",
       custom: false,
+      /**
+       * What was selected in catalog mode, remembered while Custom mode is active.
+       *
+       * 为什么需要它:切换模式时如果不分开存,自定义端点会**继承目录 Provider 的 id**
+       * (实测把 `{"source":"custom","providerId":"deepseek"}` 写进了 llm.json ——
+       * 一条把凭据归错主的混合记录)。
+       */
+      lastCatalogProvider: "",
+      lastCatalogModel: "",
       modelsLoading: false,
       /** Custom-endpoint form fields (also the "effective config" preview). */
       form: { baseUrl: "", api: "openai-completions", model: "", key: "" },
@@ -171,6 +180,53 @@
           return Boolean(this.form.baseUrl.trim() && this.form.model.trim());
         }
         return Boolean(this.providerId && this.model);
+      },
+
+      /**
+       * Switch between built-in catalog and a custom endpoint.
+       *
+       * Keeps the two selections separate in both directions: a catalog provider id
+       * must never leak into a custom record, and switching back must not silently
+       * drop what the user had chosen.
+       */
+      setMode(mode) {
+        const wantCustom = mode === "custom";
+        if (wantCustom === this.custom) return;
+        if (wantCustom) {
+          this.lastCatalogProvider = this.providerId;
+          this.lastCatalogModel = this.model;
+          // Cleared on purpose: saveBody() falls back to "custom-endpoint".
+          this.providerId = "";
+        } else {
+          this.providerId = this.lastCatalogProvider || "";
+          this.model = this.lastCatalogModel || "";
+        }
+        this.custom = wantCustom;
+        // The selects are x-show'd, so just refresh their labels.
+        if (this.provCbx) this.provCbx.refresh();
+        if (this.modelCbx) this.modelCbx.refresh();
+      },
+
+      /**
+       * Why Save is unavailable right now, or "" when it is available.
+       *
+       * 为什么必须有这个:早先的按钮只在 `saveReady()` 为假时 `disabled`,而 CSS 没有给
+       * `:disabled` 任何样式——于是它看起来完全可点。用户点下去**什么都没发生**
+       * (不发请求、不报错、不提示),然后刷新页面发现配置没变,
+       * 只能得出"保存坏了"的结论。**沉默的禁用按钮等于一个 bug。**
+       *
+       * 每个分支都必须说清楚**下一步该做什么**,而不只是否定。
+       */
+      saveHint() {
+        if (this.saveReady()) return "";
+        if (this.custom) {
+          if (!this.form.baseUrl.trim()) return "Enter the endpoint base URL to enable saving.";
+          if (!this.form.model.trim()) return "Enter a model name to enable saving.";
+          return "Fill in the endpoint details to enable saving.";
+        }
+        if (!this.providerId) return "Pick a provider to enable saving.";
+        if (!this.model) return "Pick a model — the provider changed, so the model must be chosen again.";
+        return "Complete the selection to enable saving.";
       },
 
       /** Whether a stored key can be cleared (needs a selected provider). */

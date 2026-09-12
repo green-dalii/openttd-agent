@@ -242,6 +242,28 @@
   - `test/unit/web-assets.test.ts` 新增 `script dependency closure` 守卫。
   详见 `docs/DASHBOARD-UI.md` §5.4。
 
+### Fixed（Providers 页保存）
+
+- **点了 Save 毫无反应**（用户报告）。根因是**禁用的按钮看起来完全可点**：
+  选中 Provider 但未选模型时 `saveReady()` 为假、按钮 `disabled`，而 CSS 没有给
+  `:disabled` 任何样式（`opacity:1; cursor:pointer`），点击不发请求、不报错、不提示。
+  现在：`:disabled` 有可见样式，且 `saveHint()` 按分支说明**下一步该做什么**。
+- **切到 Custom 模式会继承目录 Provider 的 id**，把
+  `{"source":"custom","providerId":"deepseek"}` 写进 `llm.json`（凭据归错主的混合记录）。
+  两个模式的选择现在分开保存。
+- **静态资源没有缓存校验**（无 `Cache-Control` / `ETag`），导致"刷新"可能继续跑旧 JS
+  —— 修好的 bug 看起来没修好。现为 `no-cache` + `ETag`（未变返回 304）。
+- **全新安装默认落在 Custom 端点**（`resolveLlmSource` 对空配置返回 `custom`），
+  于是首次打开 Providers 是一个禁用的、要求填写 baseUrl 的自定义表单。
+  空配置现返回 `catalog`——内置目录才是入口。
+
+### Added（测试缺口）
+
+- `test/unit/providers-save.test.ts`：**保存链路**的真实组件测试——"点 Save 发了什么请求"、
+  "发不出去时用户是否被告知"。此前后端（`web-api.test.ts`）与纯逻辑
+  （`saveReady()` / `saveBody()`）都被测过，**缺的正是两者之间那一段**：
+  断言一个谓词 ≠ 断言一次体验。
+
 ### Fixed
 - **阶段性总结面板恒为空（dead UI）**：Live 页读 `telemetry.checkpoints`，但该字段
   从不存在，且 checkpoint **只在 shutdown 写**。现在 `--agent` 每个 decision turn、
