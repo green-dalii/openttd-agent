@@ -91,6 +91,40 @@ describe("executor-status: 阶段词汇表解码", () => {
 		expect(d.description).toContain("some_future_thing");
 	});
 
+	it("车辆遥测被解成车在干什么，不是一串数字", () => {
+		// done 之后的阶段全部来自 DumpBus()。不解码的话，agent 在整个运营期
+		// 看到的都是 "EX R53 d33 a24 #17 j100" 这种噪声。
+		const d = decodeExecutorPhase("EX R53 d33 a24 #17 j100");
+		expect(d.stage).toBe("vehicle");
+		expect(d.detail).toMatchObject({ vehicleState: "running", speed: 53, tilesFromStationA: 33, waitingAtStationA: 24 });
+		expect(d.description).toMatch(/running/i);
+		expect(d.description).toMatch(/speed 53/);
+		expect(d.description).toMatch(/24 passenger/);
+		expect(d.error).toBe(false);
+	});
+
+	it("故障车被标成 error —— 它不是在忙，是不赚钱", () => {
+		const b = decodeExecutorPhase("EX B0 d12 a0 #3 j100");
+		expect(b.error).toBe(true);
+		expect(b.description).toMatch(/broken down/i);
+		const c = decodeExecutorPhase("EX X0 d1 a0 #4 j100");
+		expect(c.error).toBe(true);
+		expect(c.description).toMatch(/crashed/i);
+	});
+
+	it("候客数不可得时如实说，不编造 0", () => {
+		const d = decodeExecutorPhase("EX R10 d5 a-1 #2 j100");
+		expect(d.description).toMatch(/unavailable/i);
+	});
+
+	it("位置探针解出坐标与脚下是什么", () => {
+		const d = decodeExecutorPhase("EX @62,136 station d0 j100");
+		expect(d.stage).toBe("vehicle");
+		expect(d.detail).toMatchObject({ x: 62, y: 136, onTile: "station" });
+		// "other" 意味着车不在路网上了 —— 必须说出来
+		expect(decodeExecutorPhase("EX @12,34 other d9 j100").description).toMatch(/not road/i);
+	});
+
 	it("空输入不炸，且不给假信息", () => {
 		const d = decodeExecutorPhase("");
 		expect(d.stage).toBe("unknown");

@@ -180,12 +180,11 @@ export function decodeExecutorPhase(input: string): ExecutorPhase {
 		base.description = `building station ${slot}: ${what}.`;
 		return base;
 	}
-	// The `@` form the executor also emits while scanning.
-	if (s.startsWith("@")) {
-		base.stage = "station";
-		base.description = `executor is scanning for a station site: ${s}`;
-		return base;
-	}
+	// NOTE: there is deliberately no `@`-prefix branch here any more. `@` is the
+	// vehicle position probe from DumpBus() (`@62,136 station d0`), and a
+	// speculative "station scanning" branch used to shadow it - handing the agent
+	// a confident wrong meaning, which is worse than no meaning. The vehicle form
+	// is matched below; anything else falls through to `unknown`.
 
 	// --- road ---
 	if (s === "road_start") {
@@ -266,6 +265,62 @@ export function decodeExecutorPhase(input: string): ExecutorPhase {
 			return base;
 		}
 		base.description = `vehicles: ${what}.`;
+		return base;
+	}
+
+	// --- vehicle telemetry: `R53 d33 a24 #17` ---
+	//
+	// After the route is finished the executor stops reporting construction and
+	// switches to DumpBus(), which spells the vehicle state as a single letter:
+	// R running, S stopped, D in depot, @ at station, B broken, X crashed, ? unknown.
+	// Without decoding this the agent is handed "EX R53 d33 a24 #17 j100", which
+	// reads as noise - and this is exactly the phase the agent sees for the whole
+	// life of a working route, i.e. most of the game.
+	const veh = /^([RSD@BX?])(\d+)\s+d(\d+)\s+a(-?\d+)\s+#(\d+)$/.exec(s);
+	if (veh) {
+		const stateOf: Record<string, string> = {
+			R: "running",
+			S: "stopped",
+			D: "in the depot",
+			"@": "at a station",
+			B: "broken down",
+			X: "crashed",
+			"?": "in an unknown state",
+		};
+		const state = stateOf[veh[1]!] ?? "unknown";
+		const speed = num(veh[2]) ?? 0;
+		const distA = num(veh[3]) ?? 0;
+		const waiting = num(veh[4]) ?? -1;
+		base.stage = "vehicle";
+		base.detail = { vehicleState: state, speed, tilesFromStationA: distA, waitingAtStationA: waiting };
+		const wait =
+			waiting < 0 ? "the waiting count at station A is unavailable" : `${waiting} passenger(s) waiting at station A`;
+		base.description =
+			`the bus is ${state}` +
+			(state === "running" ? ` at speed ${speed}` : "") +
+			`, ${distA} tile(s) from station A, and ${wait}.`;
+		if (state === "broken down" || state === "crashed") {
+			base.error = true;
+			base.description += " It will not earn anything until it is dealt with.";
+		}
+		return base;
+	}
+
+	// --- vehicle position probe: `@62,136 station d0` ---
+	const at = /^@(\d+),(\d+)\s+(\S+)\s+d(\d+)$/.exec(s);
+	if (at) {
+		const kindOf: Record<string, string> = {
+			station: "on a station tile",
+			road: "on a road tile",
+			depot: "on a depot tile",
+			other: "on a tile that is not road, depot or station",
+		};
+		base.stage = "vehicle";
+		base.detail = { x: num(at[1]) ?? 0, y: num(at[2]) ?? 0, onTile: at[3]!, tilesFromStationA: num(at[4]) ?? 0 };
+		base.description =
+			`the bus is at map tile (${at[1]},${at[2]}), ${kindOf[at[3]!] ?? `on "${at[3]}"`}, ` +
+			`${at[4]} tile(s) from station A. ` +
+			`A bus reported as "other" is off the road network.`;
 		return base;
 	}
 

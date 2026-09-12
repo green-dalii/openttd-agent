@@ -1013,4 +1013,12 @@ EX rd s1 r0  d21 p0    ← 第 1 段，剩余 21 格
 `DumpBus()` 是**车辆诊断**通道（`R`=RUNNING / `S`=STOPPED / `D`=IN_DEPOT /
 `@`=AT_STATION / `B`=BROKEN / `X`=CRASHED，后跟速度、距 A 格数、A 站候客数）。
 `done` 之后的阶段字符串**全部来自它**，不是施工阶段。
-`src/agent/executor-status.ts` 的解码器尚未覆盖这一族，待补。
+`src/agent/executor-status.ts` 的**解码器已覆盖这一族**：
+`R53 d33 a24 #17` → "the bus is running at speed 53, 33 tile(s) from station A,
+and 24 passenger(s) waiting at station A"；`B`/`X`（抛锚/撞毁）标为 `error`
+（**"在忙"与"不赚钱"必须分开**，否则 agent 学不到东西）；
+`@62,136 station d0` → 坐标 + 脚下是什么 + 距 A 格数。
+
+**顺带修掉一个"自信地给出错误含义"的分支**：解码器里原有一个猜测性的
+`@` → "正在扫描车站选址"分支，会**遮蔽**真正的车辆位置探针格式，
+于是 agent 拿到的是**错的**解释。已删除 —— **没有含义好过错误的含义**。
