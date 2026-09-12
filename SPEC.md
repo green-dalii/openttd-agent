@@ -718,3 +718,23 @@ openttd-agent/
 - **Bridge GS**: 我方唯一 GS，负责状态/命令/标牌中继
 - **蓝图 (Blueprint)**: GS 收到的高层施工 JSON → 拆成标牌序列
 - **GameEvent**: Runner 内部规范化事件类型
+
+## 10.20 `add_vehicles` 的真实语义（2026-09-12 实测澄清）
+
+一段真实 e2e 日志里，模型连续 4 次调用 `add_vehicles` 得到 `ok=true`，而 `vehicles` 始终为 0。
+排查后固化为以下事实（**不是推测**）：
+
+1. **GS 的 ack 报的是标牌**。`{"kind":"ack","cmd":"add_vehicles","placed":1}` 里的 `placed`
+   指 **`GSSign.BuildSign` 成功**，与"放了几台车"无关。字段已更名为 `signPlaced` 以免再次误读。
+2. **标牌只是一个请求**。GS 在 exec 公司的模式下放 `NUTZ:bp:<job>:V:<count>` 标牌；
+   真正执行的是执行器 AI。
+3. **执行器只在特定状态下读它**。`CheckAddVehicles()` 的调用条件是
+   `_stage == "done" && _vehicle >= 0`。若施工未完成（阶段停留在 `road`），
+   这个标牌**永远不会被读取**。
+4. **该命令只能"克隆"，不能创建第一台车**。`CheckAddVehicles` 用
+   `AIVehicle.CloneVehicle(..., this._vehicle, ...)` 扩容；`_vehicle` 由 `PhaseBus()`
+   的 `AIVehicle.BuildVehicle` 设置。因此**车队为 0 时该命令不可能生效**。
+
+**结论（写入工具契约）**：`add_vehicles` 的前提是**路线已上线且有头车**。
+`src/agent/tools/index.ts` 现在会在 `vehicles == 0`（或公司无 stats）时**拒绝发送**并
+说明原因与下一步，而不是报 `ok=true`。

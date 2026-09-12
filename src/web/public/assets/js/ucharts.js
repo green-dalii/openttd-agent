@@ -204,6 +204,48 @@
     return { data: rows, opts: stackedOpts(c, series, items) };
   }
 
+  /**
+   * Lower bound (in scale units) of segment `si` at data index `i`.
+   *
+   * 为什么需要它 —— uPlot 的 `paths.bars` **永远从零基线画**。把数据累积起来并不够:
+   * 后画的系列会整块盖住先画的,最后只剩**一个颜色**可见。
+   * 实测(600x220,3 系列):正常顺序只有最后一个系列有像素
+   *   { Input: 0, Output: 0, Reasoning: 6272 }
+   * 把系列**反过来**也没用,只是换成另一个系列全遮 —— 遮挡顺序变了,叠加没有发生。
+   *
+   * 正解是 uPlot 官方的 `disp.y0` facet:让每根柱子从"前面所有系列之和"画起,
+   * 于是每段露出的是它自己的高度。本函数就是那个下界。
+   */
+  function stackedLowerBound(items, si, i) {
+    const vals = (items && items[i] && items[i].values) || [];
+    let lower = 0;
+    for (let k = 0; k < si; k++) {
+      const v = Number(vals[k]);
+      if (Number.isFinite(v)) lower += v;
+    }
+    return lower;
+  }
+
+  /** Lower bounds for indices [i0, i1] inclusive — the shape uPlot facets expect. */
+  function stackedLowerBounds(items, si, i0, i1) {
+    const out = [];
+    for (let i = i0; i <= i1; i++) out.push(stackedLowerBound(items, si, i));
+    return out;
+  }
+
+  /** Upper bound of segment `si` at index `i` — its own value added to the lower one. */
+  function stackedUpperBound(items, si, i) {
+    const v = Number(((items && items[i] && items[i].values) || [])[si]);
+    return stackedLowerBound(items, si, i) + (Number.isFinite(v) ? v : 0);
+  }
+
+  /** Upper bounds for indices [i0, i1] inclusive. */
+  function stackedUpperBounds(items, si, i0, i1) {
+    const out = [];
+    for (let i = i0; i <= i1; i++) out.push(stackedUpperBound(items, si, i));
+    return out;
+  }
+
   function stackedOpts(c, series, items) {
     const t = theme();
     const axis = axisStyle(t);
@@ -233,7 +275,26 @@
             stroke: colour,
             fill: colour,
             paths: window.uPlot && window.uPlot.paths && window.uPlot.paths.bars
-              ? window.uPlot.paths.bars({ size: bar })
+              ? window.uPlot.paths.bars({
+                  size: bar,
+                  // Each bar starts where the previous series ended, so the stack
+                  // shows every segment instead of only the topmost colour.
+                  // BOTH y0 and y1 are required. uPlot 1.6.32's bars builder does
+                  // `let {y0, y1} = disp; if (y0 != null && y1 != null) {...}` and
+                  // otherwise IGNORES the facet silently - supplying y0 alone
+                  // changes nothing at all (measured: still one visible colour).
+                  disp: {
+                    y0: {
+                      // BarsPathBuilderFacetUnit.ScaleValue
+                      unit: 1,
+                      values: (u, sidx, i0, i1) => stackedLowerBounds(items, sidx - 1, i0, i1),
+                    },
+                    y1: {
+                      unit: 1,
+                      values: (u, sidx, i0, i1) => stackedUpperBounds(items, sidx - 1, i0, i1),
+                    },
+                  },
+                })
               : undefined,
             points: { show: false },
           };
@@ -331,5 +392,7 @@
     // Exposed for tests: pure translations with no DOM/uPlot involvement.
     toLineData: toLineData,
     toStackedData: toStackedData,
+    stackedLowerBounds: stackedLowerBounds,
+    stackedUpperBounds: stackedUpperBounds,
   };
 })();

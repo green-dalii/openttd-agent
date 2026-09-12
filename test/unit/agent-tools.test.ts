@@ -112,11 +112,67 @@ describe("build_bus_route tool", () => {
 });
 
 describe("add_vehicles tool", () => {
-	it("sends count + company", async () => {
+	/** A company entry with a given vehicle count, as the admin port reports it. */
+	function stateWithVehicles(n: number): StateReader {
+		return fakeState({
+			companies: new Map([
+				[0, { info: { id: 0, name: "EX rd s0 r0", isAi: true }, stats: { vehicles: n, stations: 2 } }],
+			]) as never,
+		});
+	}
+
+	it("sends count + company when the route already has vehicles", async () => {
 		const { sink, gameScript } = fakeSink();
-		const tool = addVehiclesTool({ sink, state: fakeState() });
+		const tool = addVehiclesTool({ sink, state: stateWithVehicles(3) });
 		await tool.execute("c1", { count: 5 });
 		expect(JSON.parse(gameScript[0]!)).toEqual({ cmd: "add_vehicles", company: 0, count: 5 });
+	});
+
+	// 2026-09-12 真实事故（用户 e2e 日志）:
+	//   决策 24/25/26/27 连续 `add_vehicles ok=true`，而 `vehicles` 始终为 0。
+	//   原因链:
+	//   1) GS 的 ack `placed:1` 指的是**标牌放好了**，不是"放了 1 台车"；
+	//   2) 执行器只在 `_stage == "done" && _vehicle >= 0` 时才读那个标牌；
+	//   3) `CheckAddVehicles` 靠**克隆头车**扩容，0 台车时没有可克隆对象，直接 return。
+	//   而工具无条件返回 `ok=true`（"我把命令写进 socket 了"），于是模型永远
+	//   得不到"这做不到"的反馈，只能无限重试同一个动作。
+	//
+	// 工具**能**看见 `vehicles`（observe 用的就是它），所以不许再说谎。
+	it("车队为空时拒绝，并说明为什么（克隆不出第一台车）", async () => {
+		const { sink, gameScript } = fakeSink();
+		const tool = addVehiclesTool({ sink, state: stateWithVehicles(0) });
+		const res = await tool.execute("c1", { count: 1 });
+		const details = (res as { details: { ok: boolean; summary: string } }).details;
+		expect(details.ok, "claiming success here is what made the model retry forever").toBe(false);
+		expect(details.summary).toMatch(/no vehicles/i);
+		expect(details.summary).toMatch(/clone|first/i);
+		expect(gameScript, "an impossible command must not be sent").toEqual([]);
+	});
+
+	it("车队为空时的提示要告诉模型下一步该做什么", async () => {
+		const { sink } = fakeSink();
+		const tool = addVehiclesTool({ sink, state: stateWithVehicles(0) });
+		const res = await tool.execute("c1", { count: 4 });
+		const summary = (res as { details: { summary: string } }).details.summary;
+		// Not just "failed" - the model needs a route out of the dead end.
+		expect(summary).toMatch(/observe|wait|construction|finish/i);
+	});
+
+	it("公司不存在时同样拒绝（不猜）", async () => {
+		const { sink, gameScript } = fakeSink();
+		const tool = addVehiclesTool({ sink, state: fakeState() });
+		const res = await tool.execute("c1", { count: 2 });
+		const details = (res as { details: { ok: boolean } }).details;
+		expect(details.ok).toBe(false);
+		expect(gameScript).toEqual([]);
+	});
+
+	it("允许的 count 不会因为 0 车而被误拦（3 台车要 5 台仍然照发）", async () => {
+		const { sink, gameScript } = fakeSink();
+		const tool = addVehiclesTool({ sink, state: stateWithVehicles(3) });
+		const res = await tool.execute("c1", { count: 5 });
+		expect((res as { details: { ok: boolean } }).details.ok).toBe(true);
+		expect(gameScript).toHaveLength(1);
 	});
 });
 

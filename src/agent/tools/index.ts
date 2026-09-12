@@ -107,23 +107,65 @@ const AddVehiclesSchema = Type.Object({
 	job: Type.Optional(Type.Number({ description: "Route job id (default: current)" })),
 });
 
-/** `add_vehicles` — ask the Executor to clone vehicles onto the active route. */
+/** `add_vehicles` — scale the active route's fleet (clones the lead vehicle). */
 export function addVehiclesTool(deps: AgentDeps): AgentTool<typeof AddVehiclesSchema, ActionResult> {
 	return {
 		name: "add_vehicles",
 		label: "Add Vehicles",
 		description:
-			"Add road vehicles to the active bus route (clones share the route's orders). Use when station queues grow and one bus cannot clear them.",
+			"Add road vehicles to an ALREADY RUNNING bus route (clones share its orders). " +
+			"It clones the route's lead vehicle, so it cannot create the first one — if the " +
+			"route has no vehicles yet, wait for construction to finish instead.",
 		parameters: AddVehiclesSchema,
 		execute: async (_id, params) => {
 			const company = params.company ?? DEFAULT_COMPANY;
+
+			// Refuse when the request cannot possibly work, instead of claiming success.
+			//
+			// 真实事故（2026-09-12，用户 e2e）:决策 24~27 连续 `add_vehicles ok=true`，
+			// 而 `vehicles` 始终为 0。工具以前无条件返回 `ok=true`——它只说明
+			// "我把命令写进了 socket"，既不等于标牌被读到，也不等于车队变了。
+			//
+			// 而这条命令在 0 车时**永远不可能生效**:
+			//   1. GS 的 ack `placed:1` 是"标牌放好了"，不是"放了 1 台车"；
+			//   2. 执行器只在 `_stage=="done" && _vehicle>=0` 时才去读那个标牌；
+			//   3. `CheckAddVehicles` 靠**克隆头车**扩容，没有头车就静默 return。
+			// 于是模型得到的是"成功"，只能无限重试同一个动作——**一个永远说谎的工具
+			// 让 agent 丧失了学习能力**。工具能看见 vehicles（observe 用的就是它），
+			// 所以没有理由不说真话。
+			const snap = deps.state.snapshot();
+			const c0 = snap.companies.get(company);
+			const vehicles = c0?.stats?.vehicles ?? null;
+			if (vehicles === null) {
+				return toResult({
+					ok: false,
+					summary:
+						`not sent: company ${company} has no reported stats yet, so the fleet cannot be ` +
+						"scaled. Call observe() first to confirm the company exists.",
+					data: { company, vehicles: null },
+				});
+			}
+			if (vehicles === 0) {
+				return toResult({
+					ok: false,
+					summary:
+						`not sent: the route has no vehicles yet (vehicles=0). This tool CLONES the ` +
+						"route's lead vehicle, so it cannot create the first one — the executor buys " +
+						"it when construction finishes. Use observe() to watch for vehicles > 0, and " +
+						"only then scale the fleet.",
+					data: { company, vehicles },
+				});
+			}
+
 			const cmd: Record<string, unknown> = { cmd: "add_vehicles", company, count: params.count };
 			if (params.job !== undefined) cmd.job = params.job;
 			deps.sink.gameScript(JSON.stringify(cmd));
 			const r: ActionResult = {
 				ok: true,
-				summary: `sent add_vehicles count=${params.count} (company=${company})`,
-				data: cmd,
+				summary:
+					`requested fleet size ${params.count} (company=${company}, currently ${vehicles}). ` +
+					"Fleet changes are applied by the executor on a later tick — verify with observe().",
+				data: { ...cmd, vehiclesBefore: vehicles },
 			};
 			return toResult(r);
 		},

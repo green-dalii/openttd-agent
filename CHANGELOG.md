@@ -269,6 +269,23 @@
   （`saveReady()` / `saveBody()`）都被测过，**缺的正是两者之间那一段**：
   断言一个谓词 ≠ 断言一次体验。
 
+### Fixed（用户 e2e 发现的两个问题）
+
+- **Token Usage 图只有一种颜色，没有按 token 种类堆叠**。根因：uPlot 的
+  `paths.bars` **永远从零基线画**，所以累积数据里后画的系列整块盖住先画的
+  （实测 3 系列只有最后一个有像素：`{Input:0, Output:0, Reasoning:6272}`）；
+  把系列反序也没用，只是换一个颜色全遮。正解是 uPlot 的 `disp` facet 给出每段的
+  上下界，且**必须同时给 `y0` 和 `y1`** —— uPlot 1.6.32 的实现是
+  `if (y0 != null && y1 != null)`，只给 `y0` 会被**静默忽略**（实测无变化）。
+  修后逐系列像素 `{Input:4922, Output:949, Reasoning:385}`，
+  纵向颜色序列自上而下 `Reasoning → Output → Input`，即正确的堆叠。
+- **`add_vehicles` 谎报成功，导致 agent 无限重试**。工具无条件返回 `ok=true`
+  （"命令写进 socket 了"），而这条命令在车队为 0 时**永远不可能生效**
+  （执行器靠克隆头车扩容，且只在 `stage=="done"` 时读请求标牌）。
+  模型因此得不到"这做不到"的反馈 —— 一个永远说谎的工具会让 agent 丧失学习能力。
+  现在工具会检查 `vehicles` 并**拒绝**，附上原因与下一步。
+  语义澄清见 `SPEC.md` §10.20。
+
 ### Fixed
 - **阶段性总结面板恒为空（dead UI）**：Live 页读 `telemetry.checkpoints`，但该字段
   从不存在，且 checkpoint **只在 shutdown 写**。现在 `--agent` 每个 decision turn、

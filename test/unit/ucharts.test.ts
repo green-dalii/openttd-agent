@@ -29,6 +29,8 @@ interface UChartsApi {
 	/** Exposed for tests: the cfg translation, with no uPlot involved. */
 	toLineData: (cfg: unknown) => { data: unknown; opts: unknown };
 	toStackedData: (cfg: unknown) => { data: unknown; opts: unknown };
+	stackedLowerBounds: (items: unknown, si: number, i0: number, i1: number) => number[];
+	stackedUpperBounds: (items: unknown, si: number, i0: number, i1: number) => number[];
 }
 
 /** A uPlot stand-in that records the arguments it is constructed with. */
@@ -353,5 +355,88 @@ describe("uPlot adapter: host element rules", () => {
 		api.line(box, { series: [{ name: "s", data: [1, 2] }], labels: ["a", "b"] });
 		// Asserting via the recorded setSize call in the fake instance.
 		expect(box).toBeTruthy();
+	});
+});
+
+describe("ucharts: stacked bar lower bounds (the stacking fix)", () => {
+	// 2026-09-12 用户报告:"每个数据只显示一个 Bar,没有按 read/Cache 堆叠"。
+	// 实测根因:uPlot 的 paths.bars **永远从零基线画**,所以累计数据里
+	// 后画的系列整块盖住先画的 —— 600x220 三重系列只有最后一个有像素
+	// ({Input:0, Output:0, Reasoning:6272});把系列反过来也只是换一个颜色全遮。
+	// 正解是 disp.y0 facet:每段从"前面所有系列之和"画起。
+	const items = [
+		{ label: "T1", values: [1000, 100, 50] },
+		{ label: "T2", values: [2000, 200, 80] },
+	];
+
+	it("第一个系列从 0 画起", () => {
+		const s = load().api;
+		expect(s.stackedLowerBounds(items, 0, 0, 1)).toEqual([0, 0]);
+	});
+
+	it("第二个系列从第一个的总和画起", () => {
+		const s = load().api;
+		expect(s.stackedLowerBounds(items, 1, 0, 1)).toEqual([1000, 2000]);
+	});
+
+	it("第三个系列是前两个之和", () => {
+		const s = load().api;
+		expect(s.stackedLowerBounds(items, 2, 0, 1)).toEqual([1100, 2200]);
+	});
+
+	it("尊重 i0..i1 的区间(含两端),因为 uPlot 只要求可见区间", () => {
+		const s = load().api;
+		expect(s.stackedLowerBounds(items, 1, 1, 1)).toEqual([2000]);
+		expect(s.stackedLowerBounds(items, 1, 0, 0)).toEqual([1000]);
+	});
+
+	it("上界减去下界等于该系列自身的值(这就是可见的那一段)", () => {
+		const s = load().api;
+		for (let si = 0; si < 3; si++) {
+			const lower = s.stackedLowerBounds(items, si, 0, items.length - 1);
+			const upper = items.map((it) => it.values.slice(0, si + 1).reduce((a, b) => a + b, 0));
+			for (let i = 0; i < items.length; i++) {
+				expect(upper[i]! - lower[i]!).toBe(items[i]!.values[si]);
+			}
+		}
+	});
+
+	it("容忍缺失/非数值条目(不产出 NaN,否则整张图会消失)", () => {
+		const s = load().api;
+		const messy = [{ values: [1, null, 3] }, { values: [4, undefined, 6] }];
+		const out = s.stackedLowerBounds(messy, 2, 0, 1);
+		for (const v of out) expect(Number.isFinite(v)).toBe(true);
+	});
+});
+
+describe("ucharts: stacked upper bounds (uPlot needs BOTH facets)", () => {
+	// uPlot 1.6.32 的 bars builder: `let {y0,y1} = disp; if (y0 != null && y1 != null) {...}`
+	// —— 只给 y0 会被**静默忽略**(实测:仍然只有一个颜色可见)。所以两个 facet 都要给。
+	const items = [
+		{ label: "T1", values: [1000, 100, 50] },
+		{ label: "T2", values: [2000, 200, 80] },
+	];
+
+	it("上界等于到该系列为止的累计值", () => {
+		const s = load().api;
+		expect(s.stackedUpperBounds(items, 0, 0, 1)).toEqual([1000, 2000]);
+		expect(s.stackedUpperBounds(items, 1, 0, 1)).toEqual([1100, 2200]);
+		expect(s.stackedUpperBounds(items, 2, 0, 1)).toEqual([1150, 2280]);
+	});
+
+	it("每段的上界严格不小于下界(否则柱子会翻过来)", () => {
+		const s = load().api;
+		for (let si = 0; si < 3; si++) {
+			const lo = s.stackedLowerBounds(items, si, 0, 1);
+			const hi = s.stackedUpperBounds(items, si, 0, 1);
+			for (let i = 0; i < 2; i++) expect(hi[i]!).toBeGreaterThanOrEqual(lo[i]!);
+		}
+	});
+
+	it("最后一段的上界等于该 turn 的总量(柱顶就是总量)", () => {
+		const s = load().api;
+		const hi = s.stackedUpperBounds(items, 2, 0, 1);
+		expect(hi).toEqual([1150, 2280]);
+		expect(hi[0]).toBe(1000 + 100 + 50);
 	});
 });

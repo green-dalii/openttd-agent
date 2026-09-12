@@ -352,10 +352,18 @@ class BridgeV1 extends GSController {
         }
         // Anchor the sign on any free tile near company 0's first station area.
         local anchor = this.FindFreeTileNear(GSTown.GetLocation(GSTownList().Begin()), 10);
-        local placed = 0;
-        if (GSSign.BuildSign(anchor, "NUTZ:bp:" + job_str + ":V:" + count)) placed = 1;
+        local sign_placed = 0;
+        if (GSSign.BuildSign(anchor, "NUTZ:bp:" + job_str + ":V:" + count)) sign_placed = 1;
+        // `signPlaced` is named explicitly on purpose. It used to be `placed`, which
+        // reads as "placed N vehicles" and was mistaken for exactly that in a live
+        // run's logs (the agent kept asking for vehicles while the fleet stayed at
+        // zero). This ack only reports that the REQUEST was delivered to the
+        // executor's mailbox; whether the fleet changes is decided later, by the
+        // executor, and is observable only via company stats.
         GSAdmin.Send({ kind = "ack", cmd = "add_vehicles", job = job,
-                       count = count, company = exec, placed = placed });
+                       count = count, company = exec, signPlaced = sign_placed,
+                       note = "request delivered; the executor applies fleet changes, "
+                            + "and only once the route has a lead vehicle" });
     }
 
     /* Remove all NUTZ signs carrying job `job_str`. */

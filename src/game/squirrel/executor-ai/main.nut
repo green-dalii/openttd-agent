@@ -810,7 +810,13 @@ class ExecutorV1 extends AIController {
         local vl = AIVehicleList();
         foreach (v, _ in vl) cur++;
         if (cur < want) {
-            if (!AIVehicle.IsValidVehicle(this._vehicle)) return;
+            if (!AIVehicle.IsValidVehicle(this._vehicle)) {
+                // Nothing to clone: this command can only SCALE an existing fleet.
+                // It used to `return` silently, so a request for vehicles from a
+                // route with zero vehicles looked like it had been accepted.
+                this.SetPhase("fleet_noveh");
+                return;
+            }
             while (cur < want) {
                 local cv = AIVehicle.CloneVehicle(this._slotD.bp[0], this._vehicle, true);
                 if (!AIVehicle.IsValidVehicle(cv)) break;
