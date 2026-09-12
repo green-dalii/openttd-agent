@@ -809,3 +809,35 @@ openttd-agent/
 
 用途：未来写"外部诊断工具"或"spike"时必须知道这一点，否则会得到
 "命令发了但没反应"这种无法定位的假象（与 §10.21 的事件转发缺失同类）。
+
+## 10.25 GS 可对公司施工并扣公司钱（2026-09-12 真机证实）
+
+这是 `SPEC.md` L355 要求、但从未执行的那个 spike 的结果。
+
+**实测**（`probe_cm`，Bridge GS 自触发，macOS dedicated，seed 7）：
+
+```json
+{"cm_valid":true, "money_before":298825, "money_after":298518, "road":"ok"}
+```
+
+- `GSCompanyMode(0)` 有效
+- `GSRoad.BuildRoad` 返回 **true**（真的建成了）
+- 公司余额**减少 307**
+
+逐字复现了官方文档 `script_companymode.hpp` 的语义：
+*"All actions performed within the scope of this mode, will be executed on behalf of
+the company you switched to. This includes any costs attached to the action performed."*
+
+**推论：Executor AI 是可删除的组件。** `script_road.hpp` / `script_vehicle.hpp` /
+`script_station.hpp` 均标注 `@api ai game`，GS 与 AI 共享同一套施工 API；
+GS 还能直接收 admin 消息、直接用 `GSAdmin.Send` 发结构化 JSON。
+→ SPEC §10 里"AI 不能直接收 admin 消息"这条约束**不再构成架构约束**。
+详见 `docs/EXECUTOR-ARCHITECTURE.md`。
+
+### 10.25.1 两条附带实测事实
+
+1. **tick ~200 时 company 0 尚不存在**（`GSCompany.ResolveCompanyID(0)` 返回
+   `COMPANY_INVALID`）。任何"公司一开局就在"的假设都是错的。
+2. **没有订阅者的 `GSAdmin.Send` 会被静默丢弃**。GS 在 `Start()` 里发的探针消息
+   完全收不到；改到周期性发送（已知能到达 agent）后正常。
+   → 写任何 GS 侧自检，必须**先证明通道是通的**，否则会得到"跑了但没反应"的假象。

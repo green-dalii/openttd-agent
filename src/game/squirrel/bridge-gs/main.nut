@@ -20,6 +20,16 @@ class BridgeV1 extends GSController {
             this.HandleEvents();
             if (GSController.GetTick() > this._last_send + 200) {
                 this._last_send = GSController.GetTick();
+                // Phase-1 spike. It fires HERE, not at boot, because a
+                // GSAdmin.Send with no subscribed admin is silently dropped
+                // (measured 2026-09-12: the boot-time probe produced nothing,
+                // while this same periodic send reaches the agent every time).
+                // The delay is the point: it proves the channel is live first.
+                // The phase-1 probe is NOT auto-run any more: it passed
+                // (docs/EXECUTOR-ARCHITECTURE.md §1), and it builds a real road
+                // tile that costs the company ~300. Leaving it armed would put a
+                // wrench in every game. It stays available as the `probe_cm`
+                // command for future re-verification.
                 local sl = GSSignList();
                 local sc = 0;
                 local names = [];
@@ -67,6 +77,107 @@ class BridgeV1 extends GSController {
     }
 
     /* Dispatch an admin command object. */
+    /* PHASE-1 FEASIBILITY SPIKE (docs/EXECUTOR-ARCHITECTURE.md).
+
+     * Question: can the Game Script itself BUILD for a company - in company mode,
+     * with that company's money? The OpenTTD sources say yes (script_road.hpp is
+     * tagged "@api ai game"; script_companymode.hpp says actions are carried out
+     * "on behalf of the company you switched to ... like the real player is
+     * executing the commands"), and this GS already uses GSCompanyMode to place
+     * signs. But the docs do not say whether it works on a macOS dedicated
+     * server, and that is exactly the kind of thing only a real run answers.
+     *
+     * Deliberately tiny and safe: it tries ONE road tile near one town. It never
+     * touches the route the executor is building, and it reports even when it
+     * throws, so a failure is information rather than silence. */
+    function ProbeCompanyMode() {
+        local exec = 0;
+        local out = {
+            kind = "probe", cmd = "probe_cm", company = exec,
+            money_before = -1, money_after = -1, stage = "init",
+            cm_valid = false, road = "unset", engine = "none", note = ""
+        };
+        try {
+            if (GSCompany.ResolveCompanyID(exec) == GSCompany.COMPANY_INVALID) {
+                out.note = "company invalid";
+                GSAdmin.Send(out);
+                return;
+            }
+            out.money_before = GSCompany.GetBankBalance(exec);
+            local mode = GSCompanyMode(exec);
+            out.stage = "mode";
+            out.cm_valid = GSCompanyMode.IsValid();
+            // A road type must be selected before any road command; without it
+            // BuildRoad fails its precondition. The Executor AI does exactly this
+            // (AIRoad.SetCurrentRoadType) before it builds anything.
+            GSRoad.SetCurrentRoadType(GSRoad.ROADTYPE_ROAD);
+
+            local tl = GSTownList();
+            if (tl.Count() == 0) {
+                out.road = "no-towns";
+            } else {
+                local c = GSTown.GetLocation(tl.Begin());
+                local pair = this.FindAdjacentLandPair(c, 16);
+                if (pair == null) {
+                    out.road = "no-site";
+                } else {
+                    out.stage = "build";
+                    local built = GSRoad.BuildRoad(pair[0], pair[1]);
+                    out.stage = "built";
+                    if (built) {
+                        out.road = "ok";
+                    } else {
+                        out.road = "fail";
+                        // Report the error, not just "failed" (SPEC 10.20). Each
+                        // call is guarded because a reporting failure must not
+                        // destroy the result we already have.
+                        out.stage = "err";
+                        local code = -1;
+                        try { code = GSError.GetLastError(); } catch (e2) { code = -2; }
+                        out.note = "code=" + code;
+                        out.stage = "err2";
+                    }
+                }
+            }
+
+            // Can we even see a road engine to buy later? Guarded: this is a
+            // secondary question and a failure here must not hide the primary
+            // result (that the road build returned true).
+            out.stage = "engine";
+            try {
+                foreach (eid, _ in GSEngineList()) {
+                    out.engine = "id" + eid;
+                    break;
+                }
+                out.stage = "engine_ok";
+            } catch (e3) {
+                out.engine = "EXC:" + ("" + e3);
+            }
+            out.money_after = GSCompany.GetBankBalance(exec);
+        } catch (e) {
+            out.note = "EXC " + ("" + e);
+        }
+        GSAdmin.Send(out);
+    }
+
+    /* Two adjacent land tiles near `center` - a legal site for one road tile. */
+    function FindAdjacentLandPair(center, radius) {
+        local cx = GSMap.GetTileX(center);
+        local cy = GSMap.GetTileY(center);
+        for (local dx = -radius; dx <= radius; dx++) {
+            for (local dy = -radius; dy <= radius; dy++) {
+                local x = cx + dx;
+                local y = cy + dy;
+                if (x < 2 || y < 2) continue;
+                if (x >= GSMap.GetMapSizeX() - 2 || y >= GSMap.GetMapSizeY() - 2) continue;
+                local a = GSMap.GetTileIndex(x, y);
+                local b = GSMap.GetTileIndex(x + 1, y);
+                if (GSTile.IsBuildable(a) && GSTile.IsBuildable(b)) return [a, b];
+            }
+        }
+        return null;
+    }
+
     function Dispatch(obj) {
         local cmd = obj["cmd"];
         if (cmd == "ping") {

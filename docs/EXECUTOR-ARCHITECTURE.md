@@ -122,7 +122,50 @@ observe · build_bus_route · add_vehicles · set_pause
 > 它是否受每 tick 指令数限制、是否与现有 GS 逻辑冲突、macOS dedicated 下是否可用。
 > 这些只能实测。
 
-**阶段一已尝试，并已得到一个负面结果（2026-09-12）**：
+### ✅ 阶段一：**已通过**（2026-09-12 真机实测）
+
+`probe_cm` 在 company mode 下对 agent 公司试建 1 格路，GS 自触发上报：
+
+```json
+{"kind":"probe","cmd":"probe_cm","company":0,
+ "cm_valid":true,
+ "money_before":298825, "money_after":298518,
+ "road":"ok", "engine":"EXC:wrong number of parameters"}
+```
+
+**逐项对照**：
+
+| 问题 | 结果 |
+|---|---|
+| `GSCompanyMode(0)` 是否有效？ | ✅ `cm_valid: true` |
+| GS 能否读到公司余额？ | ✅ `money_before: 298825` |
+| **GS 能否为公司施工？** | ✅ **`road: "ok"`（`GSRoad.BuildRoad` 返回 true）** |
+| **施工是否花公司的钱？** | ✅ **`298825 → 298518`，扣了 307** |
+
+最后一项是**决定性**的：它逐字复现了官方文档的语义 ——
+*"This includes any costs attached to the action performed."*
+花的钱来自公司账上，说明 GS 确实是在**以玩家身份**施工。
+
+**结论：GS-only 架构在本机（macOS dedicated）上可行，Executor AI 可以删除。**
+
+两点附带事实（都是实测，不是推断）：
+
+1. **tick ~200 时 company 0 还不存在**（`ResolveCompanyID(0) == COMPANY_INVALID`）。
+   探针改为等公司存在后才跑。
+2. **未订阅的 `GSAdmin.Send` 会被静默丢弃**：探针最初在 GS `Start()` 里跑，
+   结果什么都没收到。改到周期性发送里（已知能到达 agent）才有结果。
+   → 写任何 GS 侧探针都必须**先证明通道是通的**。
+
+**尚未完成**：`GSEngine.GetVehicleType` 调用报 "wrong number of parameters"
+（我探针里的 API 用法错误，不影响可行性结论 —— `GSVehicle.BuildVehicle` 文档标注
+`@api ai game`）。买车一步需在阶段二里用正确的调用方式补验。
+
+**当前状态**：探针**不再自动运行**（它会真建 1 格路、花公司 ~300 金币，
+留在自动流程里等于每局捣乱）。函数保留，需要时用 `probe_cm` 命令调用。
+
+---
+
+### 之前那次失败的尝试（保留，作为教训）
 
 1. 已在 Bridge GS 里实现 `probe_cm`（company mode 下试建 1 格路 + 查可购引擎 + 回报 JSON）。
 2. 用**第二个 admin 客户端**发这条命令 → 客户端连上了、命令发出了，
@@ -158,7 +201,8 @@ GameScript 消息**不会**被 `ScriptEventAdminPort` 收到。这本身对
 
 | 项 | 状态 |
 |---|---|
-| GS 能否在 company mode 下施工 | **源码层面已证实**（`@api ai game` + company mode 语义）；**真机未验证** |
+| GS 能否在 company mode 下施工 | ✅ **已真机证实**（阶段一通过，见上） |
+| 扣的确实是公司的钱 | ✅ **已真机证实**（298825 → 298518） |
 | 每 tick 指令上限 | **未查证**。AI 与 GS 共享同一套限制，所以**不构成选 AI 的理由**，但影响施工速度 |
 | 与现有 Bridge GS 逻辑是否冲突 | 未验证（阶段一 spike 的验收项之一） |
 | **第二个 admin 客户端能否给 GS 发命令** | **已证实：不能**（2026-09-12 实测）。探针必须由 GS 自触发 |
