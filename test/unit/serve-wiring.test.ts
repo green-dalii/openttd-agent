@@ -111,7 +111,7 @@ describe("runner 的所有回调状态必须在 AdminClient 之前声明（TDZ �
 		const src = readFileSync(join(ROOT, "src/agent/runner.ts"), "utf8");
 		const adminIdx = src.indexOf("client = new AdminClient");
 		expect(adminIdx, "runner.ts must still construct AdminClient").toBeGreaterThan(0);
-		for (const name of ["executorPhase", "executorPhaseIdentity", "web", "sessionRef"]) {
+		for (const name of ["executorPhase", "executorStage", "web", "sessionRef"]) {
 			const decl = new RegExp(`let\\s+${name}\\b`).exec(src);
 			expect(decl, `runner.ts should declare ${name}`).not.toBeNull();
 			expect(

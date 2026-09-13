@@ -101,6 +101,14 @@ pnpm exec tsx scripts/m3-verdict.ts /tmp/m3b
 
 ---
 
+### 🔴 NEXT-1c：新闻门已落地（2026-09-12），待真机确认
+
+`phaseStage`/`isErrorPhase` 已实现并用真实日志回放验证（117 phase → 6 新闻，SPEC §10.36）。
+仪器 `scripts/loop-health.ts` 已就位（旧账本读出：35 决策/局、空转率 72%）。
+
+- [ ] 真机跑一局，`loop-health` 读数应进入 HEALTHY 区（决策 ≤10/局、空转率 <30%）
+- [ ] 顺带完成 §10.35.1 的暂停探针（Normal 模式 pause 是否真的可逆）
+
 ### 🔴 NEXT-1b：验证心跳修复（**立刻做，最便宜**）
 
 §10.35 修掉了"每次心跳唤醒一次决策"。**重跑一局确认**：

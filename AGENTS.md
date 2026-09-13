@@ -79,6 +79,11 @@ scripts/       # dev 辅助 (gen-squirrel, setup-sandbox)
 
 ## 5. 测试与门禁
 
+> **fixture 必须来自真实样本**（2026-09-12 教训，代价一轮实验）：凡测试涉及
+> 真实协议产物（阶段字符串、事件流、admin 包），fixture 必须抄自真实日志
+> （存 `test/fixtures/` 或测试内注明来源），**不得手写臆想格式** ——
+> 臆想格式让第一版修复测试全绿却静默失效。
+
 - `pnpm test` — unit（快，纯）。**用 faux provider，无法发现"没接线"**。
 - `pnpm run test:live` — 含 `@live` 真机集成（需要本机 OpenTTD 二进制 + 可写临时 data dir）。
   **涉及 agent/决策/遥测的改动必须跑这个**，断言见 §5.1。

@@ -63,7 +63,7 @@ import { pruningTransformContext } from "./context.js";
 import { loadMemory, makeLessonProvider, memoryCounts, type LoadedMemory } from "../evolution/memory.js";
 import { runReflection } from "../evolution/reflection-run.js";
 import { buildReflectionEvidence } from "../evolution/reflect.js";
-import { isHeartbeatPhase, phaseIdentity } from "../game/executor-status.js";
+import { isErrorPhase, phaseStage } from "../game/executor-status.js";
 import { evolutionView, setStrategyEnabled } from "../evolution/web-view.js";
 import { AuditLog } from "./audit.js";
 import { isLlmConfigured } from "../config.js";
@@ -240,12 +240,11 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 
 	let gsStates = 0;
 	let executorPhase = "";
-	// Last phase IDENTITY (heartbeat counters stripped) - see phaseIdentity.
-	// MUST be declared here, above `new AdminClient`: the event callback fires
-	// during boot, and a `let` declared next to its first assignment is in the
-	// temporal dead zone at that moment, which throws inside every callback
-	// (MEMORY.md A5 - this is the fourth time this exact defect has appeared).
-	let executorPhaseIdentity = "";
+	// Last phase STAGE (see phaseStage) - the news gate. MUST be declared here,
+	// above `new AdminClient`: the event callback fires during boot, and a `let`
+	// declared next to its first assignment is in the temporal dead zone at that
+	// moment, which throws inside every callback (MEMORY.md A5 - four occurrences).
+	let executorStage = "";
 	// The executor's periodic bus dump overwrites the company name, so the
 	// LAST phase is not the terminal one. Track "reached done" separately.
 	let reachedDone = false;
@@ -355,16 +354,12 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 					// 197 of 212 decisions triggered that way, ~36 per game, with money
 					// unmoved in 83% of the intervals (MEASURED 2026-09-12).
 					// A heartbeat means nothing happened - it must never wake the model.
-					const identity = phaseIdentity(p.name);
-					if (p.isAi && p.name.startsWith("EX ") && identity !== executorPhaseIdentity) {
-						executorPhaseIdentity = identity;
+					const stage = phaseStage(p.name);
+					if (p.isAi && p.name.startsWith("EX ") && (stage !== executorStage || isErrorPhase(p.name))) {
+						executorStage = stage;
 						executorPhase = p.name;
 						if (p.name.startsWith("EX done")) reachedDone = true;
 						console.log(`[agent] executor phase -> "${p.name}"`);
-						// A heartbeat is liveness, NOT news. Letting it open a decision
-						// window is what produced ~36 decisions per game with money
-						// unmoved in 83% of the gaps (SPEC §10.35).
-						if (isHeartbeatPhase(p.name)) return;
 						// A phase change means the world moved: it is a reason to ask
 						// the model again (it may want to react to the new situation).
 						onPhaseChange?.(p.name);

@@ -126,25 +126,37 @@ function num(v: string | undefined): number | null {
  * is kept, because it is state: `hb boot` -> `hb road` is a real transition, and
  * `s3` -> `s4` means a sign was placed.
  */
-export function phaseIdentity(phase: string): string {
-	const s = (phase ?? "").trim();
-	// Strip the COUNTERS, keep the STATE.
-	//
-	// The phase string mixes two things:
-	//   state  - stage, segment, tiles remaining, sign count   -> real news
-	//   count  - heartbeat seq (`#28`), retry counter (`r7`)   -> just ticking
-	//
-	// Measured (2026-09-12, /tmp/hbfix2): 119 phase strings collapsed to a handful
-	// of real situations. `rd s0 r0..r40 d144` is ONE situation - the executor
-	// retrying a segment it cannot finish - reported 40 times as if it were 40
-	// events. A rising retry counter is the signature of being STUCK.
-	//
-	// Both were waking the model on every tick, which is why a 200s game produced
-	// ~36 decisions with money unmoved in 83% of them.
-	return s
-		.replace(/(\bhb\s+\S+\s*)#\d+/, "$1")
-		.replace(/(\brd\s+\S+\s*)r\d+/, "$1")
-		.replace(/\s+/g, " ");
+/**
+ * The STAGE of a phase string — the only thing that should gate "is this news?".
+ *
+ * Why stages and not strings, not counters, not identities: measured over three
+ * rounds (SPEC §10.34/§10.35/§10.35.1), every variant of comparing phase strings
+ * eventually woke the model on noise, because the phase string mixes
+ *
+ *   state   - stage, segment, tiles remaining          -> real news
+ *   counters- heartbeat seq, retry count, money spent  -> just ticking
+ *
+ * `hb road #28 s3 j100` and `rd s0 r2 d144` are BOTH "the road stage is running",
+ * so collapsing them to their stage token also fixes the alternation problem: the
+ * executor interleaves heartbeat and progress reports, and every alternation
+ * looked like a change until the two streams mapped to the same stage.
+ */
+export function phaseStage(phase: string): string {
+	const m = /^(?:EX\s+)?(?:hb\s+)?(\S+)/.exec((phase ?? "").trim());
+	let stage = m ? m[1]! : (phase ?? "").trim();
+	// `rd`（铺路中）与 `road`（修路阶段）是同一件事的两条汇报流；执行器在两者间
+	// 交替，若不归并，每次交替都是一次"变化"。归并后阶段内进度不再唤醒模型。
+	if (stage === "rd") stage = "road";
+	return stage;
+}
+
+/** Phases that report a failure or an exception. */
+const FAILURE_RE =
+	/stuck|giveup|exc:|nowhere|noconn|noeng|nocargo|nofront|slope_warn|_e(?=[\s:]|$)/;
+
+/** True when this phase reports a failure or an exception - always worth waking for. */
+export function isErrorPhase(phase: string): boolean {
+	return FAILURE_RE.test((phase ?? "").trim());
 }
 
 /**
@@ -155,9 +167,6 @@ export function phaseIdentity(phase: string): string {
  * flag lets the caller keep the liveness signal (it is how we know the executor is
  * alive at all) without turning it into a trigger.
  */
-export function isHeartbeatPhase(phase: string): boolean {
-	return /(^|\s)hb\s/.test((phase ?? "").trim());
-}
 
 export function decodeExecutorPhase(input: string): ExecutorPhase {
 	const raw = String(input ?? "").trim();

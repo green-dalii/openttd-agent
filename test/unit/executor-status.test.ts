@@ -5,7 +5,12 @@
  * 禁止：在此断言"agent 该怎么做"。这里只验证**翻译是否忠实**。
  */
 import { describe, expect, it } from "vitest";
-import { decodeExecutorPhase, decodePhaseWindow, phaseIdentity } from "../../src/game/executor-status.js";
+import {
+	decodeExecutorPhase,
+	decodePhaseWindow,
+	isErrorPhase,
+	phaseStage,
+} from "../../src/game/executor-status.js";
 
 describe("executor-status: 阶段词汇表解码", () => {
 	it("剥掉 EX 前缀与 j<job> 后缀，并认出 job", () => {
@@ -166,58 +171,51 @@ describe("executor-status: 心跳折叠（防止 40 条相同事实淹没变化�
 	});
 });
 
-describe("phaseIdentity — 心跳不是「变化」（2026-09-12，代价：整整一轮 M3）", () => {
-	// 真实事故：执行器把状态汇报写在**公司名**里，而 runner 用
-	// `p.name !== executorPhase` 判断"阶段变了没有"。
+describe("phaseStage/isErrorPhase — 新闻门（2026-09-12，代价：整整一轮 M3）", () => {
+	// 三轮实测（SPEC §10.34/§10.35/§10.35.1）：任何对 phase **字符串**的等值比较，
+	// 最终都会被"永远在变的字段"击穿 —— 心跳序号、重试计数、花钱都会改变字符串。
+	// 唯一稳定的语义单位是**阶段**（stage）：boot → work → road → done。
 	//
-	// 心跳格式是 `hb <stage> #<seq> s<signs>`，seq **每轮自增** ——
-	// 于是每一拍都是一个"新字符串"，每一次心跳都触发一次决策。
-	//
-	// 实测（/tmp/m3b）：212 次决策里 **197 次由 heartbeat 触发**，
-	// 每局约 36 次决策，其中 83% 的间隔里 money 一分钱没动。
-	// 后果：87% 的工具调用是 observe、218 次重复同一句 plan、5 次重复下发
-	// build_bus_route（因为 agent 不知道上一次成功了没有）。
-	//
-	// 心跳的语义**恰恰是**"什么都没发生，我还活着"。把它当成变化信号，
-	// 等于用"没有新闻"去触发一次新闻发布。
-	it("同一阶段的心跳序列号递增 → 同一个 identity", () => {
-		expect(phaseIdentity("EX hb road #28 s3 j1")).toBe(phaseIdentity("EX hb road #29 s3 j1"));
-		expect(phaseIdentity("EX hb boot #1 s0 j-1")).toBe(phaseIdentity("EX hb boot #2 s0 j-1"));
+	// 真实序列（/tmp/hbfix3）：119 个 phase 字符串只对应 7 个真实局面。
+	// fixture 全部取自真实日志，不用臆想格式（A9 的教训：臆想格式让第一版修复静默失效）。
+	const real = {
+		bootBeat1: "EX hb boot #1 s0 j-1",
+		bootBeat2: "EX hb boot #2 s0 j-1",
+		roadBeat1: "EX hb road #5 s3 j100",
+		roadBeat2: "EX hb road #28 s3 j100",
+		lay0: "EX rd s0 r0 d144 p0 j100",
+		lay40: "EX rd s0 r40 d144 p0 j100",
+		lay1: "EX rd s1 r0 d104 p0 j100",
+		stuck: "EX road_stuck j100",
+		done: "EX done stN2 r63 bus j100",
+	};
+
+	it("同一阶段内的计数器变化 → 同一 stage（不是新闻）", () => {
+		expect(phaseStage(real.roadBeat1!)).toBe(phaseStage(real.roadBeat2!));
+		// 同一段路重试 40 次是**一个**局面（卡住了），不是 40 条新闻
+		expect(phaseStage(real.lay0!)).toBe(phaseStage(real.lay40!));
+		// 心跳与进度交替，也不该互相触发
+		expect(phaseStage(real.roadBeat2!)).toBe(phaseStage(real.lay0!));
 	});
 
-	it("阶段真的变了 → identity 不同", () => {
-		expect(phaseIdentity("EX hb boot #9 s0 j1")).not.toBe(phaseIdentity("EX hb road #9 s3 j1"));
+	it("阶段真的变了 → 新闻", () => {
+		expect(phaseStage(real.bootBeat1!)).not.toBe(phaseStage(real.roadBeat1!));
+		// rd 归并进 road：铺路进度（换段）仍是同阶段，不唤醒
+		expect(phaseStage(real.lay1!)).toBe(phaseStage(real.lay0!));
+		expect(phaseStage(real.done!)).toBe("done");
+		expect(phaseStage(real.done!)).not.toBe(phaseStage(real.roadBeat1!));
 	});
 
-	it("标牌数变化是有意义的，不能被抹掉", () => {
-		expect(phaseIdentity("EX hb road #9 s3 j1")).not.toBe(phaseIdentity("EX hb road #9 s4 j1"));
+	it("失败阶段总是新闻（即使 stage 没变）", () => {
+		expect(isErrorPhase(real.stuck!)).toBe(true);
+		expect(isErrorPhase("EX dpt_nowhere j100")).toBe(true);
+		expect(isErrorPhase("EX exc:pathfinder blew up")).toBe(true);
+		expect(isErrorPhase("EX bus_buy_e: no money")).toBe(true);
 	});
 
-	it("非心跳阶段原样保留", () => {
-		// 重试计数器 r<k> 也是计数器：同一段路重试 40 次是**一个**局面（卡住了），
-// 不是 40 条新闻。
-		expect(phaseIdentity("EX rd s1 r0 d104 p0 j1")).toBe(phaseIdentity("EX rd s1 r40 d104 p0 j1"));
-		expect(phaseIdentity("EX rd s1 r0 d104 p0 j1")).toBe("EX rd s1 d104 p0 j1");
-		expect(phaseIdentity("EX done stN2 r63 bus j1")).toBe("EX done stN2 r63 bus j1");
-	});
-
-	it("不同阶段的进度变化仍然是变化", () => {
-		expect(phaseIdentity("EX rd s0 r0 d104 j1")).not.toBe(phaseIdentity("EX rd s1 r0 d104 j1"));
-	});
-
-	it("测试必须用真实观测到的字符串（带尾部 j<money>）", () => {
-		// 教训：第一版测试用的是我自己**臆想**的格式 `EX hb road #28 s3`，
-		// 而真实格式是 `EX hb road #28 s3 j1`。测试全绿，修复却毫无作用
-		// （复测：心跳仍触发 28 次）。**断言必须建立在真实样本上。**
-		const real = [
-			"EX hb boot #1 s0 j-1",
-			"EX hb road #28 s3 j1",
-			"EX hb road #29 s3 j1",
-			"EX rd s1 r0 d104 p0 j1",
-			"EX done stN2 r63 bus j1",
-		];
-		expect(phaseIdentity(real[1]!)).toBe(phaseIdentity(real[2]!));
-		expect(phaseIdentity(real[3]!)).toBe("EX rd s1 d104 p0 j1");
-		expect(phaseIdentity(real[4]!)).toBe(real[4]);
+	it("正常阶段不是错误", () => {
+		expect(isErrorPhase(real.done!)).toBe(false);
+		expect(isErrorPhase(real.roadBeat1!)).toBe(false);
+		expect(isErrorPhase(real.lay0!)).toBe(false);
 	});
 });
