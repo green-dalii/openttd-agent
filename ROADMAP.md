@@ -123,6 +123,15 @@ pnpm exec tsx scripts/m3-verdict.ts /tmp/m3b
 
 ---
 
+### 🔴 NEXT-2b：信号架构（**先于一切扩决策空间的工作**）
+
+设计已定稿：`docs/SIGNAL-ARCHITECTURE.md`（人的五种信息方式 → L0-L3 分层 →
+红线判定法）。要点：OpenTTD 的**年度分类账**与事件时间线是归因的现成原料，
+harness 只需把「决策→结果」对齐 —— credit assignment 不需要发明，只需要连接。
+
+顺序：结构化通道 → L2 查询族（inspect_*/estimate_route/finances）→
+决策-结果账本进反思 → L1 增量化 → GSEvent 推送。每步用 `loop-health` 验证。
+
 ### 🔴 NEXT-2：继续扩决策空间（**NEXT-1 已跑，确认无信号 → 本项是最优先**）
 
 **NEXT-1 结果（2026-09-12，SPEC §10.34）**：6 局，5 局没建成。
