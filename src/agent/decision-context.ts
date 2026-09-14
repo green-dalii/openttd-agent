@@ -67,6 +67,15 @@ export interface DecisionContextInput {
 	 * position - never a ranking beyond population order.
 	 */
 	towns?: TownSummary[];
+	/**
+	 * How much wall-clock session remains, in seconds. A FACT about the episode
+	 * boundary (like a human knowing how long the session lasts), not advice:
+	 * the model uses it to budget its own decisions. Measured failure without it
+	 * (2026-09-12, /tmp/cal1): the model spent its first decision exploring,
+	 * then asked to sleep until 1950-04-01 - the run ended before it woke, and
+	 * its plan ("start with a cheap pair") was never executed.
+	 */
+	session?: { secondsRemaining: number };
 	since: DecisionTracker;
 	/** Total game days elapsed since run start (for the interval baseline). */
 	gameDay?: number;
@@ -160,6 +169,7 @@ export function buildDecisionContext(input: DecisionContextInput): {
 	trigger: DecisionTrigger;
 	now: { date: string | null; companies: CompanyNumbers[] };
 	towns?: TownSummary[];
+	session?: { secondsRemaining: number };
 	sinceLastDecision: {
 		elapsedGameDays: number;
 		moneyDelta: number;
@@ -191,6 +201,7 @@ export function buildDecisionContext(input: DecisionContextInput): {
 		trigger: input.trigger,
 		now: input.now,
 		...(input.towns ? { towns: input.towns } : {}),
+		...(input.session ? { session: input.session } : {}),
 		sinceLastDecision: {
 			...delta,
 			// Heartbeats are collapsed by decodePhaseWindow: 40 identical

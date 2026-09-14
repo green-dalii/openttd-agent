@@ -106,8 +106,10 @@ pnpm exec tsx scripts/m3-verdict.ts /tmp/m3b
 `phaseStage`/`isErrorPhase` 已实现并用真实日志回放验证（117 phase → 6 新闻，SPEC §10.36）。
 仪器 `scripts/loop-health.ts` 已就位（旧账本读出：35 决策/局、空转率 72%）。
 
-- [ ] 真机跑一局，`loop-health` 读数应进入 HEALTHY 区（决策 ≤10/局、空转率 <30%）
-- [ ] 顺带完成 §10.35.1 的暂停探针（Normal 模式 pause 是否真的可逆）
+- [x] **真机确认（2026-09-12，SPEC §10.37）**：2 决策/局、0 phase_change、
+      空转率 0% —— **HEALTHY**。estimate_route 被主动使用且认知生效（避开 146 格对）。
+      新缺口（已修）：模型不知局长，wait_until 睡过终点 → 补 `session.secondsRemaining`
+- [ ] 暂停探针（Normal 模式 pause 是否可逆）—— 仍未做
 
 ### 🔴 NEXT-1b：验证心跳修复（**立刻做，最便宜**）
 

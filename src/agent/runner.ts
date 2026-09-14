@@ -869,6 +869,9 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 				gameDay: gameDaysSinceStart(deps),
 				history,
 				...(executorPhase ? { phase: executorPhase } : {}),
+				// Episode-boundary fact: without it the model cannot budget its own
+				// decisions and may sleep past the end of the run (see /tmp/cal1).
+				...(deadline !== null ? { secondsRemaining: Math.max(0, Math.round((deadline - Date.now()) / 1000)) } : {}),
 			});
 			plan = out.plan;
 			telemetry.onActivity?.();

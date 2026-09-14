@@ -51,6 +51,8 @@ export interface DecisionRequest {
 	history?: string[];
 	/** Latest executor phase name, if known. */
 	phase?: string;
+	/** Wall-clock seconds left in the session (episode-boundary fact). */
+	secondsRemaining?: number;
 }
 
 /** One company's comparable numbers (as produced by summarizeState). */
@@ -99,6 +101,7 @@ export async function runDecision(
 		// alternative: towns reachable only via observe() meant the model sat through
 		// whole games without ever seeing its siting options.
 		towns: toTownSummaries(state),
+		...(req.secondsRemaining !== undefined ? { session: { secondsRemaining: req.secondsRemaining } } : {}),
 		since: req.tracker,
 		...(req.gameDay !== undefined ? { gameDay: req.gameDay } : {}),
 		...(req.history ? { history: req.history } : {}),

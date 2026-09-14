@@ -194,3 +194,27 @@ describe("towns 必须在每轮决策上下文里（SPEC §10.34 的教训）", 
 		expect("towns" in ctx).toBe(false);
 	});
 });
+
+describe("session horizon 是决策上下文的一部分（2026-09-12, /tmp/cal1 实测）", () => {
+	// 实测：模型第一次决策全部用于探索，然后 wait_until 让自己睡到 1950-04-01，
+	// 而 200 秒的局在那之前就结束了 —— plan 里"先建一条便宜的线"从未执行。
+	// 会话还剩多久是**事实**（人知道这场要打多久），不是策略。
+	it("透传 secondsRemaining", () => {
+		const ctx = buildDecisionContext({
+			trigger: "start",
+			now: { date: "1950-01-01", companies: [] },
+			since: emptyTracker(),
+			session: { secondsRemaining: 130 },
+		});
+		expect(ctx.session).toEqual({ secondsRemaining: 130 });
+	});
+
+	it("没有 session 字段时不伪造", () => {
+		const ctx = buildDecisionContext({
+			trigger: "start",
+			now: { date: "1950-01-01", companies: [] },
+			since: emptyTracker(),
+		});
+		expect("session" in ctx).toBe(false);
+	});
+});
