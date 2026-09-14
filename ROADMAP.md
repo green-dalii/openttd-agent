@@ -109,6 +109,9 @@ pnpm exec tsx scripts/m3-verdict.ts /tmp/m3b
 - [x] **真机确认（2026-09-12，SPEC §10.37）**：2 决策/局、0 phase_change、
       空转率 0% —— **HEALTHY**。estimate_route 被主动使用且认知生效（避开 146 格对）。
       新缺口（已修）：模型不知局长，wait_until 睡过终点 → 补 `session.secondsRemaining`
+- [x] **校准跑 #2（2026-09-12，SPEC §10.38）**：horizon 生效——模型先建 26 格
+      便宜对再扩张（plan 被执行！）；add_vehicles 诚实拒绝；0 phase_change 噪声。
+      **剩余阻塞点收敛为：一次性执行器接不住第二个计划 → NEXT-4**
 - [ ] 暂停探针（Normal 模式 pause 是否可逆）—— 仍未做
 
 ### 🔴 NEXT-1b：验证心跳修复（**立刻做，最便宜**）
