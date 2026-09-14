@@ -14,7 +14,7 @@
  * （`Cannot find module './src/evolution/web-view.js'`）。
  * 收尾时实测过。交接文档里的命令必须是**跑得通**的，所以落成文件。
  */
-import { evolutionView } from "../src/evolution/web-view.js";
+import { evolutionView, type EvolutionView } from "../src/evolution/web-view.js";
 
 const dataDir = process.argv[2];
 if (!dataDir) {
@@ -22,7 +22,7 @@ if (!dataDir) {
 	process.exit(2);
 }
 
-const view = evolutionView(dataDir);
+const view: EvolutionView = evolutionView(dataDir);
 const { arms, metrics } = view;
 
 console.log(`dataDir : ${dataDir}`);
