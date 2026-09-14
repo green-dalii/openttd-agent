@@ -215,7 +215,15 @@ describe("observe tool", () => {
 describe("createTools", () => {
 	it("exposes the first batch with stable names", () => {
 		const names = createTools(deps()).map((t) => t.name);
-		expect(names).toEqual(["observe", "build_bus_route", "add_vehicles", "set_pause"]);
+		// 估价先于建造：§10.34 实测没有距离信号时 agent 只会"按人口取前二"
+		expect(names).toContain("estimate_route");
+		expect(names).toEqual([
+			"observe",
+			"estimate_route",
+			"build_bus_route",
+			"add_vehicles",
+			"set_pause",
+		]);
 	});
 });
 

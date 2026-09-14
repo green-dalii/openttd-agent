@@ -12,6 +12,7 @@ import { Type, type TSchema } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { ActionResult, AgentDeps } from "../types.js";
 import type { WorldSnapshot } from "../../game/world-state.js";
+import { estimateRoute } from "../estimate.js";
 
 /** Executor AI's company id on a fresh map (first company = 0). */
 export const DEFAULT_COMPANY = 0;
@@ -232,6 +233,68 @@ export function setPauseTool(deps: AgentDeps): AgentTool<typeof SetPauseSchema, 
 }
 
 /** Assemble the first tool batch (SPEC §4.3). */
+
+const EstimateRouteSchema = Type.Object({
+	from: Type.Integer({ description: "from town id" }),
+	to: Type.Integer({ description: "to town id" }),
+});
+
+/** `estimate_route` — facts about a candidate line BEFORE spending anything.
+ *
+ * This is the click-to-inspect channel for siting decisions (SIGNAL-ARCHITECTURE
+ * L2). It exists because §10.34 measured what happens without it: the agent saw
+ * only population, so "take the two biggest" was the only strategy it could form,
+ * and it picked a pair 104 straight-tiles apart that construction could not finish.
+ * Distance and cost are world facts; which pair to build is still the agent's call.
+ */
+function estimateRouteTool(deps: AgentDeps): AgentTool<typeof EstimateRouteSchema, ActionResult> {
+	return {
+		name: "estimate_route",
+		label: "Estimate Route",
+		description:
+			"Estimate a candidate bus line between two towns WITHOUT building: straight-line " +
+			"tile distance and a road-only cost lower bound vs the company balance. " +
+			"Call before build_bus_route to compare candidate pairs.",
+		parameters: EstimateRouteSchema,
+		execute: async (_id, params) => {
+			const snap = deps.state.snapshot();
+			const towns = snap.towns ?? [];
+			const from = towns.find((t) => t.id === params.from);
+			const to = towns.find((t) => t.id === params.to);
+			if (!from || !to) {
+				return toResult({
+					ok: false,
+					summary: `unknown town id(s): ${!from ? params.from : ""}${!from && !to ? ", " : ""}${!to ? params.to : ""}. Call observe() for valid ids.`,
+					data: { from: params.from, to: params.to, known: towns.map((t) => t.id) },
+				});
+			}
+			const c0 = snap.companies.get(DEFAULT_COMPANY);
+			const balance = c0?.economy ? Number(c0.economy.money) : null;
+			const est = estimateRoute(from, to, balance);
+			return toResult({
+				ok: true,
+				// Facts in the summary (toResult sends ONLY the summary - MEMORY A7).
+				// No preference is stated: the agent weighs these numbers itself.
+				summary:
+					`towns ${est.fromTown}->${est.toTown}: ${est.straightTiles} straight tiles ` +
+					`(real road is longer); road-only cost >= £${est.roadCostLowerBound} ` +
+					"(stations/depot/vehicles extra); balance £" +
+					(balance === null ? "?" : String(balance)) +
+					(est.roadCostShareOfBalance === null
+						? ""
+						: `; road alone = ${(est.roadCostShareOfBalance * 100).toFixed(0)}% of balance`),
+				data: est,
+			});
+		},
+	};
+}
+
 export function createTools(deps: AgentDeps): AgentTool<TSchema, ActionResult>[] {
-	return [observeTool(deps), buildBusRouteTool(deps), addVehiclesTool(deps), setPauseTool(deps)];
+	return [
+		observeTool(deps),
+		estimateRouteTool(deps),
+		buildBusRouteTool(deps),
+		addVehiclesTool(deps),
+		setPauseTool(deps),
+	];
 }

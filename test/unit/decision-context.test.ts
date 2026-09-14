@@ -170,3 +170,27 @@ describe("decision context", () => {
 		expect(next.baseline!.money).toBe(20);
 	});
 });
+
+describe("towns 必须在每轮决策上下文里（SPEC §10.34 的教训）", () => {
+	// 实测：towns 只有 observe() 才有，模型整局可能都看不到自己的选址选项，
+	// 于是"按人口取前二"成为唯一策略，选了 104 格远的线建不完。
+	// 选址是本游戏的核心决策，候选必须在唤醒时就在眼前。
+	it("buildDecisionContext 透传 towns", () => {
+		const ctx = buildDecisionContext({
+			trigger: "start",
+			now: { date: "1950-01-01", companies: [] },
+			towns: [{ id: 9, pop: 2279, x: 97, y: 162 }],
+			since: emptyTracker(),
+		});
+		expect(ctx.towns).toEqual([{ id: 9, pop: 2279, x: 97, y: 162 }]);
+	});
+
+	it("没有 towns 时不出现在上下文里（不伪造空数组）", () => {
+		const ctx = buildDecisionContext({
+			trigger: "start",
+			now: { date: "1950-01-01", companies: [] },
+			since: emptyTracker(),
+		});
+		expect("towns" in ctx).toBe(false);
+	});
+});

@@ -16,6 +16,14 @@
 import { decodePhaseWindow } from "../game/executor-status.js";
 
 /** One company's comparable numbers in the payload. */
+/** Model-visible town fact: identity, demand signal, position. */
+export interface TownSummary {
+	id: number;
+	pop: number;
+	x: number;
+	y: number;
+}
+
 export interface CompanyNumbers {
 	id: number;
 	money: number | null;
@@ -51,6 +59,14 @@ export interface DecisionTracker {
 export interface DecisionContextInput {
 	trigger: DecisionTrigger;
 	now: { date: string | null; companies: CompanyNumbers[] };
+	/**
+	 * Candidate towns, largest first. Present in EVERY decision context, not
+	 * only inside observe(): the siting choice is the game's central decision
+	 * (SPEC §10.34) and a candidate list the model must fetch with a tool call
+	 * is a candidate list it often works without. Facts only - ids, population,
+	 * position - never a ranking beyond population order.
+	 */
+	towns?: TownSummary[];
 	since: DecisionTracker;
 	/** Total game days elapsed since run start (for the interval baseline). */
 	gameDay?: number;
@@ -143,6 +159,7 @@ function numbersOf(c: CompanyNumbers | undefined, gameDay: number): NumbersBasel
 export function buildDecisionContext(input: DecisionContextInput): {
 	trigger: DecisionTrigger;
 	now: { date: string | null; companies: CompanyNumbers[] };
+	towns?: TownSummary[];
 	sinceLastDecision: {
 		elapsedGameDays: number;
 		moneyDelta: number;
@@ -173,6 +190,7 @@ export function buildDecisionContext(input: DecisionContextInput): {
 	return {
 		trigger: input.trigger,
 		now: input.now,
+		...(input.towns ? { towns: input.towns } : {}),
 		sinceLastDecision: {
 			...delta,
 			// Heartbeats are collapsed by decodePhaseWindow: 40 identical

@@ -37,13 +37,14 @@ function fauxAgent(deps: AgentDeps, responses: Parameters<ReturnType<typeof crea
 }
 
 describe("createAgent", () => {
-	it("installs the four tools and the default system prompt", () => {
+	it("installs the five tools and the default system prompt", () => {
 		const { deps } = fakeDeps();
 		const faux = createFauxCore({});
 		faux.setResponses([fauxAssistantMessage("hi")]);
 		const { agent } = createAgent({ deps, streamFn: faux.streamSimple, model: faux.getModel() });
 		expect(agent.state.tools.map((t) => t.name)).toEqual([
 			"observe",
+			"estimate_route",
 			"build_bus_route",
 			"add_vehicles",
 			"set_pause",

@@ -62,6 +62,15 @@ interface RawCompany {
 	stations?: unknown;
 }
 
+function toTownSummaries(state: Record<string, unknown>): DecisionContextInput["towns"] {
+	const raw = state.towns;
+	if (!Array.isArray(raw)) return undefined;
+	return raw
+		.filter((t): t is { id: number; population: number; x: number; y: number } =>
+			Boolean(t && typeof t === "object" && "id" in t && "population" in t && "x" in t && "y" in t))
+		.map((t) => ({ id: t.id, pop: t.population, x: t.x, y: t.y }));
+}
+
 function toNumbers(state: Record<string, unknown>): DecisionContextInput["now"]["companies"] {
 	const raw = Array.isArray(state.companies) ? (state.companies as RawCompany[]) : [];
 	return raw.map((c) => ({
@@ -86,6 +95,10 @@ export async function runDecision(
 	const context = buildDecisionContext({
 		trigger: req.trigger,
 		now: { date: (state.date as string | null) ?? null, companies: toNumbers(state) },
+		// Candidate towns ride along in EVERY decision context. §10.34 measured the
+		// alternative: towns reachable only via observe() meant the model sat through
+		// whole games without ever seeing its siting options.
+		towns: toTownSummaries(state),
 		since: req.tracker,
 		...(req.gameDay !== undefined ? { gameDay: req.gameDay } : {}),
 		...(req.history ? { history: req.history } : {}),

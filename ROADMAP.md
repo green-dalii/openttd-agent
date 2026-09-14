@@ -132,6 +132,13 @@ harness 只需把「决策→结果」对齐 —— credit assignment 不需要�
 顺序：结构化通道 → L2 查询族（inspect_*/estimate_route/finances）→
 决策-结果账本进反思 → L1 增量化 → GSEvent 推送。每步用 `loop-health` 验证。
 
+**进度（2026-09-12）**：
+- [x] **`estimate_route`**（L2 首个工具）——直线格数 + 修路造价下界（£307/格，
+      §10.25 实测）vs 余额。纯函数 `src/agent/estimate.ts`，只给事实不含偏好
+- [x] **towns 入每轮上下文**（L1 缺口修正）——候选城镇不再需要 observe 才可见
+- [ ] 结构化 phase 通道（GS JSON 化）——inspect_*/finances 的前置
+- [ ] 决策→结果账本进反思；GSEvent 推送
+
 ### 🔴 NEXT-2：继续扩决策空间（**NEXT-1 已跑，确认无信号 → 本项是最优先**）
 
 **NEXT-1 结果（2026-09-12，SPEC §10.34）**：6 局，5 局没建成。
