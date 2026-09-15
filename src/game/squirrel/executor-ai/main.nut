@@ -119,7 +119,42 @@ class ExecutorV1 extends AIController {
             local v = (this._vehicle >= 0 && AIVehicle.IsValidVehicle(this._vehicle)) ? "bus" : "nobus";
             this.SetPhase("done stN" + n + " r" + segs + " " + v);
         }
-        // stage "done": all S4 construction finished; loop idle.
+        // stage "done": this job's construction finished. Look for the NEXT
+        // pending plan instead of idling forever.
+        //
+        // Measured (SPEC §10.38, /tmp/cal2): the model sent FOUR build commands
+        // ("bootstrap cheap, then expand") and the executor ran exactly one and
+        // idled through the rest. A one-shot state machine turns a sound plan
+        // into one route and silently drops the remainder.
+        if (this._stage == "done" && this._reportDone) {
+            local next = this.FindNextJob();
+            if (next >= 0) {
+                // Reset EVERY per-route field to its constructor value. A missed
+                // one leaks state across jobs (a stale _roadCur made job N+1
+                // believe road-laying had already started).
+                this._job = next;
+                this._slotA = { label = "A", bp = null, tried = 0 };
+                this._slotB = { label = "B", bp = null, tried = 0 };
+                this._slotD = { label = "D", bp = null, tried = 0 };
+                this._pf = null;
+                this._pfFrom = -1;
+                this._pfTo = -1;
+                this._reportDone = false;
+                this._vehicle = -1;
+                this._paxCargo = -1;
+                this._radius = -1;
+                this._fleetApplied = -1;
+                this._roadCur = -1;
+                this._roadSeg = 0;
+                this._roadSegStep = 0;
+                this._lastLaid = -1;
+                this._layErr = "";
+                this._builtRoad = null;
+                this._stage = "buildA";
+                this.SetPhase("work");
+                AILog.Info("ExecutorV1 queued next job " + next);
+            }
+        }
     }
 
     /* Short error text for the phase channel. SetPhase truncates at 31 chars, so
@@ -301,6 +336,31 @@ class ExecutorV1 extends AIController {
         this._radius = AIStation.GetCoverageRadius(AIStation.STATION_BUS_STOP);
         if (this._radius <= 0) this._radius = 3;
         return this._radius;
+    }
+
+    /* Newest pending blueprint whose job is newer than anything we have worked,
+     * or -1. Sign ids increase with creation time; job ids only ever increase
+     * (GS route_seq), so "strictly newer than the current job" both gets the
+     * latest plan and never re-picks a job we already completed.
+     * Measured (cal3): comparing only against the current job sent the executor
+     * BACK to a finished job - it rebuilt stations for a route it had already
+     * completed while newer work waited. */
+    function FindNextJob() {
+        local sl = AISignList();
+        local best = -1;
+        foreach (sid, _ in sl) {
+            local txt = AISign.GetName(sid);
+            if (txt == null) continue;
+            if (txt.len() < 5) continue;
+            if (txt.slice(0, 5) != "NUTZ:") continue;
+            local parts = this.Split(txt.slice(5), ":");
+            if (parts.len() < 2) continue;
+            if (parts[0] != "bp") continue;
+            local job = this.ToInt(parts[1]);
+            if (job <= this._job) continue; // already worked (or older than) this one
+            if (job > best) best = job;
+        }
+        return best;
     }
 
     /* S3: build a road between station A's front and station B's front using
