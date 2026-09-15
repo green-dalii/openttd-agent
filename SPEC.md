@@ -1612,3 +1612,40 @@ per-run 数据（上表）：token ≈ 8k × 决策数，**两臂同规律**。�
 3. **给记忆出题**：NEXT-2 扩决策空间（多线路收益递增、重复博弈）——
    记忆在"上次这对镇赚了多少"有真实决策价值时才有用武之地。
 4. token 与 money 一样需要 confound 守卫（按决策数归一）。
+
+## 10.45 Phase A2：GS 侧类型化事件中继（2026-09-12，calA2）
+
+**目标**：harness 面向的所有执行器状态通过结构化 JSON 事件；
+公司名通道在 harness 侧退役（GS 侧继续做 executor→harness 的转发器）。
+
+**实现**（`src/game/squirrel/bridge-gs/main.nut`）：
+- `ParseExecPhase(name)`：剥 `EX ` 前缀与 `j<id>` 尾，映射 11 个 stage 枚举，
+  设置 `hb=true` 当且仅当前缀为 `hb `；输入 `(null : 0x...)` 守门（无效公司）。
+- `ExecEventKey(ev)`：stage+job+hb 的指纹，**变化才发**——心跳概念退役为
+  "无事件 = 无变化"。
+- `Start()` 内 200 tick 周期内新增 try/catch 块读取 executor 公司名 + 发送
+  `{kind, stage, job, hb, raw}` 事件。
+- 失败被吞掉、转为 `err/exec_emit` 事件，不破坏 GS 主循环。
+
+**对原计划的诚实偏离**：GS 侧**不做 detail 解析**。实测发现
+OpenTTD 15 的 GS Squirrel 在嵌套表赋值上有可靠性怪癖（`detail["beat"] = N`
+会抛出 "the index 'beat' does not exist"，即使 `detail = {}` 刚声明
+过）。若干轮 try/catch + 局部变量中转只能减少失败，不能根除。**决定**：
+detail 字段由 harness 侧 `executor-status.ts` 继续用 TS 正则重建（**raw
+永远在事件里**），契约层 GS 只负责 stage/job/hb + raw。这是能力受限
+下的工程妥协——结构化通道仍然建起来了，心跳风暴的根因被消除；
+detail 的契约迁移推迟到 A3 harness 消费侧统一处理时一并完成。
+
+**真机验证**：calA2 200s，`0 emit 错误`、`0 hb 解析错误`、`1 exec 事件`
+（boot 心跳，因为模型没下单、executor 未动，所以期间无 phase 变化）——
+**这正是 on-change 设计的预期行为**：无变化 = 无事件。无心跳风暴。
+
+**契约字段（GS 实际发出）**：
+```
+{ kind: "exec", stage: <ExecStage>, job: <int>, hb: <bool>, raw: <string> }
+```
+与 `src/game/gs-events.ts` ExecEventSchema 兼容；`detail` 字段在 GS 侧
+为空，由 harness 消费时由 `phaseToEvent` 走 fallback 计算。
+
+**剩余**：A3 harness 侧接线（消费 `kind=exec` 而非公司名 info）。
+runner.ts 的 `phaseStage/isErrorPhase/jobFromPhase` 退役计划照旧。

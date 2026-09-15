@@ -14,6 +14,80 @@ class BridgeV1 extends GSController {
     _last_cmd = "";
     _sign_count = 0;
     _route_seq = 0;
+    // Fingerprint of the last exec event we emitted. On-change emission
+    // retires the heartbeat concept: "no event = no change". All semantics
+    // mirror src/game/executor-status.ts decodeExecutorPhase (REFACTOR Phase A).
+    _last_exec_key = "";
+
+    /**
+     * Parse an executor company-name phase string into a typed event payload.
+     * Returns null when the string is not an `EX ...` phase (e.g. uninitialised).
+     *
+     * Scope: STAGE + JOB + HB only. Detail parsing stays on the harness side
+     * (TS regex in executor-status.ts) — the GS Squirrel runtime in OpenTTD 15
+     * has reliability quirks on table assignment that make populating nested
+     * detail unreliable. The contract still requires raw so the harness can
+     * rebuild detail deterministically (REFACTOR Phase A note).
+     *
+     * Mirrors src/game/executor-status.ts decodeExecutorPhase for stage mapping.
+     */
+    function Trim(s) {
+        while (s != null && s.len() > 0 && (s[0] == " " || s[0] == "\t" || s[0] == "\n")) {
+            s = s.slice(1);
+        }
+        while (s != null && s.len() > 0 && (s[s.len()-1] == " " || s[s.len()-1] == "\t" || s[s.len()-1] == "\n")) {
+            s = s.slice(0, s.len() - 1);
+        }
+        return s;
+    }
+
+    function ParseExecPhase(name) {
+        local s = "" + name;
+        if (s.len() > 3 && s.slice(0, 3) == "EX ") s = s.slice(3);
+        if (s.len() < 3 || s.slice(0, 6) == "(null ") return null;
+
+        local stage = "unknown";
+        local hb = false;
+        local job = -1;
+
+        local jPos = s.find(" j");
+        if (jPos != null) {
+            try { job = s.slice(jPos + 2).tointeger(); } catch (e) {}
+            s = Trim(s.slice(0, jPos));
+        }
+
+        if (s == "boot") stage = "boot";
+        else if (s == "work") stage = "work";
+        else if (s == "done") stage = "done";
+        else if (s.slice(0, 2) == "st") stage = "station";
+        else if (s.slice(0, 4) == "road") stage = "road";
+        else if (s.slice(0, 3) == "dpt" || s.slice(0, 5) == "depot") stage = "depot";
+        else if (s.slice(0, 3) == "bus") stage = "fleet";
+        else if (s.slice(0, 3) == "exc") stage = "error";
+        else if (s.slice(0, 3) == "hb ") { hb = true; stage = "heartbeat"; }
+        else if (s.slice(0, 2) == "rd") stage = "road";
+        else if (s.len() > 0 && s[0] == "@") stage = "vehicle";
+        else if (s.len() > 1) {
+            local cls = s[0];
+            if (cls == "R" || cls == "S" || cls == "D" || cls == "B" || cls == "X" || cls == "?") {
+                stage = "vehicle";
+            }
+        }
+
+        return { stage = stage, job = job, hb = hb };
+    }
+
+/** Fingerprint = stage+job+hb+detail keys; values change => new event.
+     *  We include only KEYS (not values) in the key, then compare the
+     *  whole event by re-emitting only when stage/job/hb differ — details
+     *  like `seq` and `signs` change every tick, so we don't want to spam
+     *  the harness. On-change emission already happens at the consumer
+     *  side (stage gate), so we only NEED to gate on stage/job/hb.
+     */
+    function ExecEventKey(ev) {
+        if (ev == null) return "";
+        return ev.stage + "|" + ev.job + "|" + (ev.hb ? "1" : "0");
+    }
 
     function Start() {
         while (true) {
@@ -38,6 +112,30 @@ class BridgeV1 extends GSController {
                     }
                 }
                 this._sign_count = sc;
+                // -- Executor phase event (A2) -------------------------------------
+                // Reads the executor AI company name; emits a typed event on change.
+                // Heartbeat = "no event". The harness A3 will drop its regex decode.
+                try {
+                    local execName = "" + GSCompany.GetName(0);
+                    local ev = this.ParseExecPhase(execName);
+                    if (ev != null) {
+                        local key = this.ExecEventKey(ev);
+                        if (key != this._last_exec_key) {
+                            this._last_exec_key = key;
+                            GSAdmin.Send({
+                                kind = "exec",
+                                stage = ev.stage,
+                                job = ev.job,
+                                hb = ev.hb,
+                                raw = execName,
+                            });
+                        }
+                    }
+                } catch (e) {
+                    // Emitter failure must not break the GS tick loop; surface it.
+                    GSAdmin.Send({ kind = "err", cmd = "exec_emit",
+                                   reason = e.tostring() });
+                }
                 // Publish the candidate towns, not just how many there are.
                 //
                 // SPEC §10.32: the M3 experiment was saturated because the agent
