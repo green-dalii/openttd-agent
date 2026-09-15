@@ -29,7 +29,7 @@
 
 | Phase | 内容 | 验收要点 | 状态 |
 |---|---|---|---|
-| A | GS JSON 事件通道（根因修复）：ack/err 路径扩为全事件，公司名/正则从 harness 退役；心跳改事件化 | runner 里 startsWith/.match 归零；真机 2 局事件流完整 + loop-health HEALTHY | ⬜ A1 类型契约(TDD, golden 样张取真机) → A2 GS 中继 → A3 接线 → A4 真机 |
+| A | GS JSON 事件通道（根因修复）：ack/err 路径扩为全事件，公司名/正则从 harness 退役；心跳改事件化 | runner 里 startsWith/.match 归零；真机 2 局事件流完整 + loop-health HEALTHY | 🟡 **A1 完成（2026-09-12）**：`gs-events.ts`（typebox 契约）+10 golden 测试（7 条真机原串）；顺带修复解码器对 `hb…s<n>`/`rd…d<n> p<n>` 两种高频真机格式 detail 解析为空的存量 bug（golden 测试发现）。→ A2 GS 中继 |
 | B | runner.ts(1055行) 拆四块：game-session / signal-hub / decision-loop / reflect-run | 测试零改动全绿 = 行为不变；runner ≤250 行装配 | ⬜ |
 | C | 记忆+实验脚手架：路线事实不经 LLM 直入库；躺平局 lesson 降权；一条命令跑 A/B（含 token/决策归一守卫）；单线路标定 ≥3 局 | 注入内容含结构化路线事实；下单率方差有数字 | ⬜ |
 | D | 卫生：删 v02-runner(310行)、75 静默 catch 分诊、Dashboard 冻结 | — | ⬜ 穿插做 |

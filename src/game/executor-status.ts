@@ -200,12 +200,16 @@ export function decodeExecutorPhase(input: string): ExecutorPhase {
 		}
 	}
 
-	// --- heartbeat: `hb <stage> #<n>` — liveness, not news ---
-	const hb = /^hb\s+(\S+)\s*#(\d+)$/.exec(s);
+	// --- heartbeat: `hb <stage> #<n> s<signs>` — liveness, not news ---
+	// Real-machine format (main.nut:84) carries an optional sign count suffix.
+	const hb = /^hb\s+(\S+)\s*#(\d+)(?:\s+s(\d+))?$/.exec(s);
 	if (hb) {
 		base.heartbeat = true;
 		base.stage = "heartbeat";
-		base.detail = { innerStage: hb[1]!, beat: num(hb[2]) ?? 0 };
+		base.detail =
+			hb[3] !== undefined
+				? { innerStage: hb[1]!, beat: num(hb[2]) ?? 0, signs: num(hb[3]) ?? 0 }
+				: { innerStage: hb[1]!, beat: num(hb[2]) ?? 0 };
 		base.description =
 			`executor is alive and still working on "${hb[1]}" ` +
 			`(heartbeat #${hb[2]}). No state change since the last beat.`;
@@ -275,9 +279,16 @@ export function decodeExecutorPhase(input: string): ExecutorPhase {
 			`road segment ${seg[1]} laid; about ${seg[2]} tiles still to go to the far station.`;
 		return base;
 	}
-	const rd = /^rd s(\d+) r(\d+)$/.exec(s);
+	// Real-machine format (main.nut:456): `rd s<seg> r<step> d<dist> p<probeFails>`.
+	// Distance/probes are optional on older strings.
+	const rd = /^rd s(\d+) r(\d+)(?:\s+d(\d+))?(?:\s+p(\d+))?$/.exec(s);
 	if (rd) {
-		base.detail = { segment: num(rd[1]) ?? 0, retry: num(rd[2]) ?? 0 };
+		base.detail = {
+			segment: num(rd[1]) ?? 0,
+			retry: num(rd[2]) ?? 0,
+			...(rd[3] !== undefined ? { distance: num(rd[3]) ?? 0 } : {}),
+			...(rd[4] !== undefined ? { probes: num(rd[4]) ?? 0 } : {}),
+		};
 		base.description =
 			`road segment ${rd[1]}: still searching for a route (search attempt ${rd[2]}). ` +
 			`The pathfinder has not returned a path yet - this is work in progress, not a failure.`;
