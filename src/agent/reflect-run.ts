@@ -1,0 +1,123 @@
+/* eslint-disable no-console -- intentional runtime logging */
+/**
+ * Run-finalize-and-reflect tail (REFACTOR Phase B-2).
+ *
+ * 职责: 在主决策循环退出后落定 session、跑 reflection、返回退出码。
+ *   这部分从 runner.ts 原样搬出，零行为变更；测试零改动绿是
+ *   "行为不变"的机械证明。
+ * 禁止: 决策逻辑、信号处理、调度——这些在 decision-loop / signal-hub。
+ */
+import { buildReflectionEvidence } from "../evolution/reflect.js";
+import { runReflection } from "../evolution/reflection-run.js";
+import { buildStageSummary } from "./session-store.js";
+import { totalsFromTelemetry, formatGameDate } from "./runner-helpers.js";
+import type { WorldState } from "../game/world-state.js";
+import type { SessionStore } from "./session-store.js";
+import type { Telemetry } from "./telemetry.js";
+import type { RouteLedger } from "./route-ledger.js";
+import type { Config } from "../config.js";
+
+export interface FinalizeAndReflectArgs {
+	cfg: Config;
+	world: WorldState;
+	session: SessionStore;
+	telemetry: Telemetry;
+	executorPhase: string;
+	reachedDone: boolean;
+	scheduler: { count(): number };
+	pendingActions: Array<{ tool: string; ok: boolean; summary: string }>;
+	routeLedger: RouteLedger;
+	completeOnce: (p: { system: string; user: string }) => Promise<string>;
+}
+
+/**
+ * Persist the run, then run reflection (if any decisions were made), then
+ * return the exit code. Mirrors the original in-line runner tail 1:1.
+ */
+export async function runFinalizeAndReflect(args: FinalizeAndReflectArgs): Promise<number> {
+	const {
+		cfg,
+		world,
+		session,
+		telemetry,
+		executorPhase,
+		reachedDone,
+		scheduler,
+		pendingActions,
+		routeLedger,
+		completeOnce,
+	} = args;
+	const snap = world.snapshot();
+	const c0 = snap.companies.get(0);
+	console.log(
+		`[agent] RESULT: constructionDone=${reachedDone} phase="${executorPhase}" vehicles=${c0?.stats?.vehicles ?? "?"} stations=${c0?.stats?.stations ?? "?"} money=${c0?.economy ? c0.economy.money.toString() : "?"}`,
+	);
+
+	const finalTelemetry = telemetry.snapshot();
+	session.saveTelemetry(finalTelemetry);
+	session.update({ totals: totalsFromTelemetry(session.current().totals, finalTelemetry, snap.totalEvents) });
+	session.addCheckpoint(
+		buildStageSummary(session.current(), formatGameDate(snap.date), Math.max(1, scheduler.count())),
+	);
+	console.log(
+		`[agent] tokens: in=${finalTelemetry.usage.total.input} out=${finalTelemetry.usage.total.output} ` +
+			`reasoning=${finalTelemetry.usage.total.reasoning} total=${finalTelemetry.usage.total.totalTokens} ` +
+			`cost=$${finalTelemetry.usage.total.costTotal.toFixed(4)}`,
+	);
+	console.log(
+		`[agent] tools: ${finalTelemetry.totals.toolCalls} calls, ${finalTelemetry.totals.toolFailures} failed`,
+	);
+	session.finalize({
+		status: reachedDone ? "completed" : "aborted",
+		outcome: {
+			constructionDone: reachedDone,
+			phase: executorPhase || undefined,
+			vehicles: c0?.stats?.vehicles ?? undefined,
+			stations: c0?.stats?.stations ?? undefined,
+			money: c0?.economy ? c0.economy.money.toString() : undefined,
+			totalEvents: snap.totalEvents,
+		},
+	});
+
+	if (finalTelemetry.totals.decisions > 0) {
+		try {
+			const report = await runReflection({
+				complete: completeOnce,
+				dataDir: cfg.dataDir,
+				facts: {
+					sessionId: session.id,
+					seed: cfg.seed,
+					summary: {
+						money: c0?.economy ? Number(c0.economy.money) : 0,
+						vehicleCount: c0?.stats?.vehicles ?? 0,
+						stationCount: c0?.stats?.stations ?? 0,
+						decisions: finalTelemetry.totals.decisions,
+						toolCalls: finalTelemetry.totals.toolCalls,
+						toolFailures: finalTelemetry.totals.toolFailures,
+						constructionDone: reachedDone,
+						durationMs: Math.max(0, Date.now() - Number(session.current().startedAt || Date.now())),
+					},
+					evidence: [
+						...buildReflectionEvidence({
+							stages: session.current().checkpoints,
+							actions: pendingActions,
+						}),
+						// The decision->outcome ledger: facts reflection needs to
+						// say something about CHOICES, not just about the outcome.
+						...routeLedger.lines(),
+					],
+				},
+			});
+			console.log(
+				report.ok
+					? `[evolution] reflection: ${report.lessonsSaved} lesson(s) kept, ` +
+							`${report.strategiesPromoted} strategy card(s) promoted`
+					: `[evolution] reflection failed: ${report.error}`,
+			);
+		} catch (err) {
+			console.log(`[evolution] reflection error: ${err instanceof Error ? err.message : String(err)}`);
+		}
+	}
+
+	return reachedDone ? 0 : 1;
+}

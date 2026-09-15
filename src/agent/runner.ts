@@ -45,7 +45,6 @@ import { summarizeState } from "./tools/index.js";
 import { fauxAssistantMessage, fauxToolCall, createFauxCore } from "@earendil-works/pi-ai";
 import { buildBrain, redactKey } from "./provider.js";
 import { Telemetry } from "./telemetry.js";
-import type { TelemetrySnapshot } from "./telemetry.js";
 import { FileCredentialStore } from "./file-credential-store.js";
 import {
 	SessionStore,
@@ -56,14 +55,12 @@ import {
 	readStageFile,
 	reconcileStaleSessions,
 } from "./session-store.js";
-import type { SessionTotals } from "./session-store.js";
 import { createLlmApi } from "./llm-api.js";
 import { WebServer } from "../web/server.js";
 import { pruningTransformContext } from "./context.js";
 import { loadMemory, makeLessonProvider, memoryCounts, type LoadedMemory } from "../evolution/memory.js";
-import { runReflection } from "../evolution/reflection-run.js";
-import { buildReflectionEvidence } from "../evolution/reflect.js";
 import { RouteLedger } from "./route-ledger.js";
+import { runFinalizeAndReflect } from "./reflect-run.js";
 import { evolutionView, setStrategyEnabled } from "../evolution/web-view.js";
 import { AuditLog } from "./audit.js";
 import { isLlmConfigured } from "../config.js";
@@ -115,93 +112,17 @@ export interface AgentRunOptions {
 	webPort?: number;
 }
 
-function sleep(ms: number): Promise<void> {
-	return new Promise((r) => setTimeout(r, ms));
-}
-
-/** Format a game date for session checkpoints ("unknown" when not observed). */
-function formatGameDate(d: { year: number; month: number; day: number } | null): string {
-	if (!d) return "unknown";
-	return `${d.year}-${String(d.month).padStart(2, "0")}-${String(d.day).padStart(2, "0")}`;
-}
-
-/**
- * Copy live telemetry into the session record's totals.
- *
- * Without this the session (and therefore every staged summary) reported
- * `0 decisions, 0 tool calls, 0 tokens` in agent mode, because only `events`
- * was ever synced — the flagship "总结" feature read as an empty run.
- * Kept as the single source of truth for both the per-turn and final writes.
- */
-function totalsFromTelemetry(
-	prev: SessionTotals,
-	t: TelemetrySnapshot,
-	events: number,
-): SessionTotals {
-	const u = t.usage.total;
-	return {
-		events,
-		decisions: t.totals.decisions,
-		toolCalls: t.totals.toolCalls,
-		toolFailures: t.totals.toolFailures,
-		usage: {
-			input: u.input,
-			output: u.output,
-			cacheRead: u.cacheRead,
-			cacheWrite: u.cacheWrite,
-			reasoning: u.reasoning,
-			totalTokens: u.totalTokens,
-			costTotal: u.costTotal,
-		},
-	};
-}
-
-/**
- * Describe a fleet/station change worth the model's attention, or null when
- * nothing notable happened. Facts only - the model decides what it means.
- */
-function describeNotable(
-	prev: { vehicles: number; stations: number } | null,
-	now: { vehicles?: number; stations?: number },
-): string | null {
-	if (!prev) return null;
-	const parts: string[] = [];
-	const dv = (now.vehicles ?? 0) - prev.vehicles;
-	const ds = (now.stations ?? 0) - prev.stations;
-	if (dv) parts.push(`vehicles ${dv > 0 ? "+" : ""}${dv}`);
-	if (ds) parts.push(`stations ${ds > 0 ? "+" : ""}${ds}`);
-	return parts.length ? parts.join(", ") : null;
-}
-
-/** Game days elapsed since the first observed date, for interval scheduling. */
-function gameDaysSinceStart(deps: AgentDeps): number {
-	const d = deps.state.snapshot().date;
-	if (!d) return 0;
-	return (d.year - 1950) * 360 + (d.month - 1) * 30 + (d.day - 1);
-}
-
-/** Comparable numbers for the next decision's delta. */
-function baselineOf(snap: ReturnType<AgentDeps["state"]["snapshot"]>, gameDay: number) {
-	const c = snap.companies.get(0) ?? [...snap.companies.values()][0];
-	return {
-		money: Number(c?.economy?.money ?? 0) || 0,
-		income: c?.economy ? Number(BigInt.asIntN(64, c.economy.income)) || 0 : 0,
-		vehicles: c?.stats?.vehicles ?? 0,
-		stations: c?.stats?.stations ?? 0,
-		gameDay,
-	};
-}
-
-/** Human-readable description of the selected brain (never includes the key). */
-function describeBrainSelection(cfg: Config): string {
-	const src = cfg.llm.source === "catalog" ? "catalog" : cfg.llm.baseUrl ? "custom" : "catalog";
-	const where = src === "custom" ? `base=${cfg.llm.baseUrl}` : `provider=${cfg.llm.providerId}`;
-	return `${where} model=${cfg.llm.model} api=${cfg.llm.api}`;
-}
-
-
-/** How often to refresh the session heartbeat (docs/STARTUP-AND-LIFECYCLE.md §5). */
-const HEARTBEAT_MS = 2000;
+// Pure helpers moved to ./runner-helpers.ts (REFACTOR Phase B-1).
+import {
+	sleep,
+	formatGameDate,
+	totalsFromTelemetry,
+	describeNotable,
+	gameDaysSinceStart,
+	baselineOf,
+	describeBrainSelection,
+	HEARTBEAT_MS,
+} from "./runner-helpers.js";
 
 /** Run one agent-driven session. Returns process exit code. */
 export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise<number> {
@@ -946,97 +867,20 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 		console.log(`[agent] decision ${scheduler.count()} (${due.trigger}) at ${snap.date ? formatGameDate(snap.date) : "?"}`);
 	}
 
-	// The loop owns the run length now (see `deadline` above): it exits either
-	// because we were asked to stop (`stopRequested`, set by requestStop) or
-	// because the deadline passed. There is nothing left to wait for here.
 	clearInterval(obs);
-
-	const snap = world.snapshot();
-	const c0 = snap.companies.get(0);
-	console.log(
-		`[agent] RESULT: constructionDone=${reachedDone} phase="${executorPhase}" vehicles=${c0?.stats?.vehicles ?? "?"} stations=${c0?.stats?.stations ?? "?"} money=${c0?.economy ? c0.economy.money.toString() : "?"}`,
-	);
-
-	// Persist the run for the sessions page (staged summary + outcome).
-	const finalTelemetry = telemetry.snapshot();
-	session.saveTelemetry(finalTelemetry);
-	session.update({ totals: totalsFromTelemetry(session.current().totals, finalTelemetry, snap.totalEvents) });
-	session.addCheckpoint(
-		buildStageSummary(session.current(), formatGameDate(snap.date), Math.max(1, scheduler.count())),
-	);
-	console.log(
-		`[agent] tokens: in=${finalTelemetry.usage.total.input} out=${finalTelemetry.usage.total.output} ` +
-			`reasoning=${finalTelemetry.usage.total.reasoning} total=${finalTelemetry.usage.total.totalTokens} ` +
-			`cost=$${finalTelemetry.usage.total.costTotal.toFixed(4)}`,
-	);
-	console.log(
-		`[agent] tools: ${finalTelemetry.totals.toolCalls} calls, ${finalTelemetry.totals.toolFailures} failed`,
-	);
 	clearInterval(heartbeatTimer);
 	process.off("uncaughtException", onCrash);
 	process.off("unhandledRejection", onCrash);
 	finalized = true;
-	session.finalize({
-		status: reachedDone ? "completed" : "aborted",
-		outcome: {
-			constructionDone: reachedDone,
-			phase: executorPhase || undefined,
-			vehicles: c0?.stats?.vehicles ?? undefined,
-			stations: c0?.stats?.stations ?? undefined,
-			money: c0?.economy ? c0.economy.money.toString() : undefined,
-			totalEvents: snap.totalEvents,
-		},
+
+	const exitCode = await runFinalizeAndReflect({
+		cfg, world, session, telemetry,
+		executorPhase, reachedDone, scheduler, pendingActions, routeLedger,
+		completeOnce,
 	});
 
-	// --- reflection: close the loop (SPEC §5.1 last step) ---
-	//
-	// Deliberately AFTER finalize: the metrics ledger is the foundation of the
-	// "with/without lessons" experiment, so it must be on disk before anything that
-	// can fail. `runReflection` never throws - a network blip during reflection must
-	// not cost us the game's record.
-	if (finalTelemetry.totals.decisions > 0) {
-		try {
-			const report = await runReflection({
-				complete: completeOnce,
-				dataDir: cfg.dataDir,
-				facts: {
-					sessionId: session.id,
-					seed: cfg.seed,
-					summary: {
-						money: c0?.economy ? Number(c0.economy.money) : 0,
-						vehicleCount: c0?.stats?.vehicles ?? 0,
-						stationCount: c0?.stats?.stations ?? 0,
-						decisions: finalTelemetry.totals.decisions,
-						toolCalls: finalTelemetry.totals.toolCalls,
-						toolFailures: finalTelemetry.totals.toolFailures,
-						constructionDone: reachedDone,
-						durationMs: Math.max(0, Date.now() - Number(session.current().startedAt || Date.now())),
-					},
-					evidence: [
-						...buildReflectionEvidence({
-							stages: session.current().checkpoints,
-							actions: pendingActions,
-						}),
-						// The decision->outcome ledger: the facts reflection needs to
-						// say something about CHOICES, not just about the outcome.
-						...routeLedger.lines(),
-					],
-				},
-			});
-			console.log(
-				report.ok
-					? `[evolution] reflection: ${report.lessonsSaved} lesson(s) kept, ` +
-							`${report.strategiesPromoted} strategy card(s) promoted`
-					: `[evolution] reflection failed: ${report.error}`,
-			);
-		} catch (err) {
-			// Belt and braces: runReflection already swallows failures.
-			console.log(`[evolution] reflection error: ${err instanceof Error ? err.message : String(err)}`);
-		}
-	}
-
 	await teardown();
-	return reachedDone ? 0 : 1;
+	return exitCode;
 
 	async function teardown() {
 		if (stopRequested && !web) return;
