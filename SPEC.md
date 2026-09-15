@@ -1500,3 +1500,21 @@ runner 改为比较 identity。实测：6 拍心跳原来触发 6 次决策，�
 
 **下单率**：这两局 2/2 下单（此前 5 局 2 局）——"探索后睡觉"未复现，
 样本仍小，A/B 设计时继续把它当噪声源对待。
+
+## 10.41 决策→结果账本接入反思（2026-09-12，cal8）
+
+RL 反馈闭环的最后一段接通：`RouteLedger`（`src/agent/route-ledger.ts`）记录
+"哪个决策订购了哪条线"（GS ack：job/townA/townB + 决策号），执行器 done 阶段
+（`j<job>`）回填完成事实，局终把账本行并入反思 evidence。
+
+**cal8 实测**：模型订了 4 条线（含重复的 9→17 ×2），6 站 / 6 车。
+反思第一次写出了**关于选择**的 lesson：
+
+- *"Construction was not completed by game end despite 4 routes being ordered"*
+- *"Ordering duplicate routes between the same towns (9->17 at decisions 2 and 3)
+  wastes decisions"* ← 没有账本就不可能写出这句
+
+对照 §10.34 的空洞 lesson（"零失败调用显示保守执行可行"）——**喂什么决定写什么**。
+
+边界自查：账本只记事实（谁订的、建完没有、哪天）；lesson 是反思层对**自己
+过去的观察**（过去式陈述），符合 RL-HARNESS-SCOPE-AUDIT 的注入规则。

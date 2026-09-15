@@ -142,7 +142,9 @@ harness 只需把「决策→结果」对齐 —— credit assignment 不需要�
       §10.25 实测）vs 余额。纯函数 `src/agent/estimate.ts`，只给事实不含偏好
 - [x] **towns 入每轮上下文**（L1 缺口修正）——候选城镇不再需要 observe 才可见
 - [ ] 结构化 phase 通道（GS JSON 化）——inspect_*/finances 的前置
-- [ ] 决策→结果账本进反思；GSEvent 推送
+- [x] **决策→结果账本进反思（2026-09-12，SPEC §10.41）**——cal8 实测反思写出
+      "重复下单 9→17"这类关于选择的 lesson。RL 反馈闭环闭合
+- [ ] GSEvent 推送（失败原因等）
 
 ### 🔴 NEXT-2：继续扩决策空间（**NEXT-1 已跑，确认无信号 → 本项是最优先**）
 

@@ -64,6 +64,7 @@ import { loadMemory, makeLessonProvider, memoryCounts, type LoadedMemory } from 
 import { runReflection } from "../evolution/reflection-run.js";
 import { buildReflectionEvidence } from "../evolution/reflect.js";
 import { isErrorPhase, phaseStage } from "../game/executor-status.js";
+import { RouteLedger, jobFromPhase } from "./route-ledger.js";
 import { evolutionView, setStrategyEnabled } from "../evolution/web-view.js";
 import { AuditLog } from "./audit.js";
 import { isLlmConfigured } from "../config.js";
@@ -260,6 +261,10 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 	let waitUntil: { gameDays: number; from: number } | null = null;
 	// Latest route ack from the executor (drives the map diagram).
 	let lastRoute: Record<string, unknown> | null = null;
+	// Decision->outcome ledger: which decision ordered which route, and what was
+	// observed afterwards. Reflection used to receive only outcome summaries and
+	// could only write vacuous lessons (SPEC §10.34) - it had no per-choice facts.
+	const routeLedger = new RouteLedger();
 	// Last company stats, used to detect changes worth a decision.
 	let prevStats: { vehicles: number; stations: number } | null = null;
 	let waitCondition: string | null = null;
@@ -345,7 +350,16 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 						}
 						// Remember the coordinates the executor acknowledged, so each
 						// stage snapshot can draw the actual built route.
-						if (p.kind === "ack" && p.cmd === "build_bus_route") lastRoute = p;
+						if (p.kind === "ack" && p.cmd === "build_bus_route") {
+							lastRoute = p;
+							routeLedger.record({
+								job: Number(p.job),
+								fromTown: Number(p.townA),
+								toTown: Number(p.townB),
+								decision: scheduler.count(),
+								orderedAt: Date.now(),
+							});
+						}
 					}
 				}
 				// Notable events (fleet/station changes) are worth the model's
@@ -365,6 +379,12 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 					// unmoved in 83% of the intervals (MEASURED 2026-09-12).
 					// A heartbeat means nothing happened - it must never wake the model.
 					const stage = phaseStage(p.name);
+					if (p.isAi && p.name.startsWith("EX ")) {
+						const doneJob = jobFromPhase(p.name);
+						if (doneJob !== null && doneJob >= 0 && stage === "done") {
+							routeLedger.markDone(doneJob, session.current().checkpoints.at(-1)?.gameDate);
+						}
+					}
 					if (p.isAi && p.name.startsWith("EX ") && (stage !== executorStage || isErrorPhase(p.name))) {
 						executorStage = stage;
 						executorPhase = p.name;
@@ -992,10 +1012,15 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 						constructionDone: reachedDone,
 						durationMs: Math.max(0, Date.now() - Number(session.current().startedAt || Date.now())),
 					},
-					evidence: buildReflectionEvidence({
-						stages: session.current().checkpoints,
-						actions: pendingActions,
-					}),
+					evidence: [
+						...buildReflectionEvidence({
+							stages: session.current().checkpoints,
+							actions: pendingActions,
+						}),
+						// The decision->outcome ledger: the facts reflection needs to
+						// say something about CHOICES, not just about the outcome.
+						...routeLedger.lines(),
+					],
 				},
 			});
 			console.log(
