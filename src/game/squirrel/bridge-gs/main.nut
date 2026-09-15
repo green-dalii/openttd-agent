@@ -106,18 +106,20 @@ class BridgeV1 extends GSController {
                 if (key != this._last_exec_key) {
                     this._last_exec_key = key;
                     GSAdmin.Send({
-                kind = "exec",
-                stage = ev.stage,
-                job = ev.job,
-                hb = ev.hb,
-                raw = execName,
+                        kind = "exec",
+                        stage = ev.stage,
+                        job = ev.job,
+                        hb = ev.hb,
+                        raw = execName,
                     });
                 }
             }
         } catch (e) {
             // Emitter failure must not break the GS tick loop; surface it.
-            GSAdmin.Send({ kind = "err", cmd = "exec_emit",
-                   reason = e.tostring() });
+            GSAdmin.Send({
+                kind = "err", cmd = "exec_emit",
+                reason = e.tostring(),
+            });
         }
     }
 

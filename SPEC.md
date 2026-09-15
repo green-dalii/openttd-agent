@@ -1674,3 +1674,35 @@ runner.ts 的相位源切换为 GS 的 `kind:"exec"` 事件：
 **Phase A 收官**：31 字符公司名在 harness 侧的解析职责归零；
 唯一的相位解析在 GS（stage/job/hb，§10.45）与 TS 解码器（detail 重建，
 按需）。
+
+## 10.47 Phase B-3：signal-hub 拆分（2026-09-12，calB3）
+
+**TDD 顺序**：先写 `test/unit/signal-hub.test.ts`（8 用例，golden 取自
+/tmp/calA3.log 真机事件）→ 实现 `src/agent/signal-hub.ts`（makeSignalHub
+工厂 + SignalHub 接口）→ 接到 runner.ts。
+
+**职责迁移**：从 runner.ts 原 onEvent 回调 1:1 搬出，包括：
+- world.ingest 路由、web.publishEvent / session.appendEvent / boot 缓冲
+- GS gamescript state（towns、gsStates 计数）
+- GS gamescript kind=exec（stage gate + 账本 markDone，§10.46 延续）
+- GS gamescript kind=ack build_bus_route（lastRoute + ledger.record 携带决策号）
+- company_stats notable（车队/站点变化唤醒 onNotableEvent）
+
+**runner.ts 减重**：从 979 行降到 789 行（−190）。所有外部读取改为
+`hub.getXxx()` 调用；executeRegion 的状态变集中在 hub 闭包内。
+
+**踩到的两个真实回归（已被修复）**：
+1. 我此前用 Python 脚本把 EmitExecPhase 移到每循环，**缩进错位**导致
+   Squirrel 解析失败——GS 仍能 load 但 EmitExecPhase 体内 throw 被吞。
+   修正缩进后恢复。
+2. 我把 "GS alive" 检查从 `gsStates === 0` 改为 `hub.getStage() === ""`，
+   但 `getStage()` 只在 exec 事件到达时变化，而 exec 事件需要 executor
+   AI 公司已创建——**自相矛盾**（我们在等 start_ai 之后才有 exec
+   事件，但我们用 exec 事件的存在来决定是否 start_ai）。
+   修复：hub 暴露 `getGsCount()`（state 事件计数）；runner 用 state
+   事件判 GS alive（state 事件先于 executor 启动就到来），用 exec 事件
+   判 executor boot。
+
+**acceptance（行为不变）**：gate 823 全绿（含 8 个新增 hub 单测）；
+calB3 真机：23 个 exec 事件、8 次 phase 迁移全部走 hub、RESULT 正常。
+零行为变化：阶段决策门 + FIFO 队列 + horizon + town 选举全部继续工作。

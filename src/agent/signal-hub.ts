@@ -1,0 +1,173 @@
+/* eslint-disable no-console -- intentional runtime logging */
+/**
+ * Signal hub — the GS/admin event consumer (REFACTOR Phase B-3).
+ *
+ * 职责: 接收 AdminClient 的 `onEvent` 回调，统一处理：
+ *   - world.ingest（规范化事件写世界状态）
+ *   - web.publishEvent / session.appendEvent（dashboard 与 session 记账）
+ *   - GS gamescript 通道（towns、状态采样、ack/err、exec 阶段）
+ *   - executor phase 事件（§10.45 类型化 → stage gate + 账本 markDone）
+ *   - company_stats notable 事件（决策触发）
+ *
+ * 提取原则: 1:1 搬迁 runner.ts 原 onEvent 块，零行为变更；测试零改动
+ *   全绿是 "行为不变"的机械证明（与 B-1/B-2 同守则）。
+ * 禁止: 决策（调度属 decision-loop）；signal 不在这里等待时间，
+ *   只做事件→状态变化的事实记账。
+ */
+import type { GameEvent } from "../types.js";
+import type { WorldState } from "../game/world-state.js";
+import type { RouteLedger } from "./route-ledger.js";
+import type { WebServer } from "../web/server.js";
+import type { SessionStore } from "./session-store.js";
+
+export interface SignalHubRefs {
+	world: WorldState;
+	/** Lazy: web starts null (no dashboard yet during boot). */
+	getWeb(): WebServer | null;
+	/** Lazy: session starts null during boot; replays via replayBootEvents(). */
+	getSession(): SessionStore | null;
+	routeLedger: RouteLedger;
+	/** Source of truth for the current decision count (decision-loop in B-4). */
+	getDecisionCount(): number;
+	/** Wake the decision loop on a meaningful phase change (story gate). */
+	onPhaseChange(phase: string): void;
+	/** Wake the decision loop on a fleet/station change. */
+	onNotableEvent(summary: string): void;
+}
+
+export interface SignalHub {
+	onEvent(ev: GameEvent): void;
+	/** Number of state events seen from the GS (proves the GS is ticking). */
+	getGsCount(): number;
+	/** Current executor stage, e.g. "boot" / "road" / "done" / "error". */
+	getStage(): string;
+	/** Last raw phase string (for the dashboard / RESULT line). */
+	getPhase(): string;
+	getReachedDone(): boolean;
+	/** Drain events buffered during boot into the session. */
+	replayBootEvents(session: SessionStore): void;
+	/** Used by the decision loop to detect fleet/station deltas. */
+	prevStats(): { vehicles: number; stations: number } | null;
+	/** Last ack payload for build_bus_route (kept for the stage-view snapshot). */
+	getLastRoute(): Record<string, unknown> | null;
+}
+
+/** Max events buffered before a session exists (early-connect frames). */
+const BOOT_EVENT_CAP = 256;
+
+export function makeSignalHub(refs: SignalHubRefs): SignalHub {
+	const bootEvents: GameEvent[] = [];
+	let gsStates = 0;
+	let executorStage = "";
+	let executorPhase = "";
+	let reachedDone = false;
+	let prevStats: { vehicles: number; stations: number } | null = null;
+	let lastRoute: Record<string, unknown> | null = null;
+
+	return {
+		onEvent(ev) {
+			refs.world.ingest(ev);
+			// Forward to the dashboard. The `--watch` runner has always done this
+			// (src/game/runner.ts) but the agent path did not, so during `--agent`
+			// - the main mode - the page received NO event frames at all: its
+			// company mirror and history never advanced, and the KPIs stayed frozen
+			// at whatever the connect-time snapshot said until a manual reload.
+			// Same shape as the toWireSnapshot bug (MEMORY.md C1): two paths, one of
+			// them missing a piece, and the other path "looking fine" hid it.
+			refs.getWeb()?.publishEvent(ev);
+			const session = refs.getSession();
+			if (session) session.appendEvent(ev);
+			else if (bootEvents.length < BOOT_EVENT_CAP) bootEvents.push(ev);
+			if (ev.kind === "gamescript") {
+				const p = ev.payload as Record<string, unknown>;
+				if (p.cmd === "state") {
+					gsStates++;
+					// The GS owns the town list; the agent only reads it. Without
+					// this the agent could not see the options it was choosing
+					// between, which is what made the M3 experiment saturated
+					// (SPEC §10.32).
+					if (Array.isArray(p.town_list)) {
+						refs.world.setTowns(
+							(p.town_list as { id?: unknown; pop?: unknown; x?: unknown; y?: unknown }[]).map((t) => ({
+								id: Number(t.id),
+								population: Number(t.pop),
+								x: Number(t.x),
+								y: Number(t.y),
+							})),
+						);
+					}
+					// Sample the GS's own clock. This is the only way to tell
+					// "the game is not running" from "the executor is not
+					// looping": the GS sends these every 200 ticks, so if the
+					// DATE does not advance, the game is stopped; if the date
+					// advances but the executor stays silent, the executor is
+					// starved of script ticks (ROADMAP 4b follow-up).
+					if (gsStates % 5 === 1) {
+						console.log(
+							`[agent] GS state #${gsStates} date=${String(p.date)} towns=${String(p.towns)} signs=${String(p.signs)}`,
+						);
+					}
+				}
+				else {
+					console.log(`[agent] GS: ${JSON.stringify(p)}`);
+					// Executor phase events: the PRIMARY phase source (GS relay,
+					// on-change every ~20 ticks). Replaces the company-name regex
+					// decode retired in A3.
+					if (p.kind === "exec") {
+						const stage = String(p.stage);
+						const job = Number(p.job);
+						if (stage === "done" && job >= 0) {
+							refs.routeLedger.markDone(
+								job,
+								refs.getSession()?.current().checkpoints.at(-1)?.gameDate,
+							);
+						}
+						// Stage change or an error phase is news; a heartbeat never is.
+						if (!p.hb && (stage !== executorStage || stage === "error")) {
+							executorStage = stage;
+							executorPhase = String(p.raw);
+							if (stage === "done") reachedDone = true;
+							console.log(`[agent] executor phase -> "${p.raw}"`);
+							refs.onPhaseChange(String(p.raw));
+						}
+					}
+					// Remember the coordinates the executor acknowledged, so each
+					// stage snapshot can draw the actual built route.
+					if (p.kind === "ack" && p.cmd === "build_bus_route") {
+						lastRoute = p;
+						refs.routeLedger.record({
+							job: Number(p.job),
+							fromTown: Number(p.townA),
+							toTown: Number(p.townB),
+							decision: refs.getDecisionCount(),
+							orderedAt: Date.now(),
+						});
+					}
+				}
+			}
+			// Notable events (fleet/station changes) are worth the model's
+			// attention, so they open a decision window (scheduler throttles).
+			if (ev.kind === "company_stats") {
+				const st = ev.payload as { vehicles?: number; stations?: number };
+				const dv = (st.vehicles ?? 0) - (prevStats?.vehicles ?? 0);
+				const ds = (st.stations ?? 0) - (prevStats?.stations ?? 0);
+				const parts: string[] = [];
+				if (dv) parts.push(`vehicles ${dv > 0 ? "+" : ""}${dv}`);
+				if (ds) parts.push(`stations ${ds > 0 ? "+" : ""}${ds}`);
+				const summary = parts.length ? parts.join(", ") : null;
+				prevStats = { vehicles: st.vehicles ?? 0, stations: st.stations ?? 0 };
+				if (summary) refs.onNotableEvent(summary);
+			}
+		},
+		getGsCount: () => gsStates,
+	getStage: () => executorStage,
+		getPhase: () => executorPhase,
+		getReachedDone: () => reachedDone,
+		prevStats: () => prevStats,
+		getLastRoute: () => lastRoute,
+		replayBootEvents(session) {
+			for (const ev of bootEvents) session.appendEvent(ev);
+			bootEvents.length = 0;
+		},
+	};
+}

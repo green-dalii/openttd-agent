@@ -107,16 +107,16 @@ describe("runner 的所有回调状态必须在 AdminClient 之前声明（TDZ �
 	//
 	// 与其等第 5 次，不如让门禁挡住：**回调会碰到的顶层 let，必须声明在
 	// `new AdminClient` 之前**。
-	it("executorPhase / executorPhaseIdentity / web / session 都先于 AdminClient", () => {
+	it("hub / web / sessionRef 都先于 AdminClient（TDZ 守卫；REFACTOR Phase B-3 后 executorPhase/executorStage 已迁入 signal-hub）", () => {
 		const src = readFileSync(join(ROOT, "src/agent/runner.ts"), "utf8");
 		const adminIdx = src.indexOf("client = new AdminClient");
 		expect(adminIdx, "runner.ts must still construct AdminClient").toBeGreaterThan(0);
-		for (const name of ["executorPhase", "executorStage", "web", "sessionRef"]) {
-			const decl = new RegExp(`let\\s+${name}\\b`).exec(src);
+		for (const name of ["hub", "web", "sessionRef"]) {
+			const decl = new RegExp(`\\b(?:let|const)\\s+${name}\\b`).exec(src);
 			expect(decl, `runner.ts should declare ${name}`).not.toBeNull();
 			expect(
 				decl!.index,
-				`\`let ${name}\` must be declared ABOVE \`new AdminClient\` or it is in the ` +
+				`\`${name}\` must be declared ABOVE \`new AdminClient\` or it is in the ` +
 					`temporal dead zone when the boot-time event callback fires (MEMORY A5)`,
 			).toBeLessThan(adminIdx);
 		}

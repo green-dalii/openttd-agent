@@ -11,8 +11,8 @@
 
 import { OpenTTDProcessManager } from "../game/process-manager.js";
 import { APP_VERSION } from "../version.js";
-import { AdminClient } from "../game/admin-client.js";
 import { WorldState } from "../game/world-state.js";
+import { AdminClient } from "../game/admin-client.js";
 import path from "node:path";
 import { renameSync, statSync } from "node:fs";
 import { AdminUpdateType, ALL_COMPANIES } from "../game/admin-protocol.js";
@@ -39,7 +39,6 @@ import {
 	recordPhase,
 	type DecisionTracker,
 } from "./decision-context.js";
-import type { GameEvent } from "../types.js";
 import type { AgentDeps } from "./types.js";
 import { summarizeState } from "./tools/index.js";
 import { fauxAssistantMessage, fauxToolCall, createFauxCore } from "@earendil-works/pi-ai";
@@ -60,6 +59,7 @@ import { WebServer } from "../web/server.js";
 import { pruningTransformContext } from "./context.js";
 import { loadMemory, makeLessonProvider, memoryCounts, type LoadedMemory } from "../evolution/memory.js";
 import { RouteLedger } from "./route-ledger.js";
+import { makeSignalHub, type SignalHub } from "./signal-hub.js";
 import { runFinalizeAndReflect } from "./reflect-run.js";
 import { evolutionView, setStrategyEnabled } from "../evolution/web-view.js";
 import { AuditLog } from "./audit.js";
@@ -117,8 +117,7 @@ import {
 	sleep,
 	formatGameDate,
 	totalsFromTelemetry,
-	describeNotable,
-	gameDaysSinceStart,
+		gameDaysSinceStart,
 	baselineOf,
 	describeBrainSelection,
 	HEARTBEAT_MS,
@@ -134,7 +133,7 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 		console.log(`[agent] reconciled ${reconciled.length} abandoned session(s) -> interrupted`);
 	}
 	const mgr = new OpenTTDProcessManager(cfg);
-	const world = new WorldState();
+	const _world = new WorldState();
 	let client: AdminClient | null = null;
 	let stopRequested = false;
 	// `stopRequested` alone is enough now that the decision loop checks it every
@@ -159,17 +158,6 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 	await mgr.start();
 	await mgr.waitForAdminPort(25_000);
 
-	let gsStates = 0;
-	let executorPhase = "";
-	// Last phase STAGE (see phaseStage) - the news gate. MUST be declared here,
-	// above `new AdminClient`: the event callback fires during boot, and a `let`
-	// declared next to its first assignment is in the temporal dead zone at that
-	// moment, which throws inside every callback (MEMORY.md A5 - four occurrences).
-	let executorStage = "";
-	// The executor's periodic bus dump overwrites the company name, so the
-	// LAST phase is not the terminal one. Track "reached done" separately.
-	let reachedDone = false;
-
 	// Decision cadence + the causality window handed to the model. The framework
 	// owns *when* to ask; the LLM owns *what* to do (docs/AGENT-LOOP-AND-CONTROL §1).
 	const scheduler = new DecisionScheduler({
@@ -179,15 +167,26 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 	let tracker: DecisionTracker = emptyTracker();
 	// The model's requested wake-up (SPEC §4.2 step 5), if it gave one.
 	let waitUntil: { gameDays: number; from: number } | null = null;
-	// Latest route ack from the executor (drives the map diagram).
-	let lastRoute: Record<string, unknown> | null = null;
 	// Decision->outcome ledger: which decision ordered which route, and what was
 	// observed afterwards. Reflection used to receive only outcome summaries and
 	// could only write vacuous lessons (SPEC §10.34) - it had no per-choice facts.
 	const routeLedger = new RouteLedger();
-	// Last company stats, used to detect changes worth a decision.
-	let prevStats: { vehicles: number; stations: number } | null = null;
 	let waitCondition: string | null = null;
+
+	// Signal hub owns: world ingest routing, exec phase / stage state, build ack
+	// recording, fleet/station notable detection, and boot-event buffering
+	// (REFACTOR Phase B-3). It is created BEFORE `new AdminClient` because the
+	// callback fires during boot, and lazy refs (getWeb/getSession) are
+	// intentionally null until later in the run.
+	const hub: SignalHub = makeSignalHub({
+		world: _world,
+		getWeb: () => web,
+		getSession: () => sessionRef,
+		routeLedger,
+		getDecisionCount: () => scheduler.count(),
+		onPhaseChange: (phase) => onPhaseChange?.(phase),
+		onNotableEvent: (summary) => onNotableEvent?.(summary),
+	});
 	// Set below (after the session exists) so events during boot are still safe.
 	let onPhaseChange: ((phase: string) => void) | null = null;
 	let onNotableEvent: ((summary: string) => void) | null = null;
@@ -205,118 +204,10 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 	// null because there is genuinely nothing to publish to yet.
 	let web: WebServer | null = null;
 	let sessionRef: SessionStore | null = null;
-	// Events that arrive before the session exists are BUFFERED, not dropped.
-	// They are handshake/connect frames; dropping them silently would make the
-	// audit trail begin mid-conversation with no record of why.
-	const bootEvents: GameEvent[] = [];
-	const BOOT_EVENT_CAP = 256;
-
 	client = new AdminClient({
 		cfg,
 		callbacks: {
-			onEvent: (ev) => {
-				world.ingest(ev);
-				// Forward to the dashboard. The `--watch` runner has always done this
-				// (src/game/runner.ts) but the agent path did not, so during `--agent`
-				// - the main mode - the page received NO event frames at all: its
-				// company mirror and history never advanced, and the KPIs stayed frozen
-				// at whatever the connect-time snapshot said until a manual reload.
-				// Same shape as the toWireSnapshot bug (MEMORY.md C1): two paths, one of
-				// them missing a piece, and the other path "looking fine" hid it.
-				web?.publishEvent(ev);
-				if (sessionRef) sessionRef.appendEvent(ev);
-				else if (bootEvents.length < BOOT_EVENT_CAP) bootEvents.push(ev);
-				if (ev.kind === "gamescript") {
-					const p = ev.payload as Record<string, unknown>;
-					if (p.cmd === "state") {
-						gsStates++;
-						// The GS owns the town list; the agent only reads it. Without
-						// this the agent could not see the options it was choosing
-						// between, which is what made the M3 experiment saturated
-						// (SPEC §10.32).
-						if (Array.isArray(p.town_list)) {
-							world.setTowns(
-								(p.town_list as { id?: unknown; pop?: unknown; x?: unknown; y?: unknown }[]).map((t) => ({
-									id: Number(t.id),
-									population: Number(t.pop),
-									x: Number(t.x),
-									y: Number(t.y),
-								})),
-							);
-						}
-						// Sample the GS's own clock. This is the only way to tell
-						// "the game is not running" from "the executor is not
-						// looping": the GS sends these every 200 ticks, so if the
-						// DATE does not advance, the game is stopped; if the date
-						// advances but the executor stays silent, the executor is
-						// starved of script ticks (ROADMAP 4b follow-up).
-						if (gsStates % 5 === 1) {
-							console.log(
-								`[agent] GS state #${gsStates} date=${String(p.date)} towns=${String(p.towns)} signs=${String(p.signs)}`,
-							);
-						}
-					}
-					else {
-						console.log(`[agent] GS: ${JSON.stringify(p)}`);
-						// GS-side failures must be observable to the agent's own
-						// history: "sent" is not "accepted", and a silently dropped
-						// command breaks action->outcome causality (SPEC §10.39).
-						if (p.kind === "err") {
-							audit.write({
-								type: "note",
-								ts: Date.now(),
-								message: `GS err: ${JSON.stringify(p)}`,
-							});
-						}
-						// Executor phase events: the PRIMARY phase source (GS relay,
-						// on-change every ~20 ticks). Replaces the company-name regex
-						// decode retired above.
-						if (p.kind === "exec") {
-							const stage = String(p.stage);
-							const job = Number(p.job);
-							if (stage === "done" && job >= 0) {
-								routeLedger.markDone(job, session.current().checkpoints.at(-1)?.gameDate);
-							}
-							// Stage change or an error phase is news; a heartbeat never is.
-							// The GS relay already drops heartbeats ("no event = no change");
-							// this gate stays defensive: hb events must not wake the model.
-							if (!p.hb && (stage !== executorStage || stage === "error")) {
-								executorStage = stage;
-								executorPhase = String(p.raw);
-								if (stage === "done") reachedDone = true;
-								console.log(`[agent] executor phase -> "${p.raw}"`);
-								// A phase change means the world moved: it is a reason to ask
-								// the model again (it may want to react to the new situation).
-								onPhaseChange?.(String(p.raw));
-							}
-						}
-						// Remember the coordinates the executor acknowledged, so each
-						// stage snapshot can draw the actual built route.
-						if (p.kind === "ack" && p.cmd === "build_bus_route") {
-							lastRoute = p;
-							routeLedger.record({
-								job: Number(p.job),
-								fromTown: Number(p.townA),
-								toTown: Number(p.townB),
-								decision: scheduler.count(),
-								orderedAt: Date.now(),
-							});
-						}
-					}
-				}
-				// Notable events (fleet/station changes) are worth the model's
-				// attention, so they open a decision window (scheduler throttles).
-				if (ev.kind === "company_stats") {
-					const st = ev.payload as { vehicles?: number; stations?: number };
-					const notable = describeNotable(prevStats, st);
-					if (notable) onNotableEvent?.(notable);
-					prevStats = { vehicles: st.vehicles ?? 0, stations: st.stations ?? 0 };
-				}
-				// Company-info phase decoding RETIRED (REFACTOR Phase A3): the
-				// executor phase now arrives as a typed GS event (kind:"exec",
-				// SPEC §10.45), emitted on change by the GS relay every loop
-				// iteration. The 31-char company name is no longer parsed here.
-			},
+			onEvent: hub.onEvent,
 			onStatusChange: (s, d) => {
 				if (s === "error") console.error(`[agent] admin error: ${d ?? s}`);
 			},
@@ -325,8 +216,8 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 	await client.connect(10_000);
 
 	const gsDeadline = Date.now() + 20_000;
-	while (gsStates === 0 && Date.now() < gsDeadline && !stopRequested) await sleep(250);
-	if (gsStates === 0) {
+	while (hub.getGsCount() === 0 && Date.now() < gsDeadline && !stopRequested) await sleep(250);
+	if (hub.getGsCount() === 0) {
 		console.error("[agent] ERROR: BridgeV1 GS never heartbeated.");
 		await teardown();
 		return 1;
@@ -336,18 +227,18 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 
 	// wait for the executor company to appear (boot phase)
 	const bootDeadline = Date.now() + 20_000;
-	while (executorStage !== "boot" && Date.now() < bootDeadline && !stopRequested) {
+	while (hub.getStage() !== "boot" && Date.now() < bootDeadline && !stopRequested) {
 		client.poll(AdminUpdateType.CompanyInfo, ALL_COMPANIES);
 		await sleep(500);
 	}
-	console.log(`[agent] executor booted (phase="${executorPhase}")`);
+	console.log(`[agent] executor booted (phase="${hub.getPhase()}")`);
 
 	// --- assemble the brain ---
 	// Real provider when configured (LLM_BASE_URL/LLM_MODEL, or dashboard/CLI);
 	// otherwise the offline faux provider (scripted) so the wiring is still
 	// demonstrable without a key. faux is NOT a real LLM — it cannot validate
 	// decision quality, only the command plumbing.
-	const deps: AgentDeps = { sink: client, state: world };
+	const deps: AgentDeps = { sink: client, state: _world };
 	let streamFn: AgentOptionsStreamFn;
 	let model: Model<string>;
 	let brainKind: "real" | "faux" = "faux";
@@ -402,8 +293,7 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 	const session = new SessionStore(cfg.dataDir);
 	// Unblock the boot callbacks that were buffering while this did not exist.
 	sessionRef = session;
-	for (const ev of bootEvents) session.appendEvent(ev);
-	bootEvents.length = 0;
+	hub.replayBootEvents(session);
 	session.create({
 		id: newSessionId(cfg.seed),
 		mode: "agent",
@@ -467,7 +357,7 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 	const wired = {
 		version: APP_VERSION,
 		getSnapshot: () => ({
-			...(toWireSnapshot(world) as Record<string, unknown>),
+			...(toWireSnapshot(_world) as Record<string, unknown>),
 			telemetry: telemetry.snapshot(),
 			sessionId: session.id,
 			// Backlog for late subscribers / reloads (docs/DASHBOARD-UI.md §7).
@@ -607,7 +497,7 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 				vehicles: c.stats?.vehicles,
 				stations: c.stats?.stations,
 			})),
-			route: lastRoute,
+			route: hub.getLastRoute(),
 			...(phase ? { phase } : {}),
 		});
 		void c0;
@@ -819,7 +709,7 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 				tracker,
 				gameDay: gameDaysSinceStart(deps),
 				history,
-				...(executorPhase ? { phase: executorPhase } : {}),
+				...(hub.getPhase() ? { phase: hub.getPhase() } : {}),
 				// Episode-boundary fact: without it the model cannot budget its own
 				// decisions and may sleep past the end of the run (see /tmp/cal1).
 				...(deadline !== null ? { secondsRemaining: Math.max(0, Math.round((deadline - Date.now()) / 1000)) } : {}),
@@ -874,8 +764,8 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 	finalized = true;
 
 	const exitCode = await runFinalizeAndReflect({
-		cfg, world, session, telemetry,
-		executorPhase, reachedDone, scheduler, pendingActions, routeLedger,
+		cfg, world: _world, session, telemetry,
+		executorPhase: hub.getPhase(), reachedDone: hub.getReachedDone(), scheduler, pendingActions, routeLedger,
 		completeOnce,
 	});
 
