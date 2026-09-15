@@ -10,7 +10,6 @@
 
 import { Type, type TSchema, type Static } from "typebox";
 import { Check } from "typebox/value";
-import { decodeExecutorPhase, type ExecutorStage } from "./executor-status.js";
 
 /** Executor stages — 与 executor-status.ts 的 ExecutorStage 对齐。 */
 const EXEC_STAGES = [
@@ -52,7 +51,8 @@ export const ExecEventSchema = Type.Object({
 	hb: Type.Boolean(),
 	/** 真机原串，审计与调试的唯一权威。 */
 	raw: Type.String(),
-	detail: DetailSchema,
+	/** GS 侧暂不填（SPEC §10.45）；harness 侧由 decodeExecutorPhase(raw) 重建。 */
+	detail: Type.Optional(DetailSchema),
 });
 
 /** 执行器完成事件（原 done 阶段；带 gameDate 即为账本回填的事实）。 */
@@ -91,30 +91,12 @@ export type RouteBriefEvent = Static<typeof RouteBriefEventSchema>;
 export type GsErrEvent = Static<typeof GsErrEventSchema>;
 export type GsEvent = Static<typeof GsEventSchema>;
 export type ExecStage = (typeof EXEC_STAGES)[number];
+export type ExecutorStage = ExecStage;
 
 /** ExecStage 的运行时枚举值（供 GS 侧实现对照）。 */
 export const EXEC_STAGE_VALUES: readonly ExecStage[] = EXEC_STAGES;
-export type { ExecutorStage };
 
 /** Type guard：任意输入是否为合法 GsEvent（A2/A3 的边界校验点）。 */
 export function isGsEvent(x: unknown): x is GsEvent {
 	return Check(GsEventSchema, x);
-}
-
-/**
- * 过渡 shim：公司名相位串 → ExecEvent。
- * A3 接线后由 GS 直发 JSON 取代；A2 期间 harness 用它统一事件入口。
- * 输入须带 `EX ` 前缀（真机格式），否则返回 null（不是事件）。
- */
-export function phaseToEvent(name: string): ExecEvent | null {
-	if (!name.startsWith("EX ")) return null;
-	const d = decodeExecutorPhase(name);
-	return {
-		kind: "exec",
-		stage: d.stage,
-		job: d.job ?? -1,
-		hb: d.heartbeat,
-		raw: name,
-		detail: (d.detail ?? {}) as ExecEvent["detail"],
-	};
 }

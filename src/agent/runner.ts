@@ -63,8 +63,7 @@ import { pruningTransformContext } from "./context.js";
 import { loadMemory, makeLessonProvider, memoryCounts, type LoadedMemory } from "../evolution/memory.js";
 import { runReflection } from "../evolution/reflection-run.js";
 import { buildReflectionEvidence } from "../evolution/reflect.js";
-import { isErrorPhase, phaseStage } from "../game/executor-status.js";
-import { RouteLedger, jobFromPhase } from "./route-ledger.js";
+import { RouteLedger } from "./route-ledger.js";
 import { evolutionView, setStrategyEnabled } from "../evolution/web-view.js";
 import { AuditLog } from "./audit.js";
 import { isLlmConfigured } from "../config.js";
@@ -348,6 +347,28 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 								message: `GS err: ${JSON.stringify(p)}`,
 							});
 						}
+						// Executor phase events: the PRIMARY phase source (GS relay,
+						// on-change every ~20 ticks). Replaces the company-name regex
+						// decode retired above.
+						if (p.kind === "exec") {
+							const stage = String(p.stage);
+							const job = Number(p.job);
+							if (stage === "done" && job >= 0) {
+								routeLedger.markDone(job, session.current().checkpoints.at(-1)?.gameDate);
+							}
+							// Stage change or an error phase is news; a heartbeat never is.
+							// The GS relay already drops heartbeats ("no event = no change");
+							// this gate stays defensive: hb events must not wake the model.
+							if (!p.hb && (stage !== executorStage || stage === "error")) {
+								executorStage = stage;
+								executorPhase = String(p.raw);
+								if (stage === "done") reachedDone = true;
+								console.log(`[agent] executor phase -> "${p.raw}"`);
+								// A phase change means the world moved: it is a reason to ask
+								// the model again (it may want to react to the new situation).
+								onPhaseChange?.(String(p.raw));
+							}
+						}
 						// Remember the coordinates the executor acknowledged, so each
 						// stage snapshot can draw the actual built route.
 						if (p.kind === "ack" && p.cmd === "build_bus_route") {
@@ -370,31 +391,10 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 					if (notable) onNotableEvent?.(notable);
 					prevStats = { vehicles: st.vehicles ?? 0, stations: st.stations ?? 0 };
 				}
-				if (ev.kind === "company_info") {
-					const p = ev.payload as { id: number; name: string; isAi: boolean };
-					// Compare the phase IDENTITY, not the raw string. The heartbeat is
-					// `hb <stage> #<seq> s<signs>` and increments `seq` every loop, so a
-					// raw comparison made every beat look like a phase change: measured
-					// 197 of 212 decisions triggered that way, ~36 per game, with money
-					// unmoved in 83% of the intervals (MEASURED 2026-09-12).
-					// A heartbeat means nothing happened - it must never wake the model.
-					const stage = phaseStage(p.name);
-					if (p.isAi && p.name.startsWith("EX ")) {
-						const doneJob = jobFromPhase(p.name);
-						if (doneJob !== null && doneJob >= 0 && stage === "done") {
-							routeLedger.markDone(doneJob, session.current().checkpoints.at(-1)?.gameDate);
-						}
-					}
-					if (p.isAi && p.name.startsWith("EX ") && (stage !== executorStage || isErrorPhase(p.name))) {
-						executorStage = stage;
-						executorPhase = p.name;
-						if (p.name.startsWith("EX done")) reachedDone = true;
-						console.log(`[agent] executor phase -> "${p.name}"`);
-						// A phase change means the world moved: it is a reason to ask
-						// the model again (it may want to react to the new situation).
-						onPhaseChange?.(p.name);
-					}
-				}
+				// Company-info phase decoding RETIRED (REFACTOR Phase A3): the
+				// executor phase now arrives as a typed GS event (kind:"exec",
+				// SPEC §10.45), emitted on change by the GS relay every loop
+				// iteration. The 31-char company name is no longer parsed here.
 			},
 			onStatusChange: (s, d) => {
 				if (s === "error") console.error(`[agent] admin error: ${d ?? s}`);
@@ -415,7 +415,7 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 
 	// wait for the executor company to appear (boot phase)
 	const bootDeadline = Date.now() + 20_000;
-	while (!executorPhase.startsWith("EX boot") && Date.now() < bootDeadline && !stopRequested) {
+	while (executorStage !== "boot" && Date.now() < bootDeadline && !stopRequested) {
 		client.poll(AdminUpdateType.CompanyInfo, ALL_COMPANIES);
 		await sleep(500);
 	}

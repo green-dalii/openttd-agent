@@ -1649,3 +1649,28 @@ detail 的契约迁移推迟到 A3 harness 消费侧统一处理时一并完成�
 
 **剩余**：A3 harness 侧接线（消费 `kind=exec` 而非公司名 info）。
 runner.ts 的 `phaseStage/isErrorPhase/jobFromPhase` 退役计划照旧。
+
+## 10.46 Phase A3：harness 消费类型化事件，公司名正则退役（2026-09-12，calA3）
+
+runner.ts 的相位源切换为 GS 的 `kind:"exec"` 事件：
+
+- **消费**：`stage`（新闻门：stage 变化或 error 才醒）、`job`（done → 账本
+  markDone）、`raw`（executorPhase 字符串，下游展示不变）、`hb`（防御性：
+  事件心跳绝不唤醒模型）
+- **退役**：`company_info` 里的 EX 相位逻辑整块删除；
+  runner 不再 import `phaseStage/isErrorPhase/jobFromPhase`；
+  route-ledger 的 `jobFromPhase` 与 gs-events 的过渡 shim `phaseToEvent`
+  随之删除（各自测试同步）
+- **契约微调**：`detail` 改为可选——GS 实发无 detail（§10.45 妥协），
+  harness 消费只用 stage/job/hb/raw；detail 需要时可由
+  `decodeExecutorPhase(raw)` 确定性重建
+- **boot 检测**：`executorPhase.startsWith("EX boot")` → `executorStage === "boot"`
+
+**真机验证（calA3，200s）**：64 个 exec 事件、**12 次 phase 迁移全部来自
+事件流**（boot→work→stA_ok→road_start→dpt_ok→work j101→…）；
+模型连订 j100/j101/j102 三条线，6 车 / 6 站——事件驱动新闻门 + FIFO 队列
+在同一局里同时工作。gate 815 绿。
+
+**Phase A 收官**：31 字符公司名在 harness 侧的解析职责归零；
+唯一的相位解析在 GS（stage/job/hb，§10.45）与 TS 解码器（detail 重建，
+按需）。

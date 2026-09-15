@@ -29,7 +29,7 @@
 
 | Phase | 内容 | 验收要点 | 状态 |
 |---|---|---|---|
-| A | GS JSON 事件通道（根因修复）：ack/err 路径扩为全事件，公司名/正则从 harness 退役；心跳改事件化 | runner 里 startsWith/.match 归零；真机 2 局事件流完整 + loop-health HEALTHY | 🟢 **A1 + A2 完成（2026-09-12，SPEC §10.45）**：契约 + 解码修复 + GS 侧 on-change 中继；**对 A2 范围做了一次诚实收敛**（GS 侧暂不发 detail，harness 侧继续用 TS 正则重建 raw→detail——OpenTTD 15 GS Squirrel 表赋值有可靠性怪癖）。→ A3 harness 接线 |
+| A | GS JSON 事件通道（根因修复）：ack/err 路径扩为全事件，公司名/正则从 harness 退役；心跳改事件化 | runner 里 startsWith/.match 归零；真机 2 局事件流完整 + loop-health HEALTHY | ✅ **A 全部完成（2026-09-12，SPEC §10.45–§10.46）**：A1 契约+解码修复 · A2 GS on-change 中继（GS 侧不发 detail——Squirrel 表赋值怪癖，诚实收敛）· A3 harness 消费事件、公司名正则退役；calA3 真机 12 次 phase 迁移全走事件流 + FIFO 三线同跑。→ Phase B（runner.ts 拆分） |
 | B | runner.ts(1055行) 拆四块：game-session / signal-hub / decision-loop / reflect-run | 测试零改动全绿 = 行为不变；runner ≤250 行装配 | ⬜ |
 | C | 记忆+实验脚手架：路线事实不经 LLM 直入库；躺平局 lesson 降权；一条命令跑 A/B（含 token/决策归一守卫）；单线路标定 ≥3 局 | 注入内容含结构化路线事实；下单率方差有数字 | ⬜ |
 | D | 卫生：删 v02-runner(310行)、75 静默 catch 分诊、Dashboard 冻结 | — | ⬜ 穿插做 |

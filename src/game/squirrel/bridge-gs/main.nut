@@ -89,9 +89,42 @@ class BridgeV1 extends GSController {
         return ev.stage + "|" + ev.job + "|" + (ev.hb ? "1" : "0");
     }
 
+    /**
+     * Poll the executor company name and emit a typed event on change.
+     * Called EVERY loop iteration (~20 ticks, ~0.6 s) so phase changes reach
+     * the harness without the 200-tick summary latency. Heartbeat = "no event".
+     */
+    function EmitExecPhase() {
+        // -- Executor phase event (A2/A3) -------------------------------------
+        // Reads the executor AI company name; emits a typed event on change.
+        // Heartbeat = "no event". The harness A3 will drop its regex decode.
+        try {
+            local execName = "" + GSCompany.GetName(0);
+            local ev = this.ParseExecPhase(execName);
+            if (ev != null) {
+                local key = this.ExecEventKey(ev);
+                if (key != this._last_exec_key) {
+                    this._last_exec_key = key;
+                    GSAdmin.Send({
+                kind = "exec",
+                stage = ev.stage,
+                job = ev.job,
+                hb = ev.hb,
+                raw = execName,
+                    });
+                }
+            }
+        } catch (e) {
+            // Emitter failure must not break the GS tick loop; surface it.
+            GSAdmin.Send({ kind = "err", cmd = "exec_emit",
+                   reason = e.tostring() });
+        }
+    }
+
     function Start() {
         while (true) {
             this.HandleEvents();
+            this.EmitExecPhase();
             if (GSController.GetTick() > this._last_send + 200) {
                 this._last_send = GSController.GetTick();
                 // Phase-1 spike. It fires HERE, not at boot, because a
@@ -112,30 +145,6 @@ class BridgeV1 extends GSController {
                     }
                 }
                 this._sign_count = sc;
-                // -- Executor phase event (A2) -------------------------------------
-                // Reads the executor AI company name; emits a typed event on change.
-                // Heartbeat = "no event". The harness A3 will drop its regex decode.
-                try {
-                    local execName = "" + GSCompany.GetName(0);
-                    local ev = this.ParseExecPhase(execName);
-                    if (ev != null) {
-                        local key = this.ExecEventKey(ev);
-                        if (key != this._last_exec_key) {
-                            this._last_exec_key = key;
-                            GSAdmin.Send({
-                                kind = "exec",
-                                stage = ev.stage,
-                                job = ev.job,
-                                hb = ev.hb,
-                                raw = execName,
-                            });
-                        }
-                    }
-                } catch (e) {
-                    // Emitter failure must not break the GS tick loop; surface it.
-                    GSAdmin.Send({ kind = "err", cmd = "exec_emit",
-                                   reason = e.tostring() });
-                }
                 // Publish the candidate towns, not just how many there are.
                 //
                 // SPEC §10.32: the M3 experiment was saturated because the agent

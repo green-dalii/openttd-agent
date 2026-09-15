@@ -3,10 +3,10 @@ import {
 	ExecEventSchema,
 	GsEventSchema,
 	isGsEvent,
-	phaseToEvent,
 	type ExecEvent,
 } from "../../src/game/gs-events.js";
 import { Check } from "typebox/value";
+import { decodeExecutorPhase } from "../../src/game/executor-status.js";
 
 /**
  * Golden 样张 —— 全部来自真机运行日志（cal6/cal7/cal8/m3c-ctl2/m3c-trt1/trt3，
@@ -25,21 +25,31 @@ const REAL_PHASES = [
 	"EX R56 d7 a4 #9 j101",
 ];
 
-const expectExec = (e: unknown): ExecEvent => {
+/** 过渡 shim 已随 A3 退役；golden 走 decodeExecutorPhase + schema 校验。 */
+const expectExec = (raw: string): ExecEvent => {
+	const d = decodeExecutorPhase(raw);
+	const e = {
+		kind: "exec" as const,
+		stage: d.stage,
+		job: d.job ?? -1,
+		hb: d.heartbeat,
+		raw,
+		detail: d.detail ?? {},
+	};
 	if (!Check(GsEventSchema, e)) throw new Error(`schema rejected: ${JSON.stringify(e)}`);
 	return e as ExecEvent;
 };
 
 describe("GS 事件契约 A1 —— golden 样张全部来自真机", () => {
 	it("boot：job=-1，非心跳", () => {
-		const e = expectExec(phaseToEvent("EX boot j-1"));
+		const e = expectExec("EX boot j-1");
 		expect(e.stage).toBe("boot");
 		expect(e.job).toBe(-1);
 		expect(e.hb).toBe(false);
 	});
 
 	it("心跳：hb=true（决策门不得当新闻）", () => {
-		const e = expectExec(phaseToEvent("EX hb road #13 s6 j2"));
+		const e = expectExec("EX hb road #13 s6 j2");
 		expect(e.hb).toBe(true);
 		expect(e.stage).toBe("heartbeat");
 		expect(e.job).toBe(2);
@@ -47,29 +57,25 @@ describe("GS 事件契约 A1 —— golden 样张全部来自真机", () => {
 	});
 
 	it("road 搜索/铺设计数器完整透传", () => {
-		const e = expectExec(phaseToEvent("EX rd s0 r0 d65 p0 j3"));
+		const e = expectExec("EX rd s0 r0 d65 p0 j3");
 		expect(e.stage).toBe("road");
 		expect(e.detail).toMatchObject({ segment: 0, retry: 0, distance: 65, probes: 0 });
 	});
 
 	it("车辆遥测（R56 d7 a4 #9）", () => {
-		const e = expectExec(phaseToEvent("EX R56 d7 a4 #9 j101"));
+		const e = expectExec("EX R56 d7 a4 #9 j101");
 		expect(e.stage).toBe("vehicle");
 		expect(e.job).toBe(101);
 	});
 
 	it("全部 7 条真机样张都通过 schema 且字段自洽", () => {
 		for (const raw of REAL_PHASES) {
-			const e = expectExec(phaseToEvent(raw));
+			const e = expectExec(raw);
 			expect(e.raw).toBe(raw);
 			expect(e.kind).toBe("exec");
 			expect(typeof e.job).toBe("number");
 			expect(typeof e.detail).toBe("object");
 		}
-	});
-
-	it("非 EX 串不是事件（GS 公司名等旁路输入）", () => {
-		expect(phaseToEvent("NUTZ:bp:100")).toBeNull();
 	});
 
 	it("done 事件：job 必填，gameDate 可选（账本回填）", () => {
@@ -94,9 +100,17 @@ describe("GS 事件契约 A1 —— golden 样张全部来自真机", () => {
 
 	it("解码器修复锁定：hb/rd 新字段在旧格式下可选（向后兼容）", () => {
 		// 旧格式无 s/d/p 后缀 —— detail 不得多出未观测字段
-		const hbOld = expectExec(phaseToEvent("EX hb road #7 j2"));
+		const hbOld = expectExec("EX hb road #7 j2");
 		expect(hbOld.detail).toEqual({ innerStage: "road", beat: 7 });
-		const rdOld = expectExec(phaseToEvent("EX rd s1 r2 j100"));
+		const rdOld = expectExec("EX rd s1 r2 j100");
 		expect(rdOld.detail).toEqual({ segment: 1, retry: 2 });
+	});
+
+
+	it("A3：GS 实发形状（无 detail）通过契约", () => {
+		// 真机 calA2 实测 GS 发出的就是这五个字段（SPEC §10.45）
+		expect(
+			isGsEvent({ kind: "exec", stage: "heartbeat", job: -1, hb: true, raw: "EX hb boot #1 s0 j-1" }),
+		).toBe(true);
 	});
 });

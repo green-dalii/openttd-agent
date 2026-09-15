@@ -77,9 +77,3 @@ export class RouteLedger {
 			.map((job) => ({ order: this.orders.get(job)!, outcome: this.outcomes.get(job)! }));
 	}
 }
-
-/** Pull the job id out of an executor phase string (`... j<job>`), or null. */
-export function jobFromPhase(phase: string): number | null {
-	const m = /(?:^|\s)j(-?\d+)\s*$/.exec((phase ?? "").trim());
-	return m ? Number(m[1]) : null;
-}

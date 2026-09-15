@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { RouteLedger, jobFromPhase } from "../../src/agent/route-ledger.js";
+import { RouteLedger } from "../../src/agent/route-ledger.js";
 
 describe("RouteLedger — 决策→结果账本（credit assignment 的缺失一环）", () => {
 	// 反思此前只喂 outcome 汇总，写出的 lesson 是空洞的（SPEC §10.34）。
@@ -40,12 +40,5 @@ describe("RouteLedger — 决策→结果账本（credit assignment 的缺失一
 		l.record({ job: 101, fromTown: 9, toTown: 12, decision: 2, orderedAt: 2000 });
 		expect(l.lines().length).toBe(2);
 		expect(l.lines()[0]).toContain("job 101");
-	});
-
-	it("jobFromPhase 解析执行器 done 串尾部的 j<job>", () => {
-		expect(jobFromPhase("EX done stN2 r63 bus j100")).toBe(100);
-		expect(jobFromPhase("EX dpt_conn j100")).toBe(100);
-		expect(jobFromPhase("EX boot j-1")).toBe(-1);
-		expect(jobFromPhase("EX hb road #28 s3")).toBeNull();
 	});
 });
