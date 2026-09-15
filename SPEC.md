@@ -1464,3 +1464,24 @@ runner 改为比较 identity。实测：6 拍心跳原来触发 6 次决策，�
 
 **注**：cal2 中 job1 被跳过的根因仍未查明（GS err 不入日志）——可能在 GS 侧
 选址失败但工具返回 ok=true（§10.20 同族问题："发送成功"≠"GS 成功"）。
+
+### 10.39.1 修正：FIFO + done 集合 + 契约 + err 通道（2026-09-12）
+
+用户质询"替 agent 做的架构决定"后修正三项：
+
+1. **newest-wins → FIFO**：原实现取最新 pending 计划、静默丢弃更早的——
+   等于把 `build_bus_route(A)` 的语义偷改成"建 A，除非有更新的"。
+   cal2 实测模型想要**全部四条**（bootstrap→expand），该策略会摧毁合法计划。
+   现为：**按提交顺序逐条建完**，每条都被执行。
+2. **done 集合替代单调 id 假设**：§10.39 假设"job id 单调递增"是**错的**——
+   `job` 是模型可显式传的参数（cal2 实发 `job:2`）。改为 `_doneJobs` 数组 +
+   `IsDoneJob()`，boot 接单与 FindNextJob 均跳过已完成 job。
+3. **契约补全**：`build_bus_route` description 现在写明
+   *"Commands are QUEUED: routes are built in submission order, each to completion
+   before the next starts"*——调度语义属于 agent 可见的契约，不是藏在注释里的策略。
+   另：GS err 现在写入 audit 日志（"发送成功 ≠ GS 接受"的观测闭环）。
+
+**验证状态**：gate 800 绿；**FIFO 的真机验证仍欠**——cal5 模型 0 次 build
+（"探索后睡觉"模式第 3 次出现：cal1/cal4/cal5），队列路径未被触发。
+**另**：同 seed 连续局的模型行为差异很大（2/5 局真正下单）——LLM 采样
+非确定性本身成为校准跑的噪声源，A/B 的样本量设计必须把这一点算进去。

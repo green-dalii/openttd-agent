@@ -14,6 +14,7 @@
 class ExecutorV1 extends AIController {
     _phase = "boot";
     _job = -1;
+    _doneJobs = [];   // jobs this executor has completed (FIFO bookkeeping)
     _stage = "boot";   // boot -> buildA -> buildB -> road -> done
     _slotA = { label = "A", bp = null, tried = 0 };
     _slotB = { label = "B", bp = null, tried = 0 };
@@ -127,6 +128,7 @@ class ExecutorV1 extends AIController {
         // idled through the rest. A one-shot state machine turns a sound plan
         // into one route and silently drops the remainder.
         if (this._stage == "done" && this._reportDone) {
+            this._doneJobs.append(this._job);
             local next = this.FindNextJob();
             if (next >= 0) {
                 // Reset EVERY per-route field to its constructor value. A missed
@@ -207,6 +209,7 @@ class ExecutorV1 extends AIController {
             local job = this.ToInt(parts[1]);
             if (job < 0) continue;
             if (job == this._job) continue; // already working on it
+            if (this.IsDoneJob(job)) continue; // completed earlier - never re-run
             this._job = job;
             // Observable action: fund the company for the upcoming build.
             local maxLoan = AICompany.GetMaxLoanAmount();
@@ -338,13 +341,26 @@ class ExecutorV1 extends AIController {
         return this._radius;
     }
 
-    /* Newest pending blueprint whose job is newer than anything we have worked,
-     * or -1. Sign ids increase with creation time; job ids only ever increase
-     * (GS route_seq), so "strictly newer than the current job" both gets the
-     * latest plan and never re-picks a job we already completed.
-     * Measured (cal3): comparing only against the current job sent the executor
-     * BACK to a finished job - it rebuilt stations for a route it had already
-     * completed while newer work waited. */
+    /* True when this job id has already been completed by this executor. */
+    function IsDoneJob(job) {
+        foreach (j in this._doneJobs) {
+            if (j == job) return true;
+        }
+        return false;
+    }
+
+    /* OLDEST pending blueprint not yet completed, or -1 (FIFO).
+     *
+     * Why FIFO and not newest-wins: the queue semantics are part of the action
+     * contract the agent plans against ("commands are built in submission
+     * order"). Newest-wins silently discards a submitted plan with no feedback,
+     * which breaks action->outcome causality - and it was a policy the harness
+     * chose FOR the agent, based on a guess about its intent. cal2 measured the
+     * guess being wrong: four commands meant FOUR wanted routes, not "supersede
+     * the old one". Every submitted plan is now built, in order.
+     *
+     * (A done-SET, not a monotonic id check: the agent may pass explicit job
+     * ids, so ids are NOT guaranteed to increase - cal2 sent "job 2".) */
     function FindNextJob() {
         local sl = AISignList();
         local best = -1;
@@ -357,8 +373,10 @@ class ExecutorV1 extends AIController {
             if (parts.len() < 2) continue;
             if (parts[0] != "bp") continue;
             local job = this.ToInt(parts[1]);
-            if (job <= this._job) continue; // already worked (or older than) this one
-            if (job > best) best = job;
+            if (job < 0) continue;
+            if (job == this._job) continue;
+            if (this.IsDoneJob(job)) continue;
+            if (best < 0 || job < best) best = job;
         }
         return best;
     }

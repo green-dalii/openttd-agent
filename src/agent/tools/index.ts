@@ -117,7 +117,9 @@ export function buildBusRouteTool(deps: AgentDeps): AgentTool<typeof BuildRouteS
 			// to let the planner pick the best pair", which told the agent that the
 			// framework would decide for it - one of the two reasons the M3
 			// experiment was saturated (SPEC §10.32).
-			"Construct a bus route between two towns. from_town and to_town are town ids from observe(); when either is omitted the GS picks a pair itself. Returns as soon as the command is delivered - construction is asynchronous in-game, so observe() afterwards to see what actually happened.",
+			"Construct a bus route between two towns. from_town and to_town are town ids from observe(); when either is omitted the GS picks a pair itself. " +
+			"Commands are QUEUED: routes are built in submission order, each to completion (station A, station B, road, depot, vehicle) before the next starts. " +
+			"Returns as soon as the command is delivered - construction is asynchronous in-game, so observe() afterwards to see what actually happened.",
 		parameters: BuildRouteSchema,
 		execute: async (_id, params) => {
 			const company = params.company ?? DEFAULT_COMPANY;
@@ -139,7 +141,7 @@ export function buildBusRouteTool(deps: AgentDeps): AgentTool<typeof BuildRouteS
 const AddVehiclesSchema = Type.Object({
 	count: Type.Number({ description: "Total vehicles desired on the route (>=1)", minimum: 1, maximum: 20 }),
 	company: Type.Optional(Type.Number({ description: "Executor company id (default 0)" })),
-	job: Type.Optional(Type.Number({ description: "Route job id (default: current)" })),
+	job: Type.Optional(Type.Number({ description: "Optional explicit job id; if omitted the GS assigns one. Re-sending a completed job id is ignored." })),
 });
 
 /** `add_vehicles` — scale the active route's fleet (clones the lead vehicle). */

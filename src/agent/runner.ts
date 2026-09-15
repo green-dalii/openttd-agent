@@ -333,6 +333,16 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 					}
 					else {
 						console.log(`[agent] GS: ${JSON.stringify(p)}`);
+						// GS-side failures must be observable to the agent's own
+						// history: "sent" is not "accepted", and a silently dropped
+						// command breaks action->outcome causality (SPEC §10.39).
+						if (p.kind === "err") {
+							audit.write({
+								type: "note",
+								ts: Date.now(),
+								message: `GS err: ${JSON.stringify(p)}`,
+							});
+						}
 						// Remember the coordinates the executor acknowledged, so each
 						// stage snapshot can draw the actual built route.
 						if (p.kind === "ack" && p.cmd === "build_bus_route") lastRoute = p;
