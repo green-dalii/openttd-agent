@@ -197,57 +197,8 @@ REAL provider、真发 HTTP、产生 `build_bus_route` 调用（SPEC §10.16-8�
 
 ## 目录
 
-```
-src/
-  types.ts                  # 共享类型 (单一事实源)
-  config.ts                 # env 配置 (zod-free, 手动校验)
-  util/
-    json.ts                 # BigInt-safe JSON (economy u64 金额)
-  game/
-    admin-protocol.ts       # Admin Port 字节编解码 (帧/枚举/reader/writer)
-    payload-parsers.ts      # payload → 类型化对象 (含日历算法)
-    observer.ts             # 原始包 → 规范化 GameEvent
-    admin-client.ts         # 完整 AdminClient (connect/join/sub/poll/rcon/gs)
-    world-state.ts          # 内存权威状态 (公司/日期/economy/事件缓冲)
-    runner.ts               # 长驻观测循环 (v0.1.0 --watch)
-    ai-registry.ts          # AI 可用性探测
-    blueprint.ts            # 高层动作 → GS 蓝图 JSON (校验)
-    process-manager.ts      # 服务器生命周期 (generate-then-patch 配置)
-  web/
-    server.ts               # HTTP 路由表(PAGES) + REST + WS 扇出
-    public/
-      pages/                # 一页一个 HTML
-        live.html           #   Live     ：实时游戏 + agent 遥测
-        providers.html      #   Providers：provider 目录选型 + 密钥
-        sessions.html       #   Sessions ：历史局管理 / 复盘
-      assets/css/style.css  # 全部样式 + 设计 token
-      assets/js/
-        charts.js           # 图表模块（折线/柱/环/迷你线，自建无依赖）
-        common.js           # 共享 UI 原语（格式化/组合框/Toast/WS）
-        live.js             # 页面脚本：live.html
-        providers.js        # 页面脚本：providers.html
-        sessions.js         # 页面脚本：sessions.html
-  agent/
-    runner.ts               # runAgent 装配 + 进程生命周期 (Phase B 后 650 行)
-    signal-hub.ts           # 信号消费: GS 事件→新闻门/账本/boot 缓冲
-    decision-loop.ts        # 决策节拍: scheduler→runDecision→因果窗口
-    reflect-run.ts          # 局终结算 + 反思 + metrics 上报
-    loop-control.ts         # 决策循环纯判据 (deadline/cap/wait)
-    runner-helpers.ts       # 纯工具
-    route-ledger.ts         # 决策→结果账本 (credit assignment)
-    estimate.ts             # 路线造价下界 (事实, 不表态)
-  evolution/
-    memory.ts / lessons.ts / strategies.ts / reflect.ts   # 记忆闭环
-    route-facts.ts          # 结构化路线记忆 (C-1, 不经 LLM)
-    metrics.ts              # A/B 对照 + confounded 守卫
-  cli/run.ts                # CLI: --probe / --dry-run / --watch / --v02 / --agent
-test/
-  unit/                     # 纯单测 (vitest), 850+ 用例
-  live/                     # 真机集成 (LIVE_TESTS=1 才跑)
-  helpers/                  # live skip helper
-docs/
-  DASHBOARD-API.md          # dashboard 前后端**冻结契约**（改前必读）
-```
+完整目录树与各模块一行职责见 **`CONTRIBUTING.md` §3**（单一事实源——
+改动目录时在那里同步，README 不再维护副本）。
 
 ## 三种启动方式怎么选
 
