@@ -1706,3 +1706,24 @@ runner.ts 的相位源切换为 GS 的 `kind:"exec"` 事件：
 **acceptance（行为不变）**：gate 823 全绿（含 8 个新增 hub 单测）；
 calB3 真机：23 个 exec 事件、8 次 phase 迁移全部走 hub、RESULT 正常。
 零行为变化：阶段决策门 + FIFO 队列 + horizon + town 选举全部继续工作。
+
+## 10.48 Phase B-4a：决策循环纯逻辑拆分（2026-09-12，calB4）
+
+TDD: 12 loop-control 单测（deadline/cap/waitUntil/waitCondition/phaseWorth/
+emptyTracker）→ 实现 src/agent/loop-control.ts → runner.ts 改用纯函数调用。
+
+行为零变化证据：
+- gate 835 全绿（含 12 新增 loop-control 单测）
+- runner-freeze-thaw 一个断言需更新（`Date.now() >= deadline` →
+  `shouldBreakOnDeadline`）——这正是"行为不变"的可见边界
+- calB4 真机：4 次决策、8 次 phase 迁移、`run length reached (60s)`
+  退出正常——deadline 仍生效
+
+当前成果：runner.ts 979 → 785 行（−194，含 B-1/B-2/B-3）；helpers +
+reflect-run + signal-hub + loop-control 四模块各自独立。
+
+B-4b 留待下轮：决策循环 while 体的完整提取（含 runDecision 调用、
+audit/telemetry 写入、buildStageSummary 等）——需要更细的 TDD 形态
+（mock-based 循环体单测噪声大，行为不变目前最好证明仍是真机跑 +
+全量 gate）。
+
