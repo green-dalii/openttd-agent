@@ -67,7 +67,8 @@ describe("runner: seconds 必须真的限制运行长度", () => {
 		expect(loopIdx).toBeGreaterThan(-1);
 		const head = lines.slice(loopIdx, loopIdx + 12).join("\n");
 		expect(head).toMatch(/deadline/);
-		expect(head).toMatch(/Date\.now\(\)\s*>=\s*deadline/);
+		// REFACTOR Phase B-4a: deadline check lives in loop-control.shouldBreakOnDeadline.
+		expect(head).toMatch(/shouldBreakOnDeadline/);
 	});
 
 	it("截止时间由 opts.seconds 算出（<=0 / undefined 表示不限时）", () => {

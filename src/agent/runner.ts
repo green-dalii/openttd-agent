@@ -60,6 +60,7 @@ import { pruningTransformContext } from "./context.js";
 import { loadMemory, makeLessonProvider, memoryCounts, type LoadedMemory } from "../evolution/memory.js";
 import { RouteLedger } from "./route-ledger.js";
 import { makeSignalHub, type SignalHub } from "./signal-hub.js";
+import { shouldBreakOnDeadline, shouldBreakOnCap, waitUntilExpired, waitConditionMatches, emptyTrackerAfter } from "./loop-control.js";
 import { runFinalizeAndReflect } from "./reflect-run.js";
 import { evolutionView, setStrategyEnabled } from "../evolution/web-view.js";
 import { AuditLog } from "./audit.js";
@@ -614,7 +615,7 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 		// (a data-rendered diagram, not a screenshot - see stage-view.ts).
 		publishStage(phase);
 		// A model-supplied wait condition matching this phase is its wake-up call.
-		if (waitCondition && phase.toLowerCase().includes(waitCondition)) {
+		if (waitConditionMatches(phase, waitCondition)) {
 			waitCondition = null;
 			scheduler.request("wait_until");
 			return;
@@ -640,12 +641,12 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 	// controlled experiment (M3: same seed, 3 runs per arm) impossible.
 	const deadline = opts.seconds && opts.seconds > 0 ? Date.now() + opts.seconds * 1000 : null;
 	while (!stopRequested) {
-		if (deadline !== null && Date.now() >= deadline) {
-			console.log(`[agent] run length reached (${opts.seconds}s) - stopping`);
+		if (shouldBreakOnDeadline({ deadline, seconds: opts.seconds ?? 0 }, Date.now(), stopRequested)) {
+			if (opts.seconds && opts.seconds > 0) console.log(`[agent] run length reached (${opts.seconds}s) - stopping`);
 			break;
 		}
 		const nowDay = gameDaysSinceStart(deps);
-		if (waitUntil && nowDay - waitUntil.from >= waitUntil.gameDays) {
+		if (waitUntilExpired({ waitUntil }, nowDay)) {
 			waitUntil = null;
 			scheduler.request("wait_until");
 		}
@@ -654,7 +655,7 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 			await sleep(decisionTickMs);
 			continue;
 		}
-		if (maxDecisions && scheduler.count() > maxDecisions) {
+		if (shouldBreakOnCap(scheduler.count(), maxDecisions)) {
 			console.log(`[agent] decision cap reached (${maxDecisions})`);
 			break;
 		}
@@ -742,12 +743,7 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 			recordAction(tracker, a);
 		}
 		pendingActions.length = 0;
-		tracker = {
-			baseline: baselineOf(preSnap, gameDaysSinceStart(deps)),
-			phases: [],
-			actions: [],
-			notableEvents: [],
-		};
+		tracker = emptyTrackerAfter(baselineOf(preSnap, gameDaysSinceStart(deps)));
 
 		const snap = deps.state.snapshot();
 		session.update({ totals: totalsFromTelemetry(session.current().totals, telemetry.snapshot(), snap.totalEvents) });
