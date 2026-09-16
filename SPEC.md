@@ -1877,3 +1877,45 @@ teardown 在 `mgr.stop()` 之前 `rcon("save <sessionId>")` + 等待 2.5s 落盘
 
 实验占用 3977/3979 端口 → preflight 单测（断言端口空闲）失败。**真机实验运行
 期间不得跑 gate**；实验结束后 gate 绿。
+
+## 10.53 NEXT-2 N2-1：线路经济事件（route-stats）——探针全绿（2026-09-16）
+
+### 为什么先做它
+
+三轮 A/B（§10.52）的结论是"记忆显著更贵、效果不可辨"，根因是**任务只有一个真决策**。
+要让记忆能兑现，必须先让**选择的结果可测量**。线路经济就是那个"结果"。
+
+### 契约（`src/game/gs-events.ts` 的 `RouteStatsEventSchema`）
+
+GS 每 200 tick 为每条已知线路发一条**扁平**事件（SPEC §10.45 的 GS 怪癖教训：
+Squirrel 侧不留嵌套结构与算术）：
+
+```json
+{"kind":"route-stats","job":1,"vehicles":6,"profit":-308,"waiting":146,"gameDate":712427}
+```
+
+- `profit` = 该线车辆 `GSVehicle.GetProfitThisYear` 之和（**负值合法**：亏钱线路必须能上报）；
+- `waiting` = 两端站点乘客等待之和（`GSStation.GetCargoWaiting`）；
+- **派生量（每日收益）在 harness 侧**（`src/agent/route-stats.ts`，纯函数可单测）。
+
+### 车辆归属：按站点订单，不靠位置猜
+
+`GSVehicleList_Station(station_id)` + `GSVehicle.GetOwner(v) == 0`。
+站点由蓝图标牌瓦片解析；**executor 有 `FindAltSite` 回退**（站点可能偏离标牌数格），
+故 GS 侧 `StationNear(tile, 6)` 先精确瓦片、再半径扫描——否则一条正常运行的线路
+会被静默报成"没有车辆"。
+
+### 真机探针结果（/tmp/n2d，seed 7，400s，n=1）
+
+| 探针问题 | 答案 |
+|---|---|
+| `GSVehicle.GetProfitThisYear` 在专用服务器 GS 里可用吗 | ✅ 可用（读到真值，含负值） |
+| `GSStation.GetCargoWaiting` 可用吗 | ✅ 可用（waiting 0→146） |
+| 车辆能精确归属到线路吗 | ✅ 6 辆车归到 job 1；无异常事件 |
+
+**首个真实行为信号**（job 1，6 辆车）：
+`waiting 0 → 146`，`profit -18 → -308`——一条**排队在涨、钱在亏**的线路。
+这正是 NEXT-2 需要的那种"有题可做"的状态：加车是否让 waiting 掉下来、利润转正，
+是 agent 可以做、且结果可测量的决策。
+
+局末：`constructionDone=true`，4 stations / 3 vehicles（第二条线在建成）。

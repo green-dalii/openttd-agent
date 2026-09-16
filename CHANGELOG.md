@@ -9,6 +9,17 @@
 
 ## [Unreleased]
 
+### Added（NEXT-2 N2-1：线路经济信号，2026-09-16）
+
+- GS 每 200 tick 上报每条线路的原始读数：`route-stats {job, vehicles, profit,
+  waiting, gameDate}`（当年累计利润、乘客等待）。归属按站点订单
+  （`GSVehicleList_Station` + `GetOwner`），站点用`StationNear` 吸收 executor
+  的 alt-site 偏移。
+- `src/agent/route-stats.ts`：每日收益派生 + 事实文本化（纯函数）。
+  **亏钱线路如实为负**；只有"没有车辆"才报 income unknown——不编造 0。
+- signal-hub 保留每条线路的最新读数（`getRouteStats()`），**不唤醒决策**
+  （每 200 tick 都变的量不是新闻）。
+
 ### Added（每局存档 + 分级结果指标，2026-09-16）
 
 - 每局结束自动存档 `<dataDir>/save/<sessionId>.sav`（teardown 时 rcon save，

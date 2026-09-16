@@ -71,6 +71,21 @@ export const RouteBriefEventSchema = Type.Object({
 	tiles: Type.Optional(Type.Integer()),
 });
 
+/**
+ * 线路经济事件（NEXT-2 N2-1）：GS 按站点订单归属统计每条线路的原始读数。
+ * 只发原始事实（当年累计利润 + 日期），每日收益由 harness 侧纯函数派生——
+ * Squirrel 侧不留算术（SPEC §10.45 的 GS 怪癖教训）。
+ */
+export const RouteStatsEventSchema = Type.Object({
+	kind: Type.Literal("route-stats"),
+	job: Type.Integer(),
+	vehicles: Type.Integer(),
+	/** 当年累计利润；负值合法（亏钱线路必须能上报）。 */
+	profit: Type.Integer(),
+	waiting: Type.Integer(),
+	gameDate: Type.Integer(),
+});
+
 /** GS 错误事件（"发送 ≠ 接受"的观测闭环，SPEC §10.39.1）。 */
 export const GsErrEventSchema = Type.Object({
 	kind: Type.Literal("err"),
@@ -82,12 +97,14 @@ export const GsEventSchema = Type.Union([
 	ExecEventSchema,
 	DoneEventSchema,
 	RouteBriefEventSchema,
+	RouteStatsEventSchema,
 	GsErrEventSchema,
 ]);
 
 export type ExecEvent = Static<typeof ExecEventSchema>;
 export type DoneEvent = Static<typeof DoneEventSchema>;
 export type RouteBriefEvent = Static<typeof RouteBriefEventSchema>;
+export type RouteStatsEvent = Static<typeof RouteStatsEventSchema>;
 export type GsErrEvent = Static<typeof GsErrEventSchema>;
 export type GsEvent = Static<typeof GsEventSchema>;
 export type ExecStage = (typeof EXEC_STAGES)[number];

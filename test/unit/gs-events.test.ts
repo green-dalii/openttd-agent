@@ -6,6 +6,7 @@ import {
 	type ExecEvent,
 } from "../../src/game/gs-events.js";
 import { Check } from "typebox/value";
+import type { TSchema } from "typebox";
 import { decodeExecutorPhase } from "../../src/game/executor-status.js";
 
 /**
@@ -112,5 +113,30 @@ describe("GS 事件契约 A1 —— golden 样张全部来自真机", () => {
 		expect(
 			isGsEvent({ kind: "exec", stage: "heartbeat", job: -1, hb: true, raw: "EX hb boot #1 s0 j-1" }),
 		).toBe(true);
+	});
+});
+
+/**
+ * NEXT-2 N2-1：线路经济事件。
+ * golden 格式在实现时与 GS 发送端一一对应（首次真机运行后以真串复核，
+ * 与 A1 同样的纪律：契约先立，真串回填）。
+ */
+describe("route-stats —— 线路经济事件契约", () => {
+	it("接受 GS 将发送的扁平载荷（原始事实，无派生量）", () => {
+		const ev = { kind: "route-stats", job: 101, vehicles: 2, profit: 5000, waiting: 7, gameDate: 1150 };
+		expect(Check(GsEventSchema as TSchema, ev)).toBe(true);
+		expect(isGsEvent(ev)).toBe(true);
+	});
+
+	it("负利润合法（亏钱线路必须能上报，否则只能看见好消息）", () => {
+		expect(isGsEvent({ kind: "route-stats", job: 101, vehicles: 1, profit: -240, waiting: 0, gameDate: 1150 })).toBe(true);
+	});
+
+	it("缺字段被拒（无名线路经济不可用）", () => {
+		expect(isGsEvent({ kind: "route-stats", job: 101, vehicles: 2 })).toBe(false);
+	});
+
+	it("类型错误被拒（字符串冒充数字）", () => {
+		expect(isGsEvent({ kind: "route-stats", job: "101", vehicles: 2, profit: 1, waiting: 0, gameDate: 1 })).toBe(false);
 	});
 });

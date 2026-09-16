@@ -18,6 +18,11 @@ class BridgeV1 extends GSController {
     // retires the heartbeat concept: "no event = no change". All semantics
     // mirror src/game/executor-status.ts decodeExecutorPhase (REFACTOR Phase A).
     _last_exec_key = "";
+    // N2-1: routes this GS laid out (job -> tiles), so route economics can be
+    // attributed exactly. Attribution is by station orders (GSVehicleList_Station
+    // + GetOwner), NOT by guessing from positions.
+    _routes = null;
+    _last_stats = 0;
 
     /**
      * Parse an executor company-name phase string into a typed event payload.
@@ -123,10 +128,112 @@ class BridgeV1 extends GSController {
         }
     }
 
+    /**
+     * Resolve the station a route's endpoint actually got (N2-1).
+     *
+     * The executor builds the station ON the blueprint sign tile in the normal
+     * path, but it has a FindAltSite fallback that shifts the site by a few
+     * tiles when the sign tile cannot be built on. Reading only the exact tile
+     * would then report "no vehicles" for a route that is running fine -
+     * silently, and in the direction of "nothing works". So: exact tile first,
+     * then a small radius scan, and -1 when there is genuinely nothing.
+     */
+    function StationNear(tile, radius) {
+        local sid = GSStation.GetStationID(tile);
+        if (GSStation.IsValidStation(sid)) return sid;
+        local cx = GSMap.GetTileX(tile);
+        local cy = GSMap.GetTileY(tile);
+        for (local dx = -radius; dx <= radius; dx++) {
+            for (local dy = -radius; dy <= radius; dy++) {
+                local x = cx + dx;
+                local y = cy + dy;
+                if (x < 0 || y < 0) continue;
+                if (x >= GSMap.GetMapSizeX() || y >= GSMap.GetMapSizeY()) continue;
+                local cand = GSMap.GetTileIndex(x, y);
+                if (!GSStation.IsStationTile(cand)) continue;
+                local cs = GSStation.GetStationID(cand);
+                if (GSStation.IsValidStation(cs)) return cs;
+            }
+        }
+        return -1;
+    }
+
+    /* 乘客 cargo id（线路经济的等待量按乘客算），与 executor 的判定同源。 */
+    function PaxCargoId() {
+        local cl = GSCargoList();
+        foreach (c, _ in cl) {
+            if (GSCargo.HasCargoClass(c, GSCargo.CC_PASSENGERS)) return c;
+        }
+        return -1;
+    }
+
+    /**
+     * Emit one flat `route-stats` event per known route (N2-1).
+     *
+     * Raw readings only: vehicles on the route, year-to-date profit, passengers
+     * waiting. The harness derives per-day rates (route-stats.ts) - Squirrel
+     * keeps the arithmetic out (SPEC §10.45 quirks).
+     *
+     * Deliberate: a route whose stations do not exist yet is still reported
+     * (zero vehicles, zero waiting). "Planned but not built" is a fact the
+     * agent should see, and silence would read as "no such route".
+     */
+    function EmitRouteStats() {
+        if (this._routes == null) return;
+        try {
+            local exec = 0;
+            local pax = this.PaxCargoId();
+            foreach (job_str, rec in this._routes) {
+                local tA = rec.rawget("tA");
+                local tB = rec.rawget("tB");
+                local sa = this.StationNear(tA, 6);
+                local sb = this.StationNear(tB, 6);
+                local vlist = [];
+                if (GSStation.IsValidStation(sa)) {
+                    foreach (v, _ in GSVehicleList_Station(sa)) {
+                        if (GSVehicle.GetOwner(v) == exec) vlist.append(v);
+                    }
+                }
+                if (GSStation.IsValidStation(sb)) {
+                    foreach (v, _ in GSVehicleList_Station(sb)) {
+                        if (GSVehicle.GetOwner(v) == exec) vlist.append(v);
+                    }
+                }
+                local profit = 0;
+                foreach (v in vlist) {
+                    // GetProfitThisYear returns -1 for a NON-primary vehicle
+                    // (wagons). Routes here are single road vehicles, always
+                    // primary, so a genuine -1 pound loss is not confused with
+                    // the sentinel.
+                    profit += GSVehicle.GetProfitThisYear(v);
+                }
+                local waiting = 0;
+                if (pax >= 0) {
+                    if (GSStation.IsValidStation(sa)) waiting += GSStation.GetCargoWaiting(sa, pax);
+                    if (GSStation.IsValidStation(sb)) waiting += GSStation.GetCargoWaiting(sb, pax);
+                }
+                GSAdmin.Send({
+                    kind = "route-stats",
+                    job = job_str.tointeger(),
+                    vehicles = vlist.len(),
+                    profit = profit,
+                    waiting = waiting,
+                    gameDate = GSDate.GetCurrentDate(),
+                });
+            }
+        } catch (e) {
+            GSAdmin.Send({ kind = "err", cmd = "route_stats", detail = { reason = "" + e } });
+        }
+    }
+
     function Start() {
         while (true) {
             this.HandleEvents();
             this.EmitExecPhase();
+            if (GSController.GetTick() > this._last_stats + 200) {
+                this._last_stats = GSController.GetTick();
+                this.EmitRouteStats();
+            }
             if (GSController.GetTick() > this._last_send + 200) {
                 this._last_send = GSController.GetTick();
                 // Phase-1 spike. It fires HERE, not at boot, because a
@@ -566,6 +673,14 @@ class BridgeV1 extends GSController {
         if (siteD != null) {
             GSSign.BuildSign(siteD[0], "NUTZ:bp:" + job_str + ":D:fr=" + siteD[1]);
         }
+        // N2-1: remember where this job's endpoints are. The executor builds the
+        // stations on these tiles, so later reads can turn tiles -> station ids
+        // -> the vehicles on them (exact attribution, no heuristics).
+        if (this._routes == null) this._routes = {};
+        local rec = {};
+        rec.rawset("tA", tA);
+        rec.rawset("tB", tB);
+        this._routes.rawset(job_str, rec);
         // Recount INSIDE company mode (deity GSSignList hides co-owned signs).
         local names = [];
         local sl = GSSignList();

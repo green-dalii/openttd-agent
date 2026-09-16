@@ -170,3 +170,48 @@ describe("signal-hub —— B-3 单元契约（golden from /tmp/calA3.log）", (
 		expect(session.appendEvent).toHaveBeenCalledTimes(1);
 	});
 });
+
+/**
+ * NEXT-2 N2-1：线路经济进入 hub。GS 每 200 tick 发一次，harness 保留**最新**
+ * 读数（按 job）。不唤醒决策（读数每 200 tick 都变 → 那是噪声源，不是新闻；
+ * 触发设计等看到真实数据再定，见 MEMORY §0b）。
+ */
+describe("signal-hub —— route-stats 摄取", () => {
+	const makeHub = () => makeSignalHub({
+		world: fakeWorld() as never, getWeb: () => null, getSession: () => null,
+		routeLedger: fakeLedger() as never, getDecisionCount: () => 0,
+		onPhaseChange: () => {}, onNotableEvent: () => {},
+	});
+	const routeStats = (p: Record<string, unknown>) =>
+		({ kind: "gamescript", payload: { kind: "route-stats", ...p } }) as unknown as GameEvent;
+
+	it_("按 job 保留最新读数", () => {
+		const hub = makeHub();
+		hub.onEvent(routeStats({ job: 101, vehicles: 1, profit: 100, waiting: 3, gameDate: 1000 }));
+		hub.onEvent(routeStats({ job: 102, vehicles: 2, profit: 900, waiting: 8, gameDate: 1000 }));
+		hub.onEvent(routeStats({ job: 101, vehicles: 2, profit: 4000, waiting: 1, gameDate: 1150 }));
+		const all = hub.getRouteStats();
+		expect(all).toHaveLength(2);
+		const r101 = all.find((r) => r.job === 101)!;
+		expect(r101.profit).toBe(4000); // 覆盖旧读数，不叠加
+		expect(r101.vehicles).toBe(2);
+		expect(all.find((r) => r.job === 102)!.profit).toBe(900); // 互不干扰
+	});
+
+	it_("无 route-stats 时为空数组（不是 undefined——调用方不必防空洞）", () => {
+		expect(makeHub().getRouteStats()).toEqual([]);
+	});
+
+	it_("route-stats 不唤醒决策（噪声门：200 tick 一条，变化是常态）", () => {
+		const onNotable = vi.fn();
+		const onPhase = vi.fn();
+		const hub = makeSignalHub({
+			world: fakeWorld() as never, getWeb: () => null, getSession: () => null,
+			routeLedger: fakeLedger() as never, getDecisionCount: () => 0,
+			onPhaseChange: onPhase, onNotableEvent: onNotable,
+		});
+		hub.onEvent(routeStats({ job: 101, vehicles: 1, profit: 100, waiting: 3, gameDate: 1000 }));
+		expect(onNotable).not.toHaveBeenCalled();
+		expect(onPhase).not.toHaveBeenCalled();
+	});
+});

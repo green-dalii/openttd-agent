@@ -18,6 +18,7 @@ import type { GameEvent } from "../types.js";
 import type { WorldState } from "../game/world-state.js";
 import type { RouteLedger } from "./route-ledger.js";
 import type { WebServer } from "../web/server.js";
+import type { RouteStats } from "./route-stats.js";
 import type { SessionStore } from "./session-store.js";
 
 export interface SignalHubRefs {
@@ -46,6 +47,12 @@ export interface SignalHub {
 	getReachedDone(): boolean;
 	/** Drain events buffered during boot into the session. */
 	replayBootEvents(session: SessionStore): void;
+	/**
+	 * Latest economics per route (NEXT-2 N2-1). GS sends raw readings every
+	 * 200 ticks; the hub keeps the newest per job. Derived rates live in
+	 * route-stats.ts so the arithmetic stays unit-testable.
+	 */
+	getRouteStats(): RouteStats[];
 	/** Used by the decision loop to detect fleet/station deltas. */
 	prevStats(): { vehicles: number; stations: number } | null;
 	/** Last ack payload for build_bus_route (kept for the stage-view snapshot). */
@@ -63,6 +70,7 @@ export function makeSignalHub(refs: SignalHubRefs): SignalHub {
 	let reachedDone = false;
 	let prevStats: { vehicles: number; stations: number } | null = null;
 	let lastRoute: Record<string, unknown> | null = null;
+	const routeStats = new Map<number, RouteStats>();
 
 	return {
 		onEvent(ev) {
@@ -131,6 +139,22 @@ export function makeSignalHub(refs: SignalHubRefs): SignalHub {
 							refs.onPhaseChange(String(p.raw));
 						}
 					}
+					// Route economics (N2-1): the first signal that lets a choice
+					// be judged by its RESULT rather than by whether it finished.
+					// Stored, not broadcast - it changes every 200 ticks, and a
+					// value that always changes is not news (MEMORY §0b).
+					if (p.kind === "route-stats") {
+						const job = Number(p.job);
+						if (Number.isInteger(job)) {
+							routeStats.set(job, {
+								job,
+								vehicles: Number(p.vehicles) || 0,
+								profit: Number(p.profit) || 0,
+								waiting: Number(p.waiting) || 0,
+								gameDate: Number(p.gameDate) || 0,
+							});
+						}
+					}
 					// Remember the coordinates the executor acknowledged, so each
 					// stage snapshot can draw the actual built route.
 					if (p.kind === "ack" && p.cmd === "build_bus_route") {
@@ -165,6 +189,7 @@ export function makeSignalHub(refs: SignalHubRefs): SignalHub {
 		getReachedDone: () => reachedDone,
 		prevStats: () => prevStats,
 		getLastRoute: () => lastRoute,
+		getRouteStats: () => [...routeStats.values()].sort((a, b) => a.job - b.job),
 		replayBootEvents(session) {
 			for (const ev of bootEvents) session.appendEvent(ev);
 			bootEvents.length = 0;

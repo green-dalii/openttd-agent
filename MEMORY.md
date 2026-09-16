@@ -66,17 +66,20 @@
 
 | 阶段 | 内容 | 代码锚点 | 验收（可执行） |
 |---|---|---|---|
-| **N2-1 线路经济信号** | GS 新增 `kind="route-stats"` 事件：每条已建线路的 `job/vehicles/cargoWaiting/profitThisYear/incomePerDay`（**扁平原始类型**——§10.45 教训：GS 侧嵌套表赋值有怪癖）| `bridge-gs/main.nut`（`cmd=="state"` 旁新增；`GSVehicle.GetProfitThisYear`/`GSStation.GetCargoWaiting`/`GSCompany.GetBankBalance`）、`src/game/gs-events.ts`（新 schema 分支，进 `GsEventSchema` 联合）| 真机 ≥1 局出现 `kind=route-stats` 且字段非零；`test/unit/gs-events.test.ts` 加 golden |
+| ✅ ~~N2-1 线路经济信号~~（2026-09-16 完成，真机全绿；见 SPEC §10.53）| GS 新增 `kind="route-stats"` 事件：每条已建线路的 `job/vehicles/cargoWaiting/profitThisYear/incomePerDay`（**扁平原始类型**——§10.45 教训：GS 侧嵌套表赋值有怪癖）| `bridge-gs/main.nut`（`cmd=="state"` 旁新增；`GSVehicle.GetProfitThisYear`/`GSStation.GetCargoWaiting`/`GSCompany.GetBankBalance`）、`src/game/gs-events.ts`（新 schema 分支，进 `GsEventSchema` 联合）| 真机 ≥1 局出现 `kind=route-stats` 且字段非零；`test/unit/gs-events.test.ts` 加 golden |
 | **N2-2 参数化查询** | 新工具 `inspect_route {job?}`：返回该线路的经济与站点状态；未知 job **明确拒绝**（"永远说'是'的工具毁掉学习"）| `src/agent/tools/index.ts`（照 `observe`/`estimate_route` 的 `toResult` 形态）| 单测：已知/未知 job 两条路径；真机：模型调用后 summary 含非零经济字段 |
 | **N2-3 记忆 v2（经济）** | `route-facts` 扩展：`pair → {tiles?, cost?, completed, doneDate?, incomePerDay?, vehicles?}`；仍**不经 LLM**、仍幂等 | `src/evolution/route-facts.ts`（`RouteFact` 加可选字段；`factKey` 保持 pair+completed+date 语义）| 单测：注入行含经济事实且**无策略词**（已有断言的扩展）；真机：下一局启动时 `loaded memory: … N route fact(s)` 含经济行 |
 | **N2-4 主指标换成"收益流"** | 结果指标从 money/built 转向 **income**（银行余额斜率或 GS 收入）；`compareArms` 增加 `meanIncome`；money 保留但降级为次级 | `src/evolution/metrics.ts`（ArmStats + `GameMetric`）、`src/agent/reflect-run.ts`（outcome 增 income）、`docs/SIGNAL-ARCHITECTURE.md` §L1 | 单测：income 均值 + 守卫不被破坏；**money 不再可能单独充当结论** |
 | **N2-5 标定 + A/B** | 先 1–2 局确认"决策数/局 ↑ 且含车队/线路类决策"（loop-health），再 n≥5 A/B | `scripts/run-experiment.ts`、`scripts/loop-health.ts` | loop-health：decisions/game **≥8** 且 idle 仍 0%；A/B 判定遵守守卫 |
 
-### 先验证后定（探针，动手前跑；不做就等于赌）
+### 先验证后定（探针）——**已跑完（2026-09-16，/tmp/n2d）**
 
-- **GS 车辆利润 API 在专用服务器 GS 里是否可用**：`GSVehicle.GetProfitThisYear`/
-  `GSStation.GetCargoWaiting` 可能返回 0 或 `ERR_*`（公司 0 的车辆由 AI 拥有）。
-  探针：临时 `GSAdmin.Send` 一条含这些读数的 debug 事件，跑 1 局看值。
+- ✅ **GS 经济 API 可用**：`GSVehicle.GetProfitThisYear`（含负值）与
+  `GSStation.GetCargoWaiting` 在专用服务器 GS 里都返回真值；车辆归属可行
+  （6 辆归到 job 1）。**意外收获**：一条 6 辆车的线路 waiting 0→146 而
+  profit -18→-308——**排队在涨、钱在亏**，这正是"有题可做"的状态。
+- ⚠️ **归属陷阱（已修）**：executor 有 `FindAltSite` 回退，站点可能不在蓝图
+  瓦片上 → 必须 `StationNear(tile, radius)`，否则正常线路被静默报成"没有车辆"。
 - **收入代理**：银行余额斜率 vs GS 收入分类账（`company_expenses` 未解析）。
   若斜率在 400s 窗口噪声过大，先落 `company_expenses` 解析。
 - **游戏速度旋钮**：若存在可调 world/game speed（SPEC 记 0.435 game-day/s），
