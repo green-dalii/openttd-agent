@@ -28,26 +28,16 @@ import type { AgentOptions } from "@earendil-works/pi-agent-core";
 import type { Model } from "@earendil-works/pi-ai";
 /** pi-agent-core's StreamFn, via AgentOptions. */
 type AgentOptionsStreamFn = AgentOptions["streamFn"];
-import { runDecision, type DecisionPlan } from "./loop.js";
 import { DecisionScheduler } from "./scheduler.js";
 import { buildStageView } from "./stage-view.js";
 import { captureMinimap, MINIMAP_REL_PATH } from "../game/minimap.js";
-import {
-	emptyTracker,
-	recordAction,
-	recordEvent,
-	recordPhase,
-	type DecisionTracker,
-} from "./decision-context.js";
 import type { AgentDeps } from "./types.js";
-import { summarizeState } from "./tools/index.js";
 import { fauxAssistantMessage, fauxToolCall, createFauxCore } from "@earendil-works/pi-ai";
 import { buildBrain, redactKey } from "./provider.js";
 import { Telemetry } from "./telemetry.js";
 import { FileCredentialStore } from "./file-credential-store.js";
 import {
 	SessionStore,
-	buildStageSummary,
 	listSessions,
 	newSessionId,
 	readSession,
@@ -60,7 +50,8 @@ import { pruningTransformContext } from "./context.js";
 import { loadMemory, makeLessonProvider, memoryCounts, type LoadedMemory } from "../evolution/memory.js";
 import { RouteLedger } from "./route-ledger.js";
 import { makeSignalHub, type SignalHub } from "./signal-hub.js";
-import { shouldBreakOnDeadline, shouldBreakOnCap, waitUntilExpired, waitConditionMatches, emptyTrackerAfter } from "./loop-control.js";
+import { createDecisionLoop } from "./decision-loop.js";
+import { runDecision } from "./loop.js";
 import { runFinalizeAndReflect } from "./reflect-run.js";
 import { evolutionView, setStrategyEnabled } from "../evolution/web-view.js";
 import { AuditLog } from "./audit.js";
@@ -117,9 +108,7 @@ export interface AgentRunOptions {
 import {
 	sleep,
 	formatGameDate,
-	totalsFromTelemetry,
 		gameDaysSinceStart,
-	baselineOf,
 	describeBrainSelection,
 	HEARTBEAT_MS,
 } from "./runner-helpers.js";
@@ -165,14 +154,10 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 		minGapMs: opts.decisionMinGapMs ?? 5_000,
 		intervalGameDays: opts.decisionIntervalDays ?? 90,
 	});
-	let tracker: DecisionTracker = emptyTracker();
-	// The model's requested wake-up (SPEC §4.2 step 5), if it gave one.
-	let waitUntil: { gameDays: number; from: number } | null = null;
 	// Decision->outcome ledger: which decision ordered which route, and what was
 	// observed afterwards. Reflection used to receive only outcome summaries and
 	// could only write vacuous lessons (SPEC §10.34) - it had no per-choice facts.
 	const routeLedger = new RouteLedger();
-	let waitCondition: string | null = null;
 
 	// Signal hub owns: world ingest routing, exec phase / stage state, build ack
 	// recording, fleet/station notable detection, and boot-event buffering
@@ -608,150 +593,30 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 	// built a line and was never consulted again — income decayed with nobody
 	// asked to fix it. The scheduler now keeps asking on phase changes, periodic
 	// intervals and notable events until the run ends.
-	// See docs/AGENT-LOOP-AND-CONTROL.md §2.1.
-	onPhaseChange = (phase: string) => {
-		recordPhase(tracker, phase);
-		// One snapshot per construction phase: this is the "阶段性游戏画面"
-		// (a data-rendered diagram, not a screenshot - see stage-view.ts).
-		publishStage(phase);
-		// A model-supplied wait condition matching this phase is its wake-up call.
-		if (waitConditionMatches(phase, waitCondition)) {
-			waitCondition = null;
-			scheduler.request("wait_until");
-			return;
-		}
-		scheduler.request("phase_change");
-	};
-	onNotableEvent = (summary: string) => {
-		recordEvent(tracker, summary);
-		scheduler.request("event");
-	};
+	// See docs/AGENT-LOOP-AND-COMTROL.md §2.1; implementation: decision-loop.ts
+	// (REFACTOR Phase B-4b — the while body moved there 1:1).
+	const loop = createDecisionLoop({
+		deps,
+		agent,
+		scheduler,
+		hub,
+		telemetry,
+		audit,
+		session,
+		getWeb: () => web,
+		pendingActions,
+		opts: { decisionTickMs: opts.decisionTickMs, maxDecisions: opts.maxDecisions, seconds: opts.seconds },
+		isStopRequested: () => stopRequested,
+		publishStage,
+		runDecision: (agent, deps, o) => runDecision(agent, deps, o),
+		now: () => Date.now(),
+		gameDay: () => gameDaysSinceStart(deps),
+	});
+	onPhaseChange = (phase: string) => loop.handlePhase(phase);
+	onNotableEvent = (summary: string) => loop.handleNotable(summary);
 	scheduler.request("start");
 
-	const decisionTickMs = opts.decisionTickMs ?? 1_000;
-	const maxDecisions = opts.maxDecisions ?? 0; // 0 = bounded only by run length
-	// `seconds` bounds the RUN, and it has to be checked INSIDE the loop.
-	//
-	// Measured 2026-09-12: `--demo-seconds 190` ran for 28 minutes and 251
-	// decisions before I killed it. The run was healthy - the limit simply did
-	// not exist: the loop was `while (!stopRequested)` with no deadline, and
-	// `opts.seconds` was only consulted AFTER the loop in a
-	// `Promise.race([stopPromise, sleep(seconds)])`, which by then could only
-	// shorten a wait that had already ended. An unbounded game length makes a
-	// controlled experiment (M3: same seed, 3 runs per arm) impossible.
-	const deadline = opts.seconds && opts.seconds > 0 ? Date.now() + opts.seconds * 1000 : null;
-	while (!stopRequested) {
-		if (shouldBreakOnDeadline({ deadline, seconds: opts.seconds ?? 0 }, Date.now(), stopRequested)) {
-			if (opts.seconds && opts.seconds > 0) console.log(`[agent] run length reached (${opts.seconds}s) - stopping`);
-			break;
-		}
-		const nowDay = gameDaysSinceStart(deps);
-		if (waitUntilExpired({ waitUntil }, nowDay)) {
-			waitUntil = null;
-			scheduler.request("wait_until");
-		}
-		const due = scheduler.take(Date.now(), nowDay);
-		if (!due) {
-			await sleep(decisionTickMs);
-			continue;
-		}
-		if (shouldBreakOnCap(scheduler.count(), maxDecisions)) {
-			console.log(`[agent] decision cap reached (${maxDecisions})`);
-			break;
-		}
-
-		// Snapshot the window BEFORE acting, so the next decision can compare.
-		const preState = summarizeState(deps.state.snapshot());
-		const preSnap = deps.state.snapshot();
-		telemetry.decisionPoint();
-		audit.write({
-			type: "decision",
-			ts: Date.now(),
-			turn: scheduler.count(),
-			trigger: due.trigger,
-			date: String(preState.date ?? "?"),
-			state: preState,
-		});
-		session.appendAudit({ type: "decision", ts: Date.now(), turn: scheduler.count(), trigger: due.trigger, state: preState });
-
-		const history = session.current().checkpoints.map((c) => c.note);
-		// SPEC §1.1 step 2 (REVISED 2026-09-12): the framework NO LONGER pauses the
-		// game around a decision.
-		//
-		// The original design froze the world so it could not move under the LLM.
-		// In practice the freeze was ONE-WAY. `rcon("pause")` posts
-		// `Commands::Pause(PM_NORMAL, true)` into the game loop; once paused that
-		// loop stops draining the queue, so the matching unpause posted afterwards
-		// never runs. OpenTTD's console handler documents the trap exactly:
-		//
-		//   if (_pause_mode.Test(PauseMode::Normal)) { Post(PM_NORMAL, false); }
-		//   else if (_pause_mode.Any())
-		//     "Game cannot be unpaused manually; disable
-		//      pause_on_join/min_active_clients."
-		//
-		// MEASURED (2026-09-12): with the pause in place the game calendar advanced
-		// 1 day in 120s while the GS kept sending state (3200 script ticks) - i.e.
-		// scripts ran while the world stood still, the signature of a paused game.
-		// With the pause removed the calendar advanced 13.5 days per 1000 ticks and
-		// the executor went boot -> work -> stA_ok -> road_start.
-		//
-		// Every "executor is stuck at boot" / "no heartbeat" / "GS not ticking"
-		// symptom we chased for days was this one call.
-		//
-		// What protects decision quality instead: the observation is taken BEFORE
-		// the model is asked, and `sinceLastDecision` reports everything that
-		// changed while it thought (money/income/vehicles/phases/actions). The model
-		// is told the truth about a world that kept moving, rather than a
-		// comforting lie about one that never did.
-		let plan: DecisionPlan | null = null;
-		{
-			const out = await runDecision(agent, deps, {
-				trigger: due.trigger,
-				tracker,
-				gameDay: gameDaysSinceStart(deps),
-				history,
-				...(hub.getPhase() ? { phase: hub.getPhase() } : {}),
-				// Episode-boundary fact: without it the model cannot budget its own
-				// decisions and may sleep past the end of the run (see /tmp/cal1).
-				...(deadline !== null ? { secondsRemaining: Math.max(0, Math.round((deadline - Date.now()) / 1000)) } : {}),
-			});
-			plan = out.plan;
-			telemetry.onActivity?.();
-		}
-
-		// SPEC §4.2 step 5: honour the model's own wake-up ("或等待条件满足").
-		// The framework only parses it; the content is the model's call.
-		if (plan && plan.wait_until) {
-			const w = plan.wait_until;
-			const days = Number(w.game_days);
-			if (Number.isFinite(days) && days > 0) {
-				waitUntil = { gameDays: days, from: gameDaysSinceStart(deps) };
-			} else if (typeof w.condition === "string" && w.condition.trim()) {
-				// A textual condition is matched against the next phase change.
-				waitCondition = w.condition.trim().toLowerCase();
-			}
-		}
-		publishStage(plan && plan.goal ? plan.goal : undefined);
-		if (plan && plan.goal) {
-			audit.write({ type: "note", ts: Date.now(), message: `plan: ${plan.goal}`, data: { plan } });
-			session.appendAudit({ type: "plan", ts: Date.now(), plan });
-		}
-
-		// Record the outcome of whatever the model asked for, then open a new
-		// window so the next decision sees the effect of this one.
-		for (const a of pendingActions) {
-			recordAction(tracker, a);
-		}
-		pendingActions.length = 0;
-		tracker = emptyTrackerAfter(baselineOf(preSnap, gameDaysSinceStart(deps)));
-
-		const snap = deps.state.snapshot();
-		session.update({ totals: totalsFromTelemetry(session.current().totals, telemetry.snapshot(), snap.totalEvents) });
-		const cp = buildStageSummary(session.current(), formatGameDate(snap.date), scheduler.count());
-		session.addCheckpoint(cp);
-		web?.publishCheckpoint(cp);
-		console.log(`[agent] decision ${scheduler.count()} (${due.trigger}) at ${snap.date ? formatGameDate(snap.date) : "?"}`);
-	}
+	await loop.run();
 
 	clearInterval(obs);
 	clearInterval(heartbeatTimer);

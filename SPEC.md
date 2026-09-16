@@ -1727,3 +1727,32 @@ audit/telemetry 写入、buildStageSummary 等）——需要更细的 TDD 形�
 （mock-based 循环体单测噪声大，行为不变目前最好证明仍是真机跑 +
 全量 gate）。
 
+## 10.49 Phase B-4b：决策循环体提取（2026-09-12，calB5）
+
+runner.ts 的 while 循环体（约 190 行）1:1 迁入 `src/agent/decision-loop.ts`：
+`createDecisionLoop(ctx)` 返回 `{run, handlePhase, handleNotable, handlePlanWait}`。
+
+- 循环私有状态（tracker/waitUntil/waitCondition/pendingActions）随迁；
+  pendingActions 由 runner 创建、循环填充、reflect-run 消费（共享引用，语义不变）
+- runner.ts 保留装配 + 生命周期（进程/凭据/脑/telemetry/web/obs 轮询）；
+  `onPhaseChange = (p) => loop.handlePhase(p)` 赋值位置不变——boot 期间的
+  phase 事件依旧被丢弃（原 TDZ 安全语义保持）
+
+**TDD**：`test/unit/decision-loop.test.ts` 7 用例（fake scheduler/runDecision/
+session/audit/telemetry/web 注入）——start 触发全链路顺序、wait_condition
+命中与清除、notable→request(event)、wait_until 过期唤醒、零决策退出。
+
+**结构性不变量测试同步**：runner-freeze-thaw 的 5 条断言改为扫描
+runner.ts + decision-loop.ts 两文件（不变量属于"循环"而非"文件"），
+断言内容不变。
+
+**runner.ts 清理后**：785 → 650 行；模块全景：
+runner(650, 装配+生命周期) / decision-loop(200) / signal-hub(172) /
+reflect-run(123) / runner-helpers(94) / loop-control(72)。
+
+**验证**：gate 842 全绿（+7 loop 单测）；calB5 真机 deadline 正常触发、
+RESULT 正常（模型该局未下单——已知采样方差，与重构无关）。
+
+**Phase B 收官**：runner.ts 从 979 → 650 行；四个模块职责单一
+（信号 / 决策 / 结算 / 纯判据），全部带单元契约测试。
+

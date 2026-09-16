@@ -14,10 +14,16 @@ import path from "node:path";
 
 const RUNNER = path.resolve("src/agent/runner.ts");
 const src = readFileSync(RUNNER, "utf8");
+// REFACTOR Phase B-4b: the decision-loop while body moved to decision-loop.ts.
+// The structural invariants below must hold wherever the loop lives, so the
+// assertions scan BOTH files (runner = assembly, decision-loop = loop body).
+const LOOP_SRC = path.resolve("src/agent/decision-loop.ts");
+const loopSrc = readFileSync(LOOP_SRC, "utf8");
+const both = src + "\n" + loopSrc;
 
 /** 去掉注释行 —— 解释性注释会引用被禁的写法，不该触发测试。 */
 function codeLines(): string[] {
-	return src
+	return both
 		.split("\n")
 		.map((l) => {
 			const t = l.trim();
@@ -32,7 +38,7 @@ describe("runner: 决策循环不得暂停游戏", () => {
 		// 一旦暂停该队列就不再排空，随后投进去的 unpause 永不执行。
 		// 实测：带 pause 时游戏日历 120 秒只走 1 天；去掉后 1000 tick 走 13.5 天。
 		const lines = codeLines();
-		const callIdx = lines.findIndex((l) => /await runDecision\(/.test(l));
+		const callIdx = lines.findIndex((l) => /await ctx\.runDecision\(|await runDecision\(/.test(l));
 		expect(callIdx).toBeGreaterThan(-1);
 		const window = lines.slice(Math.max(0, callIdx - 60), callIdx + 60).join("\n");
 		expect(window).not.toMatch(/rcon\(\s*["']pause["']\s*\)/);
@@ -40,13 +46,13 @@ describe("runner: 决策循环不得暂停游戏", () => {
 	});
 
 	it("保留解释，否则后人会顺手把它优化回来", () => {
-		expect(src).toMatch(/freeze was ONE-WAY|cannot be unpaused/i);
+		expect(both).toMatch(/freeze was ONE-WAY|cannot be unpaused/i);
 	});
 
 	it("观察发生在询问模型之前（这是替代暂停的机制）", () => {
 		const lines = codeLines();
-		const snapIdx = lines.findIndex((l) => /const preSnap = deps\.state\.snapshot\(\)/.test(l));
-		const callIdx = lines.findIndex((l) => /await runDecision\(/.test(l));
+		const snapIdx = lines.findIndex((l) => /const preSnap = (?:ctx\.)?deps\.state\.snapshot\(\)/.test(l));
+		const callIdx = lines.findIndex((l) => /await ctx\.runDecision\(|await runDecision\(/.test(l));
 		expect(snapIdx).toBeGreaterThan(-1);
 		expect(callIdx).toBeGreaterThan(snapIdx);
 	});
@@ -63,7 +69,7 @@ describe("runner: seconds 必须真的限制运行长度", () => {
 	// 对 M3 对照实验（同 seed 各 3 局）这是致命的：局长不可控。
 	it("决策循环内部有基于截止时间的跳出", () => {
 		const lines = codeLines();
-		const loopIdx = lines.findIndex((l) => /while \(!stopRequested\)/.test(l));
+		const loopIdx = lines.findIndex((l) => /while \(!ctx\.isStopRequested\(\)\)|while \(!stopRequested\)/.test(l));
 		expect(loopIdx).toBeGreaterThan(-1);
 		const head = lines.slice(loopIdx, loopIdx + 12).join("\n");
 		expect(head).toMatch(/deadline/);
@@ -72,6 +78,6 @@ describe("runner: seconds 必须真的限制运行长度", () => {
 	});
 
 	it("截止时间由 opts.seconds 算出（<=0 / undefined 表示不限时）", () => {
-		expect(src).toMatch(/opts\.seconds\s*&&\s*opts\.seconds\s*>\s*0/);
+		expect(both).toMatch(/opts\.seconds\s*&&\s*(?:ctx\.)?opts\.seconds\s*>\s*0/);
 	});
 });
