@@ -86,7 +86,10 @@ class ExecutorV1 extends AIController {
             }
         } catch (e) {
             local es = "" + e;
-            if (es.len() > 16) es = es.slice(0, 16);
+            // 24 chars: "exc:" (4) + 24 + " j<N>" (<=5) fits the 31-char budget.
+            // Was 16 - the truncation cut "can't execute ..." before the
+            // function name, making the error undiagnosable from the log.
+            if (es.len() > 24) es = es.slice(0, 24);
             this.SetPhase("exc:" + es);
         }
     }

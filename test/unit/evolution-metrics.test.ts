@@ -297,32 +297,36 @@ describe("compareArms 必须拒绝被 confound 的结论（2026-09-12）", () =>
 	// "没跑完的局"，挡不住"两臂停在不同阶段"。
 	const arm = (injected: number, done: boolean, money: number) =>
 		mk({ constructionDone: done, money, memory: { lessonsInjected: injected, strategiesInjected: 0 } });
+	/** n 局同构样本（用门槛常量，提升门槛时测试自动跟随）。 */
+	const many = (n: number, injected: number, done: boolean, money: number) =>
+		Array.from({ length: n }, () => arm(injected, done, money));
 
 	it("两臂建成率不同时，拒绝下结论", () => {
+		// 真实形态放大到门槛样本：treatment 全部未建成（钱高，没花钱），
+		// control 里 1 局建成（钱低）+ 其余未建成。
 		const c = compareArms([
-			// with lessons：3 局全部没建成（钱高，因为没花钱）
-			arm(5, false, 286094), arm(5, false, 284359), arm(5, false, 286094),
-			// without lessons：1 局建成（钱低，因为买车了）+ 2 局没建成
-			arm(0, true, 267068), arm(0, false, 284359), arm(0, false, 286094),
+			...many(MIN_LESSON_SAMPLE, 5, false, 286094),
+			arm(0, true, 267068),
+			...many(MIN_LESSON_SAMPLE - 1, 0, false, 284359),
 		]);
 		expect(c.withLessons.builtRate).toBe(0);
-		expect(c.withoutLessons.builtRate).toBeCloseTo(1 / 3);
+		expect(c.withoutLessons.builtRate).toBeCloseTo(1 / MIN_LESSON_SAMPLE);
 		// 样本量是够的……
-		expect(c.withLessons.count).toBe(3);
-		expect(c.withoutLessons.count).toBe(3);
+		expect(c.withLessons.count).toBe(MIN_LESSON_SAMPLE);
+		expect(c.withoutLessons.count).toBe(MIN_LESSON_SAMPLE);
 		// ……但结论必须被拒绝
 		expect(c.confounded).toBe(true);
 		expect(c.conclusive).toBe(false);
 		// 而且必须说清楚"钱的符号意思是反的"，不能让人只看到 +6342
 		expect(c.note).toMatch(/NOT comparable/);
 		expect(c.note).toMatch(/not a benefit/);
-		expect(c.note).toMatch(/0% vs 33%/);
+		expect(c.note).toMatch(new RegExp(`0% vs ${Math.round(100 / MIN_LESSON_SAMPLE)}%`));
 	});
 
 	it("两臂建成率相同时，照常下结论", () => {
 		const c = compareArms([
-			arm(5, true, 1100), arm(5, true, 1100), arm(5, true, 1100),
-			arm(0, true, 1000), arm(0, true, 1000), arm(0, true, 1000),
+			...many(MIN_LESSON_SAMPLE, 5, true, 1100),
+			...many(MIN_LESSON_SAMPLE, 0, true, 1000),
 		]);
 		expect(c.confounded).toBe(false);
 		expect(c.conclusive).toBe(true);
@@ -332,8 +336,8 @@ describe("compareArms 必须拒绝被 confound 的结论（2026-09-12）", () =>
 
 	it("被排除的局即使在 confound 时也必须如实说明", () => {
 		const c = compareArms([
-			arm(5, false, 100), arm(5, false, 100), arm(5, false, 100),
-			arm(0, true, 100), arm(0, true, 100), arm(0, true, 100),
+			...many(MIN_LESSON_SAMPLE, 5, false, 100),
+			...many(MIN_LESSON_SAMPLE, 0, true, 100),
 			mk({ status: "interrupted", memory: { lessonsInjected: 0, strategiesInjected: 0 } }),
 		]);
 		expect(c.note).toMatch(/interrupted/i);
@@ -360,8 +364,8 @@ describe("C-3：token/决策归一守卫（SPEC §10.43 归因教训）", () => 
 
 	it("ArmStats 暴露 tokensPerDecision（归一到每决策）", () => {
 		const c = compareArms([
-			...armDT("a", 3, 0, 10, 40_000),   // ctl: 4k/决策
-			...armDT("b", 3, 4, 18, 72_000),   // trt: 4k/决策 —— 相同！
+			...armDT("a", MIN_LESSON_SAMPLE, 0, 10, 40_000),   // ctl: 4k/决策
+			...armDT("b", MIN_LESSON_SAMPLE, 4, 18, 72_000),   // trt: 4k/决策 —— 相同！
 		]);
 		expect(c.withoutLessons.tokensPerDecision).toBeCloseTo(4_000, 0);
 		expect(c.withLessons.tokensPerDecision).toBeCloseTo(4_000, 0);
@@ -369,8 +373,8 @@ describe("C-3：token/决策归一守卫（SPEC §10.43 归因教训）", () => 
 
 	it("归一后两臂相同 → 不得声称'记忆增加 token 成本'（meanTokens 差是行动数混杂）", () => {
 		const c = compareArms([
-			...armDT("a", 3, 0, 10, 40_000),
-			...armDT("b", 3, 4, 18, 72_000),
+			...armDT("a", MIN_LESSON_SAMPLE, 0, 10, 40_000),
+			...armDT("b", MIN_LESSON_SAMPLE, 4, 18, 72_000),
 		]);
 		// meanTokens 不同（40k vs 72k）但 per-decision 相同 —— note 必须指明这一点
 		expect(c.note).toMatch(/per-decision|归一/i);

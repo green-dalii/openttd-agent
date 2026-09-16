@@ -74,7 +74,14 @@ export interface GameMetric {
 }
 
 /** Minimum runs per arm before a difference is worth reporting (SPEC §5.3). */
-export const MIN_LESSON_SAMPLE = 3;
+/**
+ * Minimum runs per arm before a difference is worth reporting (SPEC §5.3).
+ *
+ * Raised 3 -> 5 after the m3g rerun (2026-09-15): at n=3 a SINGLE run's built
+ * rate flips the confounded guard (3/3 vs 2/3 is one run), so the verdict was
+ * decided by one game. A sample size that one run can flip is not a sample.
+ */
+export const MIN_LESSON_SAMPLE = 5;
 
 function num(v: unknown): number {
 	const n = Number(v);
@@ -275,7 +282,14 @@ export function compareArms(metrics: GameMetric[]): ArmComparison {
 	// existing exclusions catch runs that never finished, not arms that differ.
 	const buildGap =
 		a.builtRate === null || b.builtRate === null ? 0 : Math.abs(a.builtRate - b.builtRate);
-	const confounded = buildGap >= BUILD_RATE_GAP;
+	// The rule tightened after MIN_LESSON_SAMPLE rose 3 -> 5 (2026-09-15): at a
+	// fixed 1/3 gap threshold, ONE differing run stopped being visible once the
+	// sample grew (0/5 vs 1/5 = 0.2 < 1/3) even though money was still decided by
+	// that single run. Money is only comparable when the arms reached the SAME
+	// construction rate; a small gap is as uninterpretable as a large one.
+	const ratesEqual =
+		a.builtRate !== null && b.builtRate !== null && Math.abs(a.builtRate - b.builtRate) < 1e-9;
+	const confounded = (buildGap > 0 && !ratesEqual) || buildGap >= BUILD_RATE_GAP;
 
 	let note = "";
 	if (!enough) {
@@ -354,7 +368,12 @@ export function compareArms(metrics: GameMetric[]): ArmComparison {
 	};
 }
 
-/** Below this built-rate gap the arms are treated as having reached the same stage. */
+/**
+ * A gap at or above this is always treated as confounded (kept as the dramatic
+ * case: arms that clearly finished at different stages). The stricter
+ * equal-rates rule above catches the smaller gaps that a larger sample makes
+ * invisible to a fixed threshold.
+ */
 const BUILD_RATE_GAP = 1 / 3;
 
 /** Render a built rate for a human, including the unknown case. */
