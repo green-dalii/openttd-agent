@@ -13,7 +13,7 @@
  * 本脚本不做 preflight —— 它就是研究者自己跑的，失败会显式报错。
  */
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, openSync } from "node:fs";
 import { join } from "node:path";
 import { evolutionView } from "../src/evolution/web-view.js";
 
@@ -49,8 +49,12 @@ function parseArgs(argv: string[]): Args {
 
 function runOne(label: string, dir: string, seed: number, seconds: number, extra: string[]): number {
 	console.log(`### ${label} start ${new Date().toISOString()}`);
+	// Per-run log files: the A/B verdict needs post-mortem access to each run's
+	// stdout (reflection lines, RESULT, executor phases). inherit-only loses
+	// them to the terminal scrollback (m3e lesson).
+	const fd = openSync(join(dir, `${label}.log`), "a");
 	const r = spawnSync("pnpm", ["run", "cli", "--agent", `--seed`, String(seed), "--demo-seconds", String(seconds), ...extra], {
-		stdio: ["ignore", "inherit", "inherit"],
+		stdio: ["ignore", fd, fd],
 		env: { ...process.env, OPENTTD_DATA_DIR: dir },
 	});
 	const code = r.status ?? -1;

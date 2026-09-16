@@ -35,6 +35,8 @@ export const STALE_AFTER_MS = 15_000;
 export interface MemoryInjected {
 	lessonsInjected: number;
 	strategiesInjected: number;
+	/** C-1: route facts injected from route-facts.jsonl (counts toward treatment). */
+	routeFactsInjected: number;
 }
 
 export interface SessionMeta {
@@ -211,7 +213,7 @@ export class SessionStore {
 	private meta: SessionMeta;
 	private stageCount = 0;
 	/** What cross-game memory this run was given; the experiment's variable. */
-	private memoryInjected: MemoryInjected = { lessonsInjected: 0, strategiesInjected: 0 };
+	private memoryInjected: MemoryInjected = { lessonsInjected: 0, strategiesInjected: 0, routeFactsInjected: 0 };
 
 	constructor(dataDir: string, meta?: SessionMeta) {
 		this.dataDir = dataDir;
@@ -372,6 +374,7 @@ export class SessionStore {
 		this.memoryInjected = {
 			lessonsInjected: Math.max(0, Number(memory.lessonsInjected) || 0),
 			strategiesInjected: Math.max(0, Number(memory.strategiesInjected) || 0),
+			routeFactsInjected: Math.max(0, Number(memory.routeFactsInjected) || 0),
 		};
 	}
 
@@ -549,7 +552,7 @@ export function reconcileStaleSessions(dataDir: string, now: number = Date.now()
 			};
 			writeFileSync(path.join(dir, "meta.json"), JSON.stringify(next, null, 2), "utf8");
 			// Same reason as finalize(): an abandoned run still belongs in the ledger.
-			recordMetricSafe(dataDir, next, { lessonsInjected: 0, strategiesInjected: 0 });
+			recordMetricSafe(dataDir, next, { lessonsInjected: 0, strategiesInjected: 0, routeFactsInjected: 0 });
 			changed.push(meta.id);
 		} catch {
 			/* a record we cannot rewrite must not break startup */

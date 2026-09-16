@@ -67,8 +67,10 @@ export interface GameMetric {
 	toolFailures: number;
 	totalTokens: number;
 	costTotal: number;
+	/** Facts injected from route-facts.jsonl (C-1) - counts toward treatment. */
+	routeFactsInjected?: number;
 	/** The experiment's independent variable: what memory was injected. */
-	memory: { lessonsInjected: number; strategiesInjected: number };
+	memory: { lessonsInjected: number; strategiesInjected: number; routeFactsInjected: number };
 }
 
 /** Minimum runs per arm before a difference is worth reporting (SPEC §5.3). */
@@ -87,7 +89,7 @@ function num(v: unknown): number {
  */
 export function toGameMetric(
 	meta: SessionMetaLike | SessionMeta,
-	memory?: { lessonsInjected?: number; strategiesInjected?: number },
+	memory?: { lessonsInjected?: number; strategiesInjected?: number; routeFactsInjected?: number },
 ): GameMetric {
 	const o = (meta.outcome ?? {}) as SessionMetaLike["outcome"];
 	const t = (meta.totals ?? {}) as SessionMetaLike["totals"];
@@ -121,6 +123,7 @@ export function toGameMetric(
 		memory: {
 			lessonsInjected: num(memory && memory.lessonsInjected),
 			strategiesInjected: num(memory && memory.strategiesInjected),
+			routeFactsInjected: num(memory && memory.routeFactsInjected),
 		},
 	};
 }
@@ -242,8 +245,17 @@ export function compareArms(metrics: GameMetric[]): ArmComparison {
 	const scripted = all.filter((m) => m.llmKind === "faux").length;
 	const interrupted = all.filter((m) => m.llmKind !== "faux" && m.status === "interrupted").length;
 	const real = all.filter((m) => m.llmKind !== "faux" && m.status !== "interrupted");
-	const withLessons = real.filter((m) => m.memory.lessonsInjected > 0);
-	const withoutLessons = real.filter((m) => m.memory.lessonsInjected === 0);
+	// Treatment arm = ANY injected memory: lessons OR route facts (C-1). The
+	// m3e run exposed the gap: runs that received facts-but-no-lessons were
+	// being scored as controls, splitting the arms by an accounting bug.
+	const withLessons = real.filter(
+		(m) => m.memory.lessonsInjected > 0 || (m.memory.routeFactsInjected ?? 0) > 0,
+	);
+	// Control arm = received NOTHING (neither lessons nor facts). Using only
+	// lessonsInjected here put facts-only runs in BOTH arms (m3e).
+	const withoutLessons = real.filter(
+		(m) => m.memory.lessonsInjected === 0 && (m.memory.routeFactsInjected ?? 0) === 0,
+	);
 	const a = armStats(withLessons);
 	const b = armStats(withoutLessons);
 

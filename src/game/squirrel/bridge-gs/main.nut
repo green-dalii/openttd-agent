@@ -58,7 +58,7 @@ class BridgeV1 extends GSController {
 
         if (s == "boot") stage = "boot";
         else if (s == "work") stage = "work";
-        else if (s == "done") stage = "done";
+        else if (s.slice(0, 4) == "done") stage = "done"; // real: "EX done stN4 r81 bus j101"
         else if (s.slice(0, 2) == "st") stage = "station";
         else if (s.slice(0, 4) == "road") stage = "road";
         else if (s.slice(0, 3) == "dpt" || s.slice(0, 5) == "depot") stage = "depot";

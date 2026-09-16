@@ -513,11 +513,16 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 	const injected = memoryCounts(memory);
 	// Publish it for the dashboard (per-game truth: what THIS game was told).
 	runMemory = memory;
+	// C-1: the route-facts snapshot counts toward the injected-memory total so
+	// the A/B arm split (compareArms) classifies facts-only runs as treatment.
+	// The m3e run mis-split them as controls (injected-but-unaccounted).
+	injected.routeFactsInjected = routeFactsProvider().length;
 	session.setMemoryInjected(injected);
-	if (injected.lessonsInjected || injected.strategiesInjected) {
+	if (injected.lessonsInjected || injected.strategiesInjected || injected.routeFactsInjected) {
 		console.log(
 			`[evolution] loaded memory: ${injected.lessonsInjected} lesson(s), ` +
-				`${injected.strategiesInjected} strategy card(s)`,
+				`${injected.strategiesInjected} strategy card(s), ` +
+				`${injected.routeFactsInjected} route fact(s)`,
 		);
 	}
 

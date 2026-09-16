@@ -80,12 +80,12 @@ describe("toGameMetric", () => {
 	it("records the experiment's independent variable", () => {
 		// Without this, "with vs without lessons" is just two numbers side by side.
 		const m = toGameMetric(meta(), { lessonsInjected: 3, strategiesInjected: 1 });
-		expect(m.memory).toEqual({ lessonsInjected: 3, strategiesInjected: 1 });
+		expect(m.memory).toEqual({ lessonsInjected: 3, strategiesInjected: 1, routeFactsInjected: 0 });
 	});
 
 	it("defaults to no injection when nothing was injected", () => {
 		const m = toGameMetric(meta());
-		expect(m.memory).toEqual({ lessonsInjected: 0, strategiesInjected: 0 });
+		expect(m.memory).toEqual({ lessonsInjected: 0, strategiesInjected: 0, routeFactsInjected: 0 });
 	});
 
 	it("keeps the brain identity so faux runs cannot be mistaken for real ones", () => {
@@ -383,5 +383,17 @@ describe("C-3：token/决策归一守卫（SPEC §10.43 归因教训）", () => 
 		]);
 		expect(Number.isFinite(c.withoutLessons.tokensPerDecision ?? 0)).toBe(true);
 		expect(c.withoutLessons.tokensPerDecision).toBeNull(); // 全躺平臂 → null
+	});
+});
+
+describe("C-1 计分：route facts 注入必须计入 treatment 臂（m3e 实测缺陷）", () => {
+	it("lessonsInjected=0 但 routeFactsInjected>0 的局归入 with-lessons", () => {
+		const ctl = (i: number) =>
+			toGameMetric(meta({ id: `ctl${i}`, outcome: { constructionDone: true, money: "100000" } }), { lessonsInjected: 0, strategiesInjected: 0 });
+		const factsOnly = (i: number) =>
+			toGameMetric(meta({ id: `fact${i}`, outcome: { constructionDone: true, money: "100000" } }), { lessonsInjected: 0, strategiesInjected: 0, routeFactsInjected: 3 });
+		const c = compareArms([ctl(1), ctl(2), ctl(3), factsOnly(1), factsOnly(2), factsOnly(3)]);
+		expect(c.withLessons.count).toBe(3);
+		expect(c.withoutLessons.count).toBe(3);
 	});
 });

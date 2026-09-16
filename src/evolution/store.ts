@@ -39,7 +39,7 @@ export function metricsPath(dataDir: string): string {
 export function appendMetric(
 	dataDir: string,
 	meta: SessionMetaLike,
-	memory?: { lessonsInjected?: number; strategiesInjected?: number },
+	memory?: { lessonsInjected?: number; strategiesInjected?: number; routeFactsInjected?: number },
 ): GameMetric {
 	const metric = toGameMetric(meta, memory);
 	mkdirSync(evolutionDir(dataDir), { recursive: true });

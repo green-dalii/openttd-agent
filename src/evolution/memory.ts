@@ -90,7 +90,11 @@ export function makeLessonProvider(mem: LoadedMemory): () => string[] {
 }
 
 /** Injection counts for the metrics ledger (the experiment's independent variable). */
-export function memoryCounts(mem: LoadedMemory): { lessonsInjected: number; strategiesInjected: number } {
+export function memoryCounts(mem: LoadedMemory): {
+	routeFactsInjected?: number;
+	lessonsInjected: number;
+	strategiesInjected: number;
+} {
 	return {
 		lessonsInjected: (mem?.lessons ?? []).length,
 		strategiesInjected: (mem?.strategies ?? []).length,
