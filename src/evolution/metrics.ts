@@ -35,6 +35,8 @@ export interface SessionMetaLike {
 	outcome?: {
 		constructionDone?: boolean;
 		money?: string | number;
+		/** Company income (N2-4); absent when the packet never arrived. */
+		income?: number;
 		vehicles?: number;
 		stations?: number;
 	};
@@ -60,6 +62,12 @@ export interface GameMetric {
 	llmModel: string;
 	constructionDone: boolean | null;
 	money: number;
+	/**
+	 * Company income (N2-4). null when the run never reported one - a missing
+	 * reading is NOT a zero: money is dominated by spending (building costs
+	 * money), so income is the metric that says whether the lines earn anything.
+	 */
+	income: number | null;
 	vehicles: number;
 	stations: number;
 	decisions: number;
@@ -120,6 +128,10 @@ export function toGameMetric(
 		constructionDone:
 			o && o.constructionDone === true ? true : o && o.constructionDone === false ? false : null,
 		money: num(o && o.money),
+		income:
+			o && o.income !== undefined && o.income !== null && Number.isFinite(Number(o.income))
+				? Number(o.income)
+				: null,
 		vehicles: num(o && o.vehicles),
 		stations: num(o && o.stations),
 		decisions: num(t && t.decisions),
@@ -192,6 +204,14 @@ export interface ArmStats {
 	 * progress in a way truncation does not erase.
 	 */
 	meanStations: number | null;
+	/**
+	 * Mean company income over the runs that REPORTED one (N2-4). Money cannot
+	 * answer "did the lines earn": a run that built nothing spends nothing and
+	 * therefore looks richer. Income is the flow that memory should move.
+	 */
+	meanIncome: number | null;
+	/** How many runs reported income (so a mean over 1 of 5 is visible). */
+	incomeReported: number;
 }
 
 export interface ArmComparison {
@@ -199,6 +219,12 @@ export interface ArmComparison {
 	withoutLessons: ArmStats;
 	/** Right arm minus left arm, or null when either side is empty. */
 	moneyDelta: number | null;
+	/**
+	 * Right arm minus left arm of MEAN INCOME (N2-4), or null when either side
+	 * never reported income. This is the delta that can actually mean something:
+	 * money is spending-dominated, income is what the lines earn.
+	 */
+	incomeDelta: number | null;
 	/** True only when BOTH arms have MIN_LESSON_SAMPLE runs AND the arms are comparable. */
 	conclusive: boolean;
 	/**
@@ -219,6 +245,11 @@ function mean(values: number[]): number | null {
 function armStats(list: GameMetric[]): ArmStats {
 	const known = list.filter((m) => m.constructionDone !== null);
 	const acting = list.filter((m) => m.decisions > 0);
+	// Absent readings are excluded, never counted as 0 (a zero income would read
+	// as "this company earns nothing", which is a claim the data does not make).
+	const incomeValues = list
+		.map((m) => m.income)
+		.filter((v): v is number => typeof v === "number" && Number.isFinite(v));
 	return {
 		count: list.length,
 		meanMoney: mean(list.map((m) => m.money)),
@@ -230,6 +261,8 @@ function armStats(list: GameMetric[]): ArmStats {
 			? known.filter((m) => m.constructionDone === true).length / known.length
 			: null,
 		meanStations: mean(list.map((m) => m.stations)),
+		meanIncome: incomeValues.length ? mean(incomeValues) : null,
+		incomeReported: incomeValues.length,
 	};
 }
 
@@ -278,6 +311,8 @@ export function compareArms(metrics: GameMetric[]): ArmComparison {
 	const enough = a.count >= MIN_LESSON_SAMPLE && b.count >= MIN_LESSON_SAMPLE;
 	const moneyDelta =
 		a.meanMoney === null || b.meanMoney === null ? null : a.meanMoney - b.meanMoney;
+	const incomeDelta =
+		a.meanIncome === null || b.meanIncome === null ? null : a.meanIncome - b.meanIncome;
 
 	// Money is only comparable if both arms got equally far. A run that never
 	// finished construction has spent nothing on vehicles or route, so its money
@@ -371,6 +406,7 @@ export function compareArms(metrics: GameMetric[]): ArmComparison {
 		withLessons: a,
 		withoutLessons: b,
 		moneyDelta,
+		incomeDelta,
 		confounded,
 		conclusive: enough && !confounded,
 		note: confounded ? `${confoundNote}${excluded}` : body,

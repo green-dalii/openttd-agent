@@ -1995,3 +1995,27 @@ tool inspect_route: ok=false unknown route job 3. Known jobs: 1
    两种原因必须分开（无车 → `income unknown (no vehicles on this route yet)`）。
 2. **`Math.round(-0.03)` = `-0` 显示成 `0/day`**：一条微微亏损的线读起来像"持平"。
    1/day 以下改用两位小数（`-0.03/day`）。
+
+## 10.55 NEXT-2 N2-4：主指标换成收益流 + 标定结果（2026-09-16）
+
+### met指标
+
+`ArmStats.meanIncome` / `incomeReported`；`ArmComparison.incomeDelta`。
+
+**缺失 ≠ 0**：没报收益的局不参与均值（0 会被读成"这家公司确实不赚钱"——数据没
+这么说）。负收益是**合法读数**（亏损线），照实进均值。
+
+为什么换：money 被"建不建"主导——**建线就是花钱，钱变少**，三轮 A/B 全部卡在这里
+（§10.52）。income 才是"这条线到底赚不赚钱"，也是记忆能影响的量。
+
+### 标定（/tmp/n2g，seed 11，400s，真机）
+
+| 指标 | 值 | 参照 |
+|---|---|---|
+| decisions/game | **8.0** | m3 轮均为 4.3（§10.52） |
+| triggers | start 1 / event 3 / phase_change 3 / interval 1 | 多样，非单一触发器 |
+| idle rate | 14%（1/7） | 早期 calC 为 0%——**如实记录，不粉饰** |
+| 工具分布 | estimate 7 / **inspect_route 6** / build 3 / **add_vehicles 2** / observe 2 | add_vehicles 在此前的轮次基本未被使用 |
+
+**关键行为证据**：模型**第一次真的用上了 `add_vehicles`**。NEXT-2 的目标就是把
+"选一对城镇"变成线路组合管理；车队管理动作出现，说明决策空间确实被行使了。

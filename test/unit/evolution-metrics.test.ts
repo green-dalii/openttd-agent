@@ -421,3 +421,36 @@ describe("分级结果：stations 均值（200s 窗口截断主导，二值 done
 		expect(c.withLessons.meanStations).toBeCloseTo(0.8, 5);
 	});
 });
+
+/**
+ * NEXT-2 N2-4：主指标换成**收益流**。
+ *
+ * 为什么：money 被"建不建"主导（建线就是花钱→钱变少），三轮 A/B 都卡在这里
+ * （SPEC §10.52）。income 才是"这条线到底赚不赚钱"，也是记忆能影响的量。
+ * 缺读数的局**不贡献 0**——0 会被读成"确实不赚钱"。
+ */
+describe("N2-4 收益流指标", () => {
+	/** 一局带（或不带）收益读数的样本；memory 0 = control 臂。 */
+	const run = (income: number | null) => {
+		const m = toGameMetric(meta({ outcome: { constructionDone: true, money: "100000", stations: 4 } }));
+		return { ...m, income };
+	};
+	const statsOf = (runs: ReturnType<typeof run>[]) => compareArms(runs).withoutLessons;
+
+	it("meanIncome 只对报告过收益的局取均值（缺读数的局不冒充 0）", () => {
+		const st = statsOf([run(1200), run(null), run(800)]);
+		expect(st.meanIncome).toBe(1000);
+		expect(st.incomeReported).toBe(2);
+	});
+
+	it("全部缺读数 → meanIncome 为 null（不是 0）", () => {
+		expect(statsOf([run(null)]).meanIncome).toBeNull();
+		expect(statsOf([run(null)]).incomeReported).toBe(0);
+	});
+
+	it("负收益合法（亏损线不是缺失值）", () => {
+		const st = statsOf([run(-400), run(-200)]);
+		expect(st.meanIncome).toBe(-300);
+		expect(st.incomeReported).toBe(2);
+	});
+});

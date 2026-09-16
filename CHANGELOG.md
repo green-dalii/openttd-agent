@@ -9,6 +9,12 @@
 
 ## [Unreleased]
 
+### Added（NEXT-2 N2-4：收益流主指标，2026-09-16）
+
+- `ArmStats.meanIncome` / `incomeReported`、`ArmComparison.incomeDelta`；
+  两条 verdict 脚本打印 income。**缺读数不进均值**（不冒充 0），负收益合法。
+- `session.finalize` 写入 income（来自 HUD economy）。
+
 ### Added（NEXT-2 N2-2/N2-3：经济可查、可见、可记，2026-09-16）
 
 - `inspect_route` 工具：按 job 查线路经济；未知 job / 无读数 / 无 GS 通道

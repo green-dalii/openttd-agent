@@ -84,9 +84,15 @@ const fmt = (label: string, a: typeof view.arms.withLessons) =>
 	console.log(
 		`${label.padEnd(12)} n=${a.count} money=${a.meanMoney?.toFixed(0) ?? "—"} ` +
 			`tokens=${a.meanTokens?.toFixed(0) ?? "—"} tok/dec=${a.tokensPerDecision?.toFixed(0) ?? "—"} ` +
-			`built=${a.builtRate?.toFixed(2) ?? "—"} stations=${a.meanStations?.toFixed(2) ?? "—"}`,
+			`built=${a.builtRate?.toFixed(2) ?? "—"} stations=${a.meanStations?.toFixed(2) ?? "—"} ` +
+			`income=${a.meanIncome?.toFixed(0) ?? "—"}(n=${a.incomeReported})`,
 	);
 fmt("with lessons", view.arms.withLessons);
 fmt("without", view.arms.withoutLessons);
-console.log(`money delta: ${view.arms.moneyDelta?.toFixed(0) ?? "—"}`);
+console.log(
+	`money delta: ${view.arms.moneyDelta?.toFixed(0) ?? "—"}` +
+		// N2-4: money is spending-dominated (building costs money), so the flow
+		// metric is the one that can say whether the lines earn anything.
+		`  income delta: ${view.arms.incomeDelta?.toFixed(0) ?? "—"}`,
+);
 console.log(`exit codes: control=${codes.control.join(",")} treatment=${codes.treatment.join(",")}`);

@@ -83,6 +83,10 @@ export async function runFinalizeAndReflect(args: FinalizeAndReflectArgs): Promi
 			vehicles: c0?.stats?.vehicles ?? undefined,
 			stations: c0?.stats?.stations ?? undefined,
 			money: c0?.economy ? c0.economy.money.toString() : undefined,
+			// N2-4: the flow metric. Money is spending-dominated (building costs),
+			// so "did the lines earn" needs income, and a missing reading stays
+			// missing rather than becoming 0.
+			income: c0?.economy && Number.isFinite(Number(c0.economy.income)) ? Number(c0.economy.income) : undefined,
 			totalEvents: snap.totalEvents,
 		},
 	});

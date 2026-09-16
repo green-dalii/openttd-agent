@@ -69,7 +69,7 @@
 | ✅ ~~N2-1 线路经济信号~~（2026-09-16 完成，真机全绿；见 SPEC §10.53）| GS 新增 `kind="route-stats"` 事件：每条已建线路的 `job/vehicles/cargoWaiting/profitThisYear/incomePerDay`（**扁平原始类型**——§10.45 教训：GS 侧嵌套表赋值有怪癖）| `bridge-gs/main.nut`（`cmd=="state"` 旁新增；`GSVehicle.GetProfitThisYear`/`GSStation.GetCargoWaiting`/`GSCompany.GetBankBalance`）、`src/game/gs-events.ts`（新 schema 分支，进 `GsEventSchema` 联合）| 真机 ≥1 局出现 `kind=route-stats` 且字段非零；`test/unit/gs-events.test.ts` 加 golden |
 | ✅ ~~N2-2 参数化查询~~（2026-09-16 完成；真机三条路径都验证过，SPEC §10.54）| 新工具 `inspect_route {job?}`：返回该线路的经济与站点状态；未知 job **明确拒绝**（"永远说'是'的工具毁掉学习"）| `src/agent/tools/index.ts`（照 `observe`/`estimate_route` 的 `toResult` 形态）| 单测：已知/未知 job 两条路径；真机：模型调用后 summary 含非零经济字段 |
 | ✅ ~~N2-3 记忆 v2（经济）~~（2026-09-16 完成；幂等键含经济读数）| `route-facts` 扩展：`pair → {tiles?, cost?, completed, doneDate?, incomePerDay?, vehicles?}`；仍**不经 LLM**、仍幂等 | `src/evolution/route-facts.ts`（`RouteFact` 加可选字段；`factKey` 保持 pair+completed+date 语义）| 单测：注入行含经济事实且**无策略词**（已有断言的扩展）；真机：下一局启动时 `loaded memory: … N route fact(s)` 含经济行 |
-| ⬜ **N2-4 主指标换成"收益流"** | 结果指标从 money/built 转向 **income**（银行余额斜率或 GS 收入）；`compareArms` 增加 `meanIncome`；money 保留但降级为次级 | `src/evolution/metrics.ts`（ArmStats + `GameMetric`）、`src/agent/reflect-run.ts`（outcome 增 income）、`docs/SIGNAL-ARCHITECTURE.md` §L1 | 单测：income 均值 + 守卫不被破坏；**money 不再可能单独充当结论** |
+| ✅ ~~N2-4 主指标换成"收益流"~~（2026-09-16 完成，SPEC §10.55）| 结果指标从 money/built 转向 **income**（银行余额斜率或 GS 收入）；`compareArms` 增加 `meanIncome`；money 保留但降级为次级 | `src/evolution/metrics.ts`（ArmStats + `GameMetric`）、`src/agent/reflect-run.ts`（outcome 增 income）、`docs/SIGNAL-ARCHITECTURE.md` §L1 | 单测：income 均值 + 守卫不被破坏；**money 不再可能单独充当结论** |
 | **N2-5 标定 + A/B** | 先 1–2 局确认"决策数/局 ↑ 且含车队/线路类决策"（loop-health），再 n≥5 A/B | `scripts/run-experiment.ts`、`scripts/loop-health.ts` | loop-health：decisions/game **≥8** 且 idle 仍 0%；A/B 判定遵守守卫 |
 
 ### 先验证后定（探针）——**已跑完（2026-09-16，/tmp/n2d）**
@@ -91,6 +91,12 @@
 
 - **2026-09-16 N2-1 完成**：GS route-stats（真机三问全绿，见 SPEC §10.53）；
   意外收获：一条 6 辆车的线 waiting 0→146、profit 转负——**有题可做的状态**。
+- **2026-09-16 N2-4 完成 + 标定过半**：income 成为主指标（缺读数不进均值）。
+  真机标定（/tmp/n2g，400s）：**decisions/game 8.0**（m3 轮为 4.3）、触发多样、
+  idle 14%（早期 0%——如实记）；工具分布 estimate 7 / inspect_route 6 /
+  build 3 / **add_vehicles 2** —— **模型第一次真的用上了车队管理动作**，
+  说明"选一对城镇 → 线路组合管理"的决策空间确实被行使。
+  下一步 N2-5 后半：n≥5/臂 A/B（/tmp/n2ab）看收益流是否出现记忆效应。
 - **2026-09-16 N2-2 + N2-2b + N2-3 完成**：`inspect_route` 三路径真机验证；
   经济事实进**每次**决策上下文（`[agent] route facts: …` 可验证）；记忆 v2 带结果。
   新发现两条**诚实性**缺陷（都在真机日志里露头，均修 + 测试锁定）：

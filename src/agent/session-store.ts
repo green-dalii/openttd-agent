@@ -61,6 +61,8 @@ export interface SessionMeta {
 	appVersion?: string;
 	outcome?: {
 		constructionDone?: boolean;
+		/** Company income at finalize (N2-4); absent when the packet never arrived. */
+		income?: number;
 		phase?: string;
 		vehicles?: number;
 		stations?: number;
