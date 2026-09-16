@@ -103,3 +103,12 @@ export function makeRouteFactsProvider(dataDir: string): () => string[] {
 	const facts = loadRouteFacts(dataDir);
 	return () => formatRouteFactsForInjection(facts);
 }
+
+/**
+ * Gated provider: `--no-memory` must disable route facts too, otherwise the
+ * control arm receives injected memory and the A/B arms stop being two arms
+ * (m3f: all six runs landed in treatment, 5 vs 1).
+ */
+export function routeFactsProviderFor(dataDir: string, enabled: boolean): () => string[] {
+	return enabled ? makeRouteFactsProvider(dataDir) : () => [];
+}

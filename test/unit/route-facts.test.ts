@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
 	routeFactsFromLedger,
 	saveRouteFacts,
@@ -98,5 +101,17 @@ describe("formatRouteFactsForInjection —— 注入格式（事实，不是建�
 
 	it("空事实 → 空数组（不注入占位符）", () => {
 		expect(formatRouteFactsForInjection([])).toEqual([]);
+	});
+});
+describe("C-1 门控：--no-memory 必须同时关闭 route facts（m3f 实测缺陷）", () => {
+	it("enabled=false → 空 provider（控制臂不得被注入事实）", async () => {
+		const { routeFactsProviderFor } = await import("../../src/evolution/route-facts.js");
+		const dir = mkdtempSync(join(tmpdir(), "rf-"));
+		const { RouteLedger: RL } = await import("../../src/agent/route-ledger.js");
+		const ledger = new RL();
+		ledger.record({ job: 100, fromTown: 9, toTown: 12, decision: 1, orderedAt: 1 });
+		saveRouteFacts(dir, routeFactsFromLedger(ledger.all()));
+		expect(routeFactsProviderFor(dir, false)()).toEqual([]); // 控制臂
+		expect(routeFactsProviderFor(dir, true)().length).toBe(1); // 处理臂
 	});
 });

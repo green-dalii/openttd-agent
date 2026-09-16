@@ -48,7 +48,7 @@ import { createLlmApi } from "./llm-api.js";
 import { WebServer } from "../web/server.js";
 import { pruningTransformContext } from "./context.js";
 import { loadMemory, makeLessonProvider, memoryCounts, type LoadedMemory } from "../evolution/memory.js";
-import { makeRouteFactsProvider } from "../evolution/route-facts.js";
+import { routeFactsProviderFor } from "../evolution/route-facts.js";
 import { RouteLedger } from "./route-ledger.js";
 import { makeSignalHub, type SignalHub } from "./signal-hub.js";
 import { createDecisionLoop } from "./decision-loop.js";
@@ -509,7 +509,9 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 	// actually has confirmed content (see docs/EVOLUTION.md §3).
 	const memory = loadMemory(cfg.dataDir, { inject: opts.injectMemory !== false });
 	const memoryProvider = makeLessonProvider(memory);
-	const routeFactsProvider = makeRouteFactsProvider(cfg.dataDir);
+	// Gated by the same switch as lessons: `--no-memory` must mean NO memory
+	// of either kind, or the control arm is not a control (m3f).
+	const routeFactsProvider = routeFactsProviderFor(cfg.dataDir, opts.injectMemory !== false);
 	const injected = memoryCounts(memory);
 	// Publish it for the dashboard (per-game truth: what THIS game was told).
 	runMemory = memory;
