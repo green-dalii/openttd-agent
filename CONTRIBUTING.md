@@ -29,6 +29,8 @@
 | `pnpm run cli --watch --web-port 8187` | 观测模式（内置 AI，token 面板为空是正常的） |
 | `pnpm run cli --serve --web-port 8187` | 页面可 Start/Stop 的模式 |
 | `pnpm exec tsx scripts/loop-health.ts <dataDir>` | 循环健康度仪器（决策数/触发分布/空转率） |
+| — | **每局存档**：`<dataDir>/save/<sessionId>.sav`（OpenTTD 15 客户端可载入回看）|
+| ⚠️ | **真机实验运行期间不要跑 gate**（preflight 断言端口空闲 → 假红；见 MEMORY D5）|
 | `pnpm exec tsx scripts/m3-verdict.ts <dataDir>` | A/B 判定（含 confounded 守卫） |
 
 ## 3. 目录结构（单一事实源，改动目录时**必须**同步此树）

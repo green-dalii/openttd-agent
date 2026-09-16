@@ -107,6 +107,7 @@ export interface AgentRunOptions {
 
 // Pure helpers moved to ./runner-helpers.ts (REFACTOR Phase B-1).
 import {
+	savegameName,
 	sleep,
 	formatGameDate,
 		gameDaysSinceStart,
@@ -652,6 +653,16 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 			client?.rcon("pause");
 		} catch {
 			/* best-effort */
+		}
+		// Save the finished game so a human can load it in the OpenTTD client and
+		// watch what the agent did (owner request, 2026-09-16). This runs AFTER
+		// runFinalizeAndReflect wrote the metrics, so it cannot change the numbers;
+		// the wait gives the server a tick to actually write the file before stop.
+		try {
+			client?.rcon(`save ${savegameName(session.id)}`);
+			await sleep(2500);
+		} catch {
+			/* best-effort: a missing save must not break teardown */
 		}
 		await sleep(300);
 		client?.close();

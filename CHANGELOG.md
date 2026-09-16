@@ -9,6 +9,15 @@
 
 ## [Unreleased]
 
+### Added（每局存档 + 分级结果指标，2026-09-16）
+
+- 每局结束自动存档 `<dataDir>/save/<sessionId>.sav`（teardown 时 rcon save，
+  在 metrics 落盘之后），可用 OpenTTD 15 客户端载入回看；文件名经净化。
+- `ArmStats.meanStations`：分级结果指标（200s 窗口下二值 constructionDone
+  被截断主导，站点数不随截断消失）。
+- `compareArms` 守卫收紧：样本门槛 3→5 局/臂；money 结论要求两臂建成率**相同**
+  （固定 1/3 差距阈值在大样本下看不见"一局之差"）。
+
 ### Fixed（首次有效 A/B 暴露的三个实验缺陷，2026-09-15）
 
 - GS `ParseExecPhase` 对真机 `EX done <detail> j<N>` 相位匹配失败（要求全等

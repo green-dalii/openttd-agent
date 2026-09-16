@@ -81,3 +81,18 @@ describe("runner: seconds 必须真的限制运行长度", () => {
 		expect(both).toMatch(/opts\.seconds\s*&&\s*(?:ctx\.)?opts\.seconds\s*>\s*0/);
 	});
 });
+
+describe("每局结束必须留下可载入的存档（2026-09-16 项目所有者要求）", () => {
+	it("teardown 在停服前 rcon save（否则局结束后无法在游戏里回看）", () => {
+		const lines = codeLines();
+		const teardownIdx = lines.findIndex((l) => /async function teardown\(\)/.test(l));
+		expect(teardownIdx).toBeGreaterThan(-1);
+		const window = lines.slice(teardownIdx, teardownIdx + 25).join("\n");
+		expect(window).toMatch(/rcon\(`save \$\{|rcon\("save /);
+		// 存档必须发生在 mgr.stop() 之前（服务器一停，内存里的局就没了）
+		const saveIdx = lines.findIndex((l, i) => i > teardownIdx && /rcon\(`save /.test(l));
+		const stopIdx = lines.findIndex((l, i) => i > teardownIdx && /mgr\.stop\(\)/.test(l));
+		expect(saveIdx).toBeGreaterThan(-1);
+		expect(stopIdx).toBeGreaterThan(saveIdx);
+	});
+});

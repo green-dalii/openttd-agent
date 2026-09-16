@@ -93,3 +93,13 @@ export function describeBrainSelection(cfg: Config): string {
 
 /** How often to refresh the session heartbeat (docs/STARTUP-AND-LIFECYCLE.md §5). */
 export const HEARTBEAT_MS = 2000;
+
+/**
+ * 存档文件名净化（2026-09-16）：session id 直接进 rcon 与文件名，必须安全。
+ * 只允许 [A-Za-z0-9._-]，其余替换为 '-'；空结果兜底 "game"。
+ */
+export function savegameName(sessionId: string): string {
+	const cleaned = String(sessionId ?? "").replace(/[^A-Za-z0-9._-]/g, "-");
+	// 兜底不仅针对空串："---" 这类无字母数字的名字同样不可用（路径过滤后只剩分隔符）
+	return /[A-Za-z0-9]/.test(cleaned) ? cleaned : "game";
+}
