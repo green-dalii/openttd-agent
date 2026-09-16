@@ -9,6 +9,41 @@
 
 ## [Unreleased]
 
+### Added（RL 反馈闭环 + 类型化信号通道）
+
+- `src/agent/route-ledger.ts` —— 决策→结果账本：GS ack（job/townA/townB + 决策号）
+  记账、执行器 done 事件回填完成事实，局终把账本行并入反思 evidence。
+  实测（cal8）反思首次写出"关于选择"的 lesson（如"重复下单 9→17 浪费决策"）。
+- `src/agent/estimate.ts` + `estimate_route` 工具 —— 路线造价下界（曼哈顿距离、
+  £307/tile 实测道路成本、占余额比例），事实进 summary、不表态偏好。
+- `session.secondsRemaining` 进决策上下文 —— 局终预算事实，防止模型睡过运行终点。
+
+### Changed（重构：类型化事件通道 + runner 拆分，行为不变）
+
+- **GS JSON 事件通道（REFACTOR Phase A，SPEC §10.45–§10.46）**：执行器相位经
+  bridge-gs 以类型化事件（kind=exec, stage/job/hb/raw）推送、变化才发，
+  "心跳"概念退役为"无事件=无变化"；harness 侧 31 字符公司名解析与
+  `phaseStage/isErrorPhase/jobFromPhase` 全部退役。
+- **runner.ts 拆分（REFACTOR Phase B，979→650 行）**：
+  `runner-helpers`（纯工具）/ `reflect-run`（局终结算+反思）/ `signal-hub`
+  （信号消费+新闻门）/ `decision-loop`（决策节拍）/ `loop-control`（纯判据），
+  各带单元契约测试（+27）；结构性不变量测试改为扫描双文件。
+- **执行器队列 FIFO（SPEC §10.39.1）**：newest-wins → 按提交顺序逐条建完；
+  done 集合替代单调 id 假设；队列语义写入 `build_bus_route` 契约文本；
+  GS err 进 audit 日志（"发送≠接受"可观察）。
+
+### Fixed
+
+- 相位解码器对 `hb <stage> #<n> s<signs>` 与 `rd s<n> r<n> d<dist> p<probes>`
+  两种高频真机格式 detail 解析为空（golden 测试抓到；语义以 Squirrel 源为准）。
+- `compareArms` 金额结论符号反转 → confounded 守卫（建成率差 ≥1/3 拒绝下结论）。
+
+### 教育（实验结论，详情见 SPEC §10.42–§10.43）
+
+- M3 A/B 第三次重跑（首次在已验证 harness 上）：记忆臂无收益、
+  token 均值差由行动数混杂解释（"记忆翻倍 token"是归因错误）；
+  失败局 lesson 是噪声源 —— 结构化记忆列为 Phase C 首项。
+
 ### Added（记忆闭环 第 1 片：不变量与门槛）
 
 - `src/evolution/lessons.ts` —— lessons 的数据契约与三道闸（纯函数）：
