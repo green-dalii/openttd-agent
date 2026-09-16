@@ -92,11 +92,13 @@ OPENTTD_DATA_DIR=/tmp/cal<N> pnpm run cli --agent --seed 7 --no-memory --demo-se
 grep -E "RESULT:" /tmp/cal<N>.log
 ```
 
-### 🔴 当前：M3 A/B 重跑（新记忆格式首次上桌）
+### 🟡 M3 A/B 第四次重跑：首次有效分臂，结果不可判定（2026-09-15，SPEC §10.51）
 
-- 用 C-1/C-2 的结构化记忆重跑 3+3（`scripts/run-experiment.ts` 一条命令）。
-  treatment 臂将首次注入**非空路线事实**。执行器 `exc:can't execute ov`
-  异常（calC1）待查。
+- m3g（首个可信 3v3）：treatment tok/决策 +26%、建成率 3/3 vs 2/3，但
+  confounded 守卫拒绝下结论（建成率差 1/3）。**需扩大 n（≥5/臂）**。
+- 判废的两轮（m3e/m3f）暴露并修复三个真实缺陷——正是这一步的产出。
+- **下一步**：① 查 `exc:can't execute ov`（降方差）② n≥5 重跑
+  ③ 若建成率仍显著不同，则这才是记忆价值的第一个真实信号。
 
 ### 🟠 之后（原序号保留，前置条件未变）
 

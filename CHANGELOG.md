@@ -9,6 +9,15 @@
 
 ## [Unreleased]
 
+### Fixed（首次有效 A/B 暴露的三个实验缺陷，2026-09-15）
+
+- GS `ParseExecPhase` 对真机 `EX done <detail> j<N>` 相位匹配失败（要求全等
+  `done`）→ 完成事件永不落地、账本与 route-facts 全部 `completed:false`。
+- 实验臂计分遗漏 route facts：`MemoryInjected.routeFactsInjected` 入账，
+  treatment = lessons 或 facts，control = 都没有。
+- `--no-memory` 未关闭 route facts 注入 → 控制臂被注入、实验失去对照。
+- `scripts/run-experiment.ts` 每局日志落盘（原先 stdio 直通终端，事后无法复盘）。
+
 ### Added（Phase C：结构化记忆 + 实验脚手架）
 
 - `src/evolution/route-facts.ts` —— 路线事实确定性入库/注入（不经 LLM）：
