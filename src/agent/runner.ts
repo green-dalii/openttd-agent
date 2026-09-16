@@ -49,6 +49,7 @@ import { WebServer } from "../web/server.js";
 import { pruningTransformContext } from "./context.js";
 import { loadMemory, makeLessonProvider, memoryCounts, type LoadedMemory } from "../evolution/memory.js";
 import { routeFactsProviderFor } from "../evolution/route-facts.js";
+import { joinRoutesWithLedger } from "./route-stats.js";
 import { RouteLedger } from "./route-ledger.js";
 import { makeSignalHub, type SignalHub } from "./signal-hub.js";
 import { createDecisionLoop } from "./decision-loop.js";
@@ -226,7 +227,14 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 	// otherwise the offline faux provider (scripted) so the wiring is still
 	// demonstrable without a key. faux is NOT a real LLM — it cannot validate
 	// decision quality, only the command plumbing.
-	const deps: AgentDeps = { sink: client, state: _world };
+	// `routeStats` is what makes `inspect_route` possible (N2-2): the hub keeps the
+	// newest reading per route, the tool reads it on demand. Wiring it here (not in
+	// the tool) keeps the tool unit-testable with a fake.
+	const deps: AgentDeps = {
+		sink: client,
+		state: _world,
+		routeStats: () => hub.getRouteStats(),
+	};
 	let streamFn: AgentOptionsStreamFn;
 	let model: Model<string>;
 	let brainKind: "real" | "faux" = "faux";
@@ -620,6 +628,10 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 		pendingActions,
 		opts: { decisionTickMs: opts.decisionTickMs, maxDecisions: opts.maxDecisions, seconds: opts.seconds },
 		isStopRequested: () => stopRequested,
+		// N2-2b: the economics the GS reports are keyed by job; the ledger knows
+		// which towns that job was ordered for. Joining them here is what lets the
+		// model read "route 101 (9->12): 6 vehicles, 146 waiting, -308 profit".
+		routesForContext: () => joinRoutesWithLedger(hub.getRouteStats(), routeLedger.all()),
 		publishStage,
 		runDecision: (agent, deps, o) => runDecision(agent, deps, o),
 		now: () => Date.now(),
@@ -640,6 +652,7 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 	const exitCode = await runFinalizeAndReflect({
 		cfg, world: _world, session, telemetry,
 		executorPhase: hub.getPhase(), reachedDone: hub.getReachedDone(), scheduler, pendingActions, routeLedger,
+		getRouteStats: () => hub.getRouteStats(),
 		completeOnce,
 	});
 

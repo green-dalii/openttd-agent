@@ -62,6 +62,7 @@ async function runFinalize(dir: string, ledger: RouteLedger, decisions: number) 
 		scheduler: { count: () => decisions },
 		pendingActions: [],
 		routeLedger: ledger,
+		getRouteStats: () => [],
 		completeOnce: completeOnce as never,
 	});
 }

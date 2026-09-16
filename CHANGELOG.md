@@ -9,6 +9,16 @@
 
 ## [Unreleased]
 
+### Added（NEXT-2 N2-2/N2-3：经济可查、可见、可记，2026-09-16）
+
+- `inspect_route` 工具：按 job 查线路经济；未知 job / 无读数 / 无 GS 通道
+  **三种情形都明确拒绝**并说明原因。
+- 每日收益要有 ≥30 天样本才报（年初 1 天样本不冒充年化）。
+- 线路经济进入**每次**决策上下文（`routes`，hub 读数 × 账本 pair 连接），
+  并在运行日志打印 `[agent] route facts: …` 以便验证。
+- `route-facts` v2：事实带结果（vehicles/waiting/profit）；幂等键含经济读数
+  （同一线路的不同观测都要留下）。
+
 ### Added（NEXT-2 N2-1：线路经济信号，2026-09-16）
 
 - GS 每 200 tick 上报每条线路的原始读数：`route-stats {job, vehicles, profit,

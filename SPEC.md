@@ -1919,3 +1919,79 @@ Squirrel 侧不留嵌套结构与算术）：
 是 agent 可以做、且结果可测量的决策。
 
 局末：`constructionDone=true`，4 stations / 3 vehicles（第二条线在建成）。
+
+## 10.54 NEXT-2 N2-2/N2-3：让经济事实可查、可见、可记（2026-09-16）
+
+### N2-2 `inspect_route` 工具
+
+`inspect_route {job?}`：读 GS 上报的线路经济（车辆数 / 等待 / 当年利润）。
+三条路径都必须**明确回答**（"永远说'是'的工具毁掉学习"）：
+
+| 情形 | 行为 |
+|---|---|
+| 有读数的 job | 返回该线事实（`formatRouteStats`，无建议词） |
+| 未知 job | `ok:false` + 已知 job 清单（不编造一条不存在的线） |
+| 尚无任何读数 | `ok:false` + 说明（蓝图未下单前 GS 不会上报） |
+| 该模式无 GS 通道 | `ok:false` + 说明（空成功 = 撒谎） |
+
+**样本量诚实性**：年内不足 30 天时**不给每日速率**——`gameDate % 365 = 0` 时
+`3650 / 1 = 3650/day` 是"用 1 天样本编出来的年化"，比不报更糟。原始
+year-to-date 仍照实给出。
+
+### N2-2b 经济事实进入**每次**决策上下文
+
+§10.34 的教训同样适用：**需要工具调用才能看到的事实，模型经常不看**
+（"按人口取前二"就是这么来的）。故 GS 读数（按 job）与账本 pair 连接
+（`joinRoutesWithLedger`）后进入每个决策上下文：
+
+```
+routes: [{job:1, townA:10, townB:0, vehicles:6, waiting:146, profit:-308, gameDate:732}]
+```
+
+账本不知道 pair 的 job 只给读数，**不编 pair**。运行日志同步打印
+`[agent] route facts: …`，使"模型是否真的被展示过这些事实"可验证。
+
+### N2-3 记忆 v2：事实带**结果**
+
+`RouteFact` 增 `vehicles/waiting/profit`（局终时由 hub 读数按 job 关联）。
+**幂等键加入经济读数**：同一条线这次 −308、下次 +5000 是**两个不同观测**，
+用旧键会把新观测静默丢弃。
+
+注入形态（红线：无建议词，断言测试锁定）：
+
+```
+route towns 9->12 was ordered at decision 1 and was built; at session end it had
+6 vehicles, 146 passengers waiting and -308 year-to-date profit
+```
+
+这就是 §10.43 诊断的修法：记忆从"我做没做"变成"这件事最后是什么结果"。
+
+### 真机验证（/tmp/n2g，seed 11，400s）
+
+**N2-2 工具**（模型真的调用了它，且两条路径都活）：
+
+```
+tool inspect_route: ok=false no route economics reported yet. …      ← 尚未有读数
+tool inspect_route: ok=true  route 1: 0 vehicles, waiting 0, …       ← 有读数
+tool inspect_route: ok=false unknown route job 2. Known jobs: 1      ← 未知 job 被拒并列出已知
+tool inspect_route: ok=false unknown route job 3. Known jobs: 1
+```
+
+模型反复探问 job 2/3（当时只有 job 1）——拒绝路径给出已知清单，模型据此继续。
+
+**N2-2b 上下文注入**（每次决策一行，多线路、非零读数）：
+
+```
+[agent] route facts: route 1: 6 vehicles, waiting 178, income -1/day (year-to-date -270);
+                     route 2: 6 vehicles, waiting 0, income 0/day (year-to-date -8);
+                     route 3: 0 vehicles, waiting 0, income not meaningful yet …
+```
+
+局末 `constructionDone=false`（第三条线在建），6 辆车 / 6 站——**第一条线在亏钱且排队涨到 178**。
+
+### 两处"诚实性"缺陷（真机日志抓出，均已修 + 测试锁定）
+
+1. **0 辆车时显示"year is 116 day(s) old"**：把"没有车"说成了"年份太新"。
+   两种原因必须分开（无车 → `income unknown (no vehicles on this route yet)`）。
+2. **`Math.round(-0.03)` = `-0` 显示成 `0/day`**：一条微微亏损的线读起来像"持平"。
+   1/day 以下改用两位小数（`-0.03/day`）。

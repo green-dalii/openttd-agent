@@ -11,6 +11,7 @@
 import { Type, type TSchema } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { ActionResult, AgentDeps } from "../types.js";
+import { formatRouteStats } from "../route-stats.js";
 import type { WorldSnapshot } from "../../game/world-state.js";
 import { estimateRoute } from "../estimate.js";
 
@@ -236,6 +237,12 @@ export function setPauseTool(deps: AgentDeps): AgentTool<typeof SetPauseSchema, 
 
 /** Assemble the first tool batch (SPEC §4.3). */
 
+const InspectRouteSchema = Type.Object({
+	job: Type.Optional(
+		Type.Integer({ description: "route job id; omit to list every known route" }),
+	),
+});
+
 const EstimateRouteSchema = Type.Object({
 	from: Type.Integer({ description: "from town id" }),
 	to: Type.Integer({ description: "to town id" }),
@@ -291,10 +298,76 @@ function estimateRouteTool(deps: AgentDeps): AgentTool<typeof EstimateRouteSchem
 	};
 }
 
+/**
+ * `inspect_route` — 线路经济查询（NEXT-2 N2-2）。
+ *
+ * 为什么需要它：N2-1 让每条线的结果变成事实（车辆数/等待/当年利润），但事实必须
+ * **可被主动查询**才有用——否则 agent 只能等 harness 推送，而推送是 harness 在替它
+ * 选问题。查询是 agent 自己的动作。
+ *
+ * 三路径都必须给出明确回答：
+ *   - 有 job 且存在 → 该线事实（无任何建议措辞）；
+ *   - job 不存在 → 拒绝，并列出已知 job（编造一条不存在的线是构陷）；
+ *   - 本模式没有 GS 通道 / 尚无读数 → 拒绝，并说明原因（空成功 = 撒谎）。
+ */
+export function inspectRouteTool(deps: AgentDeps): AgentTool<typeof InspectRouteSchema, ActionResult> {
+	return {
+		name: "inspect_route",
+		label: "Inspect Route",
+		description:
+			"Read the economics of a bus line you already ordered: vehicles on it, passengers " +
+			"waiting, and year-to-date profit (from the game itself). Call with no job to list " +
+			"all known routes.",
+		parameters: InspectRouteSchema,
+		execute: async (_id, params) => {
+			if (!deps.routeStats) {
+				return toResult({
+					ok: false,
+					summary: "route economics are not available in this mode (no GS channel reports them)",
+					data: { available: false },
+				});
+			}
+			const stats = deps.routeStats();
+			if (stats.length === 0) {
+				return toResult({
+					ok: false,
+					summary:
+						"no route economics reported yet. The game reports a route once its blueprint " +
+						"exists; a route with no stations built yet reads as 0 vehicles.",
+					data: { available: true, routes: [] },
+				});
+			}
+			if (params.job === undefined) {
+				return toResult({
+					ok: true,
+					summary: stats.map((r) => formatRouteStats(r)).join("; "),
+					data: { available: true, routes: stats },
+				});
+			}
+			const one = stats.find((r) => r.job === params.job);
+			if (!one) {
+				return toResult({
+					ok: false,
+					summary:
+						`unknown route job ${params.job}. Known jobs: ` +
+						`${stats.map((r) => r.job).join(", ")}`,
+					data: { available: true, known: stats.map((r) => r.job) },
+				});
+			}
+			return toResult({
+				ok: true,
+				summary: formatRouteStats(one),
+				data: { available: true, route: one },
+			});
+		},
+	};
+}
+
 export function createTools(deps: AgentDeps): AgentTool<TSchema, ActionResult>[] {
 	return [
 		observeTool(deps),
 		estimateRouteTool(deps),
+		inspectRouteTool(deps),
 		buildBusRouteTool(deps),
 		addVehiclesTool(deps),
 		setPauseTool(deps),

@@ -62,6 +62,7 @@ function makeCtx(over: Partial<DecisionLoopCtx> = {}): DecisionLoopCtx & {
 		runDecision: runDecisionFake as never,
 		now: () => Date.now(),
 		gameDay: () => 10,
+		routesForContext: () => [],
 		...over,
 	};
 	return Object.assign(ctx, { schedulerFake, runDecisionFake, auditFake, sessionFake, pendingActions });

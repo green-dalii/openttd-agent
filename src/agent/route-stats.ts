@@ -25,6 +25,19 @@ export interface RouteStats {
 const DAYS_PER_YEAR = 365;
 
 /**
+ * 报"每日收益"需要的最少样本天数。
+ * 年份刚开局时 year-to-date 只有几天，除以 1 会得到 3650/day 这种**由 1 天样本
+ * 编出来的年化**——比不报更糟。少于这个天数就只说"还没意义"。
+ */
+const MIN_INCOME_DAYS = 30;
+
+/** 年内第几天（0..364），与 incomePerDay 用同一约定。 */
+export function dayOfYear(gameDate: number): number {
+	const d = Math.trunc(gameDate);
+	return ((d % DAYS_PER_YEAR) + DAYS_PER_YEAR) % DAYS_PER_YEAR;
+}
+
+/**
  * 当年累计利润 → 每日收益。
  * `gameDate % 365` = 年内第几天；分母用 max(1, day) 避免年初除零。
  * **负利润是事实（亏损线路），照实为负**——首次实现曾把"-1 读不到"与
@@ -43,7 +56,61 @@ export function incomePerDay(profit: number, gameDate: number): number | null {
  * 此时报 0 会被读成"这条线不赚钱"——那是编造。
  */
 export function formatRouteStats(s: RouteStats): string {
-	const perDay = s.vehicles > 0 ? incomePerDay(s.profit, s.gameDate) : null;
-	const rate = perDay === null ? "income unknown" : `income ${Math.round(perDay)}/day`;
+	const day = dayOfYear(s.gameDate);
+	// Two DIFFERENT reasons for having no rate, and they must not be conflated:
+	// no vehicles (nothing is running) vs a year too young to divide by. The
+	// first version reported the second reason for both, which read as a
+	// nonsense "year is 116 days old" next to "0 vehicles" in a live run log.
+	let rate: string;
+	if (s.vehicles === 0) rate = "income unknown (no vehicles on this route yet)";
+	else if (day < MIN_INCOME_DAYS) rate = `income not meaningful yet (year is ${day} day(s) old)`;
+	else {
+		const perDay = incomePerDay(s.profit, s.gameDate);
+		// Round to 2 decimals below 1/day: Math.round(-0.03) === -0 renders as
+		// "0/day", i.e. a slightly LOSS-making route would read as breaking even.
+		rate =
+			perDay === null
+				? "income unknown"
+				: `income ${Math.abs(perDay) >= 1 ? Math.round(perDay) : Number(perDay.toFixed(2))}/day`;
+	}
 	return `route ${s.job}: ${s.vehicles} vehicles, waiting ${s.waiting}, ${rate} (year-to-date ${s.profit})`;
+}
+
+/** 账本行（route-ledger.ts）在本模块需要的最小形状。 */
+export interface LedgerPair {
+	order: { job: number; fromTown: number; toTown: number };
+}
+
+/**
+ * hub 读数 × 账本 pair → 决策上下文用的线路事实（N2-2b）。
+ * 账本不知道的 job（模型给了新 job 号、或账本未记录）**不编造 pair**：只给读数。
+ */
+export function joinRoutesWithLedger(
+	stats: RouteStats[],
+	ledger: LedgerPair[],
+): RouteStatsJoin[] {
+	const pairByJob = new Map(ledger.map((l) => [l.order.job, l.order]));
+	return [...stats]
+		.sort((a, b) => a.job - b.job)
+		.map((r) => {
+			const pair = pairByJob.get(r.job);
+			const out: RouteStatsJoin = {
+				job: r.job,
+				vehicles: r.vehicles,
+				waiting: r.waiting,
+				profit: r.profit,
+				gameDate: r.gameDate,
+			};
+			if (pair) {
+				out.townA = pair.fromTown;
+				out.townB = pair.toTown;
+			}
+			return out;
+		});
+}
+
+/** 线路事实 + 可选 pair（决策上下文与 tool 共用形状）。 */
+export interface RouteStatsJoin extends RouteStats {
+	townA?: number;
+	townB?: number;
 }

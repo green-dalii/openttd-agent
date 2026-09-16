@@ -9,6 +9,7 @@
  */
 import { buildReflectionEvidence } from "../evolution/reflect.js";
 import { routeFactsFromLedger, saveRouteFacts } from "../evolution/route-facts.js";
+import type { RouteStats } from "./route-stats.js";
 import { runReflection } from "../evolution/reflection-run.js";
 import { buildStageSummary } from "./session-store.js";
 import { totalsFromTelemetry, formatGameDate } from "./runner-helpers.js";
@@ -28,6 +29,11 @@ export interface FinalizeAndReflectArgs {
 	scheduler: { count(): number };
 	pendingActions: Array<{ tool: string; ok: boolean; summary: string }>;
 	routeLedger: RouteLedger;
+	/**
+	 * Latest per-route economics from the GS (N2-3). Injected as a function so the
+	 * finalize step reads whatever the hub last saw, without owning the hub.
+	 */
+	getRouteStats: () => RouteStats[];
 	completeOnce: (p: { system: string; user: string }) => Promise<string>;
 }
 
@@ -46,6 +52,7 @@ export async function runFinalizeAndReflect(args: FinalizeAndReflectArgs): Promi
 		scheduler,
 		pendingActions,
 		routeLedger,
+		getRouteStats,
 		completeOnce,
 	} = args;
 	const snap = world.snapshot();
@@ -88,7 +95,12 @@ export async function runFinalizeAndReflect(args: FinalizeAndReflectArgs): Promi
 	if (finalTelemetry.totals.decisions > 0 && orderedRoutes > 0) {
 		// C-1: persist route facts deterministically - the ledger already holds
 		// the precise data; an LLM summarization pass would prose-ify it away.
-		saveRouteFacts(cfg.dataDir, routeFactsFromLedger(routeLedger.all()));
+		// N2-3: attach the route's RESULT (vehicles/waiting/profit) to the fact.
+		// The ledger knows which job was ordered; the hub knows what that job's
+		// line ended up doing. Joining them is what turns "I ordered 9->12" into
+		// "9->12 ended with 6 vehicles, 146 waiting, -308 profit".
+		const statsByJob = new Map(getRouteStats().map((r) => [r.job, r]));
+		saveRouteFacts(cfg.dataDir, routeFactsFromLedger(routeLedger.all(), statsByJob));
 		try {
 			const report = await runReflection({
 				complete: completeOnce,

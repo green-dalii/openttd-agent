@@ -15,6 +15,21 @@
 
 import { decodePhaseWindow } from "../game/executor-status.js";
 
+/**
+ * One route as the model sees it. `townA/townB` are present only when the
+ * ledger knows which towns the job was ordered for (the GS reports economics by
+ * job, the ledger knows the pair) - absent fields are absent, never zeroed.
+ */
+export interface RouteContextFact {
+	job: number;
+	townA?: number;
+	townB?: number;
+	vehicles: number;
+	waiting: number;
+	profit: number;
+	gameDate: number;
+}
+
 /** One company's comparable numbers in the payload. */
 /** Model-visible town fact: identity, demand signal, position. */
 export interface TownSummary {
@@ -77,6 +92,14 @@ export interface DecisionContextInput {
 	 */
 	session?: { secondsRemaining: number };
 	since: DecisionTracker;
+	/**
+	 * Economics of the lines already ordered (NEXT-2 N2-2b): vehicles on the
+	 * route, passengers waiting, year-to-date profit, game-day for rate math.
+	 * Present in EVERY decision context for the same measured reason `towns` is
+	 * (SPEC §10.34): a fact that requires a tool call is a fact the model works
+	 * without. Facts only - no target, no advice.
+	 */
+	routes?: RouteContextFact[];
 	/** Total game days elapsed since run start (for the interval baseline). */
 	gameDay?: number;
 	/** Compressed stage summaries ("阶段性总结"), oldest first. */
@@ -191,6 +214,7 @@ export function buildDecisionContext(input: DecisionContextInput): {
 	};
 	history: string[];
 	phase?: string;
+	routes?: RouteContextFact[];
 } {
 	const gameDay = input.gameDay ?? 0;
 	const current = numbersOf(leadCompany(input.now.companies), gameDay);
@@ -201,6 +225,7 @@ export function buildDecisionContext(input: DecisionContextInput): {
 		trigger: input.trigger,
 		now: input.now,
 		...(input.towns ? { towns: input.towns } : {}),
+		...(input.routes && input.routes.length > 0 ? { routes: input.routes } : {}),
 		...(input.session ? { session: input.session } : {}),
 		sinceLastDecision: {
 			...delta,

@@ -7,6 +7,7 @@ import {
 	addVehiclesTool,
 	buildBusRouteTool,
 	createTools,
+	inspectRouteTool,
 	observeTool,
 	setPauseTool,
 	summarizeState,
@@ -217,9 +218,12 @@ describe("createTools", () => {
 		const names = createTools(deps()).map((t) => t.name);
 		// 估价先于建造：§10.34 实测没有距离信号时 agent 只会"按人口取前二"
 		expect(names).toContain("estimate_route");
+		// N2-2 起 inspect_route 也在列：线路经济必须可主动查询（推送 = harness
+		// 替 agent 选问题）
 		expect(names).toEqual([
 			"observe",
 			"estimate_route",
+			"inspect_route",
 			"build_bus_route",
 			"add_vehicles",
 			"set_pause",
@@ -271,5 +275,65 @@ describe("observe 必须让 agent 看见可选项（SPEC §10.32）", () => {
 	it("build_bus_route 的描述不再叫模型别做选择", () => {
 		const t = createTools(deps()).find((x) => x.name === "build_bus_route")!;
 		expect(t.description).not.toMatch(/let the planner pick/i);
+	});
+});
+
+/**
+ * NEXT-2 N2-2：`inspect_route` —— 让 agent 主动查一条线的经济。
+ *
+ * 三路径都必须有明确回答（"永远说'是'的工具毁掉学习"）：
+ *   已知 job → 事实；未知 job → 拒绝并给出已知清单；无经济数据 → 明确说无。
+ */
+describe("inspect_route —— 线路经济查询（N2-2）", () => {
+	const depsWith = (stats: () => { job: number; vehicles: number; profit: number; waiting: number; gameDate: number }[]) =>
+		({ ...fakeSink(), state: fakeState(), routeStats: stats }) as unknown as AgentDeps;
+
+	it("已知 job：返回该线事实（车辆数/等待/每日收益），不含建议", async () => {
+		// gameDate 395 → 年内第 30 天（≥30 天样本，速率才有意义）
+		const deps = depsWith(() => [{ job: 1, vehicles: 6, profit: 3650, waiting: 146, gameDate: 395 }]);
+		const res = await inspectRouteTool(deps).execute("id", { job: 1 });
+		const text = textOf(res);
+		expect(text).toContain("1");
+		expect(text).toMatch(/6 vehicles/);
+		expect(text).toMatch(/waiting 146/);
+		expect(text).toMatch(/income 122\/day/); // 3650 / 30
+		for (const w of ["should", "recommend", "add more", "better", "increase"]) {
+			expect(text.toLowerCase()).not.toContain(w);
+		}
+	});
+
+	it("不给 job：列出全部已知线路（agent 先看有什么）", async () => {
+		const deps = depsWith(() => [
+			{ job: 1, vehicles: 2, profit: 100, waiting: 5, gameDate: 365 },
+			{ job: 2, vehicles: 0, profit: 0, waiting: 0, gameDate: 365 },
+		]);
+		const res = await inspectRouteTool(deps).execute("id", {});
+		expect(textOf(res)).toMatch(/1[\s\S]*2/);
+	});
+
+	it("未知 job：明确拒绝并给出已知 job 清单（不许编造一条线）", async () => {
+		const deps = depsWith(() => [{ job: 7, vehicles: 1, profit: 10, waiting: 0, gameDate: 365 }]);
+		const res = await inspectRouteTool(deps).execute("id", { job: 99 });
+		const text = textOf(res);
+		expect(text).toContain("99");
+		expect(text).toContain("7");
+		expect((res as { details?: { ok?: boolean } }).details?.ok).toBe(false);
+	});
+
+	it("还没有任何经济数据：明确说没有（不返回空事实冒充成功）", async () => {
+		const res = await inspectRouteTool(depsWith(() => [])).execute("id", {});
+		expect((res as { details?: { ok?: boolean } }).details?.ok).toBe(false);
+		expect(textOf(res).toLowerCase()).toMatch(/no route|not reported|unknown/);
+	});
+
+	it("本模式没有 GS 通道：拒绝而不是静默成功", async () => {
+		const deps = { ...fakeSink(), state: fakeState() } as unknown as AgentDeps;
+		const res = await inspectRouteTool(deps).execute("id", { job: 1 });
+		expect((res as { details?: { ok?: boolean } }).details?.ok).toBe(false);
+	});
+
+	it("工具已注册进 createTools（否则模型永远看不到它）", () => {
+		const names = createTools(depsWith(() => [])).map((t) => t.name);
+		expect(names).toContain("inspect_route");
 	});
 });

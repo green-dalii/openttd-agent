@@ -36,6 +36,7 @@ import {
 	emptyTrackerAfter,
 } from "./loop-control.js";
 import { summarizeState } from "./tools/index.js";
+import type { RouteContextFact } from "./decision-context.js";
 
 /* eslint-disable no-console -- intentional runtime logging */
 
@@ -57,6 +58,8 @@ export interface DecisionLoopCtx {
 	/** Injectable clock/day for tests. */
 	now(): number;
 	gameDay(): number;
+	/** Route facts (hub economics joined with ledger pairs) for the context. */
+	routesForContext(): RouteContextFact[];
 }
 
 export interface DecisionLoop {
@@ -164,6 +167,7 @@ export function createDecisionLoop(ctx: DecisionLoopCtx): DecisionLoop {
 					...(deadline !== null
 						? { secondsRemaining: Math.max(0, Math.round((deadline - ctx.now()) / 1000)) }
 						: {}),
+					routes: ctx.routesForContext(),
 				});
 				plan = out.plan;
 				ctx.telemetry.onActivity?.();

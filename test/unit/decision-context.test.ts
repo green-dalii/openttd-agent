@@ -218,3 +218,43 @@ describe("session horizon 是决策上下文的一部分（2026-09-12, /tmp/cal1
 		expect("session" in ctx).toBe(false);
 	});
 });
+
+/**
+ * NEXT-2 N2-2b：线路经济必须出现在**每次**决策上下文里，而不是等模型调工具。
+ * SPEC §10.34 的实测教训：需要工具调用才能看到的事实，模型经常不看
+ * （"按人口取前二"就是这么来的）。
+ */
+describe("buildDecisionContext —— routes 事实（N2-2b）", () => {
+	const base = () => ({
+		trigger: "interval" as const,
+		now: { date: "1950-03-01", companies: [] },
+		since: { baseline: null, phases: [], actions: [], notableEvents: [] },
+	});
+
+	it("有经济读数时进入上下文：job/车辆/等待/盈利事实", () => {
+		const ctx = buildDecisionContext({
+			...base(),
+			routes: [{ job: 101, townA: 9, townB: 12, vehicles: 6, waiting: 146, profit: 3650, gameDate: 395 }],
+		});
+		const text = JSON.stringify(ctx);
+		expect(text).toContain("101");
+		expect(text).toMatch(/6/);
+		expect(text).toMatch(/146/);
+	});
+
+	it("无读数时字段缺席（不塞空数组冒充'没有线路'）", () => {
+		const ctx = buildDecisionContext(base());
+		expect(ctx.routes).toBeUndefined();
+	});
+
+	it("文案无策略词（红线）", () => {
+		const ctx = buildDecisionContext({
+			...base(),
+			routes: [{ job: 1, vehicles: 0, waiting: 0, profit: 0, gameDate: 395 }],
+		});
+		const low = JSON.stringify(ctx).toLowerCase();
+		for (const w of ["should", "recommend", "better", "prefer", "avoid", "optimal"]) {
+			expect(low).not.toContain(w);
+		}
+	});
+});

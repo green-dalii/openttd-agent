@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { incomePerDay, formatRouteStats } from "../../src/agent/route-stats.js";
+import { incomePerDay, formatRouteStats, joinRoutesWithLedger } from "../../src/agent/route-stats.js";
 
 /**
  * NEXT-2 N2-1：线路经济（纯函数部分）。
@@ -23,10 +23,17 @@ describe("incomePerDay —— 当年累计利润 → 每日收益", () => {
 		expect(incomePerDay(Number.NaN, 200)).toBeNull();
 	});
 
-	it("没有车辆 → income unknown，不编造 0（0 会被读成'这条线不赚钱'）", () => {
+	it("没有车辆 → income 不可知，不编造 0（0 会被读成'这条线不赚钱'）", () => {
 		const line = formatRouteStats({ job: 9, vehicles: 0, profit: 0, waiting: 3, gameDate: 200 });
-		expect(line).toContain("income unknown");
+		expect(line).toContain("no vehicles"); // 原因必须写对，不能拿"年份太新"搪塞
 		expect(line).not.toContain("income 0/day");
+	});
+
+	it("年初样本不足（<30 天）→ 不给每日速率：1 天样本不能当年化", () => {
+		const line = formatRouteStats({ job: 9, vehicles: 6, profit: 3650, waiting: 3, gameDate: 365 });
+		expect(line).not.toMatch(/income 3650\/day/);
+		expect(line).toMatch(/not meaningful yet/);
+		expect(line).toContain("3650"); // 原始事实仍然照实给出
 	});
 });
 
@@ -46,5 +53,35 @@ describe("formatRouteStats —— 注入/工具文本只陈述事实", () => {
 		for (const w of ["should", "recommend", "better", "add ", "buy ", "increase", "optimal", "must", "advise"]) {
 			expect(s).not.toContain(w);
 		}
+	});
+});
+
+describe("joinRoutesWithLedger —— hub 读数 × 账本 pair（N2-2b）", () => {
+	const stats = [
+		{ job: 101, vehicles: 6, profit: -308, waiting: 146, gameDate: 400 },
+		{ job: 999, vehicles: 1, profit: 0, waiting: 0, gameDate: 400 },
+	];
+	const ledger = [
+		{ order: { job: 101, fromTown: 9, toTown: 12, decision: 1, orderedAt: 1 }, outcome: { completed: false } },
+	];
+
+	it("账本知道 pair 就带上；不知道就不编（只给 job）", () => {
+		const joined = joinRoutesWithLedger(stats, ledger);
+		expect(joined.find((r) => r.job === 101)).toMatchObject({ townA: 9, townB: 12, vehicles: 6, waiting: 146 });
+		const orphan = joined.find((r) => r.job === 999)!;
+		expect(orphan.townA).toBeUndefined();
+		expect(orphan.vehicles).toBe(1);
+	});
+
+	it("按 job 排序（模型看到稳定的顺序）", () => {
+		expect(joinRoutesWithLedger(stats, ledger).map((r) => r.job)).toEqual([101, 999]);
+	});
+});
+
+describe("小额速率不被四舍五入成 0（符号是事实）", () => {
+	it("-6/208 ≈ -0.03 → 显示 -0.03/day，而不是 0/day", () => {
+		const line = formatRouteStats({ job: 1, vehicles: 6, profit: -6, waiting: 0, gameDate: 208 });
+		expect(line).toContain("-0.03/day");
+		expect(line).not.toContain("income 0/day");
 	});
 });

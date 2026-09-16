@@ -7,6 +7,7 @@
  * 禁止: 在此层直接依赖 AdminClient 具体类（只用下方接口）；禁止游戏语义推断。
  */
 
+import type { RouteStats } from "./route-stats.js";
 import type { WorldSnapshot } from "../game/world-state.js";
 
 /** Outbound command channel the tools use (implemented by AdminClient). */
@@ -26,6 +27,13 @@ export interface StateReader {
 export interface AgentDeps {
 	sink: CommandSink;
 	state: StateReader;
+	/**
+	 * Latest per-route economics reported by the GS (NEXT-2 N2-1).
+	 * Optional on purpose: modes without a GS channel have nothing to report,
+	 * and `inspect_route` must REFUSE in that case rather than return an empty
+	 * success ("a tool that always says yes destroys learning").
+	 */
+	routeStats?: () => RouteStats[];
 }
 
 /** Structured result payload carried in AgentToolResult.details. */

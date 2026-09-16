@@ -115,3 +115,56 @@ describe("C-1 门控：--no-memory 必须同时关闭 route facts（m3f 实测�
 		expect(routeFactsProviderFor(dir, true)().length).toBe(1); // 处理臂
 	});
 });
+
+/**
+ * N2-3（SPEC §10.53 后续）：事实必须带**结果**，否则记忆只能记住"做没做"，
+ * 记不住"值不值"——三轮 A/B 的结论正是"记忆记住了过程，没记住结果"。
+ */
+describe("routeFactsFromLedger —— 经济事实（N2-3）", () => {
+	const line = (job: number, from: number, to: number) => ({
+		order: { job, fromTown: from, toTown: to, decision: 1, orderedAt: 1000 },
+		outcome: { completed: true, doneDate: "1950-03-14" },
+	});
+	const stats = (job: number, vehicles: number, profit: number, waiting: number, gameDate = 400) =>
+		[new Map([[job, { job, vehicles, profit, waiting, gameDate }]])][0];
+
+	it("按 job 关联：事实带上车辆数/等待/利润（原始数字，不是散文）", () => {
+		const facts = routeFactsFromLedger([line(1, 9, 12)], stats(1, 6, -308, 146));
+		expect(facts[0]).toMatchObject({ from: 9, to: 12, vehicles: 6, waiting: 146, profit: -308 });
+	});
+
+	it("没有该 job 的读数：事实照记，只是没有经济字段（不丢事实）", () => {
+		const facts = routeFactsFromLedger([line(7, 9, 12)], stats(1, 6, -308, 146));
+		expect(facts[0]).toMatchObject({ from: 9, to: 12, completed: true });
+		expect(facts[0]!.vehicles).toBeUndefined();
+	});
+
+	it("不给 stats（旧调用方）：行为与 C-1 完全一致（向后兼容）", () => {
+		const facts = routeFactsFromLedger([line(1, 9, 12)]);
+		expect(facts[0]).toMatchObject({ from: 9, to: 12, completed: true });
+	});
+
+	it("幂等键含经济：同样的线但读数不同 → 新的一行（新观测不许被旧观测吞掉）", () => {
+		const dir = mkdtempSync(join(tmpdir(), "route-facts-econ-"));
+		const a = routeFactsFromLedger([line(1, 9, 12)], stats(1, 6, -308, 146));
+		const b = routeFactsFromLedger([line(1, 9, 12)], stats(1, 6, 5000, 0));
+		saveRouteFacts(dir, a);
+		saveRouteFacts(dir, b);
+		saveRouteFacts(dir, b); // 同观测重复保存 → 去重
+		const loaded = loadRouteFacts(dir);
+		expect(loaded).toHaveLength(2);
+		expect(loaded.map((f) => f.profit).sort((x, y) => (x ?? 0) - (y ?? 0))).toEqual([-308, 5000]);
+	});
+
+	it("注入文本含经济事实，且仍无任何建议词", () => {
+		const facts = routeFactsFromLedger([line(1, 9, 12)], stats(1, 6, -308, 146));
+		const text = formatRouteFactsForInjection([{ ...facts[0]!, savedAt: 1 }]).join(" ");
+		expect(text).toMatch(/6 vehicles/);
+		expect(text).toMatch(/146 passengers waiting/);
+		expect(text).toMatch(/-308|308/);
+		const low = text.toLowerCase();
+		for (const w of ["should", "recommend", "better", "prefer", "avoid", "optimal", "instead"]) {
+			expect(low).not.toContain(w);
+		}
+	});
+});

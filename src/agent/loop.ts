@@ -15,8 +15,11 @@
  *   - 因为有触发器就跳过决策（旧实现"施工中就结束回合"即此类错误）。
  */
 
+/* eslint-disable no-console -- intentional runtime logging */
 import type { Agent } from "@earendil-works/pi-agent-core";
 import type { AgentDeps } from "./types.js";
+import type { RouteContextFact } from "./decision-context.js";
+import { formatRouteStats } from "./route-stats.js";
 import { summarizeState } from "./tools/index.js";
 import {
 	buildDecisionContext,
@@ -53,6 +56,8 @@ export interface DecisionRequest {
 	phase?: string;
 	/** Wall-clock seconds left in the session (episode-boundary fact). */
 	secondsRemaining?: number;
+	/** Economics of lines already ordered (N2-2b); joined hub stats + ledger pairs. */
+	routes?: RouteContextFact[];
 }
 
 /** One company's comparable numbers (as produced by summarizeState). */
@@ -101,12 +106,24 @@ export async function runDecision(
 		// alternative: towns reachable only via observe() meant the model sat through
 		// whole games without ever seeing its siting options.
 		towns: toTownSummaries(state),
+		// Same lesson, new signal (N2-2b): the economics of the lines already
+		// ordered ride along too, so "is my route actually working" is visible
+		// without a tool call. A route with no reading yet is simply absent.
+		...(req.routes && req.routes.length > 0 ? { routes: req.routes } : {}),
 		...(req.secondsRemaining !== undefined ? { session: { secondsRemaining: req.secondsRemaining } } : {}),
 		since: req.tracker,
 		...(req.gameDay !== undefined ? { gameDay: req.gameDay } : {}),
 		...(req.history ? { history: req.history } : {}),
 		...(req.phase ? { phase: req.phase } : {}),
 	});
+
+	// Make the injected route facts visible in the run log: without this line the
+	// only way to know whether the model was ever shown "6 vehicles, 146 waiting,
+	// -308 profit" is to trust the code (MEMORY A7: facts left in `details` are
+	// invisible; the same trap applies to facts that are built but never logged).
+	if (context.routes && context.routes.length > 0) {
+		console.log(`[agent] route facts: ${context.routes.map((r) => formatRouteStats(r)).join("; ")}`);
+	}
 
 	// The observation is kept in history so a later reader can replay the trail.
 	const observation = {
