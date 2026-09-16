@@ -184,6 +184,14 @@ export interface ArmStats {
 	 */
 	tokensPerDecision: number | null;
 	builtRate: number | null;
+	/**
+	 * Mean stations built. A GRADED outcome: at a fixed run window many games end
+	 * mid-construction (m3h: 10/10 runs ended at road_start/stA_wait, built rate
+	 * 1/10 while m3g at the same settings hit 5/6), so the binary constructionDone
+	 * is dominated by truncation rather than by what the agent did. Stations count
+	 * progress in a way truncation does not erase.
+	 */
+	meanStations: number | null;
 }
 
 export interface ArmComparison {
@@ -221,6 +229,7 @@ function armStats(list: GameMetric[]): ArmStats {
 		builtRate: known.length
 			? known.filter((m) => m.constructionDone === true).length / known.length
 			: null,
+		meanStations: mean(list.map((m) => m.stations)),
 	};
 }
 

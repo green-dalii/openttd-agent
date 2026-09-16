@@ -84,7 +84,7 @@ const fmt = (label: string, a: typeof view.arms.withLessons) =>
 	console.log(
 		`${label.padEnd(12)} n=${a.count} money=${a.meanMoney?.toFixed(0) ?? "—"} ` +
 			`tokens=${a.meanTokens?.toFixed(0) ?? "—"} tok/dec=${a.tokensPerDecision?.toFixed(0) ?? "—"} ` +
-			`built=${a.builtRate?.toFixed(2) ?? "—"}`,
+			`built=${a.builtRate?.toFixed(2) ?? "—"} stations=${a.meanStations?.toFixed(2) ?? "—"}`,
 	);
 fmt("with lessons", view.arms.withLessons);
 fmt("without", view.arms.withoutLessons);

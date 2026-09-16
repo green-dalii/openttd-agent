@@ -401,3 +401,23 @@ describe("C-1 计分：route facts 注入必须计入 treatment 臂（m3e 实测
 		expect(c.withoutLessons.count).toBe(3);
 	});
 });
+
+describe("分级结果：stations 均值（200s 窗口截断主导，二值 done 不够）", () => {
+	const st = (i: number, stations: number, injected: number) =>
+		toGameMetric(
+			meta({
+				id: `s${i}`,
+				outcome: { constructionDone: false, money: "100000", vehicles: 2, stations },
+			}),
+			{ lessonsInjected: injected, strategiesInjected: 0 },
+		);
+
+	it("ArmStats 暴露 meanStations（截断局也有信息量）", () => {
+		const c = compareArms([
+			st(1, 4, 0), st(2, 4, 0), st(3, 4, 0), st(4, 4, 0), st(5, 4, 0),
+			st(6, 2, 3), st(7, 2, 3), st(8, 0, 3), st(9, 0, 3), st(10, 0, 3),
+		]);
+		expect(c.withoutLessons.meanStations).toBe(4);
+		expect(c.withLessons.meanStations).toBeCloseTo(0.8, 5);
+	});
+});
