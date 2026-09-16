@@ -227,9 +227,22 @@ src/
         live.js             # 页面脚本：live.html
         providers.js        # 页面脚本：providers.html
         sessions.js         # 页面脚本：sessions.html
+  agent/
+    runner.ts               # runAgent 装配 + 进程生命周期 (Phase B 后 650 行)
+    signal-hub.ts           # 信号消费: GS 事件→新闻门/账本/boot 缓冲
+    decision-loop.ts        # 决策节拍: scheduler→runDecision→因果窗口
+    reflect-run.ts          # 局终结算 + 反思 + metrics 上报
+    loop-control.ts         # 决策循环纯判据 (deadline/cap/wait)
+    runner-helpers.ts       # 纯工具
+    route-ledger.ts         # 决策→结果账本 (credit assignment)
+    estimate.ts             # 路线造价下界 (事实, 不表态)
+  evolution/
+    memory.ts / lessons.ts / strategies.ts / reflect.ts   # 记忆闭环
+    route-facts.ts          # 结构化路线记忆 (C-1, 不经 LLM)
+    metrics.ts              # A/B 对照 + confounded 守卫
   cli/run.ts                # CLI: --probe / --dry-run / --watch / --v02 / --agent
 test/
-  unit/                     # 纯单测 (vitest), 151 用例
+  unit/                     # 纯单测 (vitest), 850+ 用例
   live/                     # 真机集成 (LIVE_TESTS=1 才跑)
   helpers/                  # live skip helper
 docs/

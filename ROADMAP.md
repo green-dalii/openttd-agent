@@ -40,6 +40,7 @@
 | v0.5.0 | 启动门禁 + Session 生命周期 | 同上 |
 | v0.6.0 | 决策循环对齐 SPEC + 运行控制 + 阶段画面 | 同上 |
 | v0.6.x | 记忆闭环（P1–P6）+ 前端三页迁 Alpine + Evolution 页 | 同上 |
+| v0.6.x+ | 决策账本 + 类型化 GS 事件通道（Phase A）+ runner 五模块拆分（Phase B） | CHANGELOG [Unreleased] / SPEC §10.39–§10.49 |
 
 **当前门禁**：`pnpm run gate` 全绿（脚本定义见 `package.json`；具体数字以本地执行为准，
 **不在此处固化**——它会随每次提交变化，写死必然过期）。
@@ -74,18 +75,36 @@
 - **C-1 结构化记忆**：路线事实（pair→tiles/cost/outcome）由账本**确定性直入**
   `evolution/route-facts.jsonl`，不经 LLM 散文化；注入时与 lessons 并列。
 - **C-2 失败局教训降权**：0 下单局不产出 lesson（无可学习策略，纯噪声）。
-- **C-3 实验脚手架**：`scripts/run-experiment.ts` —— arms/seeds/n 参数化，
+- **C-3 实验脚手架**：实验矩阵脚本（arms/seeds/n 参数化，落地后路径在此登记），
   一条命令跑完矩阵 + m3-verdict + **token/决策归一守卫**（§10.43 归因教训）。
-- **C-4 单线路标定 ≥3 局**：loop-health HEALTHY + 下单率数字记录 →
-  然后用 C-1/C-2 的新记忆格式重跑 M3 A/B（NEXT-2 的科学问题）。
+- **C-4 单线路标定 ≥3 局**：用 `scripts/loop-health.ts` 确认 HEALTHY +
+  下单率数字记录 → 用 `scripts/m3-verdict.ts` 出判定 → 再用 C-1/C-2 的新
+  记忆格式重跑 M3 A/B（NEXT-2 的科学问题）。
+
+标定命令（实测模板，`<N>` 换局号；判定与账本解读见 SPEC §10.40–§10.42）：
+
+```bash
+pkill -f "OpenTTD.app/Contents/MacOS/openttd"; sleep 2
+rm -rf /tmp/cal<N> && mkdir -p /tmp/cal<N> \
+  && cp /tmp/openttd-agent-data/credentials.json /tmp/openttd-agent-data/llm.json /tmp/cal<N>/
+OPENTTD_DATA_DIR=/tmp/cal<N> pnpm run cli --agent --seed 7 --no-memory --demo-seconds 200 \
+  > /tmp/cal<N>.log 2>&1
+grep -E "RESULT:" /tmp/cal<N>.log
+```
 
 ### 🟠 之后（原序号保留，前置条件未变）
 
 - **NEXT-2 扩决策空间**：C-4 标定完成后开（多线路收益递增/重复博弈——
   给记忆和策略出真题）。
 - **NEXT-3 地图大小旋钮 / NEXT-4 GS-only 架构 / NEXT-5 M4 打磨**：次序不变。
-- **NEXT-6 已知未收口项**：pause 探针、process-manager flaky、GS JSON 化
-  的 detail 字段（§10.45 妥协）、v02-runner 删除（Phase D）。
+- **NEXT-6 已知未收口项（合并两份清单，非阻塞）**：
+  - pause 探针（§10.28 单向暂停是否因 pause_on_join=false 已消失）
+  - process-manager flaky 测试（spawn 时序 812ms 窗口）
+  - GS 事件 detail 字段（§10.45 妥协，Squirrel 表赋值怪癖）
+  - v02-runner 删除（310 行死代码，Phase D）
+  - alpine-templates 静态守卫升级（页面引用不存在的元素 id，B7 同类）
+  - 预提交孤儿符号误报规则写进配置（25 个/次刷屏淹没真孤儿）
+  - Tom Select 重启前按 FRONTEND-DEPENDENCIES-AUDIT 第 3 步实测对比
 
 ### 📌 已完成但值得知道的事（细节在 SPEC，不在这里复述）
 
@@ -98,17 +117,6 @@
 | `compareArms` 曾会把 bug 算成结论 | 未排除 `interrupted` 局 | 见 `CHANGELOG` |
 | 决策权交还 agent | 城镇可选，实测 `from=9,to=1` | SPEC §10.33 |
 | 执行器解码器 | 含车辆遥测族 `R/S/D/@/B/X` | SPEC §10.29 |
-
----
-
-### 🟡 NEXT-6：已知未收口项（非阻塞）
-
-- **文档守卫**：`test/unit/alpine-templates.test.ts` 只查结构，未查「页面引用了不存在的元素 id」。
-  同类静默失败已出现 3 次（`MEMORY.md` B7），值得再加一条静态检查。
-- **预提交孤儿符号报告**：25 个中 24 个是误报（`window.UI` 导出等），但**每次提交都刷屏**，
-  应该把误报规则写进配置，否则真孤儿会被噪声淹没。
-- **Tom Select 重启**：阶段 3 因浏览器端不工作而回退（见 `CHANGELOG.md`），
-  重启前应按 `docs/FRONTEND-DEPENDENCIES-AUDIT.md` 第 3 步先与 Choices.js / Slim Select 实测对比。
 
 ---
 

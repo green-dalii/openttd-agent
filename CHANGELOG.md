@@ -44,7 +44,7 @@
   token 均值差由行动数混杂解释（"记忆翻倍 token"是归因错误）；
   失败局 lesson 是噪声源 —— 结构化记忆列为 Phase C 首项。
 
-### Added（记忆闭环 第 1 片：不变量与门槛）
+#### 记忆闭环 第 1 片：不变量与门槛
 
 - `src/evolution/lessons.ts` —— lessons 的数据契约与三道闸（纯函数）：
   `normalizeLessonText()` / `lessonId()`（FNV-1a，大小写与标点不制造重复记忆）、
@@ -86,7 +86,7 @@
 - `src/evolution/reflect.ts` 增加 `buildReflectionEvidence()`：把阶段总结与动作结果
   归约成**纯事实行**（不加入任何解释——解释正是不许模型臆造的东西）。
 
-### Fixed（P5 中被测试逼出来的设计错误）
+#### 记忆闭环 P5：被测试逼出来的设计错误
 
 - **策略门槛曾经永远不可能通过**：早期实现只把"通过门槛的卡片"写回磁盘，于是第一局的样本
   被丢弃、第二局只看到自己 → `已验证局≥2` 永远不成立。已改为持久化**完整候选池**，
@@ -112,7 +112,7 @@
   而 `index` 是 `x-for` 的 `:key`，**重复 key 让 Alpine 渲染出 0 个节点**且无任何报错。
   列表写入改为幂等 upsert（`LiveView.upsertStageView`）。
 
-### Added
+#### Added（续）：决策一次化修复
 
 - **`MEMORY.md`** —— 跨 session 的**过程教训**记录（现象/根因/规则），
   与 `SPEC.md`（系统事实）、`AGENTS.md`（开发准则）分工正交。

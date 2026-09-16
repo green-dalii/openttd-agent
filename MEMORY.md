@@ -30,13 +30,13 @@
 | Phase | 内容 | 验收要点 | 状态 |
 |---|---|---|---|
 | A | GS JSON 事件通道（根因修复）：ack/err 路径扩为全事件，公司名/正则从 harness 退役；心跳改事件化 | runner 里 startsWith/.match 归零；真机 2 局事件流完整 + loop-health HEALTHY | ✅ **A 全部完成（2026-09-12，SPEC §10.45–§10.46）**：A1 契约+解码修复 · A2 GS on-change 中继（GS 侧不发 detail——Squirrel 表赋值怪癖，诚实收敛）· A3 harness 消费事件、公司名正则退役；calA3 真机 12 次 phase 迁移全走事件流 + FIFO 三线同跑。→ Phase B（runner.ts 拆分） |
-| B | runner.ts(1055行) 拆四块：game-session / signal-hub / decision-loop / reflect-run | 测试零改动全绿 = 行为不变；runner ≤250 行装配 | ⬜ |
-| C | 记忆+实验脚手架：路线事实不经 LLM 直入库；躺平局 lesson 降权；一条命令跑 A/B（含 token/决策归一守卫）；单线路标定 ≥3 局 | 注入内容含结构化路线事实；下单率方差有数字 | ⬜ |
+| B | runner.ts(1055行) 拆分：runner-helpers / reflect-run / signal-hub / decision-loop / loop-control（五件，非原计划四件——纯判据独立成件后测试更好写） | 测试零语义改动全绿；每模块带单元契约 | ✅ **完成（2026-09-15，SPEC §10.47–§10.49）**：runner 979→650 行。**诚实偏差**：原估"runner ≤250 行装配"未达成——循环体虽已抽出，装配+生命周期+dashboard 接线本身就有 650 行；250 是拍脑袋数字，不是从装配清单推导的。结构性不变量测试改为扫描双文件（不变量属于循环，不属于文件） |
+| C | 记忆+实验脚手架：C-1 路线事实直入 route-facts.jsonl；C-2 躺平局 lesson 降权；C-3 实验脚手架（token/决策归一守卫）；C-4 标定 ≥3 局 → 新记忆格式重跑 M3 A/B | 注入内容含结构化路线事实；下单率方差有数字 | 🟡 **C-1 实现中（2026-09-15）**：route-facts.test.ts 已立（RED 确认）+ route-facts.ts 已实现（GREEN 待验证）；**未接线**（reflect-run 保存 + 决策上下文注入待做）。C-2/C-3/C-4 未开工 |
 | D | 卫生：删 v02-runner(310行)、75 静默 catch 分诊、Dashboard 冻结 | — | ⬜ 穿插做 |
 
-**先验证后定**：标牌文本长度 ≥100 字符 → executor→GS 改标牌；否则保持公司名一跳、
-约束封死在 GS 侧解析器（Squirrel helper 单测覆盖）。标牌邮箱（游戏内 GS↔AI 通信）
-**保留**，本计划只改 harness 面向通道。
+**先验证后定（未执行，诚实记录）**：标牌文本长度探针**没做**——A2 走了公司名
+一跳（GS 解析 stage/job/hb），探针只在"需要更宽载荷"时才有意义，推迟。
+标牌邮箱（游戏内 GS↔AI 通信）**保留**，本计划只改 harness 面向通道。
 
 **不漂移协议（每阶段收尾）**：① gate 全绿 + 真机断言；② 三行对齐（完成/偏离/
 下阶段方向是否仍成立）；③ SPEC/CHANGELOG/ROADMAP/MEMORY 一次性同步；
@@ -514,6 +514,23 @@ lsof -nP -iTCP:<port> -sTCP:LISTEN   # 复核
 ---
 
 ## E. 提交卫生
+
+### E1. 阶段收尾漏同步文档（2026-09-15，项目所有者发现）
+
+**现象**：Phase A/B 重构全程只更新了 SPEC + MEMORY，CHANGELOG 与 ROADMAP
+的待办区停留在重构前状态（NEXT-1/1b/1c/2b 实际已完成却仍标"当前要做"），
+直到所有者质问"为什么没有每阶段完成后同步修订 CHANGELOG、ROADMAP、MEMORY"才补。
+
+**根因**：重构期间节奏是"实现→gate→commit"，把 DoD 的文档同步当成了
+"收尾时再做"，而阶段被拆成了多个 commit——每个 commit 都觉得"还没到收尾"。
+
+**规则**：
+1. **每个 commit 就是一次收尾**：commit 前自问"CHANGELOG/ROADMAP/MEMORY/SPEC
+   是否都反映此刻现实？"——任一为否就补在同一个 commit 里。
+2. 阶段完成时额外跑一遍 **DoD 文档清单**（AGENTS §7）：CHANGELOG（改了什么）/
+   ROADMAP（状态与下一步）/ MEMORY（教训 + §0 状态列）/ SPEC（事实）。
+3. ROADMAP 的"待办"极易腐烂——已完成项必须当场划掉并写指针，不许留到下轮。
+
 
 ### E1. 同一次工作的收尾不要拆成多个 commit（2026-09-12，用户指出）
 
