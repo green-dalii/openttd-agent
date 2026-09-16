@@ -33,6 +33,7 @@
 | B | runner.ts(1055行) 拆分：runner-helpers / reflect-run / signal-hub / decision-loop / loop-control（五件，非原计划四件——纯判据独立成件后测试更好写） | 测试零语义改动全绿；每模块带单元契约 | ✅ **完成（2026-09-15，SPEC §10.47–§10.49）**：runner 979→650 行。**诚实偏差**：原估"runner ≤250 行装配"未达成——循环体虽已抽出，装配+生命周期+dashboard 接线本身就有 650 行；250 是拍脑袋数字，不是从装配清单推导的。结构性不变量测试改为扫描双文件（不变量属于循环，不属于文件） |
 | C | 记忆+实验脚手架：C-1 路线事实直入 route-facts.jsonl；C-2 躺平局 lesson 降权；C-3 实验脚手架（token/决策归一守卫）；C-4 标定 ≥3 局 → 新记忆格式重跑 M3 A/B | 注入内容含结构化路线事实；下单率方差有数字 | 🟡 **C-1 实现中（2026-09-15）**：route-facts.test.ts 已立（RED 确认）+ route-facts.ts 已实现（GREEN 待验证）；**未接线**（reflect-run 保存 + 决策上下文注入待做）。C-2/C-3/C-4 未开工 |
 | D | 卫生：删 v02-runner(310行)、75 静默 catch 分诊、Dashboard 冻结 | — | ⬜ 穿插做 |
+| **N2** | **扩决策空间（当前）**：线路经济信号 → inspect_route → 记忆 v2(经济) → 收益流主指标 → 标定+A/B | 详见 **§0b** | 🟡 方案已定（2026-09-16），待执行 |
 
 **先验证后定（未执行，诚实记录）**：标牌文本长度探针**没做**——A2 走了公司名
 一跳（GS 解析 stage/job/hb），探针只在"需要更宽载荷"时才有意义，推迟。
@@ -41,6 +42,57 @@
 **不漂移协议（每阶段收尾）**：① gate 全绿 + 真机断言；② 三行对齐（完成/偏离/
 下阶段方向是否仍成立）；③ SPEC/CHANGELOG/ROADMAP/MEMORY 一次性同步；
 ④ 开工前重读本节诊断——工作若不在杀根因或给记忆出题，停下来问所有者。
+
+## 0b. NEXT-2 实施方案（活记忆，2026-09-16 定稿，compact 后从这里接续）
+
+**为什么是它（三轮数据推导，不是拍脑袋）**：m3g/m3h/m3i 三轮 A/B 合读——
+注入记忆使**每次决策贵 26–41%**（+26/+41/+41，唯一稳定信号），而
+**建成率随窗口/路线长度波动、与记忆无关**，站点数两臂几乎相同（5.60 vs 5.20）。
+根因（§10.43）：**此任务只有 1 个真决策**（选哪对城镇），记忆无处复用、
+无反馈回路可兑现。→ 不是"再跑一次 A/B"，而是**给决策空间出题**。
+
+### 设计原则（决定实现形态的三条）
+
+1. **记忆要能兑现**，任务必须有三性：① 同类决策在一次局内**反复出现**；
+   ② 不同选择的结果**可测量地不同**；③ agent **能据此行动**。
+   现状：选城镇只发生 1 次，钱被"建不建"主导（建线=花钱→钱变少），
+   线建成后无任何后续决策。→ 把"选一对城镇"变成**线路组合管理**。
+2. **harness 红线不变**：给事实（收入/等待/车辆数/成本），不给建议
+   （"应该加车"永不出现在工具输出或注入文本里）。
+3. **每个新注入通道三问**（D4）：进实验账本了吗？被 `--no-memory` 关了吗？
+   在对照臂判据里了吗？
+
+### 实施阶段（每阶段 TDD + 真机验证，参照 Phase A–C 的纪律）
+
+| 阶段 | 内容 | 代码锚点 | 验收（可执行） |
+|---|---|---|---|
+| **N2-1 线路经济信号** | GS 新增 `kind="route-stats"` 事件：每条已建线路的 `job/vehicles/cargoWaiting/profitThisYear/incomePerDay`（**扁平原始类型**——§10.45 教训：GS 侧嵌套表赋值有怪癖）| `bridge-gs/main.nut`（`cmd=="state"` 旁新增；`GSVehicle.GetProfitThisYear`/`GSStation.GetCargoWaiting`/`GSCompany.GetBankBalance`）、`src/game/gs-events.ts`（新 schema 分支，进 `GsEventSchema` 联合）| 真机 ≥1 局出现 `kind=route-stats` 且字段非零；`test/unit/gs-events.test.ts` 加 golden |
+| **N2-2 参数化查询** | 新工具 `inspect_route {job?}`：返回该线路的经济与站点状态；未知 job **明确拒绝**（"永远说'是'的工具毁掉学习"）| `src/agent/tools/index.ts`（照 `observe`/`estimate_route` 的 `toResult` 形态）| 单测：已知/未知 job 两条路径；真机：模型调用后 summary 含非零经济字段 |
+| **N2-3 记忆 v2（经济）** | `route-facts` 扩展：`pair → {tiles?, cost?, completed, doneDate?, incomePerDay?, vehicles?}`；仍**不经 LLM**、仍幂等 | `src/evolution/route-facts.ts`（`RouteFact` 加可选字段；`factKey` 保持 pair+completed+date 语义）| 单测：注入行含经济事实且**无策略词**（已有断言的扩展）；真机：下一局启动时 `loaded memory: … N route fact(s)` 含经济行 |
+| **N2-4 主指标换成"收益流"** | 结果指标从 money/built 转向 **income**（银行余额斜率或 GS 收入）；`compareArms` 增加 `meanIncome`；money 保留但降级为次级 | `src/evolution/metrics.ts`（ArmStats + `GameMetric`）、`src/agent/reflect-run.ts`（outcome 增 income）、`docs/SIGNAL-ARCHITECTURE.md` §L1 | 单测：income 均值 + 守卫不被破坏；**money 不再可能单独充当结论** |
+| **N2-5 标定 + A/B** | 先 1–2 局确认"决策数/局 ↑ 且含车队/线路类决策"（loop-health），再 n≥5 A/B | `scripts/run-experiment.ts`、`scripts/loop-health.ts` | loop-health：decisions/game **≥8** 且 idle 仍 0%；A/B 判定遵守守卫 |
+
+### 先验证后定（探针，动手前跑；不做就等于赌）
+
+- **GS 车辆利润 API 在专用服务器 GS 里是否可用**：`GSVehicle.GetProfitThisYear`/
+  `GSStation.GetCargoWaiting` 可能返回 0 或 `ERR_*`（公司 0 的车辆由 AI 拥有）。
+  探针：临时 `GSAdmin.Send` 一条含这些读数的 debug 事件，跑 1 局看值。
+- **收入代理**：银行余额斜率 vs GS 收入分类账（`company_expenses` 未解析）。
+  若斜率在 400s 窗口噪声过大，先落 `company_expenses` 解析。
+- **游戏速度旋钮**：若存在可调 world/game speed（SPEC 记 0.435 game-day/s），
+  加长"局内时间"比加长墙钟更划算（A/B 成本从 ~70 分钟/轮降下来）。
+- **400s 窗口是否够组合管理**：若一轮只能建 1–2 条线，决策空间仍太窄 →
+  优先调速度/窗口，再谈 A/B。
+
+### 风险与诚实边界
+
+- **token 成本会一起涨**：记忆每决策 +26–41% 是既有代价；若新任务每决策的
+  收益增量不足，记忆仍会是净负。**验收允许结论为"仍无收益"**——只要决策空间
+  足够宽、结论可判读。
+- **执行器仍是单线程 FIFO**（§10.39.1）：组合管理意味着更多并发意图，
+  FIFO 会把它们串行化；若排队延迟成为主导变量，需先记清楚（不是先改架构）。
+- **`exc:can't execute ov…`**（calC1，16→24 字符窗口已放宽）：仍未定位；
+  若在新任务中频繁出现，先用放宽后的相位串定位再继续。
 
 ## A. 验证方法（本仓库最大的坑）
 
