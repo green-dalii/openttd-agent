@@ -339,3 +339,49 @@ describe("compareArms 必须拒绝被 confound 的结论（2026-09-12）", () =>
 		expect(c.note).toMatch(/interrupted/i);
 	});
 });
+
+describe("C-3：token/决策归一守卫（SPEC §10.43 归因教训）", () => {
+	/** arm with explicit decisions + tokens per run */
+	function armDT(id: string, n: number, injected: number, decisions: number, tokens: number): GameMetric[] {
+		return Array.from({ length: n }, (_, i) =>
+			toGameMetric(
+				meta({
+					id: `${id}${i}`,
+					outcome: { constructionDone: true, money: "100000" },
+					totals: {
+						decisions, toolCalls: 2, toolFailures: 0, events: 10,
+						usage: { input: tokens, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, totalTokens: tokens, costTotal: 0 },
+					},
+				}),
+				{ lessonsInjected: injected },
+			),
+		);
+	}
+
+	it("ArmStats 暴露 tokensPerDecision（归一到每决策）", () => {
+		const c = compareArms([
+			...armDT("a", 3, 0, 10, 40_000),   // ctl: 4k/决策
+			...armDT("b", 3, 4, 18, 72_000),   // trt: 4k/决策 —— 相同！
+		]);
+		expect(c.withoutLessons.tokensPerDecision).toBeCloseTo(4_000, 0);
+		expect(c.withLessons.tokensPerDecision).toBeCloseTo(4_000, 0);
+	});
+
+	it("归一后两臂相同 → 不得声称'记忆增加 token 成本'（meanTokens 差是行动数混杂）", () => {
+		const c = compareArms([
+			...armDT("a", 3, 0, 10, 40_000),
+			...armDT("b", 3, 4, 18, 72_000),
+		]);
+		// meanTokens 不同（40k vs 72k）但 per-decision 相同 —— note 必须指明这一点
+		expect(c.note).toMatch(/per-decision|归一/i);
+	});
+
+	it("decisions=0 的局被排除出归一（除零防护，不造 Infinity）", () => {
+		const c = compareArms([
+			...armDT("a", 2, 0, 0, 5_000),     // 躺平局：0 决策
+			...armDT("b", 3, 4, 10, 30_000),
+		]);
+		expect(Number.isFinite(c.withoutLessons.tokensPerDecision ?? 0)).toBe(true);
+		expect(c.withoutLessons.tokensPerDecision).toBeNull(); // 全躺平臂 → null
+	});
+});

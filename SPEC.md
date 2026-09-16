@@ -1756,3 +1756,47 @@ RESULT 正常（模型该局未下单——已知采样方差，与重构无关�
 **Phase B 收官**：runner.ts 从 979 → 650 行；四个模块职责单一
 （信号 / 决策 / 结算 / 纯判据），全部带单元契约测试。
 
+## 10.50 Phase C：结构化记忆 + 实验脚手架（2026-09-15，calC1–C3）
+
+### C-1 结构化路线记忆（§10.43 修法 1 落地）
+
+`src/evolution/route-facts.ts`：账本 → JSONL（`<dataDir>/evolution/route-facts.jsonl`）
+确定性转换，**不经 LLM**。reflect-run 在 finalize 时落盘（仅当有下单）；
+runner 的 lessonsProvider 组合 `makeRouteFactsProvider`（启动时快照，
+与 memory 同款稳定集语义——M3 实验独立变量）。注入行为为纯事实句
+（"route towns 9->12 was ordered at decision 2 and was built (done …)"），
+单测断言不含策略词。
+
+**跨局幂等**：同 (pair, outcome, doneDate) 去重；同 pair 不同结局共存。
+
+### C-2 躺平局降权（§10.43 修法 2 落地）
+
+反思与落盘都要求 `decisions > 0 && routeLedger 非空`：零下单局**不产出
+lesson、不写事实文件**。真机验证：calC2（躺平）→ 无 route-facts 写入。
+
+### C-3 实验脚手架 + token 归一守卫（§10.43 归因教训落地）
+
+- `metrics.ts` ArmStats 新增 `tokensPerDecision`（按决策归一，decisions=0 局
+  排除除零 → null）；meanTokens 差 >25% 而 per-decision 差 ≤15% 时，note
+  自动声明"gap 是行动量差异，不是记忆成本"。
+- `scripts/run-experiment.ts`：一条命令跑完 3+3 矩阵（ctl=--no-memory /
+  trt）+ compareArms 判定打印。
+
+### C-4 标定（3 局，/tmp/calC）
+
+| 局 | 下单 | 结果 |
+|---|---|---|
+| calC1 | 3 条（9→12, 9→17, 9→2） | 6 车/6 站，执行器 exc 异常终止 |
+| calC2 | **0（躺平）** | 无事实写入 ✓ |
+| calC3 | 1 条（9→12，road_start 未完） | 2 站，截至于 road_start |
+
+loop-health：**HEALTHY**（4.3 决策/局、空转 0%、observe 25%、触发分布
+多样）。**下单率 2/3**——与 §10.40 的 2/5 相比回升，样本仍小，A/B 设计
+继续把它当主噪声源。
+
+**观察**：calC1 出现执行器异常 `exc:can't execute ov`（第 4 条线 9→2 施工期
+崩溃）——新失败模式，未定位，留待 NEXT-6。
+
+**诚实边界**：route-facts 注入的真机观测仅到"提供者行为被单测锁定"——
+标定 3 局启动时事实库为空（首局之前无历史），非空注入的实机观测
+将在下次 A/B 的 treatment 臂出现。

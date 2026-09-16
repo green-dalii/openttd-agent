@@ -97,3 +97,9 @@ export function formatRouteFactsForInjection(facts: RouteFact[]): string[] {
 			: `route ${pair} was ordered at decision ${f.decision} but no completion observed`;
 	});
 }
+
+/** 启动时快照的事实行 provider（闭包缓存；与 loadMemory 同款稳定性语义）。 */
+export function makeRouteFactsProvider(dataDir: string): () => string[] {
+	const facts = loadRouteFacts(dataDir);
+	return () => formatRouteFactsForInjection(facts);
+}

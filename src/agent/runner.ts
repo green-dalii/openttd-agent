@@ -48,6 +48,7 @@ import { createLlmApi } from "./llm-api.js";
 import { WebServer } from "../web/server.js";
 import { pruningTransformContext } from "./context.js";
 import { loadMemory, makeLessonProvider, memoryCounts, type LoadedMemory } from "../evolution/memory.js";
+import { makeRouteFactsProvider } from "../evolution/route-facts.js";
 import { RouteLedger } from "./route-ledger.js";
 import { makeSignalHub, type SignalHub } from "./signal-hub.js";
 import { createDecisionLoop } from "./decision-loop.js";
@@ -508,6 +509,7 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 	// actually has confirmed content (see docs/EVOLUTION.md §3).
 	const memory = loadMemory(cfg.dataDir, { inject: opts.injectMemory !== false });
 	const memoryProvider = makeLessonProvider(memory);
+	const routeFactsProvider = makeRouteFactsProvider(cfg.dataDir);
 	const injected = memoryCounts(memory);
 	// Publish it for the dashboard (per-game truth: what THIS game was told).
 	runMemory = memory;
@@ -555,7 +557,10 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 		// is the independent variable of the M3 "with/without lessons" experiment.
 		transformContext: pruningTransformContext({
 			keepRecent: 40,
-			lessonsProvider: memoryProvider,
+			// C-1: route facts from PREVIOUS games join the injected context
+			// (snapshot taken once at boot - same stable-set semantics as memory,
+			// which is the M3 experiment's independent variable).
+			lessonsProvider: () => [...memoryProvider(), ...routeFactsProvider()],
 		}),
 		onActionResult: (tool, r) => {
 			console.log(`[agent] tool ${tool}: ok=${r.ok} ${r.summary}`);

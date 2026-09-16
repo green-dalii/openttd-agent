@@ -9,6 +9,16 @@
 
 ## [Unreleased]
 
+### Added（Phase C：结构化记忆 + 实验脚手架）
+
+- `src/evolution/route-facts.ts` —— 路线事实确定性入库/注入（不经 LLM）：
+  reflect-run 局终落盘、`makeRouteFactsProvider` 启动快照注入、幂等去重、
+  注入句断言无策略词。
+- **躺平局降权**：零下单局不产出 lesson、不写事实（反思噪声源治理）。
+- `scripts/run-experiment.ts` —— 一条命令跑 A/B 矩阵 + 判定。
+- `metrics.ts` ArmStats.`tokensPerDecision` + note 归一守卫
+  （meanTokens 差由行动量混杂时不许声称"记忆增加 token 成本"）。
+
 ### Added（RL 反馈闭环 + 类型化信号通道）
 
 - `src/agent/route-ledger.ts` —— 决策→结果账本：GS ack（job/townA/townB + 决策号）

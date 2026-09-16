@@ -166,6 +166,13 @@ export interface ArmStats {
 	count: number;
 	meanMoney: number | null;
 	meanTokens: number | null;
+	/**
+	 * Tokens per DECISION (C-3, SPEC §10.43): raw meanTokens is confounded by
+	 * how much the arm happened to ACT - a run that ordered 4 routes costs more
+	 * tokens than one that ordered 0, with or without memory. Normalize before
+	 * comparing "memory costs tokens".
+	 */
+	tokensPerDecision: number | null;
 	builtRate: number | null;
 }
 
@@ -193,10 +200,14 @@ function mean(values: number[]): number | null {
 
 function armStats(list: GameMetric[]): ArmStats {
 	const known = list.filter((m) => m.constructionDone !== null);
+	const acting = list.filter((m) => m.decisions > 0);
 	return {
 		count: list.length,
 		meanMoney: mean(list.map((m) => m.money)),
 		meanTokens: mean(list.map((m) => m.totalTokens)),
+		tokensPerDecision: acting.length
+			? mean(acting.map((m) => m.totalTokens / m.decisions))
+			: null,
 		builtRate: known.length
 			? known.filter((m) => m.constructionDone === true).length / known.length
 			: null,
@@ -291,7 +302,26 @@ export function compareArms(metrics: GameMetric[]): ArmComparison {
 	// else the note says. An earlier version let a "need 3 more runs" note replace
 	// it, which re-hid the very thing the disclosure exists to reveal.
 	const excluded = parts.length ? ` Excluded ${parts.join(" and ")}.` : "";
-	const body = note ? `${note}${excluded}` : `${compared}.${excluded}`;
+	// Token attribution guard (C-3, SPEC §10.43): raw meanTokens差 can be pure
+	// action-count confounding. When per-decision costs match, say so, so a
+	// "memory doubled tokens" claim cannot rest on the arms acting differently.
+	let tokenNote = "";
+	if (
+		a.tokensPerDecision !== null && b.tokensPerDecision !== null &&
+		a.meanTokens !== null && b.meanTokens !== null
+	) {
+		const perDecisionGap = Math.abs(a.tokensPerDecision - b.tokensPerDecision) /
+			Math.max(a.tokensPerDecision, b.tokensPerDecision);
+		const meanGap = Math.abs(a.meanTokens - b.meanTokens) / Math.max(a.meanTokens, b.meanTokens);
+		if (meanGap > 0.25 && perDecisionGap <= 0.15) {
+			tokenNote =
+				` Token means differ (${Math.round(a.meanTokens)} vs ${Math.round(b.meanTokens)}) ` +
+				`but per-decision cost is the same (${Math.round(a.tokensPerDecision)} vs ` +
+				`${Math.round(b.tokensPerDecision)}) - the gap is how much each arm ACTED, ` +
+				`not a memory cost.`;
+		}
+	}
+	const body = note ? `${note}${excluded}` : `${compared}.${excluded}${tokenNote}`;
 
 	// A confounded comparison leads with the warning, but still discloses
 	// exclusions: "+6342" must never be readable without the sentence that says

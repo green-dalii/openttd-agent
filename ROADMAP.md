@@ -67,7 +67,7 @@
 - 决策→结果账本 → **已接入反思**（§10.41，cal8 反思写出关于选择的 lesson）
 - FIFO 队列 + 契约文本 + err 通道 → **已真机验证**（cal6/cal7 双线路闭环）
 
-### 🔴 当前：Phase C（记忆质量 + 实验脚手架）
+### ✅ Phase C 收官（2026-09-15，SPEC §10.50）——C-1/C-2/C-3 代码全绿 + calC 标定 HEALTHY；下单率 2/3
 
 > 依据：§10.43 审计——记忆无收益的三层原因（lesson 无含金量 / 任务太浅 /
 > 失败局噪声）。C-1/C-2 直接治第一层与第三层。
@@ -92,10 +92,16 @@ OPENTTD_DATA_DIR=/tmp/cal<N> pnpm run cli --agent --seed 7 --no-memory --demo-se
 grep -E "RESULT:" /tmp/cal<N>.log
 ```
 
+### 🔴 当前：M3 A/B 重跑（新记忆格式首次上桌）
+
+- 用 C-1/C-2 的结构化记忆重跑 3+3（`scripts/run-experiment.ts` 一条命令）。
+  treatment 臂将首次注入**非空路线事实**。执行器 `exc:can't execute ov`
+  异常（calC1）待查。
+
 ### 🟠 之后（原序号保留，前置条件未变）
 
-- **NEXT-2 扩决策空间**：C-4 标定完成后开（多线路收益递增/重复博弈——
-  给记忆和策略出真题）。
+- **NEXT-2 扩决策空间**：A/B 后开（多线路收益递增/重复博弈——给记忆和
+  策略出真题）。
 - **NEXT-3 地图大小旋钮 / NEXT-4 GS-only 架构 / NEXT-5 M4 打磨**：次序不变。
 - **NEXT-6 已知未收口项（合并两份清单，非阻塞）**：
   - pause 探针（§10.28 单向暂停是否因 pause_on_join=false 已消失）

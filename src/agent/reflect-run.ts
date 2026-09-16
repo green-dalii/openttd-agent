@@ -8,6 +8,7 @@
  * 禁止: 决策逻辑、信号处理、调度——这些在 decision-loop / signal-hub。
  */
 import { buildReflectionEvidence } from "../evolution/reflect.js";
+import { routeFactsFromLedger, saveRouteFacts } from "../evolution/route-facts.js";
 import { runReflection } from "../evolution/reflection-run.js";
 import { buildStageSummary } from "./session-store.js";
 import { totalsFromTelemetry, formatGameDate } from "./runner-helpers.js";
@@ -79,7 +80,15 @@ export async function runFinalizeAndReflect(args: FinalizeAndReflectArgs): Promi
 		},
 	});
 
-	if (finalTelemetry.totals.decisions > 0) {
+	// C-2 (SPEC 10.43): a run that never ordered a route has no learnable
+	// strategy - its "lessons" are noise injected as experience. Reflection and
+	// fact-persisting both require at least one order (C-1 saves facts only for
+	// real orders; lie-flat runs leave no route-facts.jsonl).
+	const orderedRoutes = routeLedger.all().length;
+	if (finalTelemetry.totals.decisions > 0 && orderedRoutes > 0) {
+		// C-1: persist route facts deterministically - the ledger already holds
+		// the precise data; an LLM summarization pass would prose-ify it away.
+		saveRouteFacts(cfg.dataDir, routeFactsFromLedger(routeLedger.all()));
 		try {
 			const report = await runReflection({
 				complete: completeOnce,
