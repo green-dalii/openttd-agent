@@ -497,3 +497,36 @@ describe("臂划分：以实验分配为准（N2-5 缺陷修复）", () => {
 		expect(cmp.withLessons.count).toBe(1); // lessons>0 → treatment（旧规则）
 	});
 });
+
+/**
+ * N2-4b：**吞吐量**（deliveredCargo）作为运营结果指标。
+ *
+ * 为什么不是 income：admin 协议里 `income` 是 net（含负的费用，见
+ * payload-parsers.ts 注释），施工期必然为负——它继承了 money 的混杂。
+ * `deliveredCargo` 是"运了多少货/客"，**不受施工花费与贷款影响**：
+ * 有线路真的在运转就有吞吐量，没建线就是 0——这是"这件事有没有做事"的
+ * 直接度量，也是记忆能影响的量。
+ */
+describe("N2-4b 吞吐量指标", () => {
+	const run = (delivered: number | null) => {
+		const m = toGameMetric(meta({ outcome: { constructionDone: true, money: "1", stations: 4 } }));
+		return { ...m, delivered };
+	};
+	const statsOf = (runs: ReturnType<typeof run>[]) => compareArms(runs).withoutLessons;
+
+	it("meanDelivered 仅统计报告过的局（缺读数不进均值）", () => {
+		const st = statsOf([run(120), run(null), run(80)]);
+		expect(st.meanDelivered).toBe(100);
+		expect(st.deliveredReported).toBe(2);
+	});
+
+	it("全部缺失 → null（不是 0：0 会被读成'一票没运'）", () => {
+		expect(statsOf([run(null)]).meanDelivered).toBeNull();
+	});
+
+	it("0 是合法读数（建了线但没运货），与缺失区分", () => {
+		const st = statsOf([run(0), run(0)]);
+		expect(st.meanDelivered).toBe(0);
+		expect(st.deliveredReported).toBe(2);
+	});
+});

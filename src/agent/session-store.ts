@@ -70,6 +70,8 @@ export interface SessionMeta {
 		constructionDone?: boolean;
 		/** Company income at finalize (N2-4); absent when the packet never arrived. */
 		income?: number;
+		/** Cargo/passengers delivered (N2-4b) - the least confounded outcome. */
+		delivered?: number;
 		phase?: string;
 		vehicles?: number;
 		stations?: number;

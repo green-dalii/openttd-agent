@@ -39,6 +39,8 @@ export interface SessionMetaLike {
 		money?: string | number;
 		/** Company income (N2-4); absent when the packet never arrived. */
 		income?: number;
+		/** Cargo/passengers delivered (N2-4b); absent when never reported. */
+		delivered?: number;
 		vehicles?: number;
 		stations?: number;
 	};
@@ -70,6 +72,14 @@ export interface GameMetric {
 	 * money), so income is the metric that says whether the lines earn anything.
 	 */
 	income: number | null;
+	/**
+	 * Cargo delivered (N2-4b). The admin packet's `income` is NET of expenses, so
+	 * during construction it is always negative and inherits money's confound;
+	 * deliveredCargo measures whether anything actually moved - unaffected by
+	 * building costs and loans, and 0 is a legitimate reading (built, delivered
+	 * nothing) distinct from a missing one.
+	 */
+	delivered: number | null;
 	vehicles: number;
 	stations: number;
 	decisions: number;
@@ -140,6 +150,10 @@ export function toGameMetric(
 			o && o.constructionDone === true ? true : o && o.constructionDone === false ? false : null,
 		money: num(o && o.money),
 		arm: meta.arm === "treatment" || meta.arm === "control" ? meta.arm : undefined,
+		delivered:
+			o && o.delivered !== undefined && o.delivered !== null && Number.isFinite(Number(o.delivered))
+				? Number(o.delivered)
+				: null,
 		income:
 			o && o.income !== undefined && o.income !== null && Number.isFinite(Number(o.income))
 				? Number(o.income)
@@ -224,6 +238,9 @@ export interface ArmStats {
 	meanIncome: number | null;
 	/** How many runs reported income (so a mean over 1 of 5 is visible). */
 	incomeReported: number;
+	/** Mean cargo delivered (N2-4b) - the least confounded outcome we have. */
+	meanDelivered: number | null;
+	deliveredReported: number;
 }
 
 export interface ArmComparison {
@@ -237,6 +254,8 @@ export interface ArmComparison {
 	 * money is spending-dominated, income is what the lines earn.
 	 */
 	incomeDelta: number | null;
+	/** Right minus left of mean delivered cargo (N2-4b). */
+	deliveredDelta: number | null;
 	/**
 	 * Treatment runs that received NO memory at all (N2-5). These are assigned to
 	 * treatment but the intervention never arrived, so they dilute the arm and
@@ -268,6 +287,9 @@ function armStats(list: GameMetric[]): ArmStats {
 	const incomeValues = list
 		.map((m) => m.income)
 		.filter((v): v is number => typeof v === "number" && Number.isFinite(v));
+	const deliveredValues = list
+		.map((m) => m.delivered)
+		.filter((v): v is number => typeof v === "number" && Number.isFinite(v));
 	return {
 		count: list.length,
 		meanMoney: mean(list.map((m) => m.money)),
@@ -281,6 +303,8 @@ function armStats(list: GameMetric[]): ArmStats {
 		meanStations: mean(list.map((m) => m.stations)),
 		meanIncome: incomeValues.length ? mean(incomeValues) : null,
 		incomeReported: incomeValues.length,
+		meanDelivered: deliveredValues.length ? mean(deliveredValues) : null,
+		deliveredReported: deliveredValues.length,
 	};
 }
 
@@ -337,6 +361,10 @@ export function compareArms(metrics: GameMetric[]): ArmComparison {
 		a.meanMoney === null || b.meanMoney === null ? null : a.meanMoney - b.meanMoney;
 	const incomeDelta =
 		a.meanIncome === null || b.meanIncome === null ? null : a.meanIncome - b.meanIncome;
+	const deliveredDelta =
+		a.meanDelivered === null || b.meanDelivered === null
+			? null
+			: a.meanDelivered - b.meanDelivered;
 
 	// Money is only comparable if both arms got equally far. A run that never
 	// finished construction has spent nothing on vehicles or route, so its money
@@ -431,6 +459,7 @@ export function compareArms(metrics: GameMetric[]): ArmComparison {
 		withoutLessons: b,
 		moneyDelta,
 		incomeDelta,
+		deliveredDelta,
 		treatmentWithoutInjection: withLessons.filter((m) => !injectedSomething(m)).length,
 		confounded,
 		conclusive: enough && !confounded,

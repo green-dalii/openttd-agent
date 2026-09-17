@@ -91,6 +91,13 @@ export async function runFinalizeAndReflect(args: FinalizeAndReflectArgs): Promi
 			// so "did the lines earn" needs income, and a missing reading stays
 			// missing rather than becoming 0.
 			income: c0?.economy && Number.isFinite(Number(c0.economy.income)) ? Number(c0.economy.income) : undefined,
+			// N2-4b: the least confounded outcome - cargo actually moved. `income`
+			// is net of expenses, so every construction run is negative by
+			// construction; delivered cargo is not.
+			delivered:
+				c0?.economy && c0.economy.deliveredCargo !== undefined
+					? Number(c0.economy.deliveredCargo)
+					: undefined,
 			totalEvents: snap.totalEvents,
 		},
 	});

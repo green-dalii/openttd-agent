@@ -35,7 +35,8 @@ const fmt = (label: string, a: typeof arms.withLessons) =>
 	console.log(
 		`${label.padEnd(14)} n=${a.count}  money=${a.meanMoney ?? "—"}  tokens=${a.meanTokens ?? "—"}  ` +
 			`built=${a.builtRate ?? "—"}  stations=${a.meanStations?.toFixed(2) ?? "—"}  ` +
-			`income=${a.meanIncome?.toFixed(0) ?? "—"}(n=${a.incomeReported})`,
+			`income=${a.meanIncome?.toFixed(0) ?? "—"}(n=${a.incomeReported})  ` +
+			`delivered=${a.meanDelivered?.toFixed(0) ?? "—"}(n=${a.deliveredReported})`,
 	);
 fmt("with lessons", arms.withLessons);
 fmt("without", arms.withoutLessons);
@@ -47,6 +48,7 @@ if (arms.treatmentWithoutInjection > 0) {
 }
 console.log(`money delta   : ${arms.moneyDelta ?? "—"}`);
 console.log(`income delta  : ${arms.incomeDelta?.toFixed(0) ?? "—"}`);
+console.log(`delivered delta: ${arms.deliveredDelta?.toFixed(0) ?? "—"}  (least confounded outcome)`);
 console.log("");
 console.log("Reminder: rules live in src/evolution/metrics.ts (compareArms).");
 console.log("Interrupted runs are excluded by design - their outcome is the");

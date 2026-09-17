@@ -9,6 +9,14 @@
 
 ## [Unreleased]
 
+### Added（N2-4b 吞吐量指标，2026-09-17）
+
+- `GameMetric.delivered`（`deliveredCargo`，早已解析但从未记录）、
+  `ArmStats.meanDelivered/deliveredReported`、`ArmComparison.deliveredDelta`；
+  verdict 标注 "least confounded outcome"。
+- 为什么换：admin 的 `income` 是 **net（含负费用）**，施工期必然为负、继承 money 的
+  混杂（见 SPEC §10.57 的实测分析）。
+
 ### Fixed（A/B 臂划分：以分配为准，2026-09-17）
 
 - `SessionMeta.arm` / `GameMetric.arm`：arm 由 runner 在**分配时**记录
