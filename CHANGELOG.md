@@ -9,6 +9,13 @@
 
 ## [Unreleased]
 
+### Added（v02 oracle baseline probe，2026-09-17）
+
+- `pnpm run cli --v02 --add-vehicles N`：v02 在 done 后自动请求 N 辆车，
+  作为"已知好的程序策略"对照基线。
+- v02 RESULT 读 deliveredCargo 并写一行 metrics.jsonl（`arm=control`），
+  让 oracle 与 agent 路径在 `compareArms` 里可比。
+
 ### Added（N2-4b 吞吐量指标，2026-09-17）
 
 - `GameMetric.delivered`（`deliveredCargo`，早已解析但从未记录）、

@@ -2106,3 +2106,34 @@ admin 协议里**早就解析**了 `deliveredCargo`（`payload-parsers.ts:92`）
    则目标函数本身不成立，任何 A/B 都无意义。
 2. 之后才谈记忆效应——用 delivered（而非 money/income）做主判据。
 3. 窗口/方差：本轮 10 局建成 6 局（500s），比 400s 轮的 2/10 好，但仍需与建成率同读。
+
+## 10.58 N2-5 oracle 探测：任务梯度成立（2026-09-17）
+
+### 结论：**框架能运送货物**，任务有梯度
+
+新增 `pnpm run cli --v02 --add-vehicles N`：v02 路径在 done 后发 add_vehicles 满车，
+**不靠 agent 决策**——是"已知好的程序策略"的对照基线。同时 v02 RESULT 时读
+deliveredCargo 并写一行 `metrics.jsonl`（`arm=control`），与 agent 路径同形。
+
+### 真机对照（500s，v02 + add_vehicles=20）
+
+| dataDir | seed | delivered | income | money | stations | vehicles |
+|---|---|---|---|---|---|---|
+| /tmp/baseline1 | 7 | **20** | −66,504 | 233,496 | 2 | 3 |
+| /tmp/baseline2 | 11 | **31** | −43,127 | 256,873 | 2 | 3 |
+
+**两个 oracle 局都 delivered > 0**——这是"任务是否可解"的独立答案：
+**框架能运送货物；agent 局的 delivered 量级可比**。
+
+### 但**公司仍亏钱**（−30k ~ −66k/局）
+
+即使 baseline 满车 6 辆、delivered = 31、cash delta = −30k——**收入不足以覆盖
+贷款利息 + 运行成本**（初始 loan 300k）。这与 §10.57 的诊断一致：
+**问题在地图/参数（贷款、初始现金、利率、地图大小）**，不在框架、也不在 agent 智能。
+
+### 下一步（数据推导）
+
+- 既然 oracle 稳定 delivered ∈ [20, 31]，那么 agent 局的 delivered 差异**就能被测量**。
+- 重跑一组 **agent n=3/臂、500s**（用含 N2-4b delivered 的当前代码）→ 比对
+  with-lessons vs without-lessons 的 delivered。**delivered 是首个"有梯度"的目标量**。
+- money/income 仍降为次级参考——它们不反映策略。

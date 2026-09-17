@@ -32,6 +32,8 @@ import { applyLlmSettingsFile } from "../agent/llm-settings.js";
 
 interface CliArgs {
 	mode: "probe" | "dry-run" | "watch" | "v02" | "agent" | "serve" | "version" | "help";
+	/** v02 baseline probe: after construction, request this many vehicles on the demo route. */
+	addVehicles?: number;
 	year?: number;
 	seed?: number;
 	timeoutMs: number;
@@ -50,7 +52,7 @@ interface CliArgs {
 	skipPreflight?: boolean;
 }
 
-function parseArgs(argv: string[]): CliArgs {
+export function parseArgs(argv: string[]): CliArgs {
 	let mode: CliArgs["mode"] = "help";
 	let year: number | undefined;
 	let seed: number | undefined;
@@ -58,6 +60,7 @@ function parseArgs(argv: string[]): CliArgs {
 	let aiName: string | undefined;
 	let webPort: number | undefined;
 	let demoSeconds: number | undefined;
+	let addVehicles: number | undefined;
 	let llmBaseUrl: string | undefined;
 	let llmApiKey: string | undefined;
 	let llmModel: string | undefined;
@@ -82,6 +85,9 @@ function parseArgs(argv: string[]): CliArgs {
 				break;
 			case "--agent":
 				mode = "agent";
+				break;
+			case "--add-vehicles":
+				addVehicles = parseIntNum(argv[++i], "--add-vehicles");
 				break;
 			case "--demo-seconds":
 				demoSeconds = parseIntNum(argv[++i], "--demo-seconds");
@@ -143,7 +149,7 @@ function parseArgs(argv: string[]): CliArgs {
 		// compile: `args.foo` is simply undefined, so the flag silently does
 		// nothing while the help text still advertises it. Fourth instance of
 		// "parsed but dropped" found on 2026-09-12 (MEMORY.md A5).
-		mode, year, seed, timeoutMs, aiName, webPort, demoSeconds,
+		mode, year, seed, timeoutMs, aiName, webPort, demoSeconds, addVehicles,
 		llmBaseUrl, llmApiKey, llmModel, llmApi, offlineDemo, skipPreflight,
 		injectMemory,
 	};
@@ -278,7 +284,7 @@ async function main(): Promise<number> {
 	}
 	if (args.mode === "v02") {
 		try {
-			return await runV02(cfg, { demoSeconds: args.demoSeconds });
+			return await runV02(cfg, { demoSeconds: args.demoSeconds, addVehicles: args.addVehicles });
 		} catch (e) {
 			console.error("[v02] ERROR:", e instanceof Error ? e.message : e);
 			return 1;

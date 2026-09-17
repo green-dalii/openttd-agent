@@ -24,11 +24,18 @@ import {
 	BRIDGE_GS_NAME,
 	EXECUTOR_AI_NAME,
 } from "./squirrel-deploy.js";
+import { join } from "node:path";
 import { stringifyJson } from "../util/json.js";
 
 export interface V02Options {
 	/** Seconds to run the demo before auto-exit. 0 = until Ctrl-C. */
 	demoSeconds?: number;
+	/**
+	 * Baseline-probe knob (2026-09-17, SPEC §10.57): after construction finishes,
+	 * request this many vehicles on the demo route. Used to verify a known-good
+	 * policy can produce `deliveredCargo > 0` without depending on the agent.
+	 */
+	addVehicles?: number;
 }
 
 export async function runV02(cfg: Config, opts: V02Options = {}): Promise<number> {
@@ -199,6 +206,20 @@ export async function runV02(cfg: Config, opts: V02Options = {}): Promise<number
 			stations = st?.stats?.stations ?? -1;
 		}
 		console.log(`[v02] S4 live route: vehicles=${vehicles} stations=${stations}`);
+
+		if (opts.addVehicles !== undefined && opts.addVehicles > 0) {
+			console.log(`[v02] baseline probe: requesting ${opts.addVehicles} vehicles on job=101`);
+			client.gameScript(JSON.stringify({ cmd: "add_vehicles", company: 0, job: 101, count: opts.addVehicles }));
+			// Wait for the ack so the executor's mailbox saw the request.
+			const vehAckDeadline = Date.now() + 8_000;
+			// Wait long enough for the executor's mailbox to pick up the request;
+			// it does not report back, so we just let a short window pass.
+			while (Date.now() < vehAckDeadline && !stopRequested) {
+				client?.poll(AdminUpdateType.CompanyInfo, ALL_COMPANIES);
+				await sleep(250);
+			}
+			console.log(`[v02] baseline probe: request delivered (executor applies fleet changes)`);
+		}
 		// Economy snapshot for the report.
 		let money = -1n;
 		const econDeadline = Date.now() + 8_000;
@@ -283,9 +304,58 @@ export async function runV02(cfg: Config, opts: V02Options = {}): Promise<number
 		console.log(`[v02] S5 WARN: too few economy snapshots to judge profitability`);
 	}
 
+
 	// report
 	const ackFinal: Record<string, unknown> | null = routeAck as Record<string, unknown> | null;
 	console.log(`[v02] RESULT: gsStates=${gsStates} routeAck=${ackFinal !== null ? "yes" : "no"} executorPhase="${executorPhase}"`);
+
+	// N2-4b oracle probe：v02 也读 deliveredCargo 并写 metrics.jsonl 一行
+	// （arm=control 的"已知好的程序策略"对照，与 agent 路径可比）。
+	let deliveredCargo = -1;
+	const delDeadline = Date.now() + 6_000;
+	while (Date.now() < delDeadline && deliveredCargo < 0) {
+		client?.poll(AdminUpdateType.CompanyEconomy, 0);
+		await sleep(400);
+		const st2 = world.snapshot().companies.get(0);
+		deliveredCargo = st2?.economy?.deliveredCargo ?? -1;
+	}
+	console.log(`[v02] deliveredCargo=${deliveredCargo}`);
+	const stEcon = world.snapshot().companies.get(0);
+	const armMeta = {
+		id: `v02-${Date.now()}-seed${cfg.seed ?? 0}`,
+		seed: cfg.seed ?? 0,
+		mode: "v02",
+		status: ackFinal !== null ? "completed" : "aborted",
+		startedAt: Date.now() - 500_000,
+		durationMs: 500_000,
+		appVersion: (cfg as unknown as { appVersion?: string }).appVersion ?? "",
+		llmKind: "faux",
+		llmModel: "",
+		constructionDone: executorPhase.startsWith("EX done"),
+		money: stEcon?.economy ? Number(stEcon.economy.money) : 0,
+		income: stEcon?.economy ? Number(stEcon.economy.income) : 0,
+		delivered: deliveredCargo >= 0 ? deliveredCargo : null,
+		vehicles: stEcon?.stats?.vehicles ?? 0,
+		stations: stEcon?.stats?.stations ?? 0,
+		decisions: 0,
+		toolCalls: 0,
+		toolFailures: 0,
+		totalTokens: 0,
+		costTotal: 0,
+		arm: "control",
+		memory: { lessonsInjected: 0, strategiesInjected: 0, routeFactsInjected: 0 },
+	};
+	try {
+		const { writeFileSync, mkdirSync } = await import("node:fs");
+		const evoDir = cfg.dataDir ?? process.env.OPENTTD_DATA_DIR;
+		if (evoDir) {
+			mkdirSync(join(evoDir, "evolution"), { recursive: true });
+			writeFileSync(join(evoDir, "evolution", "metrics.jsonl"), JSON.stringify(armMeta) + "\n", { flag: "a" });
+		}
+	} catch (e) {
+		console.warn(`[v02] metrics.jsonl write failed: ${String(e)}`);
+	}
+
 	await teardown();
 	return ackFinal !== null && executorPhase.length > 0 ? 0 : 1;
 
