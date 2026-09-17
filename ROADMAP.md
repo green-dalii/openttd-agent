@@ -53,9 +53,11 @@
 > Dashboard 后置、先单线路跑通、渐进式重构+每阶段对齐）。
 > **每阶段收尾**：CHANGELOG / ROADMAP / MEMORY / SPEC 一次性同步（AGENTS §7 DoD）。
 
-> **接手须知（2026-09-15 更新）**
-> - `pnpm run gate` 全绿（842 passed / 9 skipped）。
-> - **开工前必读**：`MEMORY.md` §0（方向）+ `SPEC.md` §10.34–§10.49（最近结论）。
+> **接手须知（2026-09-17 更新）**
+> - 门禁：`pnpm run gate` 必须全绿（**局数不写死**——写死必然过期）。
+> - **开工前必读**：`MEMORY.md` §0（方向）+ §0b（NEXT-2 方案/状态）+
+>   `SPEC.md` §10.53–§10.61（本轮全部实测结论）。
+> - **真机实验期间不要跑 gate**（preflight 断言端口空闲 → 假红；MEMORY D5）。
 > - **无 remote**：所有提交都是本地的，不要 push。
 > - **subagent 不可用**（缺 `@earendil-works/pi-server`）——所有活都内联做。
 
@@ -86,7 +88,7 @@
 ```bash
 pkill -f "OpenTTD.app/Contents/MacOS/openttd"; sleep 2
 rm -rf /tmp/cal<N> && mkdir -p /tmp/cal<N> \
-  && cp /tmp/openttd-agent-data/credentials.json /tmp/openttd-agent-data/llm.json /tmp/cal<N>/
+  && cp <provider-dir>/credentials.json <provider-dir>/llm.json /tmp/cal<N>/   # 凭证目录自定
 OPENTTD_DATA_DIR=/tmp/cal<N> pnpm run cli --agent --seed 7 --no-memory --demo-seconds 200 \
   > /tmp/cal<N>.log 2>&1
 grep -E "RESULT:" /tmp/cal<N>.log
@@ -101,32 +103,52 @@ grep -E "RESULT:" /tmp/cal<N>.log
 - **下一步 = NEXT-2（扩决策空间）**：多线路/收益递增/重复博弈，给记忆赚回成本的
   机会——这是三轮数据推导出的优先级，不是拍脑袋。
 
-### 🟡 待决策：决策期间是否冻结世界（2026-09-17，证据 SPEC §10.59）
+### 🔴 当前：NEXT-2 收尾 —— memory A/B，判据用 **delivered**（2026-09-17）
 
-原设计（SPEC §1.1 step 2）决策前 `pause`、决策后 `unpause`，2026-09-12 因"暂停不可
-恢复"废除，改为"快照 + 增量汇报"。**2026-09-17 实测推翻该归因**：`pause` → `getdate`
-冻结；`unpause` → 日期恢复推进（真因更可能是 `pause_on_join=true` 且无客户端）。
+**为什么是这一步**：三轮 M3（§10.52）判"记忆在此任务上无收益"，但当时的判据
+（money/income/建成率）**全部被施工花费与窗口截断污染**。本轮已把判据换成干净的量：
 
-| 方案 | 好处 | 代价 |
-|---|---|---|
-| 现状：不暂停 | 墙钟不浪费；世界变化被如实汇报 | 动作落在模型没见过的状态上（实录：`inspect_route` 报 0 辆车时上下文已是 6 辆）|
-| 冻结：pause→决策→unpause（rconAwait 确认 + 看门狗重试）| 动作落在模型真正见过的世界上 | 思考期间游戏不推进；`--demo-seconds` 与游戏天数脱钩 |
+- `deliveredCargo`（N2-4b，§10.57）：不受施工花费与贷款影响，`0` 与"缺读数"区分；
+- **oracle 基线**（§10.58）：程序确定策略 delivered = **20 / 31** → **任务有梯度**；
+- 决策空间已被行使（§10.55）：decisions/game **8.0**、模型**首次用 `add_vehicles`**。
 
-**已执行（2026-09-17，SPEC §10.61）**：冻结机制核实通过，但 frozen 臂 delivered
-0/5 vs unfrozen 2/5，且少走约 10% 游戏天数（暂停时施工也停）。
-→ **默认不冻结**；若要重测决策质量，必须**按游戏时间对齐**并用 delivered/游戏天数
-归一化。
+**因此现在可以问一个有意义的问题**：注入记忆（含线路经济事实，§10.53–§10.54）
+能否提高 delivered？
+
+```bash
+# 两臂各 5 局，500s，seed 7；treatment 注入记忆（默认），control 加 --no-memory
+rm -rf /tmp/n2ab3 && mkdir -p /tmp/n2ab3 \
+  && cp <provider-dir>/credentials.json <provider-dir>/llm.json /tmp/n2ab3/
+pnpm exec tsx scripts/run-experiment.ts --dir /tmp/n2ab3 --n 5 --demo-seconds 500 --seed 7
+# 判据：delivered delta（主）+ built-rate 守卫；money/income 只看不判
+```
+
+**验收**：`delivered delta` 与守卫结论（`conclusive`）如实记录进 SPEC；无论正负
+**都必须报告**——这一轮的价值在于判据终于可信。
+
+**前置已满足**：`--vary memory`（默认）· `arm` 分配时记录（§10.56）· 冻结默认关（§10.61）。
+
+### ✅ 冻结问题已判定：默认不冻结（2026-09-17，SPEC §10.59–§10.61）
+
+- **旧结论被推翻**（§10.59）：`pause`/`unpause` 双向有效（实测 `getdate` 冻结→恢复），
+  "暂停单向"的真因是 `pause_on_join=true` 且无客户端。
+- **可选冻结已实现并验证**（§10.60）：`--freeze`，暂停/恢复都要回执确认 +
+  `finally` 恢复 + 120s 看门狗；真机 5/5 局有 3–8 次确认暂停、0 恢复失败。
+- **A/B 判定**（§10.61）：frozen delivered **0/5** vs unfrozen **2/5（15、13）**，
+  建成率 0.20 vs 0.60，且冻结局**少走约 10% 游戏天数**——暂停时脚本 tick 停，
+  施工在模型思考期间无法推进，而施工墙钟正是本任务瓶颈。
+  → **默认不冻结**；若重测决策质量，必须按**游戏时间**对齐 + `delivered/游戏天数` 归一化。
 
 ### 🟠 之后（原序号保留，前置条件未变）
 
-- **NEXT-2 扩决策空间**：A/B 后开（多线路收益递增/重复博弈——给记忆和
-  策略出真题）。
+- **NEXT-2 扩决策空间** → **已在做，见上「当前」**（多线路/收益递增/重复博弈；
+  线路经济信号与组合管理动作已落地）。
 - **NEXT-3 地图大小旋钮 / NEXT-4 GS-only 架构 / NEXT-5 M4 打磨**：次序不变。
 - **NEXT-6 已知未收口项（合并两份清单，非阻塞）**：
   - ~~pause 探针~~ → **2026-09-17 实测完成**（§10.59：双向有效，原因见上节）
   - process-manager flaky 测试（spawn 时序 812ms 窗口）
   - GS 事件 detail 字段（§10.45 妥协，Squirrel 表赋值怪癖）
-  - v02-runner 删除（310 行死代码，Phase D）
+  - v02-runner 删除（**380 行**，2026-09-17 实测；Phase D 卫生项）
   - alpine-templates 静态守卫升级（页面引用不存在的元素 id，B7 同类）
   - 预提交孤儿符号误报规则写进配置（25 个/次刷屏淹没真孤儿）
   - Tom Select 重启前按 FRONTEND-DEPENDENCIES-AUDIT 第 3 步实测对比
@@ -136,7 +158,7 @@ grep -E "RESULT:" /tmp/cal<N>.log
 | 事 | 一句话 | 位置 |
 |---|---|---|
 | 执行器跑通完整公交线 | 2 站 / 3 车 / 63 段路，车在跑 | SPEC §10.29 |
-| 控制台 `pause` 是单向的 | **"执行器假死"的最终根因** | SPEC §10.28 |
+| ~~控制台 `pause` 是单向的~~ | **2026-09-17 实测推翻**（双向有效；真因是 `pause_on_join=true`）| SPEC §10.28 更正在 §10.59 |
 | 心跳从来没响过 | 判据用了脚本 tick，执行器一直没有存活信号 | SPEC §10.27 |
 | `--demo-seconds` 从来没用 | 决策循环无截止检查 | SPEC §10.30 |
 | `compareArms` 曾会把 bug 算成结论 | 未排除 `interrupted` 局 | 见 `CHANGELOG` |

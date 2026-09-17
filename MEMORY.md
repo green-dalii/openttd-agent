@@ -31,9 +31,9 @@
 |---|---|---|---|
 | A | GS JSON 事件通道（根因修复）：ack/err 路径扩为全事件，公司名/正则从 harness 退役；心跳改事件化 | runner 里 startsWith/.match 归零；真机 2 局事件流完整 + loop-health HEALTHY | ✅ **A 全部完成（2026-09-12，SPEC §10.45–§10.46）**：A1 契约+解码修复 · A2 GS on-change 中继（GS 侧不发 detail——Squirrel 表赋值怪癖，诚实收敛）· A3 harness 消费事件、公司名正则退役；calA3 真机 12 次 phase 迁移全走事件流 + FIFO 三线同跑。→ Phase B（runner.ts 拆分） |
 | B | runner.ts(1055行) 拆分：runner-helpers / reflect-run / signal-hub / decision-loop / loop-control（五件，非原计划四件——纯判据独立成件后测试更好写） | 测试零语义改动全绿；每模块带单元契约 | ✅ **完成（2026-09-15，SPEC §10.47–§10.49）**：runner 979→650 行。**诚实偏差**：原估"runner ≤250 行装配"未达成——循环体虽已抽出，装配+生命周期+dashboard 接线本身就有 650 行；250 是拍脑袋数字，不是从装配清单推导的。结构性不变量测试改为扫描双文件（不变量属于循环，不属于文件） |
-| C | 记忆+实验脚手架：C-1 路线事实直入 route-facts.jsonl；C-2 躺平局 lesson 降权；C-3 实验脚手架（token/决策归一守卫）；C-4 标定 ≥3 局 → 新记忆格式重跑 M3 A/B | 注入内容含结构化路线事实；下单率方差有数字 | 🟡 **C-1 实现中（2026-09-15）**：route-facts.test.ts 已立（RED 确认）+ route-facts.ts 已实现（GREEN 待验证）；**未接线**（reflect-run 保存 + 决策上下文注入待做）。C-2/C-3/C-4 未开工 |
-| D | 卫生：删 v02-runner(310行)、75 静默 catch 分诊、Dashboard 冻结 | — | ⬜ 穿插做 |
-| **N2** | **扩决策空间（当前）**：线路经济信号 → inspect_route → 记忆 v2(经济) → 收益流主指标 → 标定+A/B | 详见 **§0b** | 🟡 方案已定（2026-09-16），待执行 |
+| C | 记忆+实验脚手架：C-1 路线事实直入 route-facts.jsonl；C-2 躺平局 lesson 降权；C-3 实验脚手架（token/决策归一守卫）；C-4 标定 ≥3 局 → 新记忆格式重跑 M3 A/B | 注入内容含结构化路线事实；下单率方差有数字 | ✅ **完成（2026-09-15，SPEC §10.50）**：C-1 落盘+注入接通 · C-2 躺平局零 lesson · C-3 `tokensPerDecision` 归一 + `run-experiment.ts` 一条命令跑矩阵 · C-4 calC 标定 HEALTHY（下单率 2/3）。M3 重跑结论见 §10.51–§10.52 |
+| D | 卫生：删 v02-runner（**380 行**，2026-09-17 实测）、**85 处**裸 `catch {}` 分诊、Dashboard 冻结 | — | ⬜ 穿插做 |
+| **N2** | **扩决策空间（当前）**：线路经济信号 → inspect_route → 记忆 v2(经济) → 结果指标 → 标定+A/B | 详见 **§0b** | 🟡 **N2-1/2/2b/3/4/4b ✅**（§10.53–§10.57）；**N2-5 标定 ✅**（decisions/game 8.0、模型首次用 `add_vehicles`），**memory A/B（delivered 判据）待跑**。间接收获：rcon 回执通道（§10.59）、冻结 A/B 判定"默认不冻结"（§10.61） |
 
 **先验证后定（未执行，诚实记录）**：标牌文本长度探针**没做**——A2 走了公司名
 一跳（GS 解析 stage/job/hb），探针只在"需要更宽载荷"时才有意义，推迟。
@@ -69,8 +69,8 @@
 | ✅ ~~N2-1 线路经济信号~~（2026-09-16 完成，真机全绿；见 SPEC §10.53）| GS 新增 `kind="route-stats"` 事件：每条已建线路的 `job/vehicles/cargoWaiting/profitThisYear/incomePerDay`（**扁平原始类型**——§10.45 教训：GS 侧嵌套表赋值有怪癖）| `bridge-gs/main.nut`（`cmd=="state"` 旁新增；`GSVehicle.GetProfitThisYear`/`GSStation.GetCargoWaiting`/`GSCompany.GetBankBalance`）、`src/game/gs-events.ts`（新 schema 分支，进 `GsEventSchema` 联合）| 真机 ≥1 局出现 `kind=route-stats` 且字段非零；`test/unit/gs-events.test.ts` 加 golden |
 | ✅ ~~N2-2 参数化查询~~（2026-09-16 完成；真机三条路径都验证过，SPEC §10.54）| 新工具 `inspect_route {job?}`：返回该线路的经济与站点状态；未知 job **明确拒绝**（"永远说'是'的工具毁掉学习"）| `src/agent/tools/index.ts`（照 `observe`/`estimate_route` 的 `toResult` 形态）| 单测：已知/未知 job 两条路径；真机：模型调用后 summary 含非零经济字段 |
 | ✅ ~~N2-3 记忆 v2（经济）~~（2026-09-16 完成；幂等键含经济读数）| `route-facts` 扩展：`pair → {tiles?, cost?, completed, doneDate?, incomePerDay?, vehicles?}`；仍**不经 LLM**、仍幂等 | `src/evolution/route-facts.ts`（`RouteFact` 加可选字段；`factKey` 保持 pair+completed+date 语义）| 单测：注入行含经济事实且**无策略词**（已有断言的扩展）；真机：下一局启动时 `loaded memory: … N route fact(s)` 含经济行 |
-| ✅ ~~N2-4 主指标换成"收益流"~~（2026-09-16 完成，SPEC §10.55）| 结果指标从 money/built 转向 **income**（银行余额斜率或 GS 收入）；`compareArms` 增加 `meanIncome`；money 保留但降级为次级 | `src/evolution/metrics.ts`（ArmStats + `GameMetric`）、`src/agent/reflect-run.ts`（outcome 增 income）、`docs/SIGNAL-ARCHITECTURE.md` §L1 | 单测：income 均值 + 守卫不被破坏；**money 不再可能单独充当结论** |
-| **N2-5 标定 + A/B** | 先 1–2 局确认"决策数/局 ↑ 且含车队/线路类决策"（loop-health），再 n≥5 A/B | `scripts/run-experiment.ts`、`scripts/loop-health.ts` | loop-health：decisions/game **≥8** 且 idle 仍 0%；A/B 判定遵守守卫 |
+| ✅ ~~N2-4 收益流指标~~ + ✅ N2-4b 吞吐量（`deliveredCargo`，2026-09-17，SPEC §10.55/§10.57）| 结果指标从 money/built 转向 **income**（银行余额斜率或 GS 收入）；`compareArms` 增加 `meanIncome`；money 保留但降级为次级 | `src/evolution/metrics.ts`（ArmStats + `GameMetric`）、`src/agent/reflect-run.ts`（outcome 增 income）、`docs/SIGNAL-ARCHITECTURE.md` §L1 | 单测：income 均值 + 守卫不被破坏；**money 不再可能单独充当结论** |
+| 🟡 **N2-5 标定 ✅ / A-B 待跑** | 先 1–2 局确认"决策数/局 ↑ 且含车队/线路类决策"（loop-health），再 n≥5 A/B | `scripts/run-experiment.ts`、`scripts/loop-health.ts` | loop-health：decisions/game **≥8** 且 idle 仍 0%；A/B 判定遵守守卫 |
 
 ### 先验证后定（探针）——**已跑完（2026-09-16，/tmp/n2d）**
 
@@ -132,6 +132,16 @@
   ① "没有车"被写成"年份太新"；② `round(-0.03) = -0` 把亏损显示成 "0/day"。
   **教训（D6）**：数字与措辞的诚实性只在**真机输出**里暴露，单测不会喊疼
   ——凡"给模型看的东西"落地后必须真机读一遍自己的输出。
+
+### 本轮间接产出（不属于 N2 计划，但已落地）
+
+- **rcon 回执通道**（§10.59）：所有 rcon 从"盲发"变成可观测（FIFO + `RCON_END`），
+  `set_pause` 观测后回报，存档可确认落盘。
+- **冻结**（§10.60）：`--freeze` 可选、已验证（回执确认 + finally + 看门狗），
+  但 A/B 判定**默认不冻结**（§10.61：frozen delivered 0/5 vs unfrozen 2/5，
+  少走 ~10% 游戏天数——暂停时施工也停，而施工墙钟是本任务瓶颈）。教训 **D9**。
+- **oracle 基线**（§10.58）：`--v02 --add-vehicles N` 证明框架能运货
+  （delivered 20/31），即**任务有梯度**——这是 memory A/B 的前提。
 
 ### 风险与诚实边界
 
@@ -481,9 +491,15 @@ let {y0: t, y1: n} = disp; null != t && null != n && ( ... )
 **现象**：连续多轮把"执行器卡住"当成**执行器的问题**去修 —— 查 `AISignList` 可见性、
 查标牌协议、查 `LayPath` 铺路方向、查 pathfinder。全部无效。
 
-**真正的根因**（SPEC §10.28）：`rcon("pause")` 在 OpenTTD 里是**单向**的 ——
+**当时的根因判断**（SPEC §10.28）：`rcon("pause")` 在 OpenTTD 里是**单向**的 ——
 它会往游戏循环的命令队列里投 `Commands::Pause`，而游戏一旦暂停，**那个循环就不再
 排空队列**，于是之后投进去的 `unpause` **永远不会执行**。世界永久冻结。
+
+> ⚠️ **2026-09-17 复核：上述机制描述是错误的**（SPEC §10.59 实测：`pause` → `getdate`
+> 冻结，`unpause` → 日期恢复推进，**双向都有效**）。当时那次"永久冻结"的真因是
+> **网络默认值** `pause_on_join=true` 且没有客户端来解暂停。**保留本节，是为了留下
+> "为什么一个错误归因能挡住正确设计五天"的原始记录**（教训见 D8）；实现细节请以
+> §10.59/§10.60 为准，不要按本节描述去设计。
 
 **为什么会绕这么久**：
 1. 症状发生在执行器身上，我就一直在**被观测者**身上找原因，没去查**观测者**那一侧。

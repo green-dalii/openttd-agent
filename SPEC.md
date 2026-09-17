@@ -33,13 +33,23 @@
 ### 1.1 节拍矛盾
 OpenTTD 是**连续时钟仿真**（tick 驱动），LLM 是**慢思考离散推理**（一次 1-30s）。
 
-**解法**: 时间必须可控。采用 **冻结-观察-决策-执行-解冻** 循环：
-1. LLM 收到「需要决策」信号
-2. 外部控制器 `pause` 游戏
-3. 采集最新状态 → 喂给 LLM
+**解法（2026-09-17 现状，勿按旧文字实现）**: 时间可控的**默认手段不是暂停**，
+而是「**快照 + 增量汇报 + 队列化动作**」：
+1. LLM 收到「需要决策」信号（阶段变化 / 事件 / 间隔 / 模型自定的 wait_until）
+2. **决策前**采集快照（`preSnap`）——不暂停游戏
+3. 喂给 LLM；同时把**思考期间世界发生的变化**如实汇报（`sinceLastDecision`：
+   金额/收入/车辆/阶段/动作/事件）——模型知道世界动过，而不是以为世界没动
 4. LLM 产出结构化决策（计划 / 即时命令 / 等待条件）
-5. 外部控制器把决策转成游戏可执行动作，`unpause`
-6. 动作异步执行；外部监听结果事件；需要再决策时回到 1
+5. 动作经 RCON（服务器级）或 GS 通道下发，在 executor 里**FIFO 排队**执行；
+   晚到的动作仍会按序落地（§10.39.1）
+6. 动作异步执行；结果事件（含 rcon 回执，§10.59）回流；需要再决策时回到 1
+
+> **历史**：原设计确实是"决策前 `pause`、决策后 `unpause`"（冻结-观察-决策-执行-解冻）。
+> 2026-09-12 因"暂停不可恢复"废除；**2026-09-17 实测推翻该归因**（§10.59：双向有效，
+> 真因是 `pause_on_join=true` 且无客户端），于是冻结以**可选、已验证**的形式回归：
+> `--freeze`（§10.60）。但它在本任务里**要付吞吐**——暂停期间施工也停，
+> 而施工墙钟是本任务瓶颈（§10.61 实测 frozen delivered 0/5 vs unfrozen 2/5）。
+> 因此**默认不冻结**；要重测决策质量必须**按游戏时间对齐**。
 
 ### 1.2 动作面矛盾（本次调研最重要的发现）
 OpenTTD 有**两个动作面**，能力完全不同：
@@ -209,7 +219,7 @@ openttd-agent/
 | `AgentMessage` 声明合并 | 引入 `game_observation` `agent_plan` `action_result` 等自定义消息类型（UI/审计可见，经 `convertToLlm` 过滤） |
 | `convertToLlm` | 只把对 LLM 有意义的 message 转出去（观察/结果摘要），避免上下文爆炸 |
 | `transformContext` | 注入 lessons/策略库检索结果；剪枝历史 |
-| `tools` (AgentTool) | 每个高层动作一个 tool：`observe` `build_bus_route` `build_train_route` `add_vehicles` `adjust_orders` `pause` `unpause` `request_reflection` |
+| `tools` (AgentTool) | 实际工具集（以 `src/agent/tools/index.ts` 为准）：`observe` `estimate_route` `inspect_route` `build_bus_route` `add_vehicles` `set_pause`。未实现的（train/orders/reflection）属于路线图，不在契约里 |
 | `beforeToolCall` | 动作合法性预检（钱/状态/冷却），拒绝非法动作并给原因 |
 | `afterToolCall` | 记录指标、审计、结果反馈给进化引擎 |
 | `shouldStopAfterTurn` | 「这一 turn 结束就停」——执行器完成一轮动作后让出 |
@@ -217,8 +227,8 @@ openttd-agent/
 | session (harness) | 一局=一个 session 分支；跨局 lessons 独立存 |
 
 ### 4.2 决策循环（细粒度）
-每局定义「决策点」（默认: 每月初，或事件触发）。循环:
-1. Runner 在决策点 `pause` + 采集 rich state → 构造 `game_observation` 消息
+每局定义「决策点」（阶段变化 / 事件 / 间隔 / 模型 `wait_until`）。循环:
+1. Runner 在决策点**采集 rich state（不暂停，见 §1.1）** → 构造 `game_observation` 消息
 2. Agent `prompt()`; LLM 产出 计划（JSON: `goal / plan[] / immediate_action / wait_until / rationale`）
 3. 系统校验计划合法性 → 合法则 `unpause` 交给 executor 异步执行
 4. executor 按计划施工（可能跨月）；Bridge GS 汇报每步结果
