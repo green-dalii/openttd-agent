@@ -224,13 +224,30 @@ export function setPauseTool(deps: AgentDeps): AgentTool<typeof SetPauseSchema, 
 		description: "Pause or unpause the running OpenTTD server (server-level RCON).",
 		parameters: SetPauseSchema,
 		execute: async (_id, params) => {
-			deps.sink.rcon(params.paused ? "pause" : "unpause");
-			const r: ActionResult = {
+			const cmd = params.paused ? "pause" : "unpause";
+			// Observe the effect instead of claiming it (2026-09-17). Before the
+			// rcon reply channel existed this tool reported "sent" for a command
+			// that may have done nothing - and this repo has already paid for that
+			// exact class of bug (a one-way pause froze a whole run, SPEC 10.28).
+			// Two paths, and the command is SENT in both (the first version only
+			// "awaited", so a sink without rconAwait never received the command at
+			// all - caught by the existing unit test).
+			const canAwait = typeof deps.sink.rconAwait === "function";
+			const reply = canAwait ? await deps.sink.rconAwait!(cmd) : (deps.sink.rcon(cmd), null);
+			if (reply === null) {
+				return toResult({
+					ok: false,
+					summary:
+						`sent rcon ${cmd} but the game did not answer. Whether the game is ` +
+						"paused is UNKNOWN - the reply channel did not confirm it.",
+					data: { paused: params.paused, confirmed: false },
+				});
+			}
+			return toResult({
 				ok: true,
-				summary: `rcon ${params.paused ? "pause" : "unpause"} sent`,
-				data: { paused: params.paused },
-			};
-			return toResult(r);
+				summary: `rcon ${cmd} answered: "${reply}"`,
+				data: { paused: params.paused, confirmed: true, reply },
+			});
 		},
 	};
 }

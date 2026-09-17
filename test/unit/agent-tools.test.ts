@@ -202,6 +202,24 @@ describe("set_pause tool", () => {
 		await tool.execute("c2", { paused: false });
 		expect(rcon).toEqual(["pause", "unpause"]);
 	});
+
+	it("无法观测回执时如实报'未确认'（不谎报成功）", async () => {
+		const { sink } = fakeSink();
+		const res = await setPauseTool({ sink, state: fakeState() }).execute("c1", { paused: true });
+		expect((res as { details?: { ok?: boolean } }).details?.ok).toBe(false);
+		expect(textOf(res)).toMatch(/UNKNOWN/);
+	});
+
+	it("能观测回执时报告游戏的原话（on 2026-09-17 起 rcon 有回执通道）", async () => {
+		const { sink, rcon } = fakeSink();
+		(sink as { rconAwait?: (c: string) => Promise<string | null> }).rconAwait = async (c: string) => {
+			rcon.push(c);
+			return "Game paused";
+		};
+		const res = await setPauseTool({ sink, state: fakeState() }).execute("c1", { paused: true });
+		expect((res as { details?: { ok?: boolean } }).details?.ok).toBe(true);
+		expect(textOf(res)).toContain("Game paused");
+	});
 });
 
 describe("observe tool", () => {

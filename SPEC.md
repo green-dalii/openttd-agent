@@ -957,6 +957,13 @@ if (_pause_mode.Test(PauseMode::Normal)) {
 
 ### 结论与修正
 
+> **2026-09-17 复核（见 §10.59）**：本节当时把"暂停不可恢复"归因于 rcon 本身，
+> 但用 rcon 回执通道 + `getdate` 实测（sandbox 配置 `pause_on_join=false`、
+> `min_active_clients=0`）显示 **pause/unpause 双向有效**：暂停期间日期不动，
+> `unpause` 之后日期恢复推进。当时的真正原因更可能是**网络默认值**
+> （`pause_on_join=true` 且无客户端），而那正是本节末尾顺带修掉的配置。
+> 本节保留原样作为历史，但"暂停是单向的"**不再是事实依据**。
+
 **决策循环不再暂停游戏**（`src/agent/runner.ts`）。SPEC §1.1 step 2 的设计意图
 （"别让世界在 LLM 思考时动"）由另一套机制承担，而且更诚实：
 
@@ -2137,3 +2144,67 @@ deliveredCargo 并写一行 `metrics.jsonl`（`arm=control`），与 agent 路�
 - 重跑一组 **agent n=3/臂、500s**（用含 N2-4b delivered 的当前代码）→ 比对
   with-lessons vs without-lessons 的 delivered。**delivered 是首个"有梯度"的目标量**。
 - money/income 仍降为次级参考——它们不反映策略。
+
+## 10.59 工具必须能观测自己的效果：rcon 回执通道 + 两个实测事实（2026-09-17）
+
+### 新缺陷：所有 rcon 都是"盲发"
+
+`ServerRcon(120)` / `ServerRconEnd(125)` 在 observer 的 `default: return null` 里被
+**丢弃**（admin-client 只留给一个从未被赋值的 `onRconResult` 回调）。后果：
+
+- `set_pause` 只能说"命令已发送"，**无法知道游戏有没有真的暂停**；
+- 存档（`rcon save`）只能靠 `sleep(2500)` 赌它写完；
+- 无法查询游戏自身的设置与命令表。
+
+这正是本项目反复付学费的一类错误：**工具不能观测自己的效果**。
+
+### 修法（契约来自官方文档，不是猜）
+
+`Resources/docs/admin_network.md:190-191`：一次 rcon → **一个或多个**
+`SERVER_RCON` 包，**最后**一个 `ADMIN_PACKET_ADMIN_RCON_END`。
+
+因此 `AdminClient.rconAwait(cmd, timeoutMs)` **按 FIFO 结算**（真机实测
+**命令文本不回显**：`command` 字段为空，所以"按命令匹配"是错的），
+以 `RCON_END` 为完成信号，多行合并返回；超时返回 `null`（"没有回答"，
+不是伪造成功）。所有回执进入运行日志（`[agent] rcon <cmd>: <reply>`）。
+
+`set_pause` 随之改为**观测后回报**：有回执 → 汇报游戏的原话；无回执 → 明说
+"是否暂停未知"（`ok:false`）。测试同时锁定两条路径。
+
+### 事实 1：pause / unpause 双向有效（推翻 §10.28 的归因）
+
+```
+[before pause]   getdate → 1950-01-02
+[paused #1]      getdate → 1950-01-02   ← 冻结
+[paused #2]      getdate → 1950-01-02   ← 仍冻结
+[after unpause #1] getdate → 1950-01-03 ← 恢复推进
+[after unpause #2] getdate → 1950-01-04
+```
+
+**"暂停是单向的"不成立**（至少在 `pause_on_join=false` + `min_active_clients=0`
+的沙箱配置下）。历史上那次"永久冻结"更可能是**网络默认值**
+（`pause_on_join=true`，无客户端来解暂停）——§10.28 顺带修掉的正是它。
+
+### 事实 2：**没有服务端速度旋钮**
+
+- `setting game_speed` → `'game_speed' is an unknown setting.`
+- `setting world_speed` → `'world_speed' is an unknown setting.`
+- `list_settings` 中与速度/时间相关的键只有 3 个：
+  `difficulty.competitor_speed`（AI 对手速度）、`vehicle.wagon_speed_limits`
+  （物理真实性）、`gui.fast_forward_speed_limit`（**客户端**快进上限，2500）。
+- `list_cmds` 全表（100+ 条，已实测导出）**没有任何速度/快进命令**。
+
+**结论**：dedicated server 的模拟速度**不可调**；"快进"是客户端功能。
+唯一影响"游戏内时间 vs 墙钟"的手段就是 **pause/unpause**（时间膨胀）。
+
+### 由此产生的决策（留给项目所有者）
+
+既然 pause/unpause 实测可用，**"决策期间冻结世界"重新成为可选项**：
+
+| 方案 | 好处 | 代价 |
+|---|---|---|
+| 现状：不暂停 + 快照 + 增量汇报 | 墙钟不浪费；世界推进带来的变化被如实汇报 | 模型看到的快照会过期（本轮实录：`inspect_route` 返回 0 辆车时上下文已是 6 辆） |
+| 冻结：pause → 决策+执行 → unpause（**带 rconAwait 确认 + 看门狗重试**） | 动作落在模型真正见过的世界状态上 | 决策耗时不产生游戏进展；`--demo-seconds`（墙钟）与游戏天数脱钩 |
+
+**建议**：以"已验证的冻结"做一次同 seed A/B（freeze vs no-freeze），
+用 delivered 判据——而不是凭信念二选一。

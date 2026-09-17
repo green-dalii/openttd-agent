@@ -163,3 +163,70 @@ describe("AdminClient", () => {
 		client.close();
 	});
 });
+
+/**
+ * rconAwait（2026-09-17）：rcon 必须能等到回执，否则工具无法观测自己的效果。
+ *
+ * 契约来自 Resources/docs/admin_network.md:190-191：一次 rcon → **一个或多个**
+ * SERVER_RCON 包，**最后**一个 ADMIN_PACKET_ADMIN_RCON_END。命令文本不回显
+ * （真机实测：command 字段为空），所以按 FIFO 结算，不能按命令匹配。
+ */
+describe("rconAwait —— 等待 rcon 回执（FIFO + RCON_END）", () => {
+	const reply = (srv: FakeAdminServer, lines: string[]) => {
+		for (const l of lines) {
+			const w = new FrameWriter();
+			w.str("").str(l); // 真机不回显命令 → command 为空
+			srv.sockets[0]!.write(Buffer.from(w.build(AdminPacketType.ServerRcon)));
+		}
+		const end = new FrameWriter();
+		srv.sockets[0]!.write(Buffer.from(end.build(AdminPacketType.ServerRconEnd)));
+	};
+
+	const connect = async (srv: FakeAdminServer) => {
+		const client = new AdminClient({
+			cfg: loadConfig({ OPENTTD_ADMIN_PORT: String(srv.port), OPENTTD_ADMIN_PASSWORD: "x" }) as never,
+			callbacks: {},
+		} as never);
+		await client.connect(2_000);
+		for (let i = 0; i < 50 && srv.sockets.length === 0; i++) await new Promise((r) => setTimeout(r, 10));
+		return client;
+	};
+
+	it("多行回执在 RCON_END 时一次性返回（不是第一行就返回）", async () => {
+		const srv = new FakeAdminServer();
+		await srv.listen();
+		const client = await connect(srv);
+		const pending = client.rconAwait("list_cmds", 2_000);
+		reply(srv, ["pause", "unpause", "setting"]);
+		expect(await pending).toBe("pause\nunpause\nsetting");
+		client.close();
+		srv.close();
+	});
+
+	it("没有 RCON_END 的超时 → null（不把第一行当收尾）", async () => {
+		const srv = new FakeAdminServer();
+		await srv.listen();
+		const client = await connect(srv);
+		const pending = client.rconAwait("something", 300);
+		const w = new FrameWriter();
+		w.str("").str("partial line");
+		srv.sockets[0]!.write(Buffer.from(w.build(AdminPacketType.ServerRcon)));
+		expect(await pending).toBeNull();
+		client.close();
+		srv.close();
+	});
+
+	it("连续两次调用按 FIFO 结算（回执是有序的）", async () => {
+		const srv = new FakeAdminServer();
+		await srv.listen();
+		const client = await connect(srv);
+		const first = client.rconAwait("a", 2_000);
+		reply(srv, ["A1"]);
+		expect(await first).toBe("A1");
+		const second = client.rconAwait("b", 2_000);
+		reply(srv, ["B1"]);
+		expect(await second).toBe("B1");
+		client.close();
+		srv.close();
+	});
+});

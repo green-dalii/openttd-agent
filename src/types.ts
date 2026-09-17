@@ -68,6 +68,7 @@ export type GameEventKind =
 	| "company_stats"
 	| "company_remove"
 	| "console"
+	| "rcon"
 	| "chat"
 	| "gamescript"
 	| "newgame"

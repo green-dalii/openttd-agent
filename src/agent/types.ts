@@ -16,6 +16,12 @@ export interface CommandSink {
 	gameScript(json: string): void;
 	/** Server-level RCON command (pause/unpause/save/...). */
 	rcon(command: string): void;
+	/**
+	 * RCON with the reply awaited (2026-09-17). Optional because not every sink
+	 * can observe replies; tools must then REPORT that they could not confirm
+	 * rather than claiming success (observe-or-refuse).
+	 */
+	rconAwait?(command: string, timeoutMs?: number): Promise<string | null>;
 }
 
 /** Read-side: latest normalized world state (implemented by WorldState). */

@@ -154,3 +154,39 @@ describe("FrameWriter round-trip via handleServerPacket", () => {
 		expect(ev?.payload).toEqual({ id: 5 });
 	});
 });
+
+/**
+ * rcon 回执通道（2026-09-17）。
+ *
+ * 之前 ServerRcon / ServerRconEnd 落在 observer 的 `default: return null`
+ * 里——rcon 回执被**丢弃**。后果有两层：
+ *   1. 所有 rcon 都是"盲发"（工具违反"必须能观测自己的效果"）；
+ *   2. 无法查询游戏自身的设置/命令（例如速度旋钮）。
+ * OpenTTD 的 ServerRcon 载荷 = cstr(command) + cstr(result)，与
+ * `decodeServerRconResponse` 一致。
+ */
+describe("rcon 回执事件", () => {
+	const cstr = (t: string) => {
+		const b = new Uint8Array(t.length + 1);
+		for (let i = 0; i < t.length; i++) b[i] = t.charCodeAt(i);
+		return b;
+	};
+
+	it("ServerRcon → kind=rcon，带 command 与 message", () => {
+		const payload = concat([cstr("list_cmds"), cstr("pause\nunpause\nsetting\n")]);
+		const ev = handleServerPacket(frame(AdminPacketType.ServerRcon, payload), 7, 1000);
+		expect(ev).toMatchObject({ kind: "rcon", payload: { command: "list_cmds" } });
+		expect((ev as { payload: { message: string } }).payload.message).toContain("unpause");
+	});
+
+	it("空回执也算事件（不能把空当没有）", () => {
+		const payload = concat([cstr("pause"), cstr("")]);
+		const ev = handleServerPacket(frame(AdminPacketType.ServerRcon, payload), 8, 1000);
+		expect(ev).toMatchObject({ kind: "rcon", payload: { command: "pause", message: "" } });
+	});
+
+	it("截断载荷不崩（观测器不得因坏包挂掉）", () => {
+		const ev = handleServerPacket(frame(AdminPacketType.ServerRcon, new Uint8Array([65, 0])), 9, 1000);
+		expect(ev === null || (ev as { kind: string }).kind === "rcon").toBe(true);
+	});
+});

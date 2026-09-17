@@ -9,6 +9,14 @@
 
 ## [Unreleased]
 
+### Added（rcon 回执通道，2026-09-17）
+
+- `AdminClient.rconAwait(cmd, timeoutMs)`：等待 rcon 回执（FIFO + `RCON_END` 结算，
+  超时返回 `null`）。修前 `ServerRcon/ServerRconEnd` 被 observer 丢弃——所有 rcon
+  都是盲发。
+- `set_pause` 观测后回报（无回执时明说"是否暂停未知"，不谎报成功）。
+- 运行日志打印 rcon 回执：`[agent] rcon <cmd>: <reply>`。
+
 ### Added（v02 oracle baseline probe，2026-09-17）
 
 - `pnpm run cli --v02 --add-vehicles N`：v02 在 done 后自动请求 N 辆车，

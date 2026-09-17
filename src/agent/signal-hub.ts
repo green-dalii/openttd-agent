@@ -169,6 +169,13 @@ export function makeSignalHub(refs: SignalHubRefs): SignalHub {
 					}
 				}
 			}
+			// rcon replies (2026-09-17): before this channel existed, every rcon was
+			// fire-and-forget, so a failed save or a pause that never took effect
+			// was indistinguishable from success in the logs.
+			if (ev.kind === "rcon") {
+				const p = ev.payload as { command?: string | null; message?: string };
+				console.log(`[agent] rcon ${p.command ?? "?"}: ${p.message ?? ""}`);
+			}
 			// Notable events (fleet/station changes) are worth the model's
 			// attention, so they open a decision window (scheduler throttles).
 			if (ev.kind === "company_stats") {

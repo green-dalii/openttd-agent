@@ -41,6 +41,14 @@ export function handleServerPacket(pkt: RawServerPacket, seq: number, now: numbe
 				return chat(pkt, seq, now);
 			case AdminPacketType.ServerConsole:
 				return consoleEvent(pkt, seq, now);
+			case AdminPacketType.ServerRcon:
+				// rcon replies used to fall into `default: return null`: every rcon
+				// was blind (MEMORY: a tool that cannot observe its own effect).
+				// Payload = cstr(command) + cstr(result).
+				{
+					const { command, message } = decodeServerRconResponse(pkt.payload);
+					return { seq, kind: "rcon", ts: now, payload: { command, message } };
+				}
 			case AdminPacketType.ServerNewGame:
 				return { seq, kind: "newgame", ts: now, payload: {} };
 			case AdminPacketType.ServerShutdown:

@@ -33,7 +33,6 @@ export interface ClientCallbacks {
 	/** Normalized game event (date/economy/company/stats/console/gamescript...). */
 	onEvent?: (ev: GameEvent) => void;
 	/** RCON command response (full text incl. echoed command + result). */
-	onRconResult?: (text: string) => void;
 	/** Successful admin join: welcome info. */
 	onWelcome?: (info: WelcomeInfo) => void;
 	/** Connection/status transition. */
@@ -182,6 +181,31 @@ export class AdminClient {
 		this.send(AdminPacketType.AdminRemoteConsoleCommand, (w) => w.str(command));
 	}
 
+	/**
+	 * Send an rcon command and wait for OpenTTD's reply (2026-09-17).
+	 *
+	 * Before this, every rcon was fire-and-forget (the reply packets were
+	 * dropped), so a tool could not tell "the game paused" from "the command
+	 * vanished" - the silent-failure class this repo keeps paying for.
+	 *
+	 * Completion is ADMIN_PACKET_ADMIN_RCON_END, not the first reply packet:
+	 * one command legitimately yields many SERVER_RCON packets (admin_network.md
+	 * :190-191). Resolves with the joined reply text, or null on timeout
+	 * (timeout = "no answer", never a fabricated success).
+	 */
+	async rconAwait(command: string, timeoutMs = 5_000): Promise<string | null> {
+		if (!this.sock) return null;
+		return new Promise<string | null>((resolve) => {
+			const timer = setTimeout(() => {
+				const i = this.rconWaiters.findIndex((w) => w.timer === timer);
+				if (i >= 0) this.rconWaiters.splice(i, 1);
+				resolve(null);
+			}, timeoutMs);
+			this.rconWaiters.push({ resolve, timer });
+			this.rcon(command);
+		});
+	}
+
 	gameScript(json: string): void {
 		this.send(AdminPacketType.AdminGameScript, (w) => w.str(json));
 	}
@@ -256,11 +280,25 @@ export class AdminClient {
 				this.pollAll();
 				return;
 			}
-			case AdminPacketType.ServerRconEnd:
-				return; // rcon terminator — caller tracks completion separately
+			case AdminPacketType.ServerRconEnd: {
+				// The command finished: hand the collected reply lines to the OLDEST
+				// pending awaiter. Replies are serialized on the wire, so FIFO is
+				// exact - and it has to be FIFO because OpenTTD does not echo the
+				// command text (measured 2026-09-17).
+				const w = this.rconWaiters.shift();
+				if (w) {
+					clearTimeout(w.timer);
+					w.resolve(this.rconLines.join("\n"));
+				}
+				this.rconLines = [];
+				return;
+			}
 			case AdminPacketType.ServerRcon: {
+				// One line of a command's reply. Collected for rconAwait AND emitted
+				// as a normal event so the run log shows what the game answered.
 				const r = decodeServerRconResponse(pkt.payload);
-				if (r.message) this.callbacks.onRconResult?.(r.message);
+				this.rconLines.push(r.message);
+				this.emit(handleServerPacket(pkt, this.seq++, Date.now()));
 				return;
 			}
 			case AdminPacketType.ServerCompanyNew: {
@@ -282,6 +320,19 @@ export class AdminClient {
 			}
 		}
 	}
+
+	/**
+	 * Pending rconAwait calls (FIFO).
+	 *
+	 * FIFO, not keyed by command: OpenTTD does NOT echo the command in its
+	 * SERVER_RCON replies (measured 2026-09-17: the command field came back
+	 * empty), and one command produces MANY reply packets followed by a single
+	 * ADMIN_PACKET_ADMIN_RCON_END (Resources/docs/admin_network.md:190-191).
+	 * Matching by command text therefore cannot work; matching by arrival order
+	 * can, because replies are serialized on the wire.
+	 */
+	private rconWaiters: { resolve: (m: string | null) => void; timer: NodeJS.Timeout }[] = [];
+	private rconLines: string[] = [];
 
 	private emit(ev: GameEvent | null): void {
 		try {

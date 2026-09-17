@@ -16,7 +16,16 @@ import type { WorldSnapshot } from "../../src/game/world-state.js";
 function fakeDeps() {
 	const gameScript: string[] = [];
 	const rcon: string[] = [];
-	const sink: CommandSink = { gameScript: (j) => gameScript.push(j), rcon: (c) => rcon.push(c) };
+	// Fake game answers rcon (2026-09-17: the channel exists, so tools can observe
+	// their effect; without it set_pause honestly reports "unconfirmed").
+	const sink: CommandSink = {
+		gameScript: (j) => gameScript.push(j),
+		rcon: (c) => rcon.push(c),
+		rconAwait: async (c: string) => {
+			rcon.push(c);
+			return "ok";
+		},
+	};
 	const state: StateReader = {
 		snapshot: (): WorldSnapshot => ({
 			date: { raw: 712223, year: 1950, month: 3, day: 1 },
