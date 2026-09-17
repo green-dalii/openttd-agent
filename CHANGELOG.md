@@ -9,6 +9,13 @@
 
 ## [Unreleased]
 
+### Changed（冻结 A/B 结论：默认不冻结，2026-09-17）
+
+- 冻结机制已核实（5/5 局有 3–8 次确认暂停、0 恢复失败、0 看门狗触发），
+  但代价是**游戏内时间少约 10%**，且暂停期间 executor/GS 无法推进施工——
+  本任务的瓶颈正是施工时长。结论：**默认保持不冻结**（SPEC §10.61）。
+- verdict 输出的臂标签按比较维度显示（冻结轮不再写 "with lessons"）。
+
 ### Fixed（A/B 比较维度可指定，2026-09-17）
 
 - `GameMetric.freeze` + `compareArms(metrics, by: "memory"|"freeze")` +

@@ -115,8 +115,9 @@ const fmt = (label: string, a: typeof view.arms.withLessons) =>
 			`income=${a.meanIncome?.toFixed(0) ?? "—"}(n=${a.incomeReported}) ` +
 			`delivered=${a.meanDelivered?.toFixed(0) ?? "—"}(n=${a.deliveredReported})`,
 	);
-fmt("with lessons", view.arms.withLessons);
-fmt("without", view.arms.withoutLessons);
+const armLabel = args.vary === "freeze" ? ["frozen", "not frozen"] : ["with lessons", "without"];
+fmt(armLabel[0]!, view.arms.withLessons);
+fmt(armLabel[1]!, view.arms.withoutLessons);
 if (view.arms.treatmentWithoutInjection > 0) {
 	console.log(
 		`WARNING: ${view.arms.treatmentWithoutInjection} treatment run(s) received NO memory at all` +
