@@ -34,6 +34,8 @@ interface CliArgs {
 	mode: "probe" | "dry-run" | "watch" | "v02" | "agent" | "serve" | "version" | "help";
 	/** v02 baseline probe: after construction, request this many vehicles on the demo route. */
 	addVehicles?: number;
+	/** Agent: pause the world while the model thinks + acts (verified freeze). */
+	freeze?: boolean;
 	year?: number;
 	seed?: number;
 	timeoutMs: number;
@@ -61,6 +63,7 @@ export function parseArgs(argv: string[]): CliArgs {
 	let webPort: number | undefined;
 	let demoSeconds: number | undefined;
 	let addVehicles: number | undefined;
+	let freeze = false;
 	let llmBaseUrl: string | undefined;
 	let llmApiKey: string | undefined;
 	let llmModel: string | undefined;
@@ -85,6 +88,9 @@ export function parseArgs(argv: string[]): CliArgs {
 				break;
 			case "--agent":
 				mode = "agent";
+				break;
+			case "--freeze":
+				freeze = true;
 				break;
 			case "--add-vehicles":
 				addVehicles = parseIntNum(argv[++i], "--add-vehicles");
@@ -149,7 +155,7 @@ export function parseArgs(argv: string[]): CliArgs {
 		// compile: `args.foo` is simply undefined, so the flag silently does
 		// nothing while the help text still advertises it. Fourth instance of
 		// "parsed but dropped" found on 2026-09-12 (MEMORY.md A5).
-		mode, year, seed, timeoutMs, aiName, webPort, demoSeconds, addVehicles,
+		mode, year, seed, timeoutMs, aiName, webPort, demoSeconds, addVehicles, freeze,
 		llmBaseUrl, llmApiKey, llmModel, llmApi, offlineDemo, skipPreflight,
 		injectMemory,
 	};
@@ -306,6 +312,10 @@ async function main(): Promise<number> {
 				// runner does not.
 				offlineDemo: args.offlineDemo,
 				injectMemory: args.injectMemory,
+				// Verified freeze (SPEC §10.59). Forwarded for the same reason the
+				// two above are - a flag the CLI parses and the runner never hears
+				// about is a flag that silently does nothing.
+				freeze: args.freeze,
 			});
 		} catch (e) {
 			console.error("[agent] ERROR:", e instanceof Error ? e.message : e);

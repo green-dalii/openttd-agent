@@ -9,6 +9,14 @@
 
 ## [Unreleased]
 
+### Added（已验证的冻结 `--freeze`，2026-09-17）
+
+- `src/agent/freeze.ts` + `--freeze`：决策期暂停世界（`pause` → 模型思考+执行动作
+  → `finally` 恢复），暂停/恢复都要 rcon 回执确认，带重试与 120s 看门狗。
+- 局末打印冻结统计（确认次数/未确认/恢复失败/看门狗触发/最长持有）。
+- `scripts/run-experiment.ts --vary memory|freeze`：A/B 的自变量可选记忆或冻结，
+  两臂只差自变量（freeze 轮两臂都 `--no-memory`）。
+
 ### Added（rcon 回执通道，2026-09-17）
 
 - `AdminClient.rconAwait(cmd, timeoutMs)`：等待 rcon 回执（FIFO + `RCON_END` 结算，

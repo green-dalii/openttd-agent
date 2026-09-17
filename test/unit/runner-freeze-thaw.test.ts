@@ -1,12 +1,16 @@
 /**
- * runner.ts 的两个结构性不变量，都由真机事故换来。
+ * 决策循环的结构性不变量，都由真机事故换来。
  *
  * 职责: 锁定
- *   1. 决策循环**绝不**用控制台 pause 游戏
+ *   1. 决策循环**不得直接**用控制台 pause —— 只能经 `freeze.ts` 的验证型控制器
+ *      （暂停/恢复要回执确认 + release 必须在 finally + 看门狗）
  *   2. `seconds` **真的**限制运行长度
  * 禁止: 在这里测 dashboard 的 pause/resume 控制接口（另一条路径）。
  *
- * 详见 SPEC §10.28（暂停是单向的）与 §10.30（seconds 没生效）。
+ * **2026-09-17 更新（SPEC §10.59）**：原来这里写的是"暂停是单向的，绝不许用"。
+ * 实测推翻了该归因（pause → getdate 冻结，unpause → 日期恢复推进；真因是
+ * `pause_on_join=true` 且无客户端）。规则从"禁止暂停"改为"**只许验证型冻结**"，
+ * 且必须能证明它真的冻住了（`freeze.stats()`）。
  */
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
@@ -45,8 +49,26 @@ describe("runner: 决策循环不得暂停游戏", () => {
 		expect(window).not.toMatch(/rcon\(\s*["']unpause["']\s*\)/);
 	});
 
-	it("保留解释，否则后人会顺手把它优化回来", () => {
-		expect(both).toMatch(/freeze was ONE-WAY|cannot be unpaused/i);
+	it("保留解释：为什么默认不暂停、以及为何冻结现在又是可选项", () => {
+		// 两个都必须在场：旧结论（曾经这么以为）与新测量（推翻它）。少任何一个
+		// 都会让后人重新在"信念"上盖楼（MEMORY D8）。
+		expect(both).toMatch(/one-way/i);
+		expect(both).toMatch(/measured FALSE|§10\.59|10\.59/);
+	});
+
+	it("冻结只能经 freeze 控制器，且 release 必须在 finally 里", () => {
+		// §10.26 的永久冻结就是 unpause 不在 finally 里；这是那次的守卫升级版。
+		const loop = loopSrc.split("\n");
+		const acquireIdx = loop.findIndex((l) => /freeze\.acquire|freeze\?\.acquire/.test(l));
+		expect(acquireIdx).toBeGreaterThan(-1);
+		const tail = loop.slice(acquireIdx, acquireIdx + 40).join("\n");
+		expect(tail).toMatch(/finally\s*\{/);
+		expect(tail).toMatch(/release\(\)/);
+		// 控制器本身才允许发 pause/unpause 字面量
+		expect(loopSrc).not.toMatch(/rcon\(\s*["']pause["']\s*\)/);
+		const freezeSrc = readFileSync(path.resolve("src/agent/freeze.ts"), "utf8");
+		expect(freezeSrc).toMatch(/pause\(\)/);
+		expect(freezeSrc).toMatch(/unpause\(\)/);
 	});
 
 	it("观察发生在询问模型之前（这是替代暂停的机制）", () => {

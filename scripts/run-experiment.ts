@@ -31,7 +31,9 @@ function parseArgs(argv: string[]): Args {
 	};
 	const dir = get("--dir");
 	if (!dir) {
-		console.error("usage: tsx scripts/run-experiment.ts --dir <dataDir> [--n 3] [--demo-seconds 200] [--seed 7]");
+		console.error(
+		"usage: tsx scripts/run-experiment.ts --dir <dataDir> [--n 3] [--demo-seconds 200] [--seed 7] [--vary memory|freeze]",
+	);
 		process.exit(2);
 	}
 	if (!existsSync(join(dir, "credentials.json")) || !existsSync(join(dir, "llm.json"))) {
@@ -43,9 +45,27 @@ function parseArgs(argv: string[]): Args {
 		n: Number(get("--n") ?? 3),
 		seconds: Number(get("--demo-seconds") ?? 200),
 		seed: Number(get("--seed") ?? 7),
+		// 自变量（2026-09-17）：memory = 记忆注入（默认）；freeze = 决策期冻结世界。
+		// 两个臂必须只差这一个变量，否则比较又在撒谎。
+		vary: (get("--vary") ?? "memory") as "memory" | "freeze",
 	};
 }
 
+
+/**
+ * 两臂的额外 CLI 参数。**唯一的区别必须只有自变量本身**（MEMORY D4）：
+ *   memory: treatment = 注入记忆；control = --no-memory
+ *   freeze: treatment = --freeze（决策期冻结世界）；control = 不冻结，且两臂
+ *           都 --no-memory（记忆不是本轮的自变量，必须钉住）
+ */
+function controlFlags(_vary: "memory" | "freeze"): string[] {
+	// control 永远不注入记忆；freeze 轮里它也钉住不冻结。
+	return ["--no-memory"];
+}
+function treatmentFlags(vary: "memory" | "freeze"): string[] {
+	// freeze 轮：两臂都 --no-memory（记忆不是本轮自变量），只差冻结。
+	return vary === "freeze" ? ["--no-memory", "--freeze"] : [];
+}
 
 function runOne(label: string, dir: string, seed: number, seconds: number, extra: string[]): number {
 	console.log(`### ${label} start ${new Date().toISOString()}`);
@@ -68,16 +88,23 @@ for (let i = 1; i <= args.n; i++) {
 	// cleanup between runs: the game must die or the next one can't bind the port
 	spawnSync("pkill", ["-f", "OpenTTD.app/Contents/MacOS/openttd"]);
 	spawnSync("sleep", ["2"]);
-	codes.control.push(runOne(`ctl${i}`, args.dir, args.seed, args.seconds, ["--no-memory"]));
+	codes.control.push(runOne(`ctl${i}`, args.dir, args.seed, args.seconds, controlFlags(args.vary)));
 	spawnSync("pkill", ["-f", "OpenTTD.app/Contents/MacOS/openttd"]);
 	spawnSync("sleep", ["2"]);
-	codes.treatment.push(runOne(`trt${i}`, args.dir, args.seed, args.seconds, []));
+	codes.treatment.push(runOne(`trt${i}`, args.dir, args.seed, args.seconds, treatmentFlags(args.vary)));
 }
 spawnSync("pkill", ["-f", "OpenTTD.app/Contents/MacOS/openttd"]);
 
 const view = evolutionView(args.dir);
 console.log("");
 console.log(`=== verdict (${args.dir}) ===`);
+console.log(
+	`vary: ${args.vary}  (${
+		args.vary === "freeze"
+			? "treatment = frozen decisions; control = snapshots only; BOTH --no-memory"
+			: "treatment = memory injected; control = --no-memory"
+	})`,
+);
 console.log(`runs: ${view.metrics.length}  conclusive: ${view.arms.conclusive}`);
 console.log(`note: ${view.arms.note || "(none)"}`);
 const fmt = (label: string, a: typeof view.arms.withLessons) =>

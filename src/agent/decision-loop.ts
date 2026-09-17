@@ -37,6 +37,7 @@ import {
 } from "./loop-control.js";
 import { summarizeState } from "./tools/index.js";
 import type { RouteContextFact } from "./decision-context.js";
+import type { FreezeController } from "./freeze.js";
 
 /* eslint-disable no-console -- intentional runtime logging */
 
@@ -60,6 +61,8 @@ export interface DecisionLoopCtx {
 	gameDay(): number;
 	/** Route facts (hub economics joined with ledger pairs) for the context. */
 	routesForContext(): RouteContextFact[];
+	/** Optional verified freeze (SPEC §10.59); absent = never pause. */
+	freeze?: FreezeController;
 }
 
 export interface DecisionLoop {
@@ -149,13 +152,22 @@ export function createDecisionLoop(ctx: DecisionLoopCtx): DecisionLoop {
 			ctx.session.appendAudit({ type: "decision", ts: ctx.now(), turn: ctx.scheduler.count(), trigger: due.trigger, state: preState });
 
 			const history = ctx.session.current().checkpoints.map((c) => c.note);
-			// SPEC §1.1 step 2 (REVISED 2026-09-12): the framework NO LONGER pauses the
-			// game around a decision. The freeze was ONE-WAY (rcon pause never
-			// unpauseable); what protects decision quality instead is the
-			// pre-decision snapshot + `sinceLastDecision` reporting everything that
-			// changed while the model thought (SPEC §10.28 follow-ups).
+			// Since 2026-09-12 the framework does NOT pause by default: decision
+			// quality is protected by the pre-decision snapshot + `sinceLastDecision`,
+			// which reports everything that changed while the model thought.
+			//
+			// Note (2026-09-17): the reason originally given for abandoning the pause
+			// - "rcon pause is one-way" - was measured FALSE (§10.59: pause freezes
+			// `getdate`, unpause resumes it; the real culprit was `pause_on_join=true`
+			// with no client). Optional freezing is therefore back on the table, but
+			// only as the VERIFIED kind implemented in freeze.ts, and only when asked
+			// for (it trades wall-clock for a snapshot the model can trust).
 			let plan: DecisionPlan | null = null;
-			{
+			// 已验证的冻结（可选，SPEC §10.59）：把"模型思考 + 工具执行"整段包在
+			// pause/unpause 里，使动作落在模型真正见过的世界上。release 在 finally
+			// 里（§10.26 的永久冻结就是漏了 finally）；控制器本身还有看门狗。
+			const lease = ctx.freeze ? await ctx.freeze.acquire(`decision ${ctx.scheduler.count()}`) : null;
+			try {
 				const out = await ctx.runDecision(ctx.agent, ctx.deps, {
 					trigger: due.trigger,
 					tracker,
@@ -171,6 +183,8 @@ export function createDecisionLoop(ctx: DecisionLoopCtx): DecisionLoop {
 				});
 				plan = out.plan;
 				ctx.telemetry.onActivity?.();
+			} finally {
+				await lease?.release();
 			}
 
 			// SPEC §4.2 step 5: honour the model's own wake-up ("或等待条件满足").

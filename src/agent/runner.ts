@@ -50,6 +50,7 @@ import { pruningTransformContext } from "./context.js";
 import { loadMemory, makeLessonProvider, memoryCounts, type LoadedMemory } from "../evolution/memory.js";
 import { routeFactsProviderFor } from "../evolution/route-facts.js";
 import { joinRoutesWithLedger } from "./route-stats.js";
+import { makeFreezeController } from "./freeze.js";
 import { RouteLedger } from "./route-ledger.js";
 import { makeSignalHub, type SignalHub } from "./signal-hub.js";
 import { createDecisionLoop } from "./decision-loop.js";
@@ -71,6 +72,12 @@ export interface AgentRunOptions {
 	 * (docs/STARTUP-AND-LIFECYCLE.md §1).
 	 */
 	offlineDemo?: boolean;
+	/**
+	 * Pause the world while the model thinks and acts (SPEC §10.59).
+	 * Default false: frozen runs trade wall-clock for a snapshot the model can
+	 * trust, which is an experiment variable, not an obvious default.
+	 */
+	freeze?: boolean;
 	/**
 	 * Seed the agent with cross-game memory. Default TRUE - this is the mechanism
 	 * of self-evolution (src/evolution/memory.ts). Set false only for the control
@@ -227,6 +234,18 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 	// otherwise the offline faux provider (scripted) so the wiring is still
 	// demonstrable without a key. faux is NOT a real LLM — it cannot validate
 	// decision quality, only the command plumbing.
+	// Verified freeze controller (only when asked for). Defined before the loop and
+	// reused at finalize so the run record can PROVE the freeze really happened.
+	const freezeCtl =
+		opts.freeze === true
+			? makeFreezeController({
+					pause: () => client!.rconAwait("pause"),
+					unpause: () => client!.rconAwait("unpause"),
+					now: () => Date.now(),
+					log: (m) => console.log(m),
+				})
+			: undefined;
+
 	// `routeStats` is what makes `inspect_route` possible (N2-2): the hub keeps the
 	// newest reading per route, the tool reads it on demand. Wiring it here (not in
 	// the tool) keeps the tool unit-testable with a fake.
@@ -628,6 +647,10 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 		pendingActions,
 		opts: { decisionTickMs: opts.decisionTickMs, maxDecisions: opts.maxDecisions, seconds: opts.seconds },
 		isStopRequested: () => stopRequested,
+		// Verified freeze: acquire before the model thinks, release in a finally
+		// (plus the controller's own watchdog). Uses rconAwait so a pause that was
+		// never acknowledged is reported instead of assumed.
+		freeze: freezeCtl,
 		// N2-2b: the economics the GS reports are keyed by job; the ledger knows
 		// which towns that job was ordered for. Joining them here is what lets the
 		// model read "route 101 (9->12): 6 vehicles, 146 waiting, -308 profit".
@@ -648,6 +671,17 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 	process.off("uncaughtException", onCrash);
 	process.off("unhandledRejection", onCrash);
 	finalized = true;
+	// Proof that the freeze (if requested) really happened: an A/B comparing frozen
+	// decisions is meaningless unless the runs can show how often the pause was
+	// acknowledged. Printed on the normal path, which is where it matters.
+	if (freezeCtl) {
+		const f = freezeCtl.stats();
+		console.log(
+			`[agent] freeze: ${f.acquisitions} confirmed pause(s), ${f.acquireUnconfirmed} unconfirmed, ` +
+				`${f.unpauseFailures} unpause failure(s), ${f.watchdogTrips} watchdog trip(s), ` +
+				`max hold ${f.maxHoldMs}ms`,
+		);
+	}
 
 	const exitCode = await runFinalizeAndReflect({
 		cfg, world: _world, session, telemetry,

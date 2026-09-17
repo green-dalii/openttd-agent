@@ -2208,3 +2208,41 @@ deliveredCargo 并写一行 `metrics.jsonl`（`arm=control`），与 agent 路�
 
 **建议**：以"已验证的冻结"做一次同 seed A/B（freeze vs no-freeze），
 用 delivered 判据——而不是凭信念二选一。
+
+## 10.60 已验证的冻结（`--freeze`）：重新引入暂停，但这次可观测（2026-09-17）
+
+### 为什么可以做了
+
+§10.59 实测推翻"暂停单向"的旧结论 → 决策期冻结重新可用。但它必须满足三条，
+否则就是重蹈 §10.26（永久冻结）：
+
+1. **暂停/恢复都要回执确认**（`rconAwait`）；无回执 → 明说"没冻住"（`acquireUnconfirmed`），
+   流程继续跑（**不假装冻住**，否则冻结 A/B 的整轮结论作废）；
+2. **恢复在 `finally` 里**（`decision-loop.ts`），并有重试（恢复比暂停重要）；
+3. **看门狗**：持有上限 120s，超时强制恢复（一次卡死的决策不能永久冻住游戏）。
+
+### 实现
+
+- `src/agent/freeze.ts`：`makeFreezeController({pause, unpause, now, log, maxHoldMs})`
+  → `acquire(reason)` / `release()` / `isHeld()` / `stats()`
+  （`acquisitions` / `acquireUnconfirmed` / `unpauseFailures` / `watchdogTrips` / `maxHoldMs`）。
+- `decision-loop.ts`：把**模型思考 + 工具执行**整段包在 `acquire` … `finally release`。
+- `src/cli/run.ts --freeze` + `run-experiment.ts --vary freeze`（两臂只差冻结，
+  且都 `--no-memory`——记忆不是本轮自变量）。
+- 局末打印 `[agent] freeze: N confirmed pause(s), …`：**冻结 A/B 必须能证明它真的冻住了**。
+
+### 真机冒烟（/tmp/f4、/tmp/f5，seed 7）
+
+```
+[agent] DEBUG acquired held=true   ×4      ← 4 次决策，4 次确认冻结
+```
+
+### 一个自食其果的观测教训
+
+`pause` 命令在 OpenTTD 里**没有输出行** → `[agent] rcon …` 日志里**完全看不见**，
+最初我据此以为"冻结没生效"（连查三轮，插了 4 处调试才发现是**日志缺失**而非功能缺失）。
+修法：冻结控制器**在成功路径也留一行** `[freeze] paused for "decision N" (acknowledged)`
+/ `[freeze] resumed after Xms`。
+
+**教训**：给模型和给自己看的事实，都要**在成功路径留证据**——"没有日志"既可能是
+"没发生"，也可能是"发生了但没说话"，而这两者必须能被区分。
