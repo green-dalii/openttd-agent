@@ -9,6 +9,14 @@
 
 ## [Unreleased]
 
+### Added（分布感知判据：中位数 / 零率 / delivered 独立判定，2026-09-17）
+
+- `ArmStats.medianDelivered`、`zeroDeliveredRate`；`ArmComparison.deliveredNote`
+  （均值与中位数符号相反时点名）；`deliveredConclusive`（**不被 built-rate 守卫挡住**
+  ——那条守卫是给 money/income 的）。
+- 原因：/tmp/n2ab3 实测 delivered 均值 favor 记忆（23.2 vs 11.2）而中位数 favor 对照
+  （0 vs 15），系零膨胀重尾所致——只报均值会得出相反结论。
+
 ### Changed（冻结 A/B 结论：默认不冻结，2026-09-17）
 
 - 冻结机制已核实（5/5 局有 3–8 次确认暂停、0 恢复失败、0 看门狗触发），

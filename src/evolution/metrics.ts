@@ -121,6 +121,14 @@ export interface GameMetric {
  */
 export const MIN_LESSON_SAMPLE = 5;
 
+/** Median of a non-empty list (distribution-aware companion to `mean`). */
+function median(list: number[]): number | null {
+	if (list.length === 0) return null;
+	const s = [...list].sort((a, b) => a - b);
+	const mid = Math.floor(s.length / 2);
+	return s.length % 2 === 1 ? s[mid]! : (s[mid - 1]! + s[mid]!) / 2;
+}
+
 function num(v: unknown): number {
 	const n = Number(v);
 	return Number.isFinite(n) ? n : 0;
@@ -251,6 +259,15 @@ export interface ArmStats {
 	/** Mean cargo delivered (N2-4b) - the least confounded outcome we have. */
 	meanDelivered: number | null;
 	deliveredReported: number;
+	/**
+	 * Median delivered (2026-09-17). Delivered is ZERO-INFLATED and heavy-tailed:
+	 * in /tmp/n2ab3 the arms had means 23.2 vs 11.2 but medians 0 vs 15 - opposite
+	 * signs, because one run contributed 77 of the treatment's 116 total. When the
+	 * mean and the median disagree, the mean is describing the tail, not the arms.
+	 */
+	medianDelivered: number | null;
+	/** Share of runs that delivered nothing (the zero-inflation itself). */
+	zeroDeliveredRate: number | null;
 }
 
 export interface ArmComparison {
@@ -266,6 +283,17 @@ export interface ArmComparison {
 	incomeDelta: number | null;
 	/** Right minus left of mean delivered cargo (N2-4b). */
 	deliveredDelta: number | null;
+	/**
+	 * Whether the DELIVERED comparison is decidable: both arms at the sample
+	 * floor. Deliberately not gated on `builtRate` equality - that guard exists
+	 * because "never built" INFLATES money (nothing spent) and confounds income;
+	 * for delivered, never building means delivering 0, which is the honest
+	 * outcome rather than a bias. Gating delivered on the money guard would veto
+	 * the answer with another metric's problem.
+	 */
+	deliveredConclusive: boolean;
+	/** Human-readable caveat when mean and median disagree in sign. */
+	deliveredNote?: string;
 	/**
 	 * Treatment runs that received NO memory at all (N2-5). These are assigned to
 	 * treatment but the intervention never arrived, so they dilute the arm and
@@ -315,6 +343,10 @@ function armStats(list: GameMetric[]): ArmStats {
 		incomeReported: incomeValues.length,
 		meanDelivered: deliveredValues.length ? mean(deliveredValues) : null,
 		deliveredReported: deliveredValues.length,
+		medianDelivered: deliveredValues.length ? median(deliveredValues) : null,
+		zeroDeliveredRate: deliveredValues.length
+			? deliveredValues.filter((v) => v === 0).length / deliveredValues.length
+			: null,
 	};
 }
 
@@ -483,6 +515,29 @@ export function compareArms(metrics: GameMetric[], by: CompareBy = "memory"): Ar
 		moneyDelta,
 		incomeDelta,
 		deliveredDelta,
+		deliveredConclusive:
+			a.count >= MIN_LESSON_SAMPLE &&
+			b.count >= MIN_LESSON_SAMPLE &&
+			a.meanDelivered !== null &&
+			b.meanDelivered !== null,
+		...(() => {
+			const ma = a.meanDelivered;
+			const mb = b.meanDelivered;
+			const da = a.medianDelivered;
+			const db = b.medianDelivered;
+			if (ma === null || mb === null || da === null || db === null) return {};
+			const meanSign = Math.sign(ma - mb);
+			const medianSign = Math.sign(da - db);
+			if (meanSign !== 0 && medianSign !== 0 && meanSign !== medianSign) {
+				return {
+					deliveredNote:
+						`mean and median DISAGREE in sign (mean ${ma.toFixed(1)} vs ${mb.toFixed(1)}, ` +
+						`median ${da} vs ${db}): delivered is zero-inflated and heavy-tailed, so a few ` +
+						`runs carry the mean. Do not read the mean alone as a result.`,
+				};
+			}
+			return {};
+		})(),
 		treatmentWithoutInjection:
 			by === "freeze"
 				? withLessons.filter((m) => (m.freeze?.confirmed ?? 0) === 0).length

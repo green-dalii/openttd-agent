@@ -113,7 +113,8 @@ const fmt = (label: string, a: typeof view.arms.withLessons) =>
 			`tokens=${a.meanTokens?.toFixed(0) ?? "—"} tok/dec=${a.tokensPerDecision?.toFixed(0) ?? "—"} ` +
 			`built=${a.builtRate?.toFixed(2) ?? "—"} stations=${a.meanStations?.toFixed(2) ?? "—"} ` +
 			`income=${a.meanIncome?.toFixed(0) ?? "—"}(n=${a.incomeReported}) ` +
-			`delivered=${a.meanDelivered?.toFixed(0) ?? "—"}(n=${a.deliveredReported})`,
+			`delivered=${a.meanDelivered?.toFixed(0) ?? "—"}(n=${a.deliveredReported}) ` +
+			`med=${a.medianDelivered ?? "—"} zero=${a.zeroDeliveredRate === null ? "—" : (a.zeroDeliveredRate * 100).toFixed(0) + "%"}`,
 	);
 const armLabel = args.vary === "freeze" ? ["frozen", "not frozen"] : ["with lessons", "without"];
 fmt(armLabel[0]!, view.arms.withLessons);
@@ -124,6 +125,12 @@ if (view.arms.treatmentWithoutInjection > 0) {
 			" - the intervention did not arrive (fresh data dir?), so those runs dilute the arm.",
 	);
 }
+console.log(
+	`delivered conclusion: ${
+		view.arms.deliveredConclusive ? "DECIDABLE (both arms at sample floor)" : "not decidable (sample below floor)"
+	}`,
+);
+if (view.arms.deliveredNote) console.log(`NOTE: ${view.arms.deliveredNote}`);
 console.log(
 	`money delta: ${view.arms.moneyDelta?.toFixed(0) ?? "—"}` +
 		// N2-4: money is spending-dominated (building costs money), so the flow

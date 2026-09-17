@@ -566,3 +566,51 @@ describe("compareArms(by) —— 比较维度可选", () => {
 		expect(cmp.withoutLessons.count).toBe(1);
 	});
 });
+
+/**
+ * 零膨胀重尾判据（2026-09-17，/tmp/n2ab3 实测）。* 
+ *
+ * 现象：delivered 逐局为 control [0,23,0,18,15]、treatment [0,77,39,0,0]——
+ * **均值 favor treatment（23.2 vs 11.2），中位数 favor control（0 vs 15）**。
+ * 单个 77 撑起均值。这是"n=5 不能判定"的量化原因：重尾 + 零膨胀下，
+ * 均值与中位数可以符号相反，此时只有分布感知的统计（中位/零率/自助法）能说清。
+ */
+describe("delivered：分布感知统计 + 判据守卫", () => {
+	const run = (arm: "treatment" | "control", delivered: number, built: boolean) => ({
+		...toGameMetric(meta({ outcome: { constructionDone: built, money: "1", stations: 2, delivered } })),
+		arm,
+	});
+
+	const both = [
+		run("treatment", 0, false), run("treatment", 77, true), run("treatment", 39, false),
+		run("treatment", 0, true), run("treatment", 0, false),
+		run("control", 0, true), run("control", 23, true), run("control", 0, false),
+		run("control", 18, false), run("control", 15, true),
+	];
+
+	it("中位数与零率都被报出（重尾下均值会撒谎）", () => {
+		const cmp = compareArms(both);
+		expect(cmp.withLessons.medianDelivered).toBe(0);
+		expect(cmp.withoutLessons.medianDelivered).toBe(15);
+		expect(cmp.withLessons.zeroDeliveredRate).toBeCloseTo(0.6, 6);
+		expect(cmp.withoutLessons.zeroDeliveredRate).toBeCloseTo(0.4, 6);
+	});
+
+	it("均值与中位数符号相反 → 明确标注（不许只报均值让人以为结论已定）", () => {
+		const cmp = compareArms(both);
+		expect(cmp.deliveredNote).toMatch(/median|重尾|heavy|disagree/i);
+	});
+
+	it("delivered 的判定不被 built-rate 守卫挡住（该守卫是给 money/income 的）", () => {
+		// money 的混杂是"没建成 → 没花钱 → 钱更多"；delivered 恰好相反：
+		// 没建成 → 没运货 → 0。把它一起挡掉等于用别人的病否决自己的问题。
+		const cmp = compareArms(both);
+		expect(cmp.conclusive).toBe(false); // money/income 仍不可比（建成率不同）
+		expect(cmp.deliveredConclusive).toBe(true); // 但 delivered 样本足够即可判
+	});
+
+	it("样本不足时 deliveredConclusive 为 false", () => {
+		const few = [run("treatment", 5, true), run("control", 1, true)];
+		expect(compareArms(few).deliveredConclusive).toBe(false);
+	});
+});
