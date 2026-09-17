@@ -66,6 +66,8 @@ export interface SessionMeta {
 	 * (nothing existed to inject yet) and silently compared 4 vs 6.
 	 */
 	arm?: "treatment" | "control";
+	/** Verified-freeze stats (SPEC §10.60); null when never frozen. */
+	freeze?: { confirmed: number; unconfirmed: number; failures: number; watchdogTrips: number; maxHoldMs: number } | null;
 	outcome?: {
 		constructionDone?: boolean;
 		/** Company income at finalize (N2-4); absent when the packet never arrived. */

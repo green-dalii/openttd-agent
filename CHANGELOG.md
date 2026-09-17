@@ -9,6 +9,13 @@
 
 ## [Unreleased]
 
+### Fixed（A/B 比较维度可指定，2026-09-17）
+
+- `GameMetric.freeze` + `compareArms(metrics, by: "memory"|"freeze")` +
+  `evolutionView(dir, by)`。修前 `arm` 只描述记忆变量，冻结轮两臂都 `--no-memory`
+  → 全被记成 control，统计失去对照。
+- 冻结维度下"要求冻结但零确认"的局算 control（干预没送到）。
+
 ### Added（已验证的冻结 `--freeze`，2026-09-17）
 
 - `src/agent/freeze.ts` + `--freeze`：决策期暂停世界（`pause` → 模型思考+执行动作

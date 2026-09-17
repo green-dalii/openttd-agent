@@ -36,6 +36,8 @@ export interface FinalizeAndReflectArgs {
 	getRouteStats: () => RouteStats[];
 	/** Assigned arm, recorded in the metric so it is never inferred (N2-5 fix). */
 	arm: "treatment" | "control";
+	/** Verified-freeze stats (SPEC §10.60); null when the run never froze. */
+	freezeStats?: { confirmed: number; unconfirmed: number; failures: number; watchdogTrips: number; maxHoldMs: number } | null;
 	completeOnce: (p: { system: string; user: string }) => Promise<string>;
 }
 
@@ -56,6 +58,7 @@ export async function runFinalizeAndReflect(args: FinalizeAndReflectArgs): Promi
 		routeLedger,
 		getRouteStats,
 		arm,
+		freezeStats,
 		completeOnce,
 	} = args;
 	const snap = world.snapshot();
@@ -81,6 +84,7 @@ export async function runFinalizeAndReflect(args: FinalizeAndReflectArgs): Promi
 	session.finalize({
 		status: reachedDone ? "completed" : "aborted",
 		arm,
+		freeze: freezeStats ?? null,
 		outcome: {
 			constructionDone: reachedDone,
 			phase: executorPhase || undefined,

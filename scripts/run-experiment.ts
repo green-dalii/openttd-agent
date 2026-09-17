@@ -95,7 +95,7 @@ for (let i = 1; i <= args.n; i++) {
 }
 spawnSync("pkill", ["-f", "OpenTTD.app/Contents/MacOS/openttd"]);
 
-const view = evolutionView(args.dir);
+const view = evolutionView(args.dir, args.vary);
 console.log("");
 console.log(`=== verdict (${args.dir}) ===`);
 console.log(

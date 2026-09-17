@@ -2246,3 +2246,16 @@ deliveredCargo 并写一行 `metrics.jsonl`（`arm=control`），与 agent 路�
 
 **教训**：给模型和给自己看的事实，都要**在成功路径留证据**——"没有日志"既可能是
 "没发生"，也可能是"发生了但没说话"，而这两者必须能被区分。
+
+### 第二个自食其果：比较维度必须可指定（同轮发现）
+
+`arm` 字段是按"记忆注入"定义的，而冻结轮**两臂都 `--no-memory`** → 两臂全被记成
+`control`，统计直接失去对照（首轮 /tmp/fzab 因此作废）。这是 §10.56"臂来自分配"
+的续集：**分配的是哪个变量，就必须记录那个变量**。
+
+修法：
+- `GameMetric.freeze`（confirmed / unconfirmed / failures / watchdogTrips / maxHoldMs），
+  与 `arm` 并列记录；
+- `compareArms(metrics, by)` —— `by: "memory" | "freeze"`；
+- `evolutionView(dataDir, by)` 与 `run-experiment --vary` 贯通；
+- 冻结维度下"要求冻结但一次都没确认"的局**算 control**（干预没送到 ≠ treatment）。

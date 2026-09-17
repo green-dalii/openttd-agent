@@ -12,7 +12,7 @@
  * 页面只负责显示服务端给出的结论。
  */
 
-import { compareArms, type GameMetric } from "./metrics.js";
+import { type CompareBy, compareArms, type GameMetric} from "./metrics.js";
 import { evaluatePromotion, type StrategyCard } from "./strategies.js";
 import { readLessons, readMetrics, readStrategies, setStrategyEnabled } from "./store.js";
 
@@ -30,7 +30,7 @@ export interface EvolutionView {
 }
 
 /** Read + annotate everything the Evolution page shows. Never throws. */
-export function evolutionView(dataDir: string): EvolutionView {
+export function evolutionView(dataDir: string, by: CompareBy = "memory"): EvolutionView {
 	let metrics: GameMetric[] = [];
 	try {
 		metrics = readMetrics(dataDir);
@@ -52,7 +52,7 @@ export function evolutionView(dataDir: string): EvolutionView {
 		strategies = [];
 	}
 
-	return { metrics, lessons, strategies, arms: compareArms(metrics) };
+	return { metrics, lessons, strategies, arms: compareArms(metrics, by) };
 }
 
 export { setStrategyEnabled };

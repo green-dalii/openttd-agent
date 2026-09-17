@@ -530,3 +530,39 @@ describe("N2-4b 吞吐量指标", () => {
 		expect(st.deliveredReported).toBe(2);
 	});
 });
+
+/**
+ * A/B 的比较维度必须可指定（2026-09-17）。
+ *
+ * 事故：`arm` 字段是按"记忆注入"定义的，而冻结轮的**两臂都 `--no-memory`**
+ * → 两臂都被记成 control，整轮统计直接失去对照（我自己引入的缺陷，正是
+ * "臂来自分配"那条规则的续集：分配的是什么变量，就得记录**那个**变量）。
+ */
+describe("compareArms(by) —— 比较维度可选", () => {
+	const run = (freeze: boolean, delivered: number) => ({
+		...toGameMetric(meta({ outcome: { constructionDone: true, money: "1", stations: 1, delivered } })),
+		arm: "control" as const, // 冻结轮两臂都是 --no-memory
+		freeze: freeze ? { confirmed: 5, unconfirmed: 0, failures: 0, watchdogTrips: 0, maxHoldMs: 1000 } : null,
+	});
+
+	it("by='freeze'：有冻结为 treatment，无冻结为 control（两臂都 arm=control 也要能分开）", () => {
+		const cmp = compareArms([run(true, 100), run(false, 20)], "freeze");
+		expect(cmp.withLessons.count).toBe(1);
+		expect(cmp.withoutLessons.count).toBe(1);
+		expect(cmp.withLessons.meanDelivered).toBe(100);
+		expect(cmp.withoutLessons.meanDelivered).toBe(20);
+	});
+
+	it("by='memory'（默认）：仍按 arm 划分，不受 freeze 字段影响", () => {
+		const cmp = compareArms([run(true, 100), run(false, 20)]);
+		expect(cmp.withLessons.count).toBe(0);
+		expect(cmp.withoutLessons.count).toBe(2);
+	});
+
+	it("冻结但一次都没确认上（confirmed=0）→ 算 control：干预没送到就不是 treatment 臂", () => {
+		const broken = { ...run(true, 5), freeze: { confirmed: 0, unconfirmed: 4, failures: 0, watchdogTrips: 0, maxHoldMs: 0 } };
+		const cmp = compareArms([broken, run(true, 100)], "freeze");
+		expect(cmp.withLessons.count).toBe(1);
+		expect(cmp.withoutLessons.count).toBe(1);
+	});
+});

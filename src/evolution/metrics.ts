@@ -34,6 +34,8 @@ export interface SessionMetaLike {
 	llm?: { providerId?: string; model?: string; kind?: string };
 	/** Assigned arm (N2-5 fix): recorded by the runner, not inferred later. */
 	arm?: "treatment" | "control";
+	/** Verified-freeze stats (SPEC §10.60), recorded by the runner. */
+	freeze?: { confirmed: number; unconfirmed: number; failures: number; watchdogTrips: number; maxHoldMs: number } | null;
 	outcome?: {
 		constructionDone?: boolean;
 		money?: string | number;
@@ -89,6 +91,13 @@ export interface GameMetric {
 	costTotal: number;
 	/** Facts injected from route-facts.jsonl (C-1) - counts toward treatment. */
 	routeFactsInjected?: number;
+	/**
+	 * Verified-freeze stats for this run (2026-09-17), or null when the run never
+	 * froze. Recorded separately from `arm` because the arm label describes the
+	 * MEMORY variable - a freeze A/B runs both arms with --no-memory, so splitting
+	 * by `arm` would put every run in one bucket.
+	 */
+	freeze?: { confirmed: number; unconfirmed: number; failures: number; watchdogTrips: number; maxHoldMs: number } | null;
 	/**
 	 * The arm the EXPERIMENT assigned this run to (2026-09-17).
 	 * Authoritative when present: the arm must never be inferred from how much
@@ -150,6 +159,7 @@ export function toGameMetric(
 			o && o.constructionDone === true ? true : o && o.constructionDone === false ? false : null,
 		money: num(o && o.money),
 		arm: meta.arm === "treatment" || meta.arm === "control" ? meta.arm : undefined,
+		freeze: meta.freeze ?? null,
 		delivered:
 			o && o.delivered !== undefined && o.delivered !== null && Number.isFinite(Number(o.delivered))
 				? Number(o.delivered)
@@ -318,7 +328,9 @@ function armStats(list: GameMetric[]): ArmStats {
  * `MIN_LESSON_SAMPLE` per arm — SPEC §5.3 forbids speculative conclusions, and a
  * 1-vs-1 comparison is noise.
  */
-export function compareArms(metrics: GameMetric[]): ArmComparison {
+export type CompareBy = "memory" | "freeze";
+
+export function compareArms(metrics: GameMetric[], by: CompareBy = "memory"): ArmComparison {
 	// Two exclusions, for two different reasons.
 	//
 	// 1. `faux` (scripted) runs execute a fixed plan, so they say nothing about
@@ -349,10 +361,21 @@ export function compareArms(metrics: GameMetric[]): ArmComparison {
 	const hasArm = (m: (typeof real)[number]) => m.arm === "treatment" || m.arm === "control";
 	const injectedSomething = (m: (typeof real)[number]) =>
 		m.memory.lessonsInjected > 0 || (m.memory.routeFactsInjected ?? 0) > 0;
-	const withLessons = real.filter((m) => (hasArm(m) ? m.arm === "treatment" : injectedSomething(m)));
+	// When the independent variable is the FREEZE, the two arms are divided by
+	// whether the pause was actually acknowledged - not by `arm`, which describes
+	// the memory variable. A run that asked to freeze but never got a single
+	// acknowledgement received no intervention, so it counts as control.
+	const frozeConfirmed = (m: (typeof real)[number]) => (m.freeze?.confirmed ?? 0) > 0;
+	const withLessons =
+		by === "freeze"
+			? real.filter(frozeConfirmed)
+			: real.filter((m) => (hasArm(m) ? m.arm === "treatment" : injectedSomething(m)));
 	// Control arm = received NOTHING (neither lessons nor facts). Using only
 	// lessonsInjected here put facts-only runs in BOTH arms (m3e).
-	const withoutLessons = real.filter((m) => (hasArm(m) ? m.arm === "control" : !injectedSomething(m)));
+	const withoutLessons =
+		by === "freeze"
+			? real.filter((m) => !frozeConfirmed(m))
+			: real.filter((m) => (hasArm(m) ? m.arm === "control" : !injectedSomething(m)));
 	const a = armStats(withLessons);
 	const b = armStats(withoutLessons);
 
@@ -460,7 +483,10 @@ export function compareArms(metrics: GameMetric[]): ArmComparison {
 		moneyDelta,
 		incomeDelta,
 		deliveredDelta,
-		treatmentWithoutInjection: withLessons.filter((m) => !injectedSomething(m)).length,
+		treatmentWithoutInjection:
+			by === "freeze"
+				? withLessons.filter((m) => (m.freeze?.confirmed ?? 0) === 0).length
+				: withLessons.filter((m) => !injectedSomething(m)).length,
 		confounded,
 		conclusive: enough && !confounded,
 		note: confounded ? `${confoundNote}${excluded}` : body,
