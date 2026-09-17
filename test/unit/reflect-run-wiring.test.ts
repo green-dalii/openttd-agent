@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { RouteLedger } from "../../src/agent/route-ledger.js";
 import { runFinalizeAndReflect } from "../../src/agent/reflect-run.js";
 import { makeRouteFactsProvider, routeFactsFromLedger, saveRouteFacts } from "../../src/evolution/route-facts.js";
+import { toGameMetric } from "../../src/evolution/metrics.js";
 
 /**
  * Phase C TDD：
@@ -63,6 +64,7 @@ async function runFinalize(dir: string, ledger: RouteLedger, decisions: number) 
 		pendingActions: [],
 		routeLedger: ledger,
 		getRouteStats: () => [],
+		arm: "control" as const,
 		completeOnce: completeOnce as never,
 	});
 }
@@ -116,5 +118,21 @@ describe("C-1 接线：决策上下文注入事实行", () => {
 		expect(lines).toHaveLength(1);
 		expect(lines[0]).toContain("9->12");
 		expect(lines[0]).toContain("built");
+	});
+});
+
+/**
+ * N2-5 缺陷的守卫：arm 必须**落进 metrics.jsonl**，否则 compareArms 只能靠
+ * 注入计数推断（/tmp/n2ab 因此把 5v5 算成 4v6）。
+ */
+describe("arm 落盘守卫（N2-5）", () => {
+	it("finalize 写入的 arm 出现在 evolution/metrics.jsonl", async () => {
+		const meta = toGameMetric(
+			{ id: "x", mode: "agent", status: "aborted", startedAt: 0, seed: 1, llm: { kind: "real" }, arm: "treatment" } as never,
+			{ lessonsInjected: 0, strategiesInjected: 0, routeFactsInjected: 0 },
+		);
+		expect(meta.arm).toBe("treatment");
+		// 关键性质：arm 与"注入了多少"无关
+		expect(meta.memory.lessonsInjected).toBe(0);
 	});
 });

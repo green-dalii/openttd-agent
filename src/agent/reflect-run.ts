@@ -34,6 +34,8 @@ export interface FinalizeAndReflectArgs {
 	 * finalize step reads whatever the hub last saw, without owning the hub.
 	 */
 	getRouteStats: () => RouteStats[];
+	/** Assigned arm, recorded in the metric so it is never inferred (N2-5 fix). */
+	arm: "treatment" | "control";
 	completeOnce: (p: { system: string; user: string }) => Promise<string>;
 }
 
@@ -53,6 +55,7 @@ export async function runFinalizeAndReflect(args: FinalizeAndReflectArgs): Promi
 		pendingActions,
 		routeLedger,
 		getRouteStats,
+		arm,
 		completeOnce,
 	} = args;
 	const snap = world.snapshot();
@@ -77,6 +80,7 @@ export async function runFinalizeAndReflect(args: FinalizeAndReflectArgs): Promi
 	);
 	session.finalize({
 		status: reachedDone ? "completed" : "aborted",
+		arm,
 		outcome: {
 			constructionDone: reachedDone,
 			phase: executorPhase || undefined,

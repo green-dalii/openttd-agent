@@ -59,6 +59,13 @@ export interface SessionMeta {
 	llm: { providerId: string; model: string; api: string; kind: "real" | "faux" };
 	/** App version that produced this run (so logs map back to code). */
 	appVersion?: string;
+	/**
+	 * Assigned experimental arm (N2-5 fix). Recorded by the runner because only it
+	 * knows whether memory injection was requested; classifying arms later from
+	 * injection counts mis-assigned the first treatment run of a fresh data dir
+	 * (nothing existed to inject yet) and silently compared 4 vs 6.
+	 */
+	arm?: "treatment" | "control";
 	outcome?: {
 		constructionDone?: boolean;
 		/** Company income at finalize (N2-4); absent when the packet never arrived. */

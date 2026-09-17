@@ -9,6 +9,14 @@
 
 ## [Unreleased]
 
+### Fixed（A/B 臂划分：以分配为准，2026-09-17）
+
+- `SessionMeta.arm` / `GameMetric.arm`：arm 由 runner 在**分配时**记录
+  （`--no-memory` = control）；`compareArms` 优先按它划分，旧记录退回启发式。
+  修前：新 dataDir 的首局 treatment 因"无可注入"被算作 control（/tmp/n2ab 实际 4v6）。
+- `ArmComparison.treatmentWithoutInjection` + verdict `WARNING`：treatment 臂中
+  **干预没送到**的局被点名，不再静默平均。
+
 ### Added（NEXT-2 N2-4：收益流主指标，2026-09-16）
 
 - `ArmStats.meanIncome` / `incomeReported`、`ArmComparison.incomeDelta`；

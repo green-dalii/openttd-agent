@@ -454,3 +454,46 @@ describe("N2-4 收益流指标", () => {
 		expect(st.incomeReported).toBe(2);
 	});
 });
+
+/**
+ * 臂划分必须来自**实验分配**，不能由注入计数推断（2026-09-17，/tmp/n2ab 实测）。
+ *
+ * 现象：新 dataDir 的前两局（ctl1 与 trt1）注入数都是 0（trt1 是第一局 treatment，
+ * 那时还没有任何 lesson/fact 可注入）→ 两局都被判成 control，最终臂变成 6 vs 4。
+ * 这是 m3f 缺陷（"treatment 只看 lessons"）的**下一层**：修了"facts 也算注入"，
+ * 却没修"注入为空 ≠ 不是 treatment 臂"。
+ */
+describe("臂划分：以实验分配为准（N2-5 缺陷修复）", () => {
+	const run = (arm: "treatment" | "control", injected: number) => ({
+		...toGameMetric(meta({ outcome: { constructionDone: true, money: "100000", stations: 4 } }), {
+			lessonsInjected: injected,
+			strategiesInjected: 0,
+			routeFactsInjected: injected,
+		}),
+		arm,
+	});
+
+	it("treatment 臂即使什么都没注入，也算 treatment（分配 ≠ 实际注入量）", () => {
+		const cmp = compareArms([run("treatment", 0), run("control", 3)]);
+		expect(cmp.withLessons.count).toBe(1);
+		expect(cmp.withoutLessons.count).toBe(1);
+	});
+
+	it("注入为空要在结论里点名（干预没送到，是实验缺陷不是结果）", () => {
+		const cmp = compareArms([run("treatment", 0), run("control", 3)]);
+		expect(cmp.treatmentWithoutInjection).toBe(1);
+	});
+
+	it("有注入的 treatment 不计入该计数", () => {
+		expect(compareArms([run("treatment", 4), run("control", 3)]).treatmentWithoutInjection).toBe(0);
+	});
+
+	it("没有 arm 字段的旧记录：退回旧启发式（保持向后兼容，不炸）", () => {
+		const legacy = toGameMetric(meta({ outcome: { constructionDone: true, money: "1", stations: 1 } }), {
+			lessonsInjected: 5,
+			strategiesInjected: 0,
+		});
+		const cmp = compareArms([legacy, run("control", 0)]);
+		expect(cmp.withLessons.count).toBe(1); // lessons>0 → treatment（旧规则）
+	});
+});

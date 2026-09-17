@@ -40,6 +40,11 @@ const fmt = (label: string, a: typeof arms.withLessons) =>
 fmt("with lessons", arms.withLessons);
 fmt("without", arms.withoutLessons);
 console.log("");
+if (arms.treatmentWithoutInjection > 0) {
+	console.log(
+		`WARNING       : ${arms.treatmentWithoutInjection} treatment run(s) received NO memory (intervention did not arrive)`,
+	);
+}
 console.log(`money delta   : ${arms.moneyDelta ?? "—"}`);
 console.log(`income delta  : ${arms.incomeDelta?.toFixed(0) ?? "—"}`);
 console.log("");

@@ -2019,3 +2019,43 @@ tool inspect_route: ok=false unknown route job 3. Known jobs: 1
 
 **关键行为证据**：模型**第一次真的用上了 `add_vehicles`**。NEXT-2 的目标就是把
 "选一对城镇"变成线路组合管理；车队管理动作出现，说明决策空间确实被行使了。
+
+## 10.56 N2-5 首轮 A/B 判废：臂划分缺陷（2026-09-17）
+
+### 结果先说：**判定无效**，不是"没有效应"
+
+`/tmp/n2ab`（n=5/臂，400s，seed 7）跑完，verdict 自报 "5 with-lessons vs 5
+without"——**假的**。metrics.jsonl 逐局核对：
+
+| # | 分配 | lessons | facts | decisions | built |
+|---|---|---|---|---|---|
+| 1 | ctl | 0 | 0 | 3 | ✗ |
+| 2 | **trt** | **0** | **0** | 3 | ✗ |
+| 3 | ctl | 0 | 0 | 5 | ✗ |
+| 4 | trt | 3 | 3 | 3 | ✗ |
+| … | | | | | |
+
+**第 2 局是 treatment，却因为"注入数为 0"被算进 control → 实际是 4 vs 6。**
+
+### 根因（D4 第三问的残留漏洞）
+
+新 dataDir 的**第一局 treatment 无任何记忆可注入**（还没有 lesson/fact 存在），
+而臂划分用的是"注入了多少"而不是"被分配到哪一臂"。这是 m3f 缺陷的下一层：
+上次修了"facts 也算注入"，这次暴露"**注入为空 ≠ 不是 treatment 臂**"。
+
+### 修法
+
+1. `SessionMeta.arm` / `GameMetric.arm`：**分配时记录**（runner 由
+   `--no-memory` 决定），`compareArms` 优先按 `arm` 划分；旧记录退回启发式。
+2. `ArmComparison.treatmentWithoutInjection`：treatment 臂里**干预没送到**的局数，
+   两个 verdict 脚本都会 `WARNING` 点名——这类局稀释效应，不许静默平均。
+
+### 首轮的原始数据（即便臂错，也如实记录）
+
+- 建成率：treatment 1/4、control 1/6 → **10 局只建成 2 局**（m3i 同窗口为 8/10）
+  ——窗口方差极大，本轮几乎全是截断。
+- tok/决策：13,175 vs 12,562 → **+4.9%**（此前三轮为 +26%/+41%/+41%）。
+  这与"事实型记忆比散文型 lesson 紧凑得多"一致，但 n=4/6 且分配错误，**仅作待测假设**。
+- income 均值：-70,142 vs -37,778。注意 income 在施工期本来就为负
+  （建设/贷款成本），**"没建线"的局反而 income 接近 0**——与 money 同一个陷阱，
+  所以 income delta 同样受建成率混杂，必须与 built rate 一起读。

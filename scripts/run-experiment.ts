@@ -89,6 +89,12 @@ const fmt = (label: string, a: typeof view.arms.withLessons) =>
 	);
 fmt("with lessons", view.arms.withLessons);
 fmt("without", view.arms.withoutLessons);
+if (view.arms.treatmentWithoutInjection > 0) {
+	console.log(
+		`WARNING: ${view.arms.treatmentWithoutInjection} treatment run(s) received NO memory at all` +
+			" - the intervention did not arrive (fresh data dir?), so those runs dilute the arm.",
+	);
+}
 console.log(
 	`money delta: ${view.arms.moneyDelta?.toFixed(0) ?? "—"}` +
 		// N2-4: money is spending-dominated (building costs money), so the flow

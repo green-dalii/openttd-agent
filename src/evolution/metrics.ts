@@ -32,6 +32,8 @@ export interface SessionMetaLike {
 	seed: number;
 	appVersion?: string;
 	llm?: { providerId?: string; model?: string; kind?: string };
+	/** Assigned arm (N2-5 fix): recorded by the runner, not inferred later. */
+	arm?: "treatment" | "control";
 	outcome?: {
 		constructionDone?: boolean;
 		money?: string | number;
@@ -77,6 +79,15 @@ export interface GameMetric {
 	costTotal: number;
 	/** Facts injected from route-facts.jsonl (C-1) - counts toward treatment. */
 	routeFactsInjected?: number;
+	/**
+	 * The arm the EXPERIMENT assigned this run to (2026-09-17).
+	 * Authoritative when present: the arm must never be inferred from how much
+	 * memory happened to be injected. /tmp/n2ab proved the difference - the first
+	 * treatment run of a fresh data dir has nothing to inject yet (no lessons, no
+	 * facts exist), so counting by injection put it in the control arm and the
+	 * comparison ran 6 vs 4 while claiming 5 vs 5.
+	 */
+	arm?: "treatment" | "control";
 	/** The experiment's independent variable: what memory was injected. */
 	memory: { lessonsInjected: number; strategiesInjected: number; routeFactsInjected: number };
 }
@@ -128,6 +139,7 @@ export function toGameMetric(
 		constructionDone:
 			o && o.constructionDone === true ? true : o && o.constructionDone === false ? false : null,
 		money: num(o && o.money),
+		arm: meta.arm === "treatment" || meta.arm === "control" ? meta.arm : undefined,
 		income:
 			o && o.income !== undefined && o.income !== null && Number.isFinite(Number(o.income))
 				? Number(o.income)
@@ -225,6 +237,12 @@ export interface ArmComparison {
 	 * money is spending-dominated, income is what the lines earn.
 	 */
 	incomeDelta: number | null;
+	/**
+	 * Treatment runs that received NO memory at all (N2-5). These are assigned to
+	 * treatment but the intervention never arrived, so they dilute the arm and
+	 * must be named in the verdict instead of quietly averaged in.
+	 */
+	treatmentWithoutInjection: number;
 	/** True only when BOTH arms have MIN_LESSON_SAMPLE runs AND the arms are comparable. */
 	conclusive: boolean;
 	/**
@@ -297,14 +315,20 @@ export function compareArms(metrics: GameMetric[]): ArmComparison {
 	// Treatment arm = ANY injected memory: lessons OR route facts (C-1). The
 	// m3e run exposed the gap: runs that received facts-but-no-lessons were
 	// being scored as controls, splitting the arms by an accounting bug.
-	const withLessons = real.filter(
-		(m) => m.memory.lessonsInjected > 0 || (m.memory.routeFactsInjected ?? 0) > 0,
-	);
+	// Arm assignment: the ASSIGNED arm wins whenever it was recorded. Falling
+	// back to injection counts is only for legacy rows written before 2026-09-17.
+	//
+	// Why this had to change: on a fresh data dir the first treatment run has
+	// nothing to inject (no lessons or facts exist yet), so counting by injection
+	// silently moved it into the control arm - /tmp/n2ab reported "5 vs 5" while
+	// actually comparing 4 with-lessons against 6 without.
+	const hasArm = (m: (typeof real)[number]) => m.arm === "treatment" || m.arm === "control";
+	const injectedSomething = (m: (typeof real)[number]) =>
+		m.memory.lessonsInjected > 0 || (m.memory.routeFactsInjected ?? 0) > 0;
+	const withLessons = real.filter((m) => (hasArm(m) ? m.arm === "treatment" : injectedSomething(m)));
 	// Control arm = received NOTHING (neither lessons nor facts). Using only
 	// lessonsInjected here put facts-only runs in BOTH arms (m3e).
-	const withoutLessons = real.filter(
-		(m) => m.memory.lessonsInjected === 0 && (m.memory.routeFactsInjected ?? 0) === 0,
-	);
+	const withoutLessons = real.filter((m) => (hasArm(m) ? m.arm === "control" : !injectedSomething(m)));
 	const a = armStats(withLessons);
 	const b = armStats(withoutLessons);
 
@@ -407,6 +431,7 @@ export function compareArms(metrics: GameMetric[]): ArmComparison {
 		withoutLessons: b,
 		moneyDelta,
 		incomeDelta,
+		treatmentWithoutInjection: withLessons.filter((m) => !injectedSomething(m)).length,
 		confounded,
 		conclusive: enough && !confounded,
 		note: confounded ? `${confoundNote}${excluded}` : body,
