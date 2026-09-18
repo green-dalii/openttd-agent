@@ -105,7 +105,22 @@ grep -E "RESULT:" /tmp/cal<N>.log
 - **下一步 = NEXT-2（扩决策空间）**：多线路/收益递增/重复博弈，给记忆赚回成本的
   机会——这是三轮数据推导出的优先级，不是拍脑袋。
 
-### 🟡 NEXT-2 收尾 A/B 已跑（2026-09-17，SPEC §10.62）——方向有利但 n=5 不可判定
+### 🔴 当前：顺序检验的 memory A/B（900s，预先登记停止规则）
+
+**依据**：§10.63 校准把 CV 从 1.95 降到 0.48、零率降到 0%（同一任务）。
+首个 block = **5 局/臂 × 900s ≈ 3 小时**；停止规则**事先声明**：
+
+- 统计量：**均值差的自助法 CI（保守 α=0.01）** 为主，中位数与 Mann-Whitney 并列；
+- 每个 block（5 局/臂）看一次；**CI 不含 0 → 停并报结论**；
+- 否则继续到 12/臂，仍不清则到 **25/臂上限**（≈16 小时），然后如实报"该 MDE 下不可判定"；
+- 事先声明：**+20% 效应在本设计下不可检出**，报告时必须写明。
+
+```bash
+rm -rf /tmp/ab900 && mkdir -p /tmp/ab900 && cp <provider-dir>/{credentials,llm}.json /tmp/ab900/
+pnpm exec tsx scripts/run-experiment.ts --dir /tmp/ab900 --n 5 --demo-seconds 900 --seed 7
+```
+
+### ✅ NEXT-2 收尾 A/B 已跑（2026-09-17，SPEC §10.62）——方向有利但 n=5 不可判定
 
 - 数据：delivered 均值 23.2 vs 11.2（favor 记忆），**中位 0 vs 15（favor 对照）**，
   零率 60% vs 40%，tok/决策仅 **+7%**；`delivered delta +12`。

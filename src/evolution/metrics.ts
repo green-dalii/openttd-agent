@@ -678,6 +678,16 @@ export function compareArms(metrics: GameMetric[], by: CompareBy = "memory"): Ar
 			if (ma === null || mb === null || da === null || db === null) return {};
 			const meanSign = Math.sign(ma - mb);
 			const medianSign = Math.sign(da - db);
+			// 饱和提示（2026-09-18 校准发现）：900s 窗口下双臂 deliveryRate 都是 100%，
+			// 障碍率失去方差 → Fisher 必然 p=1。此时"没有差异"说的是这个统计量，
+			// 不是这个世界；比较必须转向量级（均值/中位/秩）。
+			if (a.deliveryRate === 1 && b.deliveryRate === 1) {
+				return {
+					deliveredNote:
+						"hurdle rate is saturated (100% in both arms): the delivery-rate test cannot " +
+						"discriminate here - compare magnitudes (mean/median/rank) instead.",
+				};
+			}
 			if (meanSign !== 0 && medianSign !== 0 && meanSign !== medianSign) {
 				return {
 					deliveredNote:

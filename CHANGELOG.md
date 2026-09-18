@@ -9,6 +9,13 @@
 
 ## [Unreleased]
 
+### Added（900s 校准：实验设计的转折，2026-09-18）
+
+- 校准证明 **500s 窗口是零膨胀与方差的主因**：900s 下零交付率 70%→**0%**、
+  建成率→**100%**、CV 1.95→**0.48**；记忆的 tok/决策代价 +0.1%。
+- 障碍率在双臂 100% 时**饱和**：`deliveredNote` 明确提示"该统计量在此无判别力，
+  请比较量级"，并给出按 MDE 反推的 n（+46% → 25/臂；+30% → ≥40/臂）。
+
 ### Added（分布感知判据：中位数 / 零率 / delivered 独立判定，2026-09-17）
 
 - `ArmStats.medianDelivered`、`zeroDeliveredRate`；`ArmComparison.deliveredNote`
