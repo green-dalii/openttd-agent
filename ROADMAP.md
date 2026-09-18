@@ -59,12 +59,17 @@ grep -E "^###" /tmp/ab900-runner.log | tail -3               # 进度（每局�
 python3 -c "import json;[print(json.loads(l)['arm'],json.loads(l)['delivered']) for l in open('/tmp/ab900/evolution/metrics.jsonl') if l.strip()]"
 ```
 
-**本轮（block #1，2026-09-18T04:37 启动）**：`/tmp/ab900`，`--n 5 --demo-seconds 900
+**本轮（block #1，2026-09-18T04:37Z 启动）**：`/tmp/ab900`，`--n 5 --demo-seconds 900
 --seed 7 --vary memory`，5 局对照 + 5 局处理，≈3.2 小时。审阅入口：
 
 ```bash
 sed -n '/=== verdict/,$p' /tmp/ab900-runner.log     # 判定（含 hurdle 统计与自助法 CI）
+ps -o pid,etime,command -p $(pgrep -f "scripts/run-experiment" | head -1)   # 存活/已运行时长
 ```
+
+> ⚠️ **runner 日志的时间戳是 UTC**（如 `2026-09-18T04:37Z` = 本地 12:37）。
+> 2026-09-18 我自己把 04:37Z 读成"8 小时前启动"，差点把一个健康运行中的实验
+> 判成挂死。**判断存活用 `ps` 的 ELAPSED，不要靠推算时间戳。**
 
 ### 2. 预先登记的停止规则（**不许事后改**）
 
