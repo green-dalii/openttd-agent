@@ -40,6 +40,16 @@
   判定优先用它、**两臂同源**（`ArmComparison.deliveredSource`），旧行回落原始值并标注为不可比。
 - 澄清 `rc=1` 的含义（=施工未达成 DONE，不是崩溃）并在输出中明示。
 
+### Fixed（episode 时钟改用 GS 原始日期 + 三处接线缺口，2026-09-18）
+
+- episode 边界改用 **GS 原始日期**（每 200 tick ≈ 3 游戏日）而非 admin 的 `Date`
+  订阅（**Monthly = 30 游戏日**）：实测 horizon 30 → 32、60 → 60、120 → 120；
+  **测量请用 30 的整数倍 horizon**。
+- 修三处"声明了但没接线"：`loop.ts` 只转发 `secondsRemaining`（模拟时钟被丢弃）、
+  CLI 未把 `--game-days` 转发给 **v02** 路径、v02 时钟只读粗粒度的 `world.date`。
+- `--v02` 记录 `deliveredRun`/`simulatedDays`/`horizonDays`/`reachedHorizon`，
+  使 oracle 梯度测试与 agent 路径**同一套可比量**。
+
 ### Added（G2：施工进度/吞吐/ETA 成为 agent 可见的事实，2026-09-18）
 
 - 新增 `src/agent/executor-progress.ts`：从 executor 阶段（`rd s<seg> r<step> d<dist> p<fails>`）

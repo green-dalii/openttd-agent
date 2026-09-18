@@ -300,7 +300,11 @@ async function main(): Promise<number> {
 	}
 	if (args.mode === "v02") {
 		try {
-			return await runV02(cfg, { demoSeconds: args.demoSeconds, addVehicles: args.addVehicles });
+			return await runV02(cfg, {
+				demoSeconds: args.demoSeconds,
+				gameDays: args.gameDays,
+				addVehicles: args.addVehicles,
+			});
 		} catch (e) {
 			console.error("[v02] ERROR:", e instanceof Error ? e.message : e);
 			return 1;

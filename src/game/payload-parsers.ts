@@ -112,3 +112,18 @@ export function parseCompanyEconomy(payload: Uint8Array): ParsedCompanyEconomy {
 export function rawDateToParts(raw: number): { year: number; month: number; day: number } {
 	return convertDateToYmd(raw);
 }
+
+/**
+ * OpenTTD raw date -> this project's 360-day game day.
+ *
+ * The admin `Date` subscription is MONTHLY (admin-client DEFAULT_SUBSCRIBE), so
+ * the world clock moves in 30-day steps; the GS, by contrast, reports its raw
+ * date every 200 ticks (~3 game days). The episode horizon must use the finer
+ * source, otherwise a "300 game day" episode can only be cut to the nearest month
+ * (measured: a 40-day horizon recorded 60). All arithmetic stays in the same
+ * 360-day convention the rest of the harness uses.
+ */
+export function gameDayFromRawDate(raw: number): number {
+	const { year, month, day } = convertDateToYmd(raw);
+	return (year - 1950) * 360 + (month - 1) * 30 + (day - 1);
+}

@@ -644,11 +644,15 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 	// (REFACTOR Phase B-4b — the while body moved there 1:1).
 	// The episode clock starts when the decision loop does, so "same episode" means
 	// "same simulated opportunity" (SPEC §10.68).
+	// ONE clock for the episode, the decision loop and the metric (D19: a contract
+	// that is not wired into the execution path is not a contract). The GS raw date
+	// (~3 game days) beats the admin Date subscription (monthly, 30 game days).
+	const gameDayNow = (): number => hub.getGameDay() ?? gameDaysSinceStart(deps);
 	const episode = createEpisode({
 		horizonDays: opts.gameDays ?? null,
 		capMs: opts.seconds && opts.seconds > 0 ? opts.seconds * 1000 : null,
 		startedAtMs: Date.now(),
-		startGameDay: gameDaysSinceStart(deps),
+		startGameDay: gameDayNow(),
 	});
 
 	const loop = createDecisionLoop({
@@ -696,7 +700,7 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 		publishStage,
 		runDecision: (agent, deps, o) => runDecision(agent, deps, o),
 		now: () => Date.now(),
-		gameDay: () => gameDaysSinceStart(deps),
+		gameDay: gameDayNow,
 	});
 	onPhaseChange = (phase: string) => loop.handlePhase(phase);
 	onNotableEvent = (summary: string) => loop.handleNotable(summary);
@@ -727,7 +731,7 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 		getRouteStats: () => hub.getRouteStats(),
 		gsErrors: hub.getGsErrors(),
 		episode: {
-			...episode.check({ gameDay: gameDaysSinceStart(deps), nowMs: Date.now() }),
+			...episode.check({ gameDay: gameDayNow(), nowMs: Date.now() }),
 			horizonDays: episode.plan.horizonDays,
 		},
 		// The arm is ASSIGNED here (--no-memory = control), never inferred later

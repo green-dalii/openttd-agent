@@ -17,6 +17,8 @@ import { type Config } from "../config.js";
 import { OpenTTDProcessManager } from "../game/process-manager.js";
 import { AdminClient } from "../game/admin-client.js";
 import { WorldState } from "../game/world-state.js";
+import { createEpisode } from "../agent/episode.js";
+import { gameDayFromRawDate } from "../game/payload-parsers.js";
 import { AdminUpdateType, ALL_COMPANIES } from "../game/admin-protocol.js";
 import {
 	deploySquirrelPacks,
@@ -36,6 +38,12 @@ export interface V02Options {
 	 * policy can produce `deliveredCargo > 0` without depending on the agent.
 	 */
 	addVehicles?: number;
+	/**
+	 * Episode horizon in SIMULATED game days (G1, SPEC §10.68). The oracle probe
+	 * measures "delivered as a function of fleet size", so every rep must observe
+	 * the same amount of world - otherwise the gradient mixes in window length.
+	 */
+	gameDays?: number;
 }
 
 export async function runV02(cfg: Config, opts: V02Options = {}): Promise<number> {
@@ -43,6 +51,8 @@ export async function runV02(cfg: Config, opts: V02Options = {}): Promise<number
 	const world = new WorldState();
 	let client: AdminClient | null = null;
 	let stopRequested = false;
+	/** Raw OpenTTD date from the GS channel (fine episode clock, ~3 game days). */
+	let gsRawDate: number | null = null;
 	let resolveStopped: (() => void) | null = null;
 
 	const requestStop = (_code: number) => {
@@ -87,6 +97,7 @@ export async function runV02(cfg: Config, opts: V02Options = {}): Promise<number
 					const p = ev.payload as Record<string, unknown>;
 					if (p.cmd === "state") {
 						gsStates++;
+						if (typeof p.date === "number") gsRawDate = p.date;
 						if (true) { // debug: log all state
 							console.log(`[v02] GS state #${gsStates}: tick=${p.tick} towns=${p.towns} signs=${p.signs}`);
 						}
@@ -276,11 +287,42 @@ export async function runV02(cfg: Config, opts: V02Options = {}): Promise<number
 		const check = () => (stopRequested ? resolve() : setTimeout(check, 300));
 		check();
 	});
-	if (opts.demoSeconds && opts.demoSeconds > 0) {
-		await Promise.race([stopPromise, sleep(opts.demoSeconds * 1000)]);
-	} else {
-		await stopPromise;
-	}
+	// G1: same episode clock as the agent path - simulated days are the
+	// measurement, wall clock is only the safety cap.
+	const gameDayNow = (): number => {
+		// GS raw date first: the admin Date subscription is MONTHLY, so the world
+		// date alone can only cut the episode to the nearest 30 game days.
+		if (gsRawDate !== null) return gameDayFromRawDate(gsRawDate);
+		const d = world.snapshot().date;
+		if (!d) return 0;
+		return (d.year - 1950) * 360 + (d.month - 1) * 30 + (d.day - 1);
+	};
+	const episode = createEpisode({
+		horizonDays: opts.gameDays ?? null,
+		capMs: opts.demoSeconds && opts.demoSeconds > 0 ? opts.demoSeconds * 1000 : null,
+		startedAtMs: Date.now(),
+		startGameDay: gameDayNow(),
+	});
+	const horizonWatch = setInterval(() => {
+		const st = episode.check({ gameDay: gameDayNow(), nowMs: Date.now() });
+		if (st.stopReason === "horizon") {
+			console.log(`[v02] episode horizon reached (${st.simulatedDays} game days) - stopping`);
+			stopRequested = true;
+			resolveStopped?.();
+		} else if (st.stopReason === "wall_cap") {
+			console.log(
+				`[v02] wall-clock cap reached after ${st.simulatedDays} game days ` +
+					`(horizon ${episode.plan.horizonDays ?? "n/a"} NOT reached) - stopping`,
+			);
+			stopRequested = true;
+			resolveStopped?.();
+		}
+	}, 1000);
+	await stopPromise;
+	clearInterval(horizonWatch);
+	const episodeEnd = episode.check({ gameDay: gameDayNow(), nowMs: Date.now() });
+	// `deliveredRun` needs a final economy packet to be current; the integrate
+	// happens on every poll, so the last one is already in world state.
 
 	clearInterval(obsPoll);
 	clearInterval(econPoll);
@@ -334,7 +376,12 @@ export async function runV02(cfg: Config, opts: V02Options = {}): Promise<number
 		constructionDone: executorPhase.startsWith("EX done"),
 		money: stEcon?.economy ? Number(stEcon.economy.money) : 0,
 		income: stEcon?.economy ? Number(stEcon.economy.income) : 0,
+		// RAW quarterly counter (kept: it is the wire truth) and the integrated
+		// figure that comparisons use (SPEC §10.65). The oracle gradient test is a
+		// comparison, so it must read deliveredRun.
 		delivered: deliveredCargo >= 0 ? deliveredCargo : null,
+		deliveredRun: stEcon?.deliveredRun?.total ?? null,
+		deliveredRunComplete: stEcon?.deliveredRun?.complete ?? null,
 		vehicles: stEcon?.stats?.vehicles ?? 0,
 		stations: stEcon?.stats?.stations ?? 0,
 		decisions: 0,
@@ -344,6 +391,11 @@ export async function runV02(cfg: Config, opts: V02Options = {}): Promise<number
 		costTotal: 0,
 		arm: "control",
 		memory: { lessonsInjected: 0, strategiesInjected: 0, routeFactsInjected: 0 },
+		// G1: the oracle probe is a measurement too, so it records its horizon.
+		simulatedDays: episodeEnd.simulatedDays,
+		horizonDays: episode.plan.horizonDays,
+		reachedHorizon: episodeEnd.reachedHorizon,
+		gsErrors: 0,
 	};
 	try {
 		const { writeFileSync, mkdirSync } = await import("node:fs");

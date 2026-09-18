@@ -19,6 +19,7 @@ import type { WorldState } from "../game/world-state.js";
 import type { RouteLedger } from "./route-ledger.js";
 import { createExecutorProgress, type ExecutorProgressReport } from "./executor-progress.js";
 import { decodeExecutorPhase } from "../game/executor-status.js";
+import { gameDayFromRawDate } from "../game/payload-parsers.js";
 import type { WebServer } from "../web/server.js";
 import type { RouteStats } from "./route-stats.js";
 import type { SessionStore } from "./session-store.js";
@@ -59,6 +60,12 @@ export interface SignalHub {
 	 * instead of polling a black box (measured: 193 tool calls in one episode).
 	 */
 	getExecutorProgress(): ExecutorProgressReport;
+	/**
+	 * Simulated day from the GS's own clock (raw date, ~every 3 game days), or
+	 * null before the first GS state. Finer than the admin Date subscription,
+	 * which is MONTHLY - the episode horizon needs the finer source.
+	 */
+	getGameDay(): number | null;
 	/** Current executor stage, e.g. "boot" / "road" / "done" / "error". */
 	getStage(): string;
 	/** Last raw phase string (for the dashboard / RESULT line). */
@@ -88,6 +95,8 @@ export function makeSignalHub(refs: SignalHubRefs): SignalHub {
 	let gsErrors = 0;
 	let executorStage = "";
 	let executorPhase = "";
+	/** Raw OpenTTD date from the GS state channel (fine-grained episode clock). */
+	let gsRawDate: number | null = null;
 	const executorProgress = createExecutorProgress();
 	/**
 	 * Simulated day for progress maths. Same 360-day-year convention as the
@@ -121,6 +130,7 @@ export function makeSignalHub(refs: SignalHubRefs): SignalHub {
 				const p = ev.payload as Record<string, unknown>;
 				if (p.cmd === "state") {
 					gsStates++;
+					if (typeof p.date === "number") gsRawDate = p.date;
 					// The GS owns the town list; the agent only reads it. Without
 					// this the agent could not see the options it was choosing
 					// between, which is what made the M3 experiment saturated
@@ -245,6 +255,7 @@ export function makeSignalHub(refs: SignalHubRefs): SignalHub {
 		getGsCount: () => gsStates,
 		getGsErrors: () => gsErrors,
 		getExecutorProgress: () => executorProgress.report(gameDayNow()),
+		getGameDay: () => (gsRawDate !== null ? gameDayFromRawDate(gsRawDate) : null),	
 	getStage: () => executorStage,
 		getPhase: () => executorPhase,
 		getReachedDone: () => reachedDone,
