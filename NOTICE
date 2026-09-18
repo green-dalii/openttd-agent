@@ -1,0 +1,21 @@
+# Third-party notices
+
+This project is MIT-licensed (see `LICENSE`). It vendors two browser libraries so the
+dashboard needs no build chain; both keep their own license notices inside the vendored
+file, and their exact upstream version and file hashes are recorded next to the file.
+
+| Package | Version | License | Upstream | Vendored at |
+|---|---|---|---|---|
+| Alpine.js | see `PROVENANCE.json` | MIT | https://github.com/alpinejs/alpine | `src/web/public/assets/vendor/alpinejs/` |
+| uPlot | see `PROVENANCE.json` | MIT | https://github.com/leeoniya/uPlot | `src/web/public/assets/vendor/uplot/` |
+
+Notes:
+
+- Versions are not duplicated here on purpose - `PROVENANCE.json` in each vendor
+  directory is the single source, and `pnpm run vendor:check` verifies the files still
+  match it (`test/unit/vendor.test.ts`).
+- Neither vendored file may be hand-edited: `pnpm run vendor` re-syncs from the pinned
+  upstream version.
+
+OpenTTD itself is not distributed with this repository and is licensed separately
+(GPLv2); the harness drives the user's own OpenTTD binary through the Admin Port.

@@ -345,3 +345,9 @@ sessions/<id>/telemetry.json #   该局末次遥测（token/步骤）
 - OAuth 类 provider（github-copilot / openai-codex / amazon-bedrock / google-vertex）
   在 dashboard 里**只能看到提示**，尚不支持交互式登录流程
 - 费用（cost）为 0 时显示 `$0`：本地端点/目录未提供价格时属正常
+
+## License
+
+MIT — see [`LICENSE`](LICENSE). Vendored browser libraries and their notices are listed
+in [`NOTICE`](NOTICE); OpenTTD itself is GPLv2 and is **not** distributed here (the
+harness drives the user's own binary through the Admin Port).

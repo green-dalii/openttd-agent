@@ -1,6 +1,7 @@
 {
   "name": "openttd-agent",
   "version": "0.6.0",
+  "license": "MIT",
   "description": "LLM agent framework that autonomously plays and self-evolves inside OpenTTD via Admin Port + in-game Bridge GS/Executor AI",
   "type": "module",
   "private": true,
