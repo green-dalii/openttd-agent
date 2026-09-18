@@ -173,9 +173,14 @@ grep -E "RESULT:" /tmp/cal<N>.log
 缺口诚实标记）、`GameMetric.deliveredRun/Complete`、判定两臂同源
 （`ArmComparison.deliveredSource`）、verdict 明示来源；`rc=1` 含义澄清。
 
+**已发现并修复的第二个仪器缺陷**：`GSStation.IsStationTile` 不存在
+（`StationNear` 半径扫描）→ `route_stats` **部分失效**，ab900/cal900 **17/17 局**命中
+（1221 次），单局丢 1–92% 读数，而 verdict 完全看不见（SPEC §10.66）。
+已修 + 加静态守卫 + **新增 `GameMetric.gsErrors` 与 verdict 的 `channel health` 行**。
+
 **下一步（按序）**：
-1. **真机验证积分器**：一局 600s，确认 `metrics.jsonl` 里 `deliveredRun` 出现且
-   量级合理（应显著大于同局 `delivered` 的原始读数），且 `complete=true`。
+1. ~~真机验证积分器~~ ✅ **已完成**（`/tmp/dm3`：错误 0、route-stats 313 条、
+   `deliveredRun=219` vs 原始 `delivered=136`）。
 2. 用新判据重跑**校准**（n=3/臂，900s）：比较 `deliveredRun` 的 CV 是否从 ≈0.5 明显下降。
    若 CV 未降，说明方差另有来源（路线选择），届时改设计而非加样本。
 3. CV 降下来后，再按 MDE 反推 n 跑正式 A/B（`deliveredRun` 为主判据）。

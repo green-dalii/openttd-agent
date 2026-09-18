@@ -81,6 +81,12 @@ export interface SessionMeta {
 		deliveredRun?: number;
 		/** False when whole quarters went unseen (total is then a lower bound). */
 		deliveredRunComplete?: boolean;
+		/**
+		 * GS error replies during the run (channel health, SPEC §10.66). A
+		 * partially broken GS channel degrades per run, so this must be visible
+		 * next to the outcome it silently affected.
+		 */
+		gsErrors?: number;
 		phase?: string;
 		vehicles?: number;
 		stations?: number;

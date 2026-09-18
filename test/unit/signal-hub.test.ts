@@ -215,3 +215,46 @@ describe("signal-hub —— route-stats 摄取", () => {
 		expect(onPhase).not.toHaveBeenCalled();
 	});
 });
+
+/**
+ * 通道健康计数（2026-09-18，SPEC §10.66）。
+ *
+ * 为什么必须记录：GS 通道的失效是**部分且逐局不同**的——一个错误的 GS API
+ * 调用只让**那一种**请求返回 `kind:"err"`，其余照常工作。ab900/cal900 全部
+ * 17 局都命中 `IsStationTile` 错误（2–152 次不等），verdict 里**一行都看不到**，
+ * 比较就这样吸收了"某几局 agent 在失明状态下操作"。计数器让它在结果旁边可见。
+ */
+describe("signal-hub —— GS 错误计数（通道健康）", () => {
+	const mkHub = () =>
+		makeSignalHub({
+			world: fakeWorld() as never,
+			getWeb: () => null,
+			getSession: () => null,
+			routeLedger: fakeLedger() as never,
+			getDecisionCount: () => 0,
+			onPhaseChange: () => {},
+			onNotableEvent: () => {},
+		});
+
+	it_("从 0 开始", () => {
+		expect(mkHub().getGsErrors()).toBe(0);
+	});
+
+	it_("每个 kind:'err' 计一次，正常事件不计", () => {
+		const hub = mkHub();
+		// 真机形状：外层 ev.kind = "gamescript"，错误在 payload.kind（来自 dm3 日志）
+		hub.onEvent({
+			kind: "gamescript",
+			payload: { kind: "err", cmd: "route_stats", detail: { reason: "the index 'IsStationTile' does not exist" } },
+		} as unknown as GameEvent);
+		hub.onEvent({
+			kind: "gamescript",
+			payload: { kind: "route_stats", job: 1, vehicles: 0, profit: 0, waiting: 0, gameDate: 712500 },
+		} as unknown as GameEvent);
+		hub.onEvent({
+			kind: "gamescript",
+			payload: { kind: "err", cmd: "build", detail: { reason: "refused" } },
+		} as unknown as GameEvent);
+		expect(hub.getGsErrors()).toBe(2);
+	});
+});

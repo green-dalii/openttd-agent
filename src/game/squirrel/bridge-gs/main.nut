@@ -150,7 +150,14 @@ class BridgeV1 extends GSController {
                 if (x < 0 || y < 0) continue;
                 if (x >= GSMap.GetMapSizeX() || y >= GSMap.GetMapSizeY()) continue;
                 local cand = GSMap.GetTileIndex(x, y);
-                if (!GSStation.IsStationTile(cand)) continue;
+                // `GSStation.IsStationTile` does NOT exist in the GS API (the
+                // predicate lives on GSTile), and calling it made the whole
+                // route-stats reply fail with "the index 'IsStationTile' does not
+                // exist" - but only when the executor had shifted the site, i.e.
+                // exactly in the runs where the route was already in trouble
+                // (SPEC §10.66: every one of 17 runs hit this; one run lost 92%
+                // of its route-economics replies). Same check as above the loop,
+                // which is the pair actually verified against OpenTTD.
                 local cs = GSStation.GetStationID(cand);
                 if (GSStation.IsValidStation(cs)) return cs;
             }

@@ -9,6 +9,19 @@
 
 ## [Unreleased]
 
+### Fixed（GS 通道部分失效 + 通道健康指标，2026-09-18）
+
+- **`GSStation.IsStationTile` 在 GS API 里不存在**：它在 `StationNear` 的半径扫描
+  里，只在 executor 挪址时触发，**只**让 `route_stats` 这一种请求报错。ab900/cal900
+  **17/17 局**都命中（共 1221 次），单局严重度从 2 次到 152 次不等，**verdict 里一行
+  都看不到**——`ctl4`（delivered=0 那局）只拿到 20 条线路经济读数。已改用已验证的
+  `GetStationID` + `IsValidStation`，并加静态守卫测试（黑名单条目必须来自线上观测）。
+- **新增通道健康指标**：`SignalHub.getGsErrors()` → `GameMetric.gsErrors`，verdict 在
+  任何收益声明前打印每臂错误数与最大值；历史行显示 `not reported` 而非假装干净。
+- 修复真机验证：错误 0 次、route-stats 313 条（修复前同窗口 20–291 条）。
+- README/CONTRIBUTING 里 `pnpm run gen-squirrel` 这条**不存在的命令**已删除
+  （脚本包是运行时从 `src/game/squirrel/` 部署的）。
+
 ### Fixed（流量指标的真实测量缺陷，2026-09-18）
 
 - **`delivered` 一直是 OpenTTD 的"当季"计数器**（每季归零）→ 此前测的是**随机一段

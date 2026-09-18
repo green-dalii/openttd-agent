@@ -40,6 +40,16 @@ export interface SignalHub {
 	onEvent(ev: GameEvent): void;
 	/** Number of state events seen from the GS (proves the GS is ticking). */
 	getGsCount(): number;
+	/**
+	 * GS replies that came back as errors (`kind:"err"`).
+	 *
+	 * Channel health, recorded per run because the failure is PARTIAL: a bad GS
+	 * API call fails one request kind and leaves the rest working, at a rate that
+	 * varies per run. SPEC §10.66 - 17 of 17 runs hit `IsStationTile` errors,
+	 * ranging from 2 to 152, and nothing in the verdict showed it; the
+	 * comparisons silently absorbed a degraded channel.
+	 */
+	getGsErrors(): number;
 	/** Current executor stage, e.g. "boot" / "road" / "done" / "error". */
 	getStage(): string;
 	/** Last raw phase string (for the dashboard / RESULT line). */
@@ -65,6 +75,8 @@ const BOOT_EVENT_CAP = 256;
 export function makeSignalHub(refs: SignalHubRefs): SignalHub {
 	const bootEvents: GameEvent[] = [];
 	let gsStates = 0;
+	/** GS error replies (channel health, SPEC §10.66). */
+	let gsErrors = 0;
 	let executorStage = "";
 	let executorPhase = "";
 	let reachedDone = false;
@@ -117,6 +129,7 @@ export function makeSignalHub(refs: SignalHubRefs): SignalHub {
 					}
 				}
 				else {
+					if (p.kind === "err") gsErrors++;
 					console.log(`[agent] GS: ${JSON.stringify(p)}`);
 					// Executor phase events: the PRIMARY phase source (GS relay,
 					// on-change every ~20 ticks). Replaces the company-name regex
@@ -191,6 +204,7 @@ export function makeSignalHub(refs: SignalHubRefs): SignalHub {
 			}
 		},
 		getGsCount: () => gsStates,
+		getGsErrors: () => gsErrors,
 	getStage: () => executorStage,
 		getPhase: () => executorPhase,
 		getReachedDone: () => reachedDone,

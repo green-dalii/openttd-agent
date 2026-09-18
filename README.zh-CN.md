@@ -87,8 +87,9 @@ flowchart TB
 git clone https://github.com/green-dalii/openttd-agent.git
 cd openttd-agent
 pnpm install
-pnpm run gen-squirrel      # 由 src/game/squirrel/ 生成游戏侧脚本包
 ```
+
+无需构建步骤：游戏侧脚本包在启动时从 `src/game/squirrel/` 复制到沙箱 data dir。
 
 ### 指向你的 OpenTTD
 

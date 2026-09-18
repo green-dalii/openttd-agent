@@ -54,6 +54,8 @@ export interface SessionMetaLike {
 		deliveredRun?: number;
 		/** False when whole quarters went unseen (`deliveredRun` is a lower bound). */
 		deliveredRunComplete?: boolean;
+		/** GS error replies (channel health, SPEC §10.66). */
+		gsErrors?: number;
 		vehicles?: number;
 		stations?: number;
 	};
@@ -97,6 +99,8 @@ export interface GameMetric {
 	deliveredRun: number | null;
 	/** False when whole quarters went unseen; null when not reported. */
 	deliveredRunComplete: boolean | null;
+	/** GS error replies during the run; null when not reported (legacy rows). */
+	gsErrors: number | null;
 	vehicles: number;
 	stations: number;
 	decisions: number;
@@ -329,6 +333,7 @@ export function toGameMetric(
 				? Number(o.deliveredRun)
 				: null,
 		deliveredRunComplete: o && typeof o.deliveredRunComplete === "boolean" ? o.deliveredRunComplete : null,
+		gsErrors: num(o && o.gsErrors),
 		income:
 			o && o.income !== undefined && o.income !== null && Number.isFinite(Number(o.income))
 				? Number(o.income)

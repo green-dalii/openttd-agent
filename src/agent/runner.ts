@@ -687,6 +687,7 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 		cfg, world: _world, session, telemetry,
 		executorPhase: hub.getPhase(), reachedDone: hub.getReachedDone(), scheduler, pendingActions, routeLedger,
 		getRouteStats: () => hub.getRouteStats(),
+		gsErrors: hub.getGsErrors(),
 		// The arm is ASSIGNED here (--no-memory = control), never inferred later
 		// from how much memory happened to be injected (N2-5 defect).
 		arm: opts.injectMemory === false ? "control" : "treatment",

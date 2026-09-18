@@ -24,7 +24,6 @@
 | `pnpm run gate` | **提交前必跑**：typecheck + lint（0 警告）+ vendor:check + test |
 | `pnpm test` | 纯单测（快，无真机） |
 | `pnpm run test:live` | 真机集成（`@live` 标记，需本机 OpenTTD + 可写临时 data dir） |
-| `pnpm run gen-squirrel` | 从 `src/game/squirrel/*/main.nut` 生成游戏侧脚本包 |
 | `pnpm run cli --agent --seed 7 --no-memory --demo-seconds 200` | 单局真机校准（命令模板见 `ROADMAP.md` 待办区） |
 | `pnpm run cli --watch --web-port 8187` | 观测模式（内置 AI，token 面板为空是正常的） |
 | `pnpm run cli --serve --web-port 8187` | 页面可 Start/Stop 的模式 |
@@ -85,7 +84,7 @@ src/
     server.ts               # HTTP 路由表(PAGES) + REST + WS 扇出
     public/                 # 无构建链前端 (Alpine + 原生 JS)
   cli/run.ts                # CLI: --probe / --dry-run / --watch / --v02 / --agent
-scripts/                    # dev 辅助 (gen-squirrel / loop-health / m3-verdict …)
+scripts/                    # dev 辅助 (run-experiment / loop-health / m3-verdict …)
 test/
   unit/                     # 纯单测 (vitest)
   live/                     # 真机集成 (@live 标记, LIVE_TESTS=1 才跑)

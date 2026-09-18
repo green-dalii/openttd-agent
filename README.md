@@ -94,8 +94,10 @@ Two facts worth remembering before reading the code (details in `SPEC.md` §10):
 git clone https://github.com/green-dalii/openttd-agent.git
 cd openttd-agent
 pnpm install
-pnpm run gen-squirrel      # build the in-game script packs from src/game/squirrel/
 ```
+
+No build step: the in-game script packs are copied from `src/game/squirrel/` into the
+sandbox data dir at launch.
 
 ### Point it at your OpenTTD
 

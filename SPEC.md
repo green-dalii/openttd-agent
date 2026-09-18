@@ -2496,3 +2496,70 @@ with-memory `[166, 260, 273, 527]`（均值 306，中位 266.5）。
 1. `run-experiment.ts` 打印 `rc=${code}` 而不解释含义：`reflect-run.ts:162` 是
    `return reachedDone ? 0 : 1`，即 **rc=1 = 施工未达 DONE**，不是崩溃。
 2. 本项目的 `delivered` 语义此前无任何一处注明"当季"，读者只能假设它是累计值。
+
+## 10.66 GS 通道的**部分失效**：`GSStation.IsStationTile` 不存在（2026-09-18）
+
+### 事实
+
+`src/game/squirrel/bridge-gs/main.nut` 的 `StationNear(tile, radius)`（N2-1 为
+executor 的 `FindAltSite` 兜底而加的**半径扫描**）调用了 **`GSStation.IsStationTile`**
+——**该函数在 GS API 里不存在**（站点地块判定在 `GSTile` 上）。因此每次走到扫描路径：
+
+```
+{"cmd":"route_stats","detail":{"reason":"the index 'IsStationTile' does not exist"},"kind":"err"}
+```
+
+### 为什么它躲过了两轮实验
+
+1. **只在"精确地块查不到站点"时触发**（= executor 挪过址），不是每次调用；
+2. **失效是部分的**：只有 `route_stats` 这一种请求失败，其余通道照常，
+   所以运行看起来一切正常；
+3. **严重程度逐局差异巨大**——verdict 里没有任何一行能显示它。
+
+| 目录 | 命中局数 | 错误次数 | 单局差异举例 |
+|---|---|---|---|
+| `/tmp/ab900`（10 局）| **10/10** | 610 | `ctl5` 2 次/240 条回复 ↔ `ctl4` 60 次/**仅 20 条** ↔ `ctl3` 152 次/151 条 |
+| `/tmp/cal900`（7 局）| **7/7** | 535 | `trt2` 150 次/151 条 |
+
+**后果**：agent 的线路经济读数在某些局里**丢了 50–92%**，而 `ctl4`——正是那局
+**delivered=0**——只拿到 20 条。ab900/cal900 的 A/B 比较因此是在
+"**部分失明**"的通道上做的，两臂差异不可解释。全量日志里该错误共 **1221 次**，
+且是**唯一**一种"索引不存在"类错误（其余 GS API 用法均经真机验证）。
+
+### 修复与守卫
+
+- 改用循环外那对**已验证**的调用：`GSStation.GetStationID(cand)` +
+  `GSStation.IsValidStation(cs)`（无需 `IsStationTile`）。
+- 新增静态守卫 `test/unit/squirrel-api-guard.test.ts`：Squirrel 包只在 OpenTTD 内
+  执行，单测无法运行时调用，故用**基于证据的黑名单**（每条必须来自线上观测到的
+  `reason` 字符串）阻止回归；同时断言"半径扫描**仍然存在**"——否则删掉扫描也能让
+  错误消失，代价是挪址后的线路被静默报成"无车辆"。
+- **真机验证（/tmp/dm3）**：`IsStationTile` 错误 **0** 次、route-stats **313 条**
+  （修复前同长度窗口为 20–291 条且伴随两位数错误）。
+
+### 新增：通道健康指标（让这类缺陷无处隐身）
+
+`SignalHub.getGsErrors()` → `GameMetric.gsErrors`（每局 GS 错误回复数），
+verdict 在任何收益声明**之前**打印它：
+
+```
+channel health (GS errors/run): with-memory n=5 max=152 total=…  without n=5 max=60 total=…
+(>0 means the agent ran with a partially broken GS channel)
+```
+
+历史行没有该字段，显示 `not reported`——**不假装它们是干净的**（我们知道按日志
+至少 17 局都命中过）。
+
+### 真机验证：跨季积分（§10.65）同时得到量化证据
+
+修复后的 900s 运行（`/tmp/dm3`，seed 7）：
+
+| 读数 | 值 |
+|---|---|
+| `delivered`（原始当季计数器）| **136** |
+| `deliveredRun`（跨季积分）| **219**（**比原始读数高 61%**）|
+| `deliveredRunComplete` | `true` |
+| 建成 / 车辆 / 站点 / 决策 | true / 10 / 4 / 12 |
+
+同一局"运了 219"，而"结束时读一次"只能看到 136；若结束点恰在季界之后则是 ~0
+（正是 `ctl4`）。**旧判据系统性低估，且低估幅度随季相位随机浮动。**

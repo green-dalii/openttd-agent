@@ -48,6 +48,22 @@ if (arms.treatmentWithoutInjection > 0) {
 }
 console.log(`money delta   : ${arms.moneyDelta ?? "—"}`);
 console.log(`income delta  : ${arms.incomeDelta?.toFixed(0) ?? "—"}`);
+// Channel health (SPEC §10.66): a partially broken GS channel degrades per run
+// and hides inside the comparison. Print it before any benefit claim.
+{
+	const health = (rows: typeof arms.withLessons[]) =>
+		rows.map((m) => m.gsErrors).filter((v): v is number => typeof v === "number");
+	const hw = health([arms.withLessons]);
+	const hc = health([arms.withoutLessons]);
+	const worst = (l: number[]) => (l.length ? Math.max(...l) : null);
+	const fmtH = (l: number[]) =>
+		l.length ? `n=${l.length} max=${worst(l)} total=${l.reduce((a, b) => a + b, 0)}` : "not reported";
+	console.log(
+		`channel health (GS errors/run): with-memory ${fmtH(hw)}  without ${fmtH(hc)}  ` +
+			`(>0 means the agent ran with a partially broken GS channel - SPEC §10.66)`,
+	);
+}
+
 console.log(
 	`delivered delta: ${arms.deliveredDelta?.toFixed(0) ?? "—"}  (least confounded outcome)  ` +
 		`source=${arms.deliveredSource === "run" ? "deliveredRun (integrated past the quarterly reset)" : "delivered (RAW partial-quarter counter - not comparable)"}`,

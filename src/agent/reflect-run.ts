@@ -36,6 +36,11 @@ export interface FinalizeAndReflectArgs {
 	getRouteStats: () => RouteStats[];
 	/** Assigned arm, recorded in the metric so it is never inferred (N2-5 fix). */
 	arm: "treatment" | "control";
+	/**
+	 * GS error replies during the run (channel health, SPEC §10.66). Recorded so
+	 * a partially broken channel cannot hide inside a comparison.
+	 */
+	gsErrors: number;
 	/** Verified-freeze stats (SPEC §10.60); null when the run never froze. */
 	freezeStats?: { confirmed: number; unconfirmed: number; failures: number; watchdogTrips: number; maxHoldMs: number } | null;
 	completeOnce: (p: { system: string; user: string }) => Promise<string>;
@@ -107,6 +112,7 @@ export async function runFinalizeAndReflect(args: FinalizeAndReflectArgs): Promi
 			// "delivered during the run" figure, and it is what comparisons use.
 			deliveredRun: c0?.deliveredRun && c0.deliveredRun.total !== null ? c0.deliveredRun.total : undefined,
 			deliveredRunComplete: c0?.deliveredRun ? c0.deliveredRun.complete : undefined,
+			gsErrors: args.gsErrors,
 			totalEvents: snap.totalEvents,
 		},
 	});
