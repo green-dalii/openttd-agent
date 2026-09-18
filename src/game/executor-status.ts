@@ -336,6 +336,17 @@ export function decodeExecutorPhase(input: string): ExecutorPhase {
 				"a fleet change was requested but the company owns no vehicle to copy, so nothing was done.";
 			return base;
 		}
+		if (s === "fleet_otherjob") {
+			// G3 (SPEC §10.67 layer 4): the executor only applies fleet signs for the
+			// job it is CURRENTLY building. It used to skip the others in silence, so
+			// the agent re-sent the same request and could not tell why nothing
+			// happened. Naming the refusal is what makes the failure attributable.
+			base.description =
+				"a fleet change was requested for a different job than the one being built, " +
+				"so it was not applied yet (the executor applies fleet requests only while " +
+				"it is working on that job).";
+			return base;
+		}
 		base.description = `vehicles: ${what}.`;
 		return base;
 	}

@@ -96,7 +96,10 @@ GS `route_stats` **部分失效**（§10.66，17/17 局命中，单局丢 1–92
 `--demo-seconds` 降为墙钟安全上限；记录 `simulatedDays`/`horizonDays`/`reachedHorizon`；
 未达上限的局**排除并披露**；模型上下文新增 `simulatedDays`/`gameDaysRemaining`。
 真机验证：**horizon 60 → 60，过冲 0**，且只花 113s（上限 600s 未触发）。
-——下一步回到 **G3（可归因）**：`add_vehicles` 静默无效必须变成可观测/可拒绝。
+**G3 ✅ 已落地（2026-09-18，SPEC §10.70）**：executor 跳过非当前 job 的车队请求时
+置 `fleet_otherjob`（按请求去重），harness 解码送到 agent；车队改为**按线路记账**。
+真机冒烟：0 错误、阶段正常推进。
+——下一步 **G2（可观测）**：把施工进度/队列/吞吐/ETA 变成 agent 能看见的事实。
 
 **S1（核心，推荐先做前置验证）**：**让施工成为场景，而不是任务本身**——
 每局从一个**确定性预建好的运营线路**开始（复用 v02 蓝图路径或 `rcon load` 预置存档），

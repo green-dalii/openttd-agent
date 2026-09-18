@@ -29,6 +29,8 @@ class ExecutorV1 extends AIController {
     _paxCargo = -1;
     _radius = -1;
     _fleetApplied = -1;  // last applied fleet size from a V sign
+    _fleetOwned = [];    // vehicles cloned for the CURRENT job (per-route accounting, G3)
+    _fleetRefused = "";  // last "job:want" refused for being another job's request
     _roadCur = -1;       // segmented-road: current front reached
     _roadSeg = 0;
     _roadSegStep = 0;
@@ -149,6 +151,7 @@ class ExecutorV1 extends AIController {
                 this._paxCargo = -1;
                 this._radius = -1;
                 this._fleetApplied = -1;
+                this._fleetOwned = [];
                 this._roadCur = -1;
                 this._roadSeg = 0;
                 this._roadSegStep = 0;
@@ -973,6 +976,13 @@ class ExecutorV1 extends AIController {
     function CheckAddVehicles() {
         local sl = AISignList();
         local want = -1;
+        // G3 (SPEC §10.67 layer 4): a request for a DIFFERENT job used to be
+        // skipped without a word, so the agent re-sent the same one (measured:
+        // the same `count:15, job:1` request 8 times) while the fleet stayed at 6.
+        // Name the refusal instead: the harness decodes `fleet_otherjob` and the
+        // agent can then target the job being built, or wait.
+        local otherJob = -1;
+        local partsRefusedWant = "0";
         foreach (sid, _ in sl) {
             local txt = AISign.GetName(sid);
             if (txt == null || txt.len() < 5) continue;
@@ -980,17 +990,38 @@ class ExecutorV1 extends AIController {
             local parts = this.Split(txt.slice(5), ":");
             if (parts.len() < 4) continue;
             if (parts[0] != "bp") continue;
-            local job = this.ToInt(parts[1]);
-            if (job != this._job) continue;
             if (parts[2] != "V") continue;
+            local job = this.ToInt(parts[1]);
+            if (job != this._job) {
+                otherJob = job;
+                partsRefusedWant = parts[3];
+                continue;
+            }
             want = this.ToInt(parts[3]);
             break;
         }
-        if (want < 1) return;
+        if (want < 1) {
+            if (otherJob >= 0) {
+                // Say it ONCE per request. The phase channel is the primary progress
+                // signal (`EX rd s0 r15 d115`); re-emitting this every tick would
+                // bury the road progress under a standing complaint.
+                local key = otherJob + ":" + this.ToInt(partsRefusedWant);
+                if (key != this._fleetRefused) {
+                    this._fleetRefused = key;
+                    this.SetPhase("fleet_otherjob j" + otherJob);
+                }
+            }
+            return;
+        }
+        this._fleetRefused = "";
         if (want == this._fleetApplied) return; // already satisfied
+        // Count the vehicles THIS executor cloned for the job it is building, not
+        // every vehicle the company owns: `want` is per route, so company-wide
+        // accounting made one route's fleet satisfy another route's request.
         local cur = 0;
-        local vl = AIVehicleList();
-        foreach (v, _ in vl) cur++;
+        foreach (v, _ in this._fleetOwned) {
+            if (AIVehicle.IsValidVehicle(v)) cur++;
+        }
         if (cur < want) {
             if (!AIVehicle.IsValidVehicle(this._vehicle)) {
                 // Nothing to clone: this command can only SCALE an existing fleet.
@@ -1003,17 +1034,27 @@ class ExecutorV1 extends AIController {
                 local cv = AIVehicle.CloneVehicle(this._slotD.bp[0], this._vehicle, true);
                 if (!AIVehicle.IsValidVehicle(cv)) break;
                 AIVehicle.StartStopVehicle(cv);
+                this._fleetOwned.append(cv);
                 cur++;
             }
             this._fleetApplied = want;
             this.SetPhase("fleet" + cur);
         } else if (cur > want) {
-            // Sell vehicles that are not the lead vehicle.
-            foreach (v, _ in vl) {
-                if (cur <= want) break;
-                if (v == this._vehicle) continue;
-                if (AIVehicle.SellVehicle(v)) cur--;
+            // Sell clones this job owns, newest first; never the lead vehicle.
+            local keep = [];
+            foreach (v, _ in this._fleetOwned) {
+                if (!AIVehicle.IsValidVehicle(v)) continue;
+                if (cur <= want) {
+                    keep.append(v);
+                    continue;
+                }
+                if (v == this._vehicle) {
+                    keep.append(v);
+                    continue;
+                }
+                if (AIVehicle.SellVehicle(v)) cur--; else keep.append(v);
             }
+            this._fleetOwned = keep;
             this._fleetApplied = want;
             this.SetPhase("fleet" + cur);
         } else {

@@ -219,3 +219,22 @@ describe("phaseStage/isErrorPhase — 新闻门（2026-09-12，代价：整整�
 		expect(isErrorPhase(real.lay0!)).toBe(false);
 	});
 });
+
+/**
+ * G3（可归因）：`add_vehicles` 静默无效必须变成**可观测的拒绝**。
+ *
+ * 实测（SPEC §10.67 第 4 层）：agent 请求车队 10/15（同一请求重复 8 次），
+ * 而 6 局里 5 局最终车队仍是 6。原因是 executor 的 `CheckAddVehicles` 只对自己
+ * **当前 job** 应用 `V` 请求（`if (job != this._job) continue;`），**跳过时一句
+ * 话都不说**。这违反本项目自己的铁律："工具必须能观测自身效果或明确拒绝"。
+ * 修法：executor 在跳过时给出诚实信号 `fleet_otherjob`，harness 解码后送到 agent。
+ */
+describe("G3: 车队请求被跳过时必须说出来", () => {
+	it("fleet_otherjob：报出请求针对的不是当前施工的线路", () => {
+		const d = decodeExecutorPhase("EX fleet_otherjob j101");
+		expect(d.stage).toBe("fleet");
+		expect(d.description).toMatch(/different (job|route)|not the job/i);
+		// 这是拒绝信号，不是错误崩溃：UI 需要能区分"被拒绝"与"坏了"。
+		expect(d.description.length).toBeGreaterThan(20);
+	});
+});
