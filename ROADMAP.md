@@ -86,7 +86,8 @@ block = 5 局/臂。每个 block 看一次：**均值差的自助法 95% CI（�
 | 凭证 | `<dataDir>/{credentials.json,llm.json}`（如 `/tmp/ab900/`、`/tmp/f2/`）。**/tmp 易失**：若被清空，实验已死，凭证需从 dashboard 的 `<dataDir>/llm.json` 或环境变量重建 |
 | OpenTTD 二进制 | 默认由 **`$HOME` 推导**（macOS Steam 路径），仓库内**不含**用户名 |
 | remote | `origin` = `git@github.com:green-dalii/openttd-agent.git`（**PUBLIC**，MIT）。amend 仅对未 push 的提交安全；已 push 用 `--force-with-lease=<ref>:<旧SHA>`，**禁止裸 `--force`** |
-| 门禁 | ⚠️ **真机实验运行期间不要跑 `pnpm run gate`**（preflight 断言端口空闲 → 假红，MEMORY D5）。实验期间用 `pnpm exec tsc --noEmit` + `pnpm exec eslint .` + 目标单测 |
+| 门禁 | ⚠️ **真机实验运行期间不要跑 `pnpm run gate`**（preflight 断言端口空闲 → 假红，MEMORY D5）。实验期间用 `pnpm exec tsc --noEmit` + `pnpm exec eslint .` |
+| 改动约束 | ⚠️ **block 运行期间禁止改 `src/` 与 `scripts/run-experiment.ts`**：每局都重新 spawn `tsx src/cli/run.ts`，改源码 = 同一 block 内前后局跑不同代码（**真污染**，MEMORY D12）。允许改文档；想改代码就先等 block 结束 |
 | 证据目录（**勿删**） | `/tmp/cal900`（校准，SPEC §10.63）、`/tmp/ab900`（本轮）、`/tmp/n2ab3`（§10.62）、`/tmp/fzab2`（冻结 A/B，§10.61）、`/tmp/f2`（凭证备份）|
 
 ### 4. 恢复后要读的三处（不要凭印象猜进度）

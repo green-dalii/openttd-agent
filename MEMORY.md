@@ -587,6 +587,22 @@ let {y0: t, y1: n} = disp; null != t && null != n && ( ... )
 
 ## D. 环境与工具
 
+### D12. 实验进行中不得改 `src/`——被测对象必须整个 block 冻结（2026-09-18）
+
+**现象**：等待 block 期间想"顺手"做 NEXT-6 卫生项（删 `v02-runner`、分诊裸 `catch {}`）。
+
+**根因**：`scripts/run-experiment.ts` **每局都重新 spawn** `pnpm exec tsx src/cli/run.ts`，
+即 tsx **从磁盘现读源码**。block 中途改 `src/` ⇒ 同一 block 内前几局跑旧代码、
+后几局跑新代码，两臂之间与局之间**同时**被污染，而 verdict 完全看不出来。
+
+**规则**：真机 block 运行期间——
+- **禁止**修改 `src/`、`scripts/run-experiment.ts`（= 被测对象与其驱动器）；
+- **允许**改文档（SPEC/CHANGELOG/ROADMAP/MEMORY/README）与纯分析脚本；
+- **禁止**跑重测试套件（wall-clock 预算的实验会被 CPU 争抢拖慢，等于偷走 game-time）；
+- 要改代码，**先等 block 结束或先停掉它**（并如实说明这个 block 作废）。
+
+比 D5（实验期间不跑 gate）更强：D5 只防止**假红**，D12 防止**真污染**。
+
 ### D11. 先怀疑实验设计，再怀疑任务难度（2026-09-18）
 
 **现象**：连续多轮 A/B 都"不可判定"，我把它归因为"任务太浅、记忆没有出题空间"。
