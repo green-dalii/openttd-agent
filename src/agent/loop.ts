@@ -18,7 +18,7 @@
 /* eslint-disable no-console -- intentional runtime logging */
 import type { Agent } from "@earendil-works/pi-agent-core";
 import type { AgentDeps } from "./types.js";
-import type { RouteContextFact } from "./decision-context.js";
+import type { ExecutorFact, RouteContextFact } from "./decision-context.js";
 import { formatRouteStats } from "./route-stats.js";
 import { summarizeState } from "./tools/index.js";
 import {
@@ -62,6 +62,8 @@ export interface DecisionRequest {
 	gameDaysRemaining?: number;
 	/** Economics of lines already ordered (N2-2b); joined hub stats + ledger pairs. */
 	routes?: RouteContextFact[];
+	/** Construction facts (G2): the process that decides the episode. */
+	executor?: ExecutorFact;
 }
 
 /** One company's comparable numbers (as produced by summarizeState). */
@@ -114,6 +116,7 @@ export async function runDecision(
 		// ordered ride along too, so "is my route actually working" is visible
 		// without a tool call. A route with no reading yet is simply absent.
 		...(req.routes && req.routes.length > 0 ? { routes: req.routes } : {}),
+		...(req.executor ? { executor: req.executor } : {}),
 		// The episode boundary in BOTH units: wall seconds (how long we will wait)
 		// and simulated days (how much world is left). Construction is bounded by
 		// simulated time, so the second one is the unit the model must plan in;
@@ -141,6 +144,24 @@ export async function runDecision(
 	// invisible; the same trap applies to facts that are built but never logged).
 	if (context.routes && context.routes.length > 0) {
 		console.log(`[agent] route facts: ${context.routes.map((r) => formatRouteStats(r)).join("; ")}`);
+	}
+
+	// Same reason for construction facts (G2): they must be checkable from the run
+	// log, not merely believed. "ETC" here is a measured projection at the current
+	// rate - the fact that lets the model judge whether a plan fits the episode.
+	if (context.executor) {
+		const e = context.executor;
+		const parts = [
+			`job ${e.job}`,
+			e.remainingTiles !== null ? `${e.remainingTiles} tiles to go` : "distance unknown",
+			e.tilesPerDay !== null ? `${e.tilesPerDay.toFixed(2)} tiles/game-day` : "no advance yet",
+			e.etaDays !== null ? `ETA ~${Math.round(e.etaDays)} game days` : "no ETA",
+			// Precisely what we measured: a reported stage without a distance does
+			// not update this, so it can read stale rather than stalled.
+			e.stalledDays !== null ? `tiles-to-go unchanged for ${e.stalledDays} game days` : "not started",
+			`${e.jobsSeen} job(s) seen`,
+		];
+		console.log(`[agent] executor facts: ${parts.join(", ")}`);
 	}
 
 	// The observation is kept in history so a later reader can replay the trail.

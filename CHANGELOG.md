@@ -40,6 +40,16 @@
   判定优先用它、**两臂同源**（`ArmComparison.deliveredSource`），旧行回落原始值并标注为不可比。
 - 澄清 `rc=1` 的含义（=施工未达成 DONE，不是崩溃）并在输出中明示。
 
+### Added（G2：施工进度/吞吐/ETA 成为 agent 可见的事实，2026-09-18）
+
+- 新增 `src/agent/executor-progress.ts`：从 executor 阶段（`rd s<seg> r<step> d<dist> p<fails>`）
+  积分出 **还需铺多少格 / 实测格每游戏日 / ETA（游戏日）/ 剩余格数多久没变**，
+  经 hub → 决策上下文 `executor` 字段 → 模型，并打印 `[agent] executor facts: …`。
+- 语义取自 Squirrel 源码：`d` 是**还剩多少格**（随推进下降），`r` 是**搜索步数**（在动≠前进）。
+- 真机实测：`157 tiles to go, 0.67 tiles/game-day, ETA ~176 game days` 而该局 horizon 150 日
+  ——**该路线按当前速率建不完**。过去正是缺这条事实，agent 才会在一局内连下
+  68/110/161/239/271 格线路，并用 193 次工具调用轮询填空。
+
 ### Fixed（G3：车队请求不再静默无效，2026-09-18）
 
 - executor 跳过"非当前 job"的车队请求时，现在会置阶段 `fleet_otherjob j<k>`

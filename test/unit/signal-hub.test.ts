@@ -12,6 +12,8 @@ import type { GameEvent } from "../../src/types.js";
 const fakeWorld = () => ({
 	ingest: vi.fn(),
 	setTowns: vi.fn(),
+	// G2: the hub now reads the clock to time construction progress.
+	snapshot: () => ({ date: { year: 1950, month: 1, day: 1 } }),
 });
 const fakeWeb = () => ({ publishEvent: vi.fn() });
 const fakeSession = () => ({

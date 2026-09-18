@@ -59,6 +59,7 @@ function makeCtx(over: Partial<DecisionLoopCtx> = {}): DecisionLoopCtx & {
 		opts: { decisionTickMs: 1 },
 		isStopRequested: () => false,
 		requestStop: () => {},
+		executorFact: () => undefined,
 		publishStage: vi.fn(),
 		runDecision: runDecisionFake as never,
 		now: () => Date.now(),

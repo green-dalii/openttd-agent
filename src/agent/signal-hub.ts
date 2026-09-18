@@ -17,6 +17,8 @@
 import type { GameEvent } from "../types.js";
 import type { WorldState } from "../game/world-state.js";
 import type { RouteLedger } from "./route-ledger.js";
+import { createExecutorProgress, type ExecutorProgressReport } from "./executor-progress.js";
+import { decodeExecutorPhase } from "../game/executor-status.js";
 import type { WebServer } from "../web/server.js";
 import type { RouteStats } from "./route-stats.js";
 import type { SessionStore } from "./session-store.js";
@@ -50,6 +52,13 @@ export interface SignalHub {
 	 * comparisons silently absorbed a degraded channel.
 	 */
 	getGsErrors(): number;
+	/**
+	 * Construction progress as FACTS (G2, SPEC §10.67 layer 3): tiles still to go,
+	 * measured tiles per game day, ETA, and how long the road has NOT advanced.
+	 * The episode is decided by this process, so the agent must be able to see it
+	 * instead of polling a black box (measured: 193 tool calls in one episode).
+	 */
+	getExecutorProgress(): ExecutorProgressReport;
 	/** Current executor stage, e.g. "boot" / "road" / "done" / "error". */
 	getStage(): string;
 	/** Last raw phase string (for the dashboard / RESULT line). */
@@ -79,6 +88,16 @@ export function makeSignalHub(refs: SignalHubRefs): SignalHub {
 	let gsErrors = 0;
 	let executorStage = "";
 	let executorPhase = "";
+	const executorProgress = createExecutorProgress();
+	/**
+	 * Simulated day for progress maths. Same 360-day-year convention as the
+	 * episode clock; only differences matter here, so the epoch is irrelevant.
+	 */
+	const gameDayNow = (): number => {
+		const d = refs.world.snapshot().date;
+		if (!d) return 0;
+		return (d.year - 1950) * 360 + (d.month - 1) * 30 + (d.day - 1);
+	};
 	let reachedDone = false;
 	let prevStats: { vehicles: number; stations: number } | null = null;
 	let lastRoute: Record<string, unknown> | null = null;
@@ -143,6 +162,26 @@ export function makeSignalHub(refs: SignalHubRefs): SignalHub {
 								refs.getSession()?.current().checkpoints.at(-1)?.gameDate,
 							);
 						}
+						// Every exec phase feeds the progress meter - heartbeats too:
+						// they carry `#n s<seg>` and are the only signal while the
+						// pathfinder is searching (no stage change to report).
+						{
+							const d = decodeExecutorPhase(String(p.raw));
+							executorProgress.observe({
+								gameDay: gameDayNow(),
+								job: d.job ?? Number(p.job ?? -1),
+								...(d.detail && typeof d.detail.segment === "number"
+									? { segment: d.detail.segment }
+									: {}),
+								// `d<dist>` from the Squirrel source = tiles STILL TO GO.
+								...(d.detail && typeof d.detail.distance === "number"
+									? { remainingTiles: d.detail.distance }
+									: {}),
+								...(d.detail && typeof d.detail.retry === "number"
+									? { step: d.detail.retry }
+									: {}),
+							});
+						}
 						// Stage change or an error phase is news; a heartbeat never is.
 						if (!p.hb && (stage !== executorStage || stage === "error")) {
 							executorStage = stage;
@@ -205,6 +244,7 @@ export function makeSignalHub(refs: SignalHubRefs): SignalHub {
 		},
 		getGsCount: () => gsStates,
 		getGsErrors: () => gsErrors,
+		getExecutorProgress: () => executorProgress.report(gameDayNow()),
 	getStage: () => executorStage,
 		getPhase: () => executorPhase,
 		getReachedDone: () => reachedDone,

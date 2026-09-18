@@ -36,7 +36,7 @@ import {
 	emptyTrackerAfter,
 } from "./loop-control.js";
 import { summarizeState } from "./tools/index.js";
-import type { RouteContextFact } from "./decision-context.js";
+import type { ExecutorFact, RouteContextFact } from "./decision-context.js";
 import type { FreezeController } from "./freeze.js";
 import type { Episode } from "./episode.js";
 
@@ -74,6 +74,8 @@ export interface DecisionLoopCtx {
 	gameDay(): number;
 	/** Route facts (hub economics joined with ledger pairs) for the context. */
 	routesForContext(): RouteContextFact[];
+	/** Construction facts (G2) - never advice, only what the executor reports. */
+	executorFact(): ExecutorFact | undefined;
 	/** Optional verified freeze (SPEC §10.59); absent = never pause. */
 	freeze?: FreezeController;
 }
@@ -252,6 +254,7 @@ export function createDecisionLoop(ctx: DecisionLoopCtx): DecisionLoop {
 							}
 						: {}),
 					routes: ctx.routesForContext(),
+					executor: ctx.executorFact(),
 				});
 				plan = out.plan;
 				ctx.telemetry.onActivity?.();

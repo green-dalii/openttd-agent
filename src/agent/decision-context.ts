@@ -110,6 +110,13 @@ export interface DecisionContextInput {
 	 * without. Facts only - no target, no advice.
 	 */
 	routes?: RouteContextFact[];
+	/**
+	 * Construction facts from the executor (G2, SPEC §10.67 layer 3): tiles still
+	 * to go, measured tiles/game day, ETA in game days, and how long the road has
+	 * NOT advanced. The episode is decided by this process, so leaving it out left
+	 * the agent to fill the blind spot with polling (193 tool calls in one run).
+	 */
+	executor?: ExecutorFact;
 	/** Total game days elapsed since run start (for the interval baseline). */
 	gameDay?: number;
 	/** Compressed stage summaries ("阶段性总结"), oldest first. */
@@ -198,6 +205,26 @@ function numbersOf(c: CompanyNumbers | undefined, gameDay: number): NumbersBasel
  *
  * The result contains only observations; it never advises (docs §2.4).
  */
+/** Construction facts (G2): measured, never advised. */
+export interface ExecutorFact {
+	/** Job the executor is working on. */
+	job: number | null;
+	/** Tiles still to go to the far station. */
+	remainingTiles: number | null;
+	/** Measured tiles per game day (null while the road has not advanced). */
+	tilesPerDay: number | null;
+	/** Game days to finish at the measured rate. */
+	etaDays: number | null;
+	/**
+	 * Game days since the reported tiles-to-go last CHANGED. Searching does not
+	 * count as progress, and phases that carry no distance (heartbeats, station
+	 * work) do not refresh it - so this can read stale rather than stalled.
+	 */
+	stalledDays: number | null;
+	/** Distinct jobs this executor has worked on (FIFO evidence). */
+	jobsSeen: number;
+}
+
 export function buildDecisionContext(input: DecisionContextInput): {
 	trigger: DecisionTrigger;
 	now: { date: string | null; companies: CompanyNumbers[] };
@@ -235,6 +262,13 @@ export function buildDecisionContext(input: DecisionContextInput): {
 	history: string[];
 	phase?: string;
 	routes?: RouteContextFact[];
+	/**
+	 * Construction facts from the executor (G2, SPEC §10.67 layer 3): tiles still
+	 * to go, measured tiles/game day, ETA in game days, and how long the road has
+	 * NOT advanced. The episode is decided by this process, so leaving it out left
+	 * the agent to fill the blind spot with polling (193 tool calls in one run).
+	 */
+	executor?: ExecutorFact;
 } {
 	const gameDay = input.gameDay ?? 0;
 	const current = numbersOf(leadCompany(input.now.companies), gameDay);
@@ -246,6 +280,7 @@ export function buildDecisionContext(input: DecisionContextInput): {
 		now: input.now,
 		...(input.towns ? { towns: input.towns } : {}),
 		...(input.routes && input.routes.length > 0 ? { routes: input.routes } : {}),
+		...(input.executor ? { executor: input.executor } : {}),
 		...(input.session ? { session: input.session } : {}),
 		sinceLastDecision: {
 			...delta,

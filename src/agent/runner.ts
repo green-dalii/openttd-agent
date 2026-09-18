@@ -678,6 +678,20 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 		// N2-2b: the economics the GS reports are keyed by job; the ledger knows
 		// which towns that job was ordered for. Joining them here is what lets the
 		// model read "route 101 (9->12): 6 vehicles, 146 waiting, -308 profit".
+		executorFact: () => {
+			const p = hub.getExecutorProgress();
+			// Absence stays absent: before the first `rd` phase there is nothing to
+			// report, and inventing zeros would read as "the road is finished".
+			if (p.job === null || p.job < 0) return undefined;
+			return {
+				job: p.job,
+				remainingTiles: p.remainingTiles,
+				tilesPerDay: p.tilesPerDay,
+				etaDays: p.etaDays,
+				stalledDays: p.stalledDays,
+				jobsSeen: p.jobsSeen,
+			};
+		},
 		routesForContext: () => joinRoutesWithLedger(hub.getRouteStats(), routeLedger.all()),
 		publishStage,
 		runDecision: (agent, deps, o) => runDecision(agent, deps, o),

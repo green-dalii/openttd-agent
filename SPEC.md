@@ -2700,3 +2700,36 @@ control 臂 CV=**1.25**（同臂内 0、19、225），treatment 臂 CV=0.07。
 ≈6.6s 墙钟）。因此 horizon 只能被"守住到 ±3 日"：短局（25–60 日）相对误差可达 10%，
 **测量应用远大于该分辨率的 horizon（350–400 日，误差 <1%）**；
 `simulatedDays` 已如实记录，故分析也可改用"每游戏日速率"而非总量。
+
+## 10.71 G2 落地：把"决定结局的那个过程"变成 agent 能看见的事实（2026-09-18）
+
+### 事实来源（语义取自 Squirrel 源码，不取自字段名）
+
+`executor-ai/main.nut:420,462` 的 `rd s<seg> r<step> d<dist> p<fails>`：
+- `d` = `AIMap.DistanceManhattan(_roadCur, farStation)` = **还需铺多少格**（随推进下降）；
+- `r` = 当前段内的**寻路搜索步数**（在动 ≠ 路在前进）。
+
+因此"这条路来不来得及建好"是可算的：`吞吐 = Δ(剩余格数)/Δ游戏日`，`ETA = 剩余/吞吐`。
+
+### 新增事实（`src/agent/executor-progress.ts`，纯函数 + 单测）
+
+每局维护：`remainingTiles`、`tilesPerDay`、`etaDays`、`stalledDays`（**剩余格数多久没变**；
+搜索在动不算推进）、`jobsSeen`；换 job 时重置（跨线路平均会**凭空造出吞吐**）。
+经 hub（喂阶段与心跳）→ 决策上下文 `executor` 字段 → 模型；并在运行日志打印：
+
+```
+[agent] executor facts: job 1, 117 tiles to go, 0.67 tiles/game-day, ETA ~176 game days,
+                        tiles-to-go unchanged for 30 game days, 1 job(s) seen
+```
+
+### 真机实测（/tmp/g2b，seed 7，horizon 150）
+
+上例即真机输出：**157 格、0.67 格/游戏日 → ETA 176 游戏日**，而该局 horizon 只有 150 日
+——**按当前速率这条线建不完**。这正是过去缺失、导致 agent 在一局内连下
+68/110/161/239/271 格线路的事实（每一条都排在同一条 FIFO 后面）。
+
+### 诚实边界
+
+- `stalledDays` 只反映"**被上报的数字**多久没变"：不带距离的阶段（心跳、站点施工）
+  不会刷新它，故它可能**偏陈旧**而非"executor 停了"——文案与注释都按此措辞。
+- 无 `rd` 阶段时（未开工、或已转入运营）该字段**缺席**，不伪造 0（0 会被读成"路已完工"）。
