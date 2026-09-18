@@ -47,6 +47,57 @@
 
 ---
 
+## 🔴 COMPACT 后从这里接续（2026-09-18）
+
+> **这一段是给"compact 后的我自己"的恢复手册。** 顺序照做即可，不必重新推导。
+
+### 1. 有实验正在跑吗？
+
+```bash
+pgrep -fl "run-experiment"                                   # 有无 live 实验
+grep -E "^###" /tmp/ab900-runner.log | tail -3               # 进度（每局一行 start/done）
+python3 -c "import json;[print(json.loads(l)['arm'],json.loads(l)['delivered']) for l in open('/tmp/ab900/evolution/metrics.jsonl') if l.strip()]"
+```
+
+**本轮（block #1，2026-09-18T04:37 启动）**：`/tmp/ab900`，`--n 5 --demo-seconds 900
+--seed 7 --vary memory`，5 局对照 + 5 局处理，≈3.2 小时。审阅入口：
+
+```bash
+sed -n '/=== verdict/,$p' /tmp/ab900-runner.log     # 判定（含 hurdle 统计与自助法 CI）
+```
+
+### 2. 预先登记的停止规则（**不许事后改**）
+
+block = 5 局/臂。每个 block 看一次：**均值差的自助法 95% CI（保守 α=0.01）**
+- CI **不含 0** → 停止并报结论（写进 SPEC，无论正负）
+- 否则续跑 block（`--n 12`，必要时 `--n 25` 为**上限**），仍不清则如实报
+  "**在该 MDE 下不可判定**"
+- **事先声明不可检出的效应：+20%**（本设计下任何可承受样本都检不出）——报告必须写明
+
+### 3. 恢复工作所需的环境事实
+
+| 事 | 值 |
+|---|---|
+| 凭证 | `<dataDir>/{credentials.json,llm.json}`（如 `/tmp/ab900/`、`/tmp/f2/`）。**/tmp 易失**：若被清空，实验已死，凭证需从 dashboard 的 `<dataDir>/llm.json` 或环境变量重建 |
+| OpenTTD 二进制 | 默认由 **`$HOME` 推导**（macOS Steam 路径），仓库内**不含**用户名 |
+| remote | `origin` = `git@github.com:green-dalii/openttd-agent.git`（**PUBLIC**，MIT）。amend 仅对未 push 的提交安全；已 push 用 `--force-with-lease=<ref>:<旧SHA>`，**禁止裸 `--force`** |
+| 门禁 | ⚠️ **真机实验运行期间不要跑 `pnpm run gate`**（preflight 断言端口空闲 → 假红，MEMORY D5）。实验期间用 `pnpm exec tsc --noEmit` + `pnpm exec eslint .` + 目标单测 |
+| 证据目录（**勿删**） | `/tmp/cal900`（校准，SPEC §10.63）、`/tmp/ab900`（本轮）、`/tmp/n2ab3`（§10.62）、`/tmp/fzab2`（冻结 A/B，§10.61）、`/tmp/f2`（凭证备份）|
+
+### 4. 恢复后要读的三处（不要凭印象猜进度）
+
+1. `MEMORY.md` §0（方向与阶段状态）+ §0b（NEXT-2 方案与执行日志）
+2. `SPEC.md` §10.53–§10.63（本轮全部实测结论，**含统计量为何换代**）
+3. 本节 + 下面的「当前」条目
+
+### 5. 下一步（按序，除非新数据改变它）
+
+1. 读上面第 1 步的 verdict → 按第 2 步的规则决定停止或续跑；**结论无论正负都写进 SPEC**。
+2. 若闭环成立 → 回到 NEXT-3/4/5（地图大小旋钮 / GS-only 架构 / M4 打磨）。
+3. 穿插做 NEXT-6 卫生项（见下）。
+
+---
+
 ## 待办
 
 > **方向与阶段状态的活记忆**：`MEMORY.md` §0（2026-09-12 三项决策：
@@ -56,7 +107,7 @@
 > **接手须知（2026-09-17 更新）**
 > - 门禁：`pnpm run gate` 必须全绿（**局数不写死**——写死必然过期）。
 > - **开工前必读**：`MEMORY.md` §0（方向）+ §0b（NEXT-2 方案/状态）+
->   `SPEC.md` §10.53–§10.61（本轮全部实测结论）。
+>   `SPEC.md` §10.53–§10.63（本轮全部实测结论，含统计量与样本量的推导）。
 > - **真机实验期间不要跑 gate**（preflight 断言端口空闲 → 假红；MEMORY D5）。
 > - **remote**：`origin` = `git@github.com:green-dalii/openttd-agent.git`（**private**，
 >   2026-09-17 创建）。amend 仅对未 push 的提交安全；已 push 的改动用
