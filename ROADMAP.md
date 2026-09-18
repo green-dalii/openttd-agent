@@ -55,21 +55,28 @@
 
 ```bash
 pgrep -fl "run-experiment"                                   # 有无 live 实验
-grep -E "^###" /tmp/ab900-runner.log | tail -3               # 进度（每局一行 start/done）
-python3 -c "import json;[print(json.loads(l)['arm'],json.loads(l)['delivered']) for l in open('/tmp/ab900/evolution/metrics.jsonl') if l.strip()]"
+grep -E "^###" /tmp/cal2-runner.log | tail -3                 # 进度（每局一行 start/done）
 ```
 
-**本轮（block #1，2026-09-18T04:37Z 启动）**：`/tmp/ab900`，`--n 5 --demo-seconds 900
---seed 7 --vary memory`，5 局对照 + 5 局处理，≈3.2 小时。审阅入口：
+**本轮（2026-09-18T07:57Z 启动）**：`/tmp/cal2`，`--n 3 --demo-seconds 900 --seed 7`
+（3 局对照 + 3 局处理，≈1.7h），目的是**用修好的仪器重测 CV**：若 CV 从 ≈0.5 明显下降，
+则 §10.65/§10.66 的两个仪器缺陷就是方差主因，再按 MDE 反推 n 跑正式 A/B。
 
 ```bash
-sed -n '/=== verdict/,$p' /tmp/ab900-runner.log     # 判定（含 hurdle 统计与自助法 CI）
-ps -o pid,etime,command -p $(pgrep -f "scripts/run-experiment" | head -1)   # 存活/已运行时长
+sed -n '/=== verdict/,$p' /tmp/cal2-runner.log    # 判定（含 channel health 行 + 来源声明）
 ```
 
-> ⚠️ **runner 日志的时间戳是 UTC**（如 `2026-09-18T04:37Z` = 本地 12:37）。
-> 2026-09-18 我自己把 04:37Z 读成"8 小时前启动"，差点把一个健康运行中的实验
-> 判成挂死。**判断存活用 `ps` 的 ELAPSED，不要靠推算时间戳。**
+> ⚠️ **runner 日志时间戳是 UTC**（`…T07:57Z` = 本地 15:57）。判断存活用 `ps` 的 ELAPSED。
+
+### 1b. 仪器状态：两个缺陷已修，必须用新指标
+
+| 缺陷 | 后果 | 现状 |
+|---|---|---|
+| `delivered` 是**当季**计数器（§10.65）| 测的是随机一段部分季度；季度相位随机浮动 | 已改为 `deliveredRun`（跨季积分，`src/game/delivery-meter.ts`）；旧行仍显示原始值并标注**不可比** |
+| `GSStation.IsStationTile` **不存在**（§10.66）| `route_stats` **部分失效**，17/17 局命中，单局丢 1–92% 读数 | 已修 + 静态守卫；新增 `GameMetric.gsErrors` 与 verdict 的 **channel health** 行 |
+
+**读数纪律**：`/tmp/ab900`、`/tmp/cal900` 两轮的 A/B **不可用于下结论**（旧判据 + 部分失明通道）。
+新结果看 `deliveredRun` 与 `gsErrors`。
 
 ### 2. 预先登记的停止规则（**不许事后改**）
 
