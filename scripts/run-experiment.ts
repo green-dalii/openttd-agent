@@ -106,10 +106,22 @@ for (let i = 1; i <= args.n; i++) {
 	// cleanup between runs: the game must die or the next one can't bind the port
 	spawnSync("pkill", ["-f", "OpenTTD.app/Contents/MacOS/openttd"]);
 	spawnSync("sleep", ["2"]);
-	codes.control.push(runOne(`ctl${i}`, args.dir, args.seed, args.seconds, controlFlags(args.vary)));
+	codes.control.push(
+		runOne(`ctl${i}`, args.dir, args.seed, args.seconds, args.gameDays, args.scenario, controlFlags(args.vary)),
+	);
 	spawnSync("pkill", ["-f", "OpenTTD.app/Contents/MacOS/openttd"]);
 	spawnSync("sleep", ["2"]);
-	codes.treatment.push(runOne(`trt${i}`, args.dir, args.seed, args.seconds, treatmentFlags(args.vary)));
+	codes.treatment.push(
+		runOne(
+			`trt${i}`,
+			args.dir,
+			args.seed,
+			args.seconds,
+			args.gameDays,
+			args.scenario,
+			treatmentFlags(args.vary),
+		),
+	);
 }
 spawnSync("pkill", ["-f", "OpenTTD.app/Contents/MacOS/openttd"]);
 
