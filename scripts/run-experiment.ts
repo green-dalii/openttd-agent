@@ -114,9 +114,12 @@ const fmt = (label: string, a: typeof view.arms.withLessons) =>
 			`built=${a.builtRate?.toFixed(2) ?? "—"} stations=${a.meanStations?.toFixed(2) ?? "—"} ` +
 			`income=${a.meanIncome?.toFixed(0) ?? "—"}(n=${a.incomeReported}) ` +
 			`delivered=${a.meanDelivered?.toFixed(0) ?? "—"}(n=${a.deliveredReported}) ` +
-			`med=${a.medianDelivered ?? "—"} zero=${a.zeroDeliveredRate === null ? "—" : (a.zeroDeliveredRate * 100).toFixed(0) + "%"}`,
+			`med=${a.medianDelivered ?? "—"} zero=${fmtRate(a.zeroDeliveredRate)} ` +
+			// 障碍率 = 非零局占比，DGP 的参数本体（力量模拟里最有力量的那个）
+			`deliveryRate=${fmtRate(a.deliveryRate)}`,
 	);
 const armLabel = args.vary === "freeze" ? ["frozen", "not frozen"] : ["with lessons", "without"];
+const fmtRate = (v: number | null) => (v === null ? "—" : `${(v * 100).toFixed(0)}%`);
 fmt(armLabel[0]!, view.arms.withLessons);
 fmt(armLabel[1]!, view.arms.withoutLessons);
 if (view.arms.treatmentWithoutInjection > 0) {
@@ -125,6 +128,11 @@ if (view.arms.treatmentWithoutInjection > 0) {
 			" - the intervention did not arrive (fresh data dir?), so those runs dilute the arm.",
 	);
 }
+console.log(
+	`hurdle stats: Fisher p=${view.arms.deliveryPValue?.toFixed(4) ?? "—"} ` +
+		`MannWhitney p=${view.arms.mannWhitneyPValue?.toFixed(4) ?? "—"} ` +
+		`meanDiff 95%CI=[${view.arms.meanDiffCi ? `${view.arms.meanDiffCi[0].toFixed(1)}, ${view.arms.meanDiffCi[1].toFixed(1)}` : "—"}]`,
+);
 console.log(
 	`delivered conclusion: ${
 		view.arms.deliveredConclusive ? "DECIDABLE (both arms at sample floor)" : "not decidable (sample below floor)"
