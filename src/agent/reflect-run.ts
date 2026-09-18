@@ -46,6 +46,16 @@ export interface FinalizeAndReflectArgs {
 	 * simulated horizon cannot be averaged with one that did: the wall-clock cap
 	 * makes it a stopper, never a result.
 	 */
+	/**
+	 * S1/G4 scenario. "prebuilt" means the route already existed when the
+	 * measurement window opened, so the outcome reflects management decisions.
+	 * Runs whose scenario never became ready must not be compared (G4).
+	 */
+	scenario: "freeform" | "prebuilt";
+	/** Why the prebuilt setup ended as it did ("ready" | "timeout" | "order_refused"). */
+	scenarioReason?: string | null;
+	/** Cargo delivered before the measurement window opened (prebuilt only). */
+	deliveredAtReady?: number | null;
 	episode: {
 		simulatedDays: number;
 		/** The horizon this episode was measured against (null = none set). */
@@ -125,6 +135,9 @@ export async function runFinalizeAndReflect(args: FinalizeAndReflectArgs): Promi
 			deliveredRun: c0?.deliveredRun && c0.deliveredRun.total !== null ? c0.deliveredRun.total : undefined,
 			deliveredRunComplete: c0?.deliveredRun ? c0.deliveredRun.complete : undefined,
 			gsErrors: args.gsErrors,
+			scenario: args.scenario,
+			scenarioReason: args.scenarioReason ?? null,
+			deliveredAtReady: args.deliveredAtReady ?? null,
 			simulatedDays: args.episode.simulatedDays,
 			horizonDays: args.episode.horizonDays,
 			reachedHorizon: args.episode.reachedHorizon,

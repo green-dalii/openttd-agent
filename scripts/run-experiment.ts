@@ -23,6 +23,8 @@ interface Args {
 	seconds: number;
 	/** Simulated horizon in game days (G1); undefined = wall-clock only. */
 	gameDays?: number;
+	/** S1/G4 scenario; both arms MUST use the same one (comparability). */
+	scenario?: "freeform" | "prebuilt";
 	seed: number;
 }
 
@@ -34,7 +36,7 @@ function parseArgs(argv: string[]): Args {
 	const dir = get("--dir");
 	if (!dir) {
 		console.error(
-		"usage: tsx scripts/run-experiment.ts --dir <dataDir> [--n 3] (--game-days 400 | --demo-seconds 900) [--seed 7] [--vary memory|freeze]",
+		"usage: tsx scripts/run-experiment.ts --dir <dataDir> [--n 3] (--game-days 400 | --demo-seconds 900) [--scenario freeform|prebuilt] [--seed 7] [--vary memory|freeze]",
 	);
 		process.exit(2);
 	}
@@ -49,6 +51,7 @@ function parseArgs(argv: string[]): Args {
 		// the wall-clock safety cap so a stalled world cannot hang the round.
 		gameDays: get("--game-days") ? Number(get("--game-days")) : undefined,
 		seconds: Number(get("--demo-seconds") ?? 900),
+		scenario: (get("--scenario") ?? undefined) as "freeform" | "prebuilt" | undefined,
 		seed: Number(get("--seed") ?? 7),
 		// 自变量（2026-09-17）：memory = 记忆注入（默认）；freeze = 决策期冻结世界。
 		// 两个臂必须只差这一个变量，否则比较又在撒谎。
@@ -78,6 +81,7 @@ function runOne(
 	seed: number,
 	seconds: number,
 	gameDays: number | undefined,
+	scenario: "freeform" | "prebuilt" | undefined,
 	extra: string[],
 ): number {
 	console.log(`### ${label} start ${new Date().toISOString()}`);
@@ -86,7 +90,8 @@ function runOne(
 	// them to the terminal scrollback (m3e lesson).
 	const fd = openSync(join(dir, `${label}.log`), "a");
 	const r = spawnSync("pnpm", ["run", "cli", "--agent", `--seed`, String(seed), "--demo-seconds", String(seconds),
-		...(gameDays ? ["--game-days", String(gameDays)] : []), ...extra], {
+		...(gameDays ? ["--game-days", String(gameDays)] : []),
+		...(scenario ? ["--scenario", scenario] : []), ...extra], {
 		stdio: ["ignore", fd, fd],
 		env: { ...process.env, OPENTTD_DATA_DIR: dir },
 	});

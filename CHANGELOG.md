@@ -40,6 +40,15 @@
   判定优先用它、**两臂同源**（`ArmComparison.deliveredSource`），旧行回落原始值并标注为不可比。
 - 澄清 `rc=1` 的含义（=施工未达成 DONE，不是崩溃）并在输出中明示。
 
+### Added（S1/G4：预建场景，施工移出测量窗，2026-09-18）
+
+- 新增 `--scenario prebuilt`：开局先用确定性蓝图建好线路，**等到可运营才开始测量窗**，
+  此后全部是管理决策；记录 `scenario`/`scenarioReason`/`deliveredAtReady`；
+  **场景未就绪的局在判定中排除并披露**。
+- 真机验证（horizon 120）：就绪耗时 331 采样（施工不计入测量窗），
+  测量窗内 6 次决策 → 车队扩到 3、站点扩到 4，`reachedHorizon=true`。
+- `src/agent/prebuilt.ts` 纯编排 + 5 项单测（就绪判定、超时、被拒）。
+
 ### Added（S0 oracle 梯度：杠杆存在但饱和，2026-09-18）
 
 - `--v02 --add-vehicles N` 探针修好并**验证自身效果**（请求 6/12/18 → 实测 9/15/21）；

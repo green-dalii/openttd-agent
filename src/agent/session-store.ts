@@ -97,6 +97,15 @@ export interface SessionMeta {
 		horizonDays?: number | null;
 		/** False when the wall-clock cap fired first: the horizon was NOT reached. */
 		reachedHorizon?: boolean;
+		/**
+		 * S1/G4 scenario: "freeform" = the agent builds the route inside the window;
+		 * "prebuilt" = the route already existed when the window opened.
+		 */
+		scenario?: "freeform" | "prebuilt";
+		/** "ready" | "timeout" | "order_refused" (prebuilt only). */
+		scenarioReason?: string | null;
+		/** Cargo already delivered when the measurement window opened. */
+		deliveredAtReady?: number | null;
 		phase?: string;
 		vehicles?: number;
 		stations?: number;

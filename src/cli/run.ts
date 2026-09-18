@@ -48,6 +48,8 @@ interface CliArgs {
 	 * `--demo-seconds`, which becomes the wall-clock safety cap.
 	 */
 	gameDays?: number;
+	/** S1/G4: "prebuilt" builds a route before the measurement window opens. */
+	scenario?: "freeform" | "prebuilt";
 	llmBaseUrl?: string;
 	llmApiKey?: string;
 	llmModel?: string;
@@ -69,6 +71,7 @@ export function parseArgs(argv: string[]): CliArgs {
 	let webPort: number | undefined;
 	let demoSeconds: number | undefined;
 	let gameDays: number | undefined;
+	let scenario: "freeform" | "prebuilt" | undefined;
 	let addVehicles: number | undefined;
 	let freeze = false;
 	let llmBaseUrl: string | undefined;
@@ -102,6 +105,12 @@ export function parseArgs(argv: string[]): CliArgs {
 			case "--add-vehicles":
 				addVehicles = parseIntNum(argv[++i], "--add-vehicles");
 				break;
+			case "--scenario": {
+				const v = argv[++i];
+				if (v !== "freeform" && v !== "prebuilt") throw new Error(`--scenario must be freeform|prebuilt, got ${String(v)}`);
+				scenario = v;
+				break;
+			}
 			case "--game-days":
 				gameDays = parseIntNum(argv[++i], "--game-days");
 				break;
@@ -165,7 +174,7 @@ export function parseArgs(argv: string[]): CliArgs {
 		// compile: `args.foo` is simply undefined, so the flag silently does
 		// nothing while the help text still advertises it. Fourth instance of
 		// "parsed but dropped" found on 2026-09-12 (MEMORY.md A5).
-		mode, year, seed, timeoutMs, aiName, webPort, demoSeconds, gameDays, addVehicles, freeze,
+		mode, year, seed, timeoutMs, aiName, webPort, demoSeconds, gameDays, scenario, addVehicles, freeze,
 		llmBaseUrl, llmApiKey, llmModel, llmApi, offlineDemo, skipPreflight,
 		injectMemory,
 	};
@@ -315,6 +324,7 @@ async function main(): Promise<number> {
 			return await runAgent(cfg, {
 				seconds: args.demoSeconds ?? 180,
 				gameDays: args.gameDays,
+				scenario: args.scenario,
 				// Agent mode also serves the live dashboard (telemetry). Undefined
 				// when not requested => CLI-only run.
 				webPort: args.webPort,

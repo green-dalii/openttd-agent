@@ -61,6 +61,11 @@ import { AuditLog } from "./audit.js";
 import { isLlmConfigured } from "../config.js";
 import { toWireSnapshot } from "../game/wire-snapshot.js";
 import { createEpisode } from "./episode.js";
+import { stringifyJson } from "../util/json.js";
+import { runPrebuiltScenario } from "./prebuilt.js";
+
+/** Blueprint job id used by the prebuilt scenario (same one the v02 oracle uses). */
+export const PREBUILT_JOB = 101;
 
 export interface AgentRunOptions {
 	/** Seconds to observe construction after the decision(s). 0 = until Ctrl-C. */
@@ -71,6 +76,14 @@ export interface AgentRunOptions {
 	 * means the same amount of world regardless of machine load or pauses.
 	 */
 	gameDays?: number;
+	/**
+	 * S1/G4: build a deterministic route BEFORE the measurement window opens, so
+	 * the episode measures management decisions instead of construction luck.
+	 * Default "freeform" keeps the historical behaviour.
+	 */
+	scenario?: "freeform" | "prebuilt";
+	/** Wall-clock bound on the prebuilt setup (protects against a wedged game). */
+	prebuiltTimeoutMs?: number;
 	/** Scripted plan for the faux provider: towns to build between. */
 	planTowns?: { from?: number; to?: number };
 	/**
@@ -648,6 +661,46 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 	// that is not wired into the execution path is not a contract). The GS raw date
 	// (~3 game days) beats the admin Date subscription (monthly, 30 game days).
 	const gameDayNow = (): number => hub.getGameDay() ?? gameDaysSinceStart(deps);
+
+	// S1/G4: with the prebuilt scenario the measurement window opens only once the
+	// route can carry cargo, so every run measures the SAME kind of opportunity
+	// (management) instead of "how much of the window construction left over".
+	const scenario: "freeform" | "prebuilt" = opts.scenario === "prebuilt" ? "prebuilt" : "freeform";
+	let prebuiltReason: string | null = null;
+	let deliveredAtReady: number | null = null;
+	if (scenario === "prebuilt") {
+		const r = await runPrebuiltScenario(
+			{
+				sendOrder: () => {
+					try {
+						client.gameScript(stringifyJson({ cmd: "build_bus_route", company: 0, job: PREBUILT_JOB }));
+						return true;
+					} catch {
+						return false;
+					}
+				},
+				snapshot: () => {
+					const c = deps.state.snapshot().companies.get(0);
+					return { stations: c?.stats?.stations ?? 0, vehicles: c?.stats?.vehicles ?? 0 };
+				},
+				sleep: (ms) => sleep(ms),
+				now: () => Date.now(),
+				log: (l) => console.log(l),
+			},
+			{ timeoutMs: opts.prebuiltTimeoutMs ?? 20 * 60_000 },
+		);
+		prebuiltReason = r.reason;
+		if (r.ready) {
+			const c = deps.state.snapshot().companies.get(0);
+			deliveredAtReady = c?.deliveredRun?.total ?? null;
+		} else {
+			// Honest refusal: the scenario is NOT set up, so this run cannot measure
+			// management decisions. It keeps running (useful to debug) but the metric
+			// marks it and the verdict excludes it.
+			console.error(`[agent] prebuilt scenario NOT ready (${r.reason}) - run marked invalid`);
+		}
+	}
+
 	const episode = createEpisode({
 		horizonDays: opts.gameDays ?? null,
 		capMs: opts.seconds && opts.seconds > 0 ? opts.seconds * 1000 : null,
@@ -730,6 +783,9 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 		executorPhase: hub.getPhase(), reachedDone: hub.getReachedDone(), scheduler, pendingActions, routeLedger,
 		getRouteStats: () => hub.getRouteStats(),
 		gsErrors: hub.getGsErrors(),
+		scenario,
+		scenarioReason: prebuiltReason,
+		deliveredAtReady,
 		episode: {
 			...episode.check({ gameDay: gameDayNow(), nowMs: Date.now() }),
 			horizonDays: episode.plan.horizonDays,

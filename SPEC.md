@@ -2777,3 +2777,36 @@ control 臂 CV=**1.25**（同臂内 0、19、225），treatment 臂 CV=0.07。
   一并记录（探针未发出 = 该局作废，不得当成"无差异"）；
 - 若最终 A/B 的效应落在饱和区，必须**先改任务参数**（更长的运营窗 / 不同货物 /
   多线路）再谈结论。
+
+## 10.73 S1/G4 落地：预建场景（施工移出测量窗）（2026-09-18）
+
+### 契约
+
+`--scenario prebuilt`：开局时用**确定性蓝图**（复用 v02 的 `job=101`）建好一条线路，
+**等到可运营**（≥2 站 + ≥1 车辆）才算"测量窗打开"，此后所有决策都是**管理决策**。
+`metrics.jsonl` 记录 `scenario` / `scenarioReason` / `deliveredAtReady`。
+
+- `scenarioReason`: `ready` | `timeout` | `order_refused`；
+- **未就绪的局在判定中排除并披露**（"whose prebuilt scenario never became ready"）——
+  场景没建好的一局**不是**一次关于管理决策的测量（G4）。
+- 场景来源（`src/agent/prebuilt.ts`，5 项单测）：等就绪有墙钟上限（默认 20 min），
+  超时/被拒不假装成功。
+
+### 真机验证（/tmp/pb1，seed 7，horizon 120）
+
+```
+[agent] prebuilt: blueprint sent; waiting for an operable route…
+[agent] prebuilt: ready after 331 sample(s) (stations=2, vehicles=2)
+记录: scenario=prebuilt, scenarioReason=ready, deliveredAtReady=0,
+      deliveredRun=18, simulatedDays=122, reachedHorizon=true, decisions=6
+```
+
+即：施工占用 ~5.5 min **但不计入测量窗**；测量窗内 agent 做了 6 次决策并把车队
+扩到 3 辆、站点扩到 4 个（**管理动作**），这正是 N2 想要的决策空间。
+
+### 为什么这样设计（由 S0/S0b 推出，不是猜）
+
+`§10.72`：车队规模是真杠杆但**在 3–15 辆区间陡峭、15 辆后饱和**；
+自由局里结局主要由"executor 有没有把路建完"决定（同车队下 0–527 的散布）。
+→ 把施工移出测量窗后，两臂面对的是**同一类机会**（管理），效应量落进陡峭区，
+且单局墙钟下降（预建后只需较短的 horizon）。

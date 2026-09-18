@@ -62,6 +62,10 @@ export interface SessionMetaLike {
 		horizonDays?: number | null;
 		/** False when the wall-clock cap fired first. */
 		reachedHorizon?: boolean;
+		/** S1/G4 scenario (see GameMetric.scenario). */
+		scenario?: "freeform" | "prebuilt";
+		scenarioReason?: string | null;
+		deliveredAtReady?: number | null;
 		vehicles?: number;
 		stations?: number;
 	};
@@ -113,6 +117,12 @@ export interface GameMetric {
 	horizonDays: number | null;
 	/** False when the wall-clock cap fired first: not a comparable observation. */
 	reachedHorizon: boolean | null;
+	/** Which scenario produced this run; null when not recorded (legacy rows). */
+	scenario: "freeform" | "prebuilt" | null;
+	/** Why the prebuilt setup ended as it did; null when not applicable. */
+	scenarioReason: string | null;
+	/** Cargo delivered before the measurement window opened (prebuilt only). */
+	deliveredAtReady: number | null;
 	vehicles: number;
 	stations: number;
 	decisions: number;
@@ -349,6 +359,9 @@ export function toGameMetric(
 		simulatedDays: num(o && o.simulatedDays),
 		horizonDays: o && typeof o.horizonDays === "number" ? o.horizonDays : null,
 		reachedHorizon: o && typeof o.reachedHorizon === "boolean" ? o.reachedHorizon : null,
+		scenario: o && (o.scenario === "prebuilt" || o.scenario === "freeform") ? o.scenario : null,
+		scenarioReason: o && typeof o.scenarioReason === "string" ? o.scenarioReason : null,
+		deliveredAtReady: num(o && o.deliveredAtReady),
 		income:
 			o && o.income !== undefined && o.income !== null && Number.isFinite(Number(o.income))
 				? Number(o.income)
@@ -588,8 +601,17 @@ export function compareArms(metrics: GameMetric[], by: CompareBy = "memory"): Ar
 	// Excluded with disclosure; rows written before the field existed (null) stay
 	// in, and their unknown opportunity length is disclosed separately.
 	const horizonShort = real.filter((m) => m.reachedHorizon === false);
+	// G4: a prebuilt run whose scenario never became ready measured nothing about
+	// management decisions, so it must not be averaged into either arm.
+	const scenarioNotReady = real.filter(
+		(m) => m.scenario === "prebuilt" && m.scenarioReason !== null && m.scenarioReason !== "ready",
+	);
 	const horizonUnknown = real.filter((m) => m.reachedHorizon === null);
-	const measured = real.filter((m) => m.reachedHorizon !== false);
+	const measured = real.filter(
+		(m) =>
+			m.reachedHorizon !== false &&
+			!(m.scenario === "prebuilt" && m.scenarioReason !== null && m.scenarioReason !== "ready"),
+	);
 	// Treatment arm = ANY injected memory: lessons OR route facts (C-1). The
 	// m3e run exposed the gap: runs that received facts-but-no-lessons were
 	// being scored as controls, splitting the arms by an accounting bug.
@@ -692,6 +714,8 @@ export function compareArms(metrics: GameMetric[], by: CompareBy = "memory"): Ar
 	if (scripted > 0) parts.push(`${scripted} scripted`);
 	// G1: shorter-than-horizon runs are excluded, and rows with no recorded
 	// horizon are disclosed as "unknown opportunity" rather than assumed equal.
+	if (scenarioNotReady.length > 0)
+		parts.push(`${scenarioNotReady.length} whose prebuilt scenario never became ready`);
 	if (horizonShort.length > 0)
 		parts.push(`${horizonShort.length} that hit the wall-clock cap before the horizon`);
 	if (horizonUnknown.length > 0)
