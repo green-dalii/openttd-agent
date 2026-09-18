@@ -92,10 +92,11 @@ GS `route_stats` **部分失效**（§10.66，17/17 局命中，单局丢 1–92
 
 ### 方案（按"收益/成本"排序，均待所有者确认）
 
-**G1/S1b（基石，改动小、收益最大）**：**局按模拟时间结束**（固定游戏日数，如 350–400 日），
-墙钟只作安全上限；记录 `simulatedDays`/`reachedHorizon`；给 agent 同时提供
-`gameDaysRemaining`。理由：把"分母"变成常数，**机器负载不再改变结论**，
-且"停住的世界"再也不会冒充 `deliveredRun=0`（§10.68）。
+**G1 ✅ 已落地（2026-09-18，SPEC §10.69）**：`--game-days N` 定义模拟边界，
+`--demo-seconds` 降为墙钟安全上限；记录 `simulatedDays`/`horizonDays`/`reachedHorizon`；
+未达上限的局**排除并披露**；模型上下文新增 `simulatedDays`/`gameDaysRemaining`。
+真机验证：**horizon 60 → 60，过冲 0**，且只花 113s（上限 600s 未触发）。
+——下一步回到 **G3（可归因）**：`add_vehicles` 静默无效必须变成可观测/可拒绝。
 
 **S1（核心，推荐先做前置验证）**：**让施工成为场景，而不是任务本身**——
 每局从一个**确定性预建好的运营线路**开始（复用 v02 蓝图路径或 `rcon load` 预置存档），

@@ -65,6 +65,7 @@ async function runFinalize(dir: string, ledger: RouteLedger, decisions: number) 
 		routeLedger: ledger,
 		getRouteStats: () => [],
 		gsErrors: 0,
+		episode: { simulatedDays: 0, horizonDays: null, reachedHorizon: false, stopReason: null },
 		arm: "control" as const,
 		completeOnce: completeOnce as never,
 	});

@@ -38,6 +38,7 @@ import {
 import { summarizeState } from "./tools/index.js";
 import type { RouteContextFact } from "./decision-context.js";
 import type { FreezeController } from "./freeze.js";
+import type { Episode } from "./episode.js";
 
 /* eslint-disable no-console -- intentional runtime logging */
 
@@ -52,8 +53,20 @@ export interface DecisionLoopCtx {
 	getWeb(): WebServer | null;
 	/** Shared with the runner: drained by reflect-run at finalize. */
 	pendingActions: { tool: string; ok: boolean; summary: string }[];
-	opts: { decisionTickMs?: number; maxDecisions?: number; seconds?: number };
+	opts: {
+		decisionTickMs?: number;
+		maxDecisions?: number;
+		seconds?: number;
+		/**
+		 * The episode clock (G1, SPEC §10.68): the run ends on SIMULATED time,
+		 * with the wall clock only as a safety cap. When absent, the loop falls
+		 * back to the legacy wall-clock deadline.
+		 */
+		episode?: Episode;
+	};
 	isStopRequested(): boolean;
+	/** Ask the run to stop (used by the horizon watcher, G1). */
+	requestStop(): void;
 	publishStage(phase?: string): void;
 	runDecision: typeof runDecision;
 	/** Injectable clock/day for tests. */
@@ -82,6 +95,15 @@ export function createDecisionLoop(ctx: DecisionLoopCtx): DecisionLoop {
 	let waitCondition: string | null = null;
 	const deadline =
 		ctx.opts.seconds && ctx.opts.seconds > 0 ? ctx.now() + ctx.opts.seconds * 1000 : null;
+	const episode = ctx.opts.episode ?? null;
+	/**
+	 * Simulated days the LAST decision consumed (G1). A decision is tens of
+	 * seconds of wall clock = many game days, so the horizon can only be honoured
+	 * if we stop ASKING before the end: a question started 5 days before the
+	 * horizon finished 20 days past it (measured: horizon 40 -> 60).
+	 */
+	let lastDecisionDays = 0;
+	const decisionMarginDays = () => Math.max(lastDecisionDays, 1);
 	const decisionTickMs = ctx.opts.decisionTickMs ?? 1_000;
 	const maxDecisions = ctx.opts.maxDecisions ?? 0; // 0 = bounded only by run length
 
@@ -116,7 +138,25 @@ export function createDecisionLoop(ctx: DecisionLoopCtx): DecisionLoop {
 
 	async function run(): Promise<void> {
 		while (!ctx.isStopRequested()) {
-			if (shouldBreakOnDeadline({ deadline, seconds: ctx.opts.seconds ?? 0 }, ctx.now(), ctx.isStopRequested())) {
+			// G1: the episode clock decides. The wall-clock cap is an engineering
+			// bound, so when it fires we say plainly that the simulated horizon was
+			// NOT reached - a stalled world must not read as a finished episode.
+			const epState = episode ? episode.check({ gameDay: ctx.gameDay(), nowMs: ctx.now() }) : null;
+			if (epState?.stopReason === "horizon") {
+				console.log(`[agent] episode horizon reached (${epState.simulatedDays} game days) - stopping`);
+				break;
+			}
+			if (epState?.stopReason === "wall_cap") {
+				console.log(
+					`[agent] wall-clock cap reached after ${epState.simulatedDays} game days ` +
+						`(horizon ${episode?.plan.horizonDays ?? "n/a"} NOT reached) - stopping`,
+				);
+				break;
+			}
+			if (
+				!episode &&
+				shouldBreakOnDeadline({ deadline, seconds: ctx.opts.seconds ?? 0 }, ctx.now(), ctx.isStopRequested())
+			) {
 				if (ctx.opts.seconds && ctx.opts.seconds > 0) {
 					console.log(`[agent] run length reached (${ctx.opts.seconds}s) - stopping`);
 				}
@@ -126,6 +166,13 @@ export function createDecisionLoop(ctx: DecisionLoopCtx): DecisionLoop {
 			if (waitUntilExpired({ waitUntil }, nowDay)) {
 				waitUntil = null;
 				ctx.scheduler.request("wait_until");
+			}
+			// G1: do not start a question we cannot finish inside the horizon. The
+			// margin is the measured cost of the previous decision, so it adapts to
+			// the model's latency instead of a guessed constant.
+			if (epState && epState.daysRemaining !== null && epState.daysRemaining <= decisionMarginDays()) {
+				await sleep(decisionTickMs);
+				continue;
 			}
 			const due = ctx.scheduler.take(ctx.now(), nowDay);
 			if (!due) {
@@ -137,9 +184,25 @@ export function createDecisionLoop(ctx: DecisionLoopCtx): DecisionLoop {
 				break;
 			}
 
+			// A decision takes tens of seconds of wall clock, which is many simulated
+			// days - so the horizon must also be watched WHILE the decision runs,
+			// not only between decisions. Without this the episode overshot its
+			// horizon by a whole decision (measured: horizon 25 -> 30 simulated
+			// days), reintroducing exactly the variable opportunity G1 removes.
+			const horizonWatch = episode
+				? setInterval(() => {
+						const st = episode.check({ gameDay: ctx.gameDay(), nowMs: ctx.now() });
+						if (st.stopReason === "horizon") {
+							console.log(`[agent] episode horizon reached (${st.simulatedDays} game days) - stopping`);
+							ctx.requestStop();
+						}
+					}, decisionTickMs)
+				: null;
+
 			// Snapshot the window BEFORE acting, so the next decision can compare.
 			const preState = summarizeState(ctx.deps.state.snapshot());
 			const preSnap = ctx.deps.state.snapshot();
+			const dayBeforeDecision = ctx.gameDay();
 			ctx.telemetry.decisionPoint();
 			ctx.audit.write({
 				type: "decision",
@@ -179,11 +242,21 @@ export function createDecisionLoop(ctx: DecisionLoopCtx): DecisionLoop {
 					...(deadline !== null
 						? { secondsRemaining: Math.max(0, Math.round((deadline - ctx.now()) / 1000)) }
 						: {}),
+					// The clock in the units the WORK is measured in. Construction is
+					// bounded by simulated time (script ticks), so "will this finish in
+					// time?" cannot be answered with wall seconds (D18).
+					...(epState
+						? {
+								simulatedDays: epState.simulatedDays,
+								...(epState.daysRemaining !== null ? { gameDaysRemaining: epState.daysRemaining } : {}),
+							}
+						: {}),
 					routes: ctx.routesForContext(),
 				});
 				plan = out.plan;
 				ctx.telemetry.onActivity?.();
 			} finally {
+				if (horizonWatch) clearInterval(horizonWatch);
 				await lease?.release();
 			}
 
@@ -204,6 +277,7 @@ export function createDecisionLoop(ctx: DecisionLoopCtx): DecisionLoop {
 				recordAction(tracker, a);
 			}
 			ctx.pendingActions.length = 0;
+			lastDecisionDays = Math.max(0, ctx.gameDay() - dayBeforeDecision);
 			tracker = emptyTrackerAfter(baselineOf(preSnap, ctx.gameDay()));
 
 			const snap = ctx.deps.state.snapshot();

@@ -90,7 +90,17 @@ export interface DecisionContextInput {
 	 * then asked to sleep until 1950-04-01 - the run ended before it woke, and
 	 * its plan ("start with a cheap pair") was never executed.
 	 */
-	session?: { secondsRemaining: number };
+	session?: {
+		/** Wall-clock seconds left; absent when no wall cap is set. */
+		secondsRemaining?: number;
+		/**
+		 * The clock in SIMULATED units (G1, SPEC §10.68). Construction is bounded
+		 * by simulated time, so "will this finish in time?" cannot be answered
+		 * with wall seconds - the model needs the unit the work is measured in.
+		 */
+		simulatedDays?: number;
+		gameDaysRemaining?: number;
+	};
 	since: DecisionTracker;
 	/**
 	 * Economics of the lines already ordered (NEXT-2 N2-2b): vehicles on the
@@ -192,7 +202,17 @@ export function buildDecisionContext(input: DecisionContextInput): {
 	trigger: DecisionTrigger;
 	now: { date: string | null; companies: CompanyNumbers[] };
 	towns?: TownSummary[];
-	session?: { secondsRemaining: number };
+	session?: {
+		/** Wall-clock seconds left; absent when no wall cap is set. */
+		secondsRemaining?: number;
+		/**
+		 * The clock in SIMULATED units (G1, SPEC §10.68). Construction is bounded
+		 * by simulated time, so "will this finish in time?" cannot be answered
+		 * with wall seconds - the model needs the unit the work is measured in.
+		 */
+		simulatedDays?: number;
+		gameDaysRemaining?: number;
+	};
 	sinceLastDecision: {
 		elapsedGameDays: number;
 		moneyDelta: number;

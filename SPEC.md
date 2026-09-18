@@ -2637,3 +2637,31 @@ control 臂 CV=**1.25**（同臂内 0、19、225），treatment 臂 CV=0.07。
 2. **给 agent 用它的单位表达时钟**：现在只给 `secondsRemaining`（墙钟），
    而施工是**游戏时间/脚本 tick** 受限的 → 必须同时给 `gameDaysRemaining`。
 3. **暂停必须被计量**：暂停时长与模拟时长分别记录，绝不让"停住的世界"冒充结果。
+
+## 10.69 G1 落地：局以**模拟时间**结束（2026-09-18）
+
+### 契约
+
+| 项 | 规则 |
+|---|---|
+| 边界 | `--game-days N`：推进 **N 游戏日**后结束。`--demo-seconds S` **降级为墙钟安全上限**（防"死住的世界"挂住整轮） |
+| 记录 | `GameMetric.simulatedDays` / `horizonDays` / `reachedHorizon` |
+| 判定 | `reachedHorizon=false` 的局**排除并披露**（"hit the wall-clock cap before the horizon"）；无该字段的历史行披露为 "unknown opportunity"，**不假装等长** |
+| 模型上下文 | `session.simulatedDays` + `session.gameDaysRemaining`（与 `secondsRemaining` 并列） |
+
+### 实现要点（都是实测逼出来的）
+
+1. `src/agent/episode.ts`：纯函数时钟（`simulatedDays`/`daysRemaining`/`reachedHorizon`/`stopReason`），
+   对重复/回退的日期报告取高水位（GS 会重播状态）。
+2. **过冲必须治**：边界若只在两次决策之间检查，一次决策（墙钟数十秒 ≈ 十几游戏日）
+   就会整段冲出边界——实测 **horizon 40 → 记录 60**。两条修法并用：
+   - 决策**进行中**每秒检查一次（`horizonWatch`），命中即 `requestStop()`；
+   - **剩余天数不足一次决策（用上一次决策实测消耗的游戏日做余量）时不再提问**，空转到边界。
+   修后实测：**horizon 60 → `simulatedDays=60`，过冲 0**，且整局只花 **113 s**（墙钟上限 600 s 未触发）。
+3. **接口缺口**：`src/agent/loop.ts` 原先只把 `secondsRemaining` 转发给模型，
+   新字段会在到达提示前被丢弃 → 已修 + 单测锁定（"墙钟秒不是规划施工的单位"）。
+
+### 为什么这同时是"诚实"修复
+
+那局推进 **0 游戏日**的运行，过去被记为 `deliveredRun=0`——与"agent 什么都没运"不可区分。
+现在它是 `reachedHorizon=false` 的**被排除项**：**"世界停住了"不再冒充结果**。

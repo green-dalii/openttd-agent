@@ -40,6 +40,16 @@
   判定优先用它、**两臂同源**（`ArmComparison.deliveredSource`），旧行回落原始值并标注为不可比。
 - 澄清 `rc=1` 的含义（=施工未达成 DONE，不是崩溃）并在输出中明示。
 
+### Changed（G1：局改以模拟时间结束，2026-09-18）
+
+- 新增 `--game-days N`：推进 N **游戏日**后结束；`--demo-seconds` 降级为**墙钟安全上限**。
+- 记录 `simulatedDays`/`horizonDays`/`reachedHorizon`；未达上限的局在判定中**排除并披露**，
+  历史行披露为 "unknown opportunity"。**"世界停住了"不再冒充 `deliveredRun=0`。**
+- 模型上下文新增 `simulatedDays`/`gameDaysRemaining`（固定接口缺口：`loop.ts` 原先只转发
+  墙钟秒，新字段到不了提示）。
+- 边界精确性：决策进行中也检查边界 + 剩余不足一次决策时不再提问（实测 horizon 60 → 60，过冲 0；
+  修前 horizon 40 → 60）。**固定模拟时长还能省墙钟**（60 日只花 113s，上限 600s 未触发）。
+
 ### Added（block #1 结果与方差诊断，2026-09-18）
 
 - 顺序检验 block #1（n=5/臂）：delivered 均值 137 vs 190、**CI [-147, 56] 含 0**、

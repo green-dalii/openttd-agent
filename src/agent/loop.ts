@@ -56,6 +56,10 @@ export interface DecisionRequest {
 	phase?: string;
 	/** Wall-clock seconds left in the session (episode-boundary fact). */
 	secondsRemaining?: number;
+	/** Simulated days elapsed in this episode (G1, SPEC §10.68). */
+	simulatedDays?: number;
+	/** Simulated days left before the episode horizon. */
+	gameDaysRemaining?: number;
 	/** Economics of lines already ordered (N2-2b); joined hub stats + ledger pairs. */
 	routes?: RouteContextFact[];
 }
@@ -110,7 +114,21 @@ export async function runDecision(
 		// ordered ride along too, so "is my route actually working" is visible
 		// without a tool call. A route with no reading yet is simply absent.
 		...(req.routes && req.routes.length > 0 ? { routes: req.routes } : {}),
-		...(req.secondsRemaining !== undefined ? { session: { secondsRemaining: req.secondsRemaining } } : {}),
+		// The episode boundary in BOTH units: wall seconds (how long we will wait)
+		// and simulated days (how much world is left). Construction is bounded by
+		// simulated time, so the second one is the unit the model must plan in;
+		// forwarding only the wall clock was a silent interface gap (G1/D18).
+		...((req.secondsRemaining !== undefined ||
+			req.simulatedDays !== undefined ||
+			req.gameDaysRemaining !== undefined)
+			? {
+					session: {
+						...(req.secondsRemaining !== undefined ? { secondsRemaining: req.secondsRemaining } : {}),
+						...(req.simulatedDays !== undefined ? { simulatedDays: req.simulatedDays } : {}),
+						...(req.gameDaysRemaining !== undefined ? { gameDaysRemaining: req.gameDaysRemaining } : {}),
+					},
+				}
+			: {}),
 		since: req.tracker,
 		...(req.gameDay !== undefined ? { gameDay: req.gameDay } : {}),
 		...(req.history ? { history: req.history } : {}),

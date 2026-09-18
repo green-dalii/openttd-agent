@@ -21,6 +21,8 @@ interface Args {
 	dir: string;
 	n: number;
 	seconds: number;
+	/** Simulated horizon in game days (G1); undefined = wall-clock only. */
+	gameDays?: number;
 	seed: number;
 }
 
@@ -32,7 +34,7 @@ function parseArgs(argv: string[]): Args {
 	const dir = get("--dir");
 	if (!dir) {
 		console.error(
-		"usage: tsx scripts/run-experiment.ts --dir <dataDir> [--n 3] [--demo-seconds 200] [--seed 7] [--vary memory|freeze]",
+		"usage: tsx scripts/run-experiment.ts --dir <dataDir> [--n 3] (--game-days 400 | --demo-seconds 900) [--seed 7] [--vary memory|freeze]",
 	);
 		process.exit(2);
 	}
@@ -43,7 +45,10 @@ function parseArgs(argv: string[]): Args {
 	return {
 		dir,
 		n: Number(get("--n") ?? 3),
-		seconds: Number(get("--demo-seconds") ?? 200),
+		// G1 (SPEC §10.68): prefer a SIMULATED horizon. `--demo-seconds` stays as
+		// the wall-clock safety cap so a stalled world cannot hang the round.
+		gameDays: get("--game-days") ? Number(get("--game-days")) : undefined,
+		seconds: Number(get("--demo-seconds") ?? 900),
 		seed: Number(get("--seed") ?? 7),
 		// 自变量（2026-09-17）：memory = 记忆注入（默认）；freeze = 决策期冻结世界。
 		// 两个臂必须只差这一个变量，否则比较又在撒谎。
@@ -67,13 +72,21 @@ function treatmentFlags(vary: "memory" | "freeze"): string[] {
 	return vary === "freeze" ? ["--no-memory", "--freeze"] : [];
 }
 
-function runOne(label: string, dir: string, seed: number, seconds: number, extra: string[]): number {
+function runOne(
+	label: string,
+	dir: string,
+	seed: number,
+	seconds: number,
+	gameDays: number | undefined,
+	extra: string[],
+): number {
 	console.log(`### ${label} start ${new Date().toISOString()}`);
 	// Per-run log files: the A/B verdict needs post-mortem access to each run's
 	// stdout (reflection lines, RESULT, executor phases). inherit-only loses
 	// them to the terminal scrollback (m3e lesson).
 	const fd = openSync(join(dir, `${label}.log`), "a");
-	const r = spawnSync("pnpm", ["run", "cli", "--agent", `--seed`, String(seed), "--demo-seconds", String(seconds), ...extra], {
+	const r = spawnSync("pnpm", ["run", "cli", "--agent", `--seed`, String(seed), "--demo-seconds", String(seconds),
+		...(gameDays ? ["--game-days", String(gameDays)] : []), ...extra], {
 		stdio: ["ignore", fd, fd],
 		env: { ...process.env, OPENTTD_DATA_DIR: dir },
 	});

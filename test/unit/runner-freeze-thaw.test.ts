@@ -89,13 +89,18 @@ describe("runner: seconds 必须真的限制运行长度", () => {
 	// 即 seconds 限制的是"循环结束后还要等多久"—— 一个永远走不到的分支。
 	//
 	// 对 M3 对照实验（同 seed 各 3 局）这是致命的：局长不可控。
-	it("决策循环内部有基于截止时间的跳出", () => {
+	it("决策循环内部有跳出（G1：episode 时钟优先，墙钟上限兜底）", () => {
+		// 2026-09-18 起，运行长度由 EPISODE 时钟（模拟游戏日）决定，墙钟只剩
+		// 安全上限；旧的 `deadline` 路径保留给没有 episode 的调用方（测试/旧路径）。
+		// SPEC §10.68：墙钟预算 → 模拟时间不可比（同 900s 六局推进 0–449 游戏日）。
 		const lines = codeLines();
 		const loopIdx = lines.findIndex((l) => /while \(!ctx\.isStopRequested\(\)\)|while \(!stopRequested\)/.test(l));
 		expect(loopIdx).toBeGreaterThan(-1);
-		const head = lines.slice(loopIdx, loopIdx + 12).join("\n");
-		expect(head).toMatch(/deadline/);
-		// REFACTOR Phase B-4a: deadline check lives in loop-control.shouldBreakOnDeadline.
+		const head = lines.slice(loopIdx, loopIdx + 26).join("\n");
+		expect(head).toMatch(/episode/);
+		expect(head).toMatch(/stopReason === "horizon"/);
+		expect(head).toMatch(/stopReason === "wall_cap"/);
+		// 兜底路径仍在（没有 episode 时按墙钟截止）。
 		expect(head).toMatch(/shouldBreakOnDeadline/);
 	});
 

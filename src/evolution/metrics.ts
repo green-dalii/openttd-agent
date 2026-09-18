@@ -56,6 +56,12 @@ export interface SessionMetaLike {
 		deliveredRunComplete?: boolean;
 		/** GS error replies (channel health, SPEC §10.66). */
 		gsErrors?: number;
+		/** Simulated days covered (G1, SPEC §10.68). */
+		simulatedDays?: number;
+		/** Episode horizon in simulated days (null = none). */
+		horizonDays?: number | null;
+		/** False when the wall-clock cap fired first. */
+		reachedHorizon?: boolean;
 		vehicles?: number;
 		stations?: number;
 	};
@@ -101,6 +107,12 @@ export interface GameMetric {
 	deliveredRunComplete: boolean | null;
 	/** GS error replies during the run; null when not reported (legacy rows). */
 	gsErrors: number | null;
+	/** Simulated days this run covered; null when not reported (legacy rows). */
+	simulatedDays: number | null;
+	/** Episode horizon in simulated days; null when not reported or none set. */
+	horizonDays: number | null;
+	/** False when the wall-clock cap fired first: not a comparable observation. */
+	reachedHorizon: boolean | null;
 	vehicles: number;
 	stations: number;
 	decisions: number;
@@ -334,6 +346,9 @@ export function toGameMetric(
 				: null,
 		deliveredRunComplete: o && typeof o.deliveredRunComplete === "boolean" ? o.deliveredRunComplete : null,
 		gsErrors: num(o && o.gsErrors),
+		simulatedDays: num(o && o.simulatedDays),
+		horizonDays: o && typeof o.horizonDays === "number" ? o.horizonDays : null,
+		reachedHorizon: o && typeof o.reachedHorizon === "boolean" ? o.reachedHorizon : null,
 		income:
 			o && o.income !== undefined && o.income !== null && Number.isFinite(Number(o.income))
 				? Number(o.income)
@@ -568,6 +583,13 @@ export function compareArms(metrics: GameMetric[], by: CompareBy = "memory"): Ar
 	const scripted = all.filter((m) => m.llmKind === "faux").length;
 	const interrupted = all.filter((m) => m.llmKind !== "faux" && m.status === "interrupted").length;
 	const real = all.filter((m) => m.llmKind !== "faux" && m.status !== "interrupted");
+	// G1 (SPEC §10.68): a run that hit the wall-clock cap before its simulated
+	// horizon measured a SHORTER world, so it is not the same unit of observation.
+	// Excluded with disclosure; rows written before the field existed (null) stay
+	// in, and their unknown opportunity length is disclosed separately.
+	const horizonShort = real.filter((m) => m.reachedHorizon === false);
+	const horizonUnknown = real.filter((m) => m.reachedHorizon === null);
+	const measured = real.filter((m) => m.reachedHorizon !== false);
 	// Treatment arm = ANY injected memory: lessons OR route facts (C-1). The
 	// m3e run exposed the gap: runs that received facts-but-no-lessons were
 	// being scored as controls, splitting the arms by an accounting bug.
@@ -588,8 +610,8 @@ export function compareArms(metrics: GameMetric[], by: CompareBy = "memory"): Ar
 	const frozeConfirmed = (m: (typeof real)[number]) => (m.freeze?.confirmed ?? 0) > 0;
 	const withLessons =
 		by === "freeze"
-			? real.filter(frozeConfirmed)
-			: real.filter((m) => (hasArm(m) ? m.arm === "treatment" : injectedSomething(m)));
+			? measured.filter(frozeConfirmed)
+			: measured.filter((m) => (hasArm(m) ? m.arm === "treatment" : injectedSomething(m)));
 	// Control arm = received NOTHING (neither lessons nor facts). Using only
 	// lessonsInjected here put facts-only runs in BOTH arms (m3e).
 	const withoutLessons =
@@ -668,6 +690,12 @@ export function compareArms(metrics: GameMetric[], by: CompareBy = "memory"): Ar
 	const parts: string[] = [];
 	if (interrupted > 0) parts.push(`${interrupted} interrupted`);
 	if (scripted > 0) parts.push(`${scripted} scripted`);
+	// G1: shorter-than-horizon runs are excluded, and rows with no recorded
+	// horizon are disclosed as "unknown opportunity" rather than assumed equal.
+	if (horizonShort.length > 0)
+		parts.push(`${horizonShort.length} that hit the wall-clock cap before the horizon`);
+	if (horizonUnknown.length > 0)
+		parts.push(`${horizonUnknown.length} with no recorded simulated horizon (unknown opportunity)`);
 
 	const compared =
 		`Compared ${a.count} with-lessons vs ${b.count} without-lessons run(s)`;

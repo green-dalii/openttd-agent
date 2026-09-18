@@ -87,6 +87,16 @@ export interface SessionMeta {
 		 * next to the outcome it silently affected.
 		 */
 		gsErrors?: number;
+		/**
+		 * Simulated days this run covered (G1, SPEC §10.68). The comparable
+		 * opportunity denominator: two runs with different values measured
+		 * different amounts of world.
+		 */
+		simulatedDays?: number;
+		/** Episode horizon in simulated days (null = no horizon was set). */
+		horizonDays?: number | null;
+		/** False when the wall-clock cap fired first: the horizon was NOT reached. */
+		reachedHorizon?: boolean;
 		phase?: string;
 		vehicles?: number;
 		stations?: number;

@@ -60,10 +60,17 @@ import { evolutionView, setStrategyEnabled } from "../evolution/web-view.js";
 import { AuditLog } from "./audit.js";
 import { isLlmConfigured } from "../config.js";
 import { toWireSnapshot } from "../game/wire-snapshot.js";
+import { createEpisode } from "./episode.js";
 
 export interface AgentRunOptions {
 	/** Seconds to observe construction after the decision(s). 0 = until Ctrl-C. */
 	seconds?: number;
+	/**
+	 * Episode horizon in SIMULATED game days (G1, SPEC §10.68). Preferred over
+	 * `seconds`: the wall clock is only a safety cap, so the same episode length
+	 * means the same amount of world regardless of machine load or pauses.
+	 */
+	gameDays?: number;
 	/** Scripted plan for the faux provider: towns to build between. */
 	planTowns?: { from?: number; to?: number };
 	/**
@@ -635,6 +642,15 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 	// intervals and notable events until the run ends.
 	// See docs/AGENT-LOOP-AND-COMTROL.md §2.1; implementation: decision-loop.ts
 	// (REFACTOR Phase B-4b — the while body moved there 1:1).
+	// The episode clock starts when the decision loop does, so "same episode" means
+	// "same simulated opportunity" (SPEC §10.68).
+	const episode = createEpisode({
+		horizonDays: opts.gameDays ?? null,
+		capMs: opts.seconds && opts.seconds > 0 ? opts.seconds * 1000 : null,
+		startedAtMs: Date.now(),
+		startGameDay: gameDaysSinceStart(deps),
+	});
+
 	const loop = createDecisionLoop({
 		deps,
 		agent,
@@ -645,8 +661,16 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 		session,
 		getWeb: () => web,
 		pendingActions,
-		opts: { decisionTickMs: opts.decisionTickMs, maxDecisions: opts.maxDecisions, seconds: opts.seconds },
+		opts: {
+			decisionTickMs: opts.decisionTickMs,
+			maxDecisions: opts.maxDecisions,
+			seconds: opts.seconds,
+			episode: episode ?? undefined,
+		},
 		isStopRequested: () => stopRequested,
+		requestStop: () => {
+			stopRequested = true;
+		},
 		// Verified freeze: acquire before the model thinks, release in a finally
 		// (plus the controller's own watchdog). Uses rconAwait so a pause that was
 		// never acknowledged is reported instead of assumed.
@@ -688,6 +712,10 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 		executorPhase: hub.getPhase(), reachedDone: hub.getReachedDone(), scheduler, pendingActions, routeLedger,
 		getRouteStats: () => hub.getRouteStats(),
 		gsErrors: hub.getGsErrors(),
+		episode: {
+			...episode.check({ gameDay: gameDaysSinceStart(deps), nowMs: Date.now() }),
+			horizonDays: episode.plan.horizonDays,
+		},
 		// The arm is ASSIGNED here (--no-memory = control), never inferred later
 		// from how much memory happened to be injected (N2-5 defect).
 		arm: opts.injectMemory === false ? "control" : "treatment",

@@ -41,6 +41,18 @@ export interface FinalizeAndReflectArgs {
 	 * a partially broken channel cannot hide inside a comparison.
 	 */
 	gsErrors: number;
+	/**
+	 * EPISODE CLOCK (G1, SPEC §10.68). Recorded so a run that never reached its
+	 * simulated horizon cannot be averaged with one that did: the wall-clock cap
+	 * makes it a stopper, never a result.
+	 */
+	episode: {
+		simulatedDays: number;
+		/** The horizon this episode was measured against (null = none set). */
+		horizonDays: number | null;
+		reachedHorizon: boolean;
+		stopReason: "horizon" | "wall_cap" | null;
+	};
 	/** Verified-freeze stats (SPEC §10.60); null when the run never froze. */
 	freezeStats?: { confirmed: number; unconfirmed: number; failures: number; watchdogTrips: number; maxHoldMs: number } | null;
 	completeOnce: (p: { system: string; user: string }) => Promise<string>;
@@ -113,6 +125,9 @@ export async function runFinalizeAndReflect(args: FinalizeAndReflectArgs): Promi
 			deliveredRun: c0?.deliveredRun && c0.deliveredRun.total !== null ? c0.deliveredRun.total : undefined,
 			deliveredRunComplete: c0?.deliveredRun ? c0.deliveredRun.complete : undefined,
 			gsErrors: args.gsErrors,
+			simulatedDays: args.episode.simulatedDays,
+			horizonDays: args.episode.horizonDays,
+			reachedHorizon: args.episode.reachedHorizon,
 			totalEvents: snap.totalEvents,
 		},
 	});

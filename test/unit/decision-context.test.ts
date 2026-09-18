@@ -209,6 +209,29 @@ describe("session horizon 是决策上下文的一部分（2026-09-12, /tmp/cal1
 		expect(ctx.session).toEqual({ secondsRemaining: 130 });
 	});
 
+	it("透传模拟时钟（G1, SPEC §10.68）：墙钟秒不是规划施工的单位", () => {
+		// 只有墙钟秒时，模型无法回答"这条路来不来得及建好"——施工受游戏时间/
+		// 脚本 tick 约束。曾出现真实缺陷：loop.ts 只转发 secondsRemaining，
+		// 新字段在到达提示前被丢弃（靠人工核对才发现）。
+		const ctx = buildDecisionContext({
+			trigger: "interval",
+			now: { date: "1950-05-01", companies: [] },
+			since: emptyTracker(),
+			session: { secondsRemaining: 130, simulatedDays: 240, gameDaysRemaining: 160 },
+		});
+		expect(ctx.session).toEqual({ secondsRemaining: 130, simulatedDays: 240, gameDaysRemaining: 160 });
+	});
+
+	it("只提供模拟时钟时也成立（无墙钟上限）", () => {
+		const ctx = buildDecisionContext({
+			trigger: "interval",
+			now: { date: "1950-05-01", companies: [] },
+			since: emptyTracker(),
+			session: { simulatedDays: 12, gameDaysRemaining: 388 },
+		});
+		expect(ctx.session).toEqual({ simulatedDays: 12, gameDaysRemaining: 388 });
+	});
+
 	it("没有 session 字段时不伪造", () => {
 		const ctx = buildDecisionContext({
 			trigger: "start",

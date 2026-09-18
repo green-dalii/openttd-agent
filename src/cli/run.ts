@@ -43,6 +43,11 @@ interface CliArgs {
 	aiName?: string;
 	webPort?: number;
 	demoSeconds?: number;
+	/**
+	 * Episode horizon in SIMULATED game days (G1, SPEC §10.68). Preferred over
+	 * `--demo-seconds`, which becomes the wall-clock safety cap.
+	 */
+	gameDays?: number;
 	llmBaseUrl?: string;
 	llmApiKey?: string;
 	llmModel?: string;
@@ -63,6 +68,7 @@ export function parseArgs(argv: string[]): CliArgs {
 	let aiName: string | undefined;
 	let webPort: number | undefined;
 	let demoSeconds: number | undefined;
+	let gameDays: number | undefined;
 	let addVehicles: number | undefined;
 	let freeze = false;
 	let llmBaseUrl: string | undefined;
@@ -95,6 +101,9 @@ export function parseArgs(argv: string[]): CliArgs {
 				break;
 			case "--add-vehicles":
 				addVehicles = parseIntNum(argv[++i], "--add-vehicles");
+				break;
+			case "--game-days":
+				gameDays = parseIntNum(argv[++i], "--game-days");
 				break;
 			case "--demo-seconds":
 				demoSeconds = parseIntNum(argv[++i], "--demo-seconds");
@@ -156,7 +165,7 @@ export function parseArgs(argv: string[]): CliArgs {
 		// compile: `args.foo` is simply undefined, so the flag silently does
 		// nothing while the help text still advertises it. Fourth instance of
 		// "parsed but dropped" found on 2026-09-12 (MEMORY.md A5).
-		mode, year, seed, timeoutMs, aiName, webPort, demoSeconds, addVehicles, freeze,
+		mode, year, seed, timeoutMs, aiName, webPort, demoSeconds, gameDays, addVehicles, freeze,
 		llmBaseUrl, llmApiKey, llmModel, llmApi, offlineDemo, skipPreflight,
 		injectMemory,
 	};
@@ -301,6 +310,7 @@ async function main(): Promise<number> {
 		try {
 			return await runAgent(cfg, {
 				seconds: args.demoSeconds ?? 180,
+				gameDays: args.gameDays,
 				// Agent mode also serves the live dashboard (telemetry). Undefined
 				// when not requested => CLI-only run.
 				webPort: args.webPort,
