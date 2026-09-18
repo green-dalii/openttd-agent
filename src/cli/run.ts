@@ -11,6 +11,7 @@
 
 import net from "node:net";
 import { access } from "node:fs/promises";
+import { pathToFileURL } from "node:url";
 import { loadConfig, ConfigError, type Config } from "../config.js";
 import { OpenTTDProcessManager } from "../game/process-manager.js";
 import {
@@ -576,9 +577,29 @@ function sleep(ms: number): Promise<void> {
 	return new Promise((r) => setTimeout(r, ms));
 }
 
-main()
-	.then((code) => process.exit(code))
-	.catch((e) => {
-		console.error("FATAL:", e instanceof Error ? e.message : e);
-		process.exit(1);
-	});
+/**
+ * Only run when this module IS the process entry point.
+ *
+ * Importing a module must not start a game: `test/unit/cli-v02.test.ts` imports
+ * this file for `parseArgs`, and an unguarded `main()` made the import itself
+ * call `process.exit` - which vitest reports as an unhandled rejection (a red
+ * gate whose cause was eight files away from the failure).
+ */
+function isEntryPoint(): boolean {
+	const arg = process.argv[1];
+	if (!arg) return false;
+	try {
+		return import.meta.url === pathToFileURL(arg).href;
+	} catch {
+		return false;
+	}
+}
+
+if (isEntryPoint()) {
+	main()
+		.then((code) => process.exit(code))
+		.catch((e) => {
+			console.error("FATAL:", e instanceof Error ? e.message : e);
+			process.exit(1);
+		});
+}

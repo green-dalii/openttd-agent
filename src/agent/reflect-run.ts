@@ -102,6 +102,11 @@ export async function runFinalizeAndReflect(args: FinalizeAndReflectArgs): Promi
 				c0?.economy && c0.economy.deliveredCargo !== undefined
 					? Number(c0.economy.deliveredCargo)
 					: undefined,
+			// SPEC §10.65: the raw counter resets every quarter, so the number
+			// above measures a random partial quarter. This is the integrated
+			// "delivered during the run" figure, and it is what comparisons use.
+			deliveredRun: c0?.deliveredRun && c0.deliveredRun.total !== null ? c0.deliveredRun.total : undefined,
+			deliveredRunComplete: c0?.deliveredRun ? c0.deliveredRun.complete : undefined,
 			totalEvents: snap.totalEvents,
 		},
 	});

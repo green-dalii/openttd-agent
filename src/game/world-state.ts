@@ -10,6 +10,20 @@
  */
 
 import type { CompanyEconomy, CompanySnapshot, CompanyStats, GameDate, GameEvent } from "../types.js";
+import { createDeliveryMeter } from "./delivery-meter.js";
+
+/**
+ * Game day in the project's 360-day-year convention. Absolute year is fine -
+ * the meter only compares differences and quarter boundaries.
+ */
+function gameDayOf(date: GameDate | null): number {
+	if (!date) return 0;
+	return date.year * 360 + (date.month - 1) * 30 + (date.day - 1);
+}
+
+function emptyDelivery(): CumulativeRunDelivery {
+	return { total: null, missing: 0, quarterChanges: 0, gaps: 0, complete: false };
+}
 
 export interface CompanyState {
 	/** Last known info snapshot. */
@@ -28,6 +42,28 @@ export interface CompanyState {
 	 * operator returning to a long run saw a blank chart.
 	 */
 	history: CompanyHistoryPoint[];
+	/**
+	 * Cargo delivered since this session started, integrated across OpenTTD's
+	 * quarterly reset of `economy.deliveredCargo` (SPEC §10.65).
+	 *
+	 * `economy.deliveredCargo` alone is a **per-quarter** counter, so reading it
+	 * once at the end measures a random partial quarter - exactly the confound
+	 * that made two A/B rounds disagree in direction.
+	 */
+	deliveredRun: CumulativeRunDelivery;
+}
+
+/** Cumulative cargo plus how trustworthy the accumulation is. */
+export interface CumulativeRunDelivery {
+	total: number | null;
+	/** Readings skipped (counter absent from the packet). */
+	missing: number;
+	/** Quarter boundaries crossed with the previous total carried over. */
+	quarterChanges: number;
+	/** Journal breaks: a whole quarter elapsed unseen -> total is a lower bound. */
+	gaps: number;
+	/** False when whole quarters were missed, so callers can refuse to compare. */
+	complete: boolean;
 }
 
 /** One sampled point of a company's economy (for the cash/loan/income curve). */
@@ -83,6 +119,12 @@ const DEFAULT_RECENT_LIMIT = 500;
 export class WorldState {
 	private date: GameDate | null = null;
 	private companies = new Map<number, CompanyState>();
+	/**
+	 * One delivery meter per company id. Instance state, not module state: two
+	 * WorldState instances (tests, or two sessions in one process) must not
+	 * accumulate into each other's counters.
+	 */
+	private meters = new Map<number, ReturnType<typeof createDeliveryMeter>>();
 	private recent: GameEvent[] = [];
 	private towns: TownInfo[] = [];
 	private totalEvents = 0;
@@ -113,6 +155,7 @@ export class WorldState {
 						stats: null,
 						lastEconomyAt: null,
 						history: [],
+						deliveredRun: emptyDelivery(),
 					});
 				}
 				break;
@@ -125,6 +168,7 @@ export class WorldState {
 					stats: this.companies.get(p.id)?.stats ?? null,
 					lastEconomyAt: this.companies.get(p.id)?.lastEconomyAt ?? null,
 					history: this.companies.get(p.id)?.history ?? [],
+					deliveredRun: this.companies.get(p.id)?.deliveredRun ?? emptyDelivery(),
 				});
 				break;
 			}
@@ -132,6 +176,19 @@ export class WorldState {
 				const p = ev.payload as CompanyEconomy;
 				const c = this.upsertCompany(p.id);
 				c.economy = p;
+				// Integrate across the quarterly reset (SPEC §10.65). The date is
+				// what identifies the quarter; each company keeps its own meter.
+				const meter = this.meters.get(p.id) ?? createDeliveryMeter();
+				this.meters.set(p.id, meter);
+				meter.observe(gameDayOf(this.date), p.deliveredCargo);
+				const st = meter.stats();
+				c.deliveredRun = {
+					total: meter.total(),
+					missing: st.missing,
+					quarterChanges: st.quarterChanges,
+					gaps: st.gaps,
+					complete: st.complete,
+				};
 				c.lastEconomyAt = ev.ts;
 				// Money is signed (SPEC §10.6); keep it numeric for the chart.
 				c.history = [
@@ -165,7 +222,7 @@ export class WorldState {
 	private upsertCompany(id: number): CompanyState {
 		let c = this.companies.get(id);
 		if (!c) {
-			c = { info: null, economy: null, stats: null, lastEconomyAt: null, history: [] };
+			c = { info: null, economy: null, stats: null, lastEconomyAt: null, history: [], deliveredRun: emptyDelivery() };
 			this.companies.set(id, c);
 		}
 		return c;

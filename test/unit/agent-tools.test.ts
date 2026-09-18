@@ -84,6 +84,7 @@ describe("summarizeState", () => {
 						stats: { id: 0, vehicles: 3, stations: 2 } as never,
 						lastEconomyAt: null,
 						history: [],
+						deliveredRun: { total: null, missing: 0, quarterChanges: 0, gaps: 0, complete: false },
 					},
 				],
 			]),

@@ -666,3 +666,52 @@ describe("hurdle 统计量：零率 / Fisher / Mann-Whitney / 自助法", () => 
 		expect(cmp.mannWhitneyPValue).toBeNull();
 	});
 });
+
+/**
+ * 流量指标换代（2026-09-18，SPEC §10.65）。
+ *
+ * 事故：`delivered = economy.deliveredCargo` 是 **OpenTTD 的当季计数器**
+ * （每季归零）。运行恰好在季界后结束就记 0（建成却"零交付"），其余运行各自
+ * 覆盖 0–90 游戏天不等的部分季度 —— 两轮 A/B 因此给出**相反方向**。
+ * 修法：`deliveredRun` 把季界积分掉（见 delivery-meter），判定优先用它，
+ * 但**两臂必须同源**：一边用积分值、一边用原始值，就是拿不可比的东西比。
+ */
+describe("deliveredRun —— 跨季积分的流量指标优先，且两臂同源", () => {
+	const run = (arm: "treatment" | "control", raw: number | null, integrated: number | null) => ({
+		...toGameMetric(meta({ outcome: { constructionDone: true, money: "1", stations: 4 } })),
+		arm,
+		delivered: raw,
+		deliveredRun: integrated,
+	});
+	/** 每臂 5 局（达到报告下限），积分值 = 原始值 + 100，便于区分用了哪个源。 */
+	const bothArmsWithRun = () => [
+		...Array.from({ length: 5 }, (_, i) => run("treatment", 10 + i, 110 + i)),
+		...Array.from({ length: 5 }, (_, i) => run("control", 20 + i, 120 + i)),
+	];
+
+	it("两臂都有积分读数 → 用积分值，并声明来源", () => {
+		const cmp = compareArms(bothArmsWithRun());
+		expect(cmp.deliveredSource).toBe("run");
+		expect(cmp.withLessons.meanDelivered).toBe(112); // 110..114
+		expect(cmp.withoutLessons.meanDelivered).toBe(122); // 120..124
+	});
+
+	it("两臂都没有积分读数（历史行）→ 回落到原始值，不假装是积分值", () => {
+		const cmp = compareArms([
+			...Array.from({ length: 5 }, (_, i) => run("treatment", 10 + i, null)),
+			...Array.from({ length: 5 }, (_, i) => run("control", 20 + i, null)),
+		]);
+		expect(cmp.deliveredSource).toBe("raw");
+		expect(cmp.withLessons.meanDelivered).toBe(12); // 10..14
+	});
+
+	it("只有一边有积分读数 → 两臂都用原始值（绝不混用）", () => {
+		const cmp = compareArms([
+			...Array.from({ length: 5 }, (_, i) => run("treatment", 10 + i, 110 + i)),
+			...Array.from({ length: 5 }, (_, i) => run("control", 20 + i, null)),
+		]);
+		expect(cmp.deliveredSource).toBe("raw");
+		expect(cmp.withLessons.meanDelivered).toBe(12);
+		expect(cmp.withoutLessons.meanDelivered).toBe(22);
+	});
+});

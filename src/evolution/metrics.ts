@@ -41,8 +41,19 @@ export interface SessionMetaLike {
 		money?: string | number;
 		/** Company income (N2-4); absent when the packet never arrived. */
 		income?: number;
-		/** Cargo/passengers delivered (N2-4b); absent when never reported. */
+		/**
+		 * Cargo/passengers delivered (N2-4b); absent when never reported.
+		 *
+		 * RAW reading: `cur_economy.delivered_cargo`, which OpenTTD resets every
+		 * quarter - so this is a partial-quarter count and NOT comparable across
+		 * runs (SPEC §10.65). Kept because it is the wire truth; comparisons use
+		 * `deliveredRun`.
+		 */
 		delivered?: number;
+		/** Integrated across the quarterly reset - the comparable flow outcome. */
+		deliveredRun?: number;
+		/** False when whole quarters went unseen (`deliveredRun` is a lower bound). */
+		deliveredRunComplete?: boolean;
 		vehicles?: number;
 		stations?: number;
 	};
@@ -82,6 +93,10 @@ export interface GameMetric {
 	 * nothing) distinct from a missing one.
 	 */
 	delivered: number | null;
+	/** Integrated past the quarterly reset; the comparable flow outcome (SPEC §10.65). */
+	deliveredRun: number | null;
+	/** False when whole quarters went unseen; null when not reported. */
+	deliveredRunComplete: boolean | null;
 	vehicles: number;
 	stations: number;
 	decisions: number;
@@ -122,9 +137,22 @@ export interface GameMetric {
 export const MIN_LESSON_SAMPLE = 5;
 
 /** Delivered values of an arm (missing readings excluded, never zeroed). */
-function deliveredOf(list: GameMetric[]): number[] {
-	return list.map((m) => m.delivered).filter((v): v is number => typeof v === "number" && Number.isFinite(v));
+/**
+ * The flow outcome for one arm, from ONE source only.
+ *
+ * `deliveredRun` (integrated past the quarterly reset, SPEC §10.65) is the
+ * comparable figure; `delivered` is the raw partial-quarter counter. Mixing them
+ * across arms would compare incomparable things, so the caller picks a single
+ * source for both arms.
+ */
+function deliveredSeries(list: GameMetric[], source: DeliveredSource): number[] {
+	return list
+		.map((m) => (source === "run" ? m.deliveredRun : m.delivered))
+		.filter((v): v is number => typeof v === "number" && Number.isFinite(v));
 }
+
+/** Which flow figure a comparison used. */
+export type DeliveredSource = "run" | "raw";
 
 /** log-factorial via lgamma-free loop (n is small here: a few dozen runs). */
 function lnFact(n: number): number {
@@ -296,6 +324,11 @@ export function toGameMetric(
 			o && o.delivered !== undefined && o.delivered !== null && Number.isFinite(Number(o.delivered))
 				? Number(o.delivered)
 				: null,
+		deliveredRun:
+			o && o.deliveredRun !== undefined && o.deliveredRun !== null && Number.isFinite(Number(o.deliveredRun))
+				? Number(o.deliveredRun)
+				: null,
+		deliveredRunComplete: o && typeof o.deliveredRunComplete === "boolean" ? o.deliveredRunComplete : null,
 		income:
 			o && o.income !== undefined && o.income !== null && Number.isFinite(Number(o.income))
 				? Number(o.income)
@@ -417,6 +450,11 @@ export interface ArmComparison {
 	/** Right minus left of mean delivered cargo (N2-4b). */
 	deliveredDelta: number | null;
 	/**
+	 * Which figure `delivered*` fields describe: the run-integrated flow metric
+	 * ("run") or the raw partial-quarter counter ("raw", legacy rows only).
+	 */
+	deliveredSource: DeliveredSource;
+	/**
 	 * Whether the DELIVERED comparison is decidable: both arms at the sample
 	 * floor. Deliberately not gated on `builtRate` equality - that guard exists
 	 * because "never built" INFLATES money (nothing spent) and confounds income;
@@ -461,7 +499,7 @@ function mean(values: number[]): number | null {
 	return values.reduce((a, b) => a + b, 0) / values.length;
 }
 
-function armStats(list: GameMetric[]): ArmStats {
+function armStats(list: GameMetric[], source: DeliveredSource = "raw"): ArmStats {
 	const known = list.filter((m) => m.constructionDone !== null);
 	const acting = list.filter((m) => m.decisions > 0);
 	// Absent readings are excluded, never counted as 0 (a zero income would read
@@ -469,9 +507,7 @@ function armStats(list: GameMetric[]): ArmStats {
 	const incomeValues = list
 		.map((m) => m.income)
 		.filter((v): v is number => typeof v === "number" && Number.isFinite(v));
-	const deliveredValues = list
-		.map((m) => m.delivered)
-		.filter((v): v is number => typeof v === "number" && Number.isFinite(v));
+	const deliveredValues = deliveredSeries(list, source);
 	return {
 		count: list.length,
 		meanMoney: mean(list.map((m) => m.money)),
@@ -555,8 +591,17 @@ export function compareArms(metrics: GameMetric[], by: CompareBy = "memory"): Ar
 		by === "freeze"
 			? real.filter((m) => !frozeConfirmed(m))
 			: real.filter((m) => (hasArm(m) ? m.arm === "control" : !injectedSomething(m)));
-	const a = armStats(withLessons);
-	const b = armStats(withoutLessons);
+	// Same source for both arms, decided by whether the corrected figure exists
+	// on BOTH sides. Old rows predate `deliveredRun`; a comparison that silently
+	// used "run" for one arm and "raw" for the other would be exactly the kind of
+	// invisible mixing this file exists to prevent.
+	const flowAvailable = (list: GameMetric[]) =>
+		list.filter((m) => typeof m.deliveredRun === "number" && Number.isFinite(m.deliveredRun)).length >=
+		MIN_LESSON_SAMPLE;
+	const deliveredSource: DeliveredSource =
+		flowAvailable(withLessons) && flowAvailable(withoutLessons) ? "run" : "raw";
+	const a = armStats(withLessons, deliveredSource);
+	const b = armStats(withoutLessons, deliveredSource);
 
 	const enough = a.count >= MIN_LESSON_SAMPLE && b.count >= MIN_LESSON_SAMPLE;
 	const moneyDelta =
@@ -662,9 +707,25 @@ export function compareArms(metrics: GameMetric[], by: CompareBy = "memory"): Ar
 		moneyDelta,
 		incomeDelta,
 		deliveredDelta,
-		deliveryPValue: enough ? fisherExactTwoSided(deliveredOf(withLessons), deliveredOf(withoutLessons)) : null,
-		mannWhitneyPValue: enough ? mannWhitneyTwoSided(deliveredOf(withLessons), deliveredOf(withoutLessons)) : null,
-		meanDiffCi: enough ? bootstrapMeanDiffCi(deliveredOf(withLessons), deliveredOf(withoutLessons)) : null,
+		deliveredSource,
+		deliveryPValue: enough
+			? fisherExactTwoSided(
+					deliveredSeries(withLessons, deliveredSource),
+					deliveredSeries(withoutLessons, deliveredSource),
+				)
+			: null,
+		mannWhitneyPValue: enough
+			? mannWhitneyTwoSided(
+					deliveredSeries(withLessons, deliveredSource),
+					deliveredSeries(withoutLessons, deliveredSource),
+				)
+			: null,
+		meanDiffCi: enough
+			? bootstrapMeanDiffCi(
+					deliveredSeries(withLessons, deliveredSource),
+					deliveredSeries(withoutLessons, deliveredSource),
+				)
+			: null,
 		deliveredConclusive:
 			a.count >= MIN_LESSON_SAMPLE &&
 			b.count >= MIN_LESSON_SAMPLE &&

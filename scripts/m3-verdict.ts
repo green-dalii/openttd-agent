@@ -48,7 +48,10 @@ if (arms.treatmentWithoutInjection > 0) {
 }
 console.log(`money delta   : ${arms.moneyDelta ?? "—"}`);
 console.log(`income delta  : ${arms.incomeDelta?.toFixed(0) ?? "—"}`);
-console.log(`delivered delta: ${arms.deliveredDelta?.toFixed(0) ?? "—"}  (least confounded outcome)`);
+console.log(
+	`delivered delta: ${arms.deliveredDelta?.toFixed(0) ?? "—"}  (least confounded outcome)  ` +
+		`source=${arms.deliveredSource === "run" ? "deliveredRun (integrated past the quarterly reset)" : "delivered (RAW partial-quarter counter - not comparable)"}`,
+);
 console.log("");
 console.log("Reminder: rules live in src/evolution/metrics.ts (compareArms).");
 console.log("Interrupted runs are excluded by design - their outcome is the");

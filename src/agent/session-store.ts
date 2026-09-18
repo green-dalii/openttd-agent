@@ -74,6 +74,13 @@ export interface SessionMeta {
 		income?: number;
 		/** Cargo/passengers delivered (N2-4b) - the least confounded outcome. */
 		delivered?: number;
+		/**
+		 * Cargo delivered across the whole session, integrated past OpenTTD's
+		 * quarterly reset (SPEC §10.65). The comparable flow outcome.
+		 */
+		deliveredRun?: number;
+		/** False when whole quarters went unseen (total is then a lower bound). */
+		deliveredRunComplete?: boolean;
 		phase?: string;
 		vehicles?: number;
 		stations?: number;
