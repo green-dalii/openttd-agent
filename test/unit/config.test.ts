@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { ConfigError, loadConfig } from "../../src/config.js";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
-const DEFAULT_BIN =
-	"$HOME/Library/Application Support/Steam/steamapps/common/OpenTTD/OpenTTD.app/Contents/MacOS/openttd";
+// Derived the same way the code derives it: no username in the test either.
+const DEFAULT_BIN = join(
+	homedir(),
+	"Library/Application Support/Steam/steamapps/common/OpenTTD/OpenTTD.app/Contents/MacOS/openttd",
+);
 
 function env(over: Record<string, string> = {}): Record<string, string> {
 	return {

@@ -58,7 +58,9 @@
 > - **开工前必读**：`MEMORY.md` §0（方向）+ §0b（NEXT-2 方案/状态）+
 >   `SPEC.md` §10.53–§10.61（本轮全部实测结论）。
 > - **真机实验期间不要跑 gate**（preflight 断言端口空闲 → 假红；MEMORY D5）。
-> - **无 remote**：所有提交都是本地的，不要 push。
+> - **remote**：`origin` = `git@github.com:green-dalii/openttd-agent.git`（**private**，
+>   2026-09-17 创建）。amend 仅对未 push 的提交安全；已 push 的改动用
+>   `--force-with-lease`，不要裸 `--force`。
 > - **subagent 不可用**（缺 `@earendil-works/pi-server`）——所有活都内联做。
 
 ### ✅ 已收口（2026-09-12～15，细节见 CHANGELOG [Unreleased] 与 SPEC §10.34–§10.49）

@@ -6,6 +6,9 @@
  * 禁止: 隐藏副作用; 不在本模块 spawn 进程。
  */
 
+import { homedir } from "node:os";
+import { join } from "node:path";
+
 export class ConfigError extends Error {
 	constructor(message: string) {
 		super(message);
@@ -68,8 +71,17 @@ export function isLlmConfigured(llm: LlmConfig): boolean {
 	return llm.baseUrl.trim().length > 0;
 }
 
-const DEFAULT_BINARY =
-	"$HOME/Library/Application Support/Steam/steamapps/common/OpenTTD/OpenTTD.app/Contents/MacOS/openttd";
+/**
+ * Default OpenTTD binary for the local Steam install.
+ *
+ * Derived from the home directory on purpose: the earlier hardcoded
+ * "/Users/<name>/..." was both non-portable and a small privacy leak in a public
+ * repository (it published the maintainer's username and install layout).
+ */
+const DEFAULT_BINARY = join(
+	homedir(),
+	"Library/Application Support/Steam/steamapps/common/OpenTTD/OpenTTD.app/Contents/MacOS/openttd",
+);
 
 const MAP_SIZES: Record<string, [number, number]> = {
 	small: [256, 256],

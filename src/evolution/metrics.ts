@@ -121,6 +121,130 @@ export interface GameMetric {
  */
 export const MIN_LESSON_SAMPLE = 5;
 
+/** Delivered values of an arm (missing readings excluded, never zeroed). */
+function deliveredOf(list: GameMetric[]): number[] {
+	return list.map((m) => m.delivered).filter((v): v is number => typeof v === "number" && Number.isFinite(v));
+}
+
+/** log-factorial via lgamma-free loop (n is small here: a few dozen runs). */
+function lnFact(n: number): number {
+	let acc = 0;
+	for (let i = 2; i <= n; i++) acc += Math.log(i);
+	return acc;
+}
+
+function lnChoose(n: number, k: number): number {
+	if (k < 0 || k > n) return Number.NEGATIVE_INFINITY;
+	return lnFact(n) - lnFact(k) - lnFact(n - k);
+}
+
+/**
+ * Two-sided Fisher exact test on the hurdle (delivered > 0) counts.
+ * Exact, not chi-square: at n=5-40 per arm the counts are small and an
+ * approximation would invent significance.
+ */
+export function fisherExactTwoSided(a: number[], b: number[]): number | null {
+	const k1 = a.filter((v) => v > 0).length;
+	const k2 = b.filter((v) => v > 0).length;
+	const n1 = a.length;
+	const n2 = b.length;
+	const K = k1 + k2;
+	const N = n1 + n2;
+	if (n1 === 0 || n2 === 0 || N === 0) return null;
+	const pOf = (x: number) => Math.exp(lnChoose(K, x) + lnChoose(N - K, n1 - x) - lnChoose(N, n1));
+	const p0 = pOf(k1);
+	const lo = Math.max(0, n1 - (N - K));
+	const hi = Math.min(n1, K);
+	let p = 0;
+	for (let x = lo; x <= hi; x++) {
+		const px = pOf(x);
+		if (px <= p0 * (1 + 1e-9)) p += px;
+	}
+	return Math.min(1, p);
+}
+
+/** Ranks with ties averaged (standard Mann-Whitney preparation). */
+function ranks(values: number[]): number[] {
+	const idx = values.map((v, i) => ({ v, i })).sort((x, y) => x.v - y.v);
+	const out = new Array<number>(values.length).fill(0);
+	let i = 0;
+	while (i < idx.length) {
+		let j = i;
+		while (j + 1 < idx.length && idx[j + 1]!.v === idx[i]!.v) j++;
+		const avg = (i + j) / 2 + 1;
+		for (let k = i; k <= j; k++) out[idx[k]!.i] = avg;
+		i = j + 1;
+	}
+	return out;
+}
+
+/**
+ * Two-sided Mann-Whitney U (normal approximation with continuity correction).
+ * Chosen as the secondary statistic because it uses ORDER only: the outcome is
+ * zero-inflated and heavy-tailed, and ranks do not care that one run delivered 77.
+ */
+export function mannWhitneyTwoSided(a: number[], b: number[]): number | null {
+	const n1 = a.length;
+	const n2 = b.length;
+	if (n1 === 0 || n2 === 0) return null;
+	const all = [...a, ...b];
+	const r = ranks(all);
+	const r1 = r.slice(0, n1).reduce((x, y) => x + y, 0);
+	const u = r1 - (n1 * (n1 + 1)) / 2;
+	const mu = (n1 * n2) / 2;
+	const sd = Math.sqrt((n1 * n2 * (n1 + n2 + 1)) / 12);
+	if (sd === 0) return null;
+	const z = (Math.abs(u - mu) - 0.5) / sd;
+	return Math.min(1, 2 * (1 - normalCdf(Math.max(0, z))));
+}
+
+function normalCdf(z: number): number {
+	return 0.5 * (1 + erf(z / Math.SQRT2));
+}
+
+/** Abramowitz-Stegun 7.1.26 — plenty for a p value at these sample sizes. */
+function erf(x: number): number {
+	const sign = x < 0 ? -1 : 1;
+	const ax = Math.abs(x);
+	const t = 1 / (1 + 0.3275911 * ax);
+	const y =
+		1 -
+		((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) *
+			t *
+			Math.exp(-ax * ax);
+	return sign * y;
+}
+
+/**
+ * Percentile bootstrap CI for the difference of means (2000 draws, seeded by a
+ * simple LCG so a verdict is reproducible from the same data).
+ */
+export function bootstrapMeanDiffCi(
+	a: number[],
+	b: number[],
+	iters = 2000,
+): [number, number] | null {
+	if (a.length === 0 || b.length === 0) return null;
+	let seed = 123456789;
+	const rnd = () => {
+		seed = (1103515245 * seed + 12345) % 2147483648;
+		return seed / 2147483648;
+	};
+	const pick = (list: number[]) => list[Math.floor(rnd() * list.length)]!;
+	const diffs: number[] = [];
+	for (let i = 0; i < iters; i++) {
+		let sa = 0;
+		for (let k = 0; k < a.length; k++) sa += pick(a);
+		let sb = 0;
+		for (let k = 0; k < b.length; k++) sb += pick(b);
+		diffs.push(sa / a.length - sb / b.length);
+	}
+	diffs.sort((x, y) => x - y);
+	const lo = diffs[Math.floor(0.025 * iters)]!;
+	const hi = diffs[Math.floor(0.975 * iters)]!;
+	return [lo, hi];
+}
+
 /** Median of a non-empty list (distribution-aware companion to `mean`). */
 function median(list: number[]): number | null {
 	if (list.length === 0) return null;
@@ -268,6 +392,15 @@ export interface ArmStats {
 	medianDelivered: number | null;
 	/** Share of runs that delivered nothing (the zero-inflation itself). */
 	zeroDeliveredRate: number | null;
+	/**
+	 * Hurdle rate = share of runs that delivered ANYTHING (2026-09-17).
+	 * The data-generating process is a hurdle: P(deliver>0) times a heavy-tailed
+	 * positive amount. 33 measured runs: 70% zeros, non-zero mean ~32, range 13-77.
+	 * Power simulation on that distribution: Mann-Whitney 0.08 at n=5/arm, 0.50 at
+	 * n=40, 0.80 only near n=80-100 (~24h per experiment). The hurdle rate is the
+	 * parameter the process actually has; the mean is its noisiest summary.
+	 */
+	deliveryRate: number | null;
 }
 
 export interface ArmComparison {
@@ -294,6 +427,17 @@ export interface ArmComparison {
 	deliveredConclusive: boolean;
 	/** Human-readable caveat when mean and median disagree in sign. */
 	deliveredNote?: string;
+	/**
+	 * Two-sided Fisher exact p for the DELIVERY RATE (hurdle) difference.
+	 * Primary statistic for this outcome: it tests the parameter the generative
+	 * process has, and it is the one with the most power per run in simulation.
+	 * Null below MIN_LESSON_SAMPLE per arm - an underpowered test is not a result.
+	 */
+	deliveryPValue: number | null;
+	/** Two-sided Mann-Whitney (rank) p on raw delivered: robust to the heavy tail. */
+	mannWhitneyPValue: number | null;
+	/** Percentile bootstrap 95% CI for (mean treatment - mean control), 2000 draws. */
+	meanDiffCi: [number, number] | null;
 	/**
 	 * Treatment runs that received NO memory at all (N2-5). These are assigned to
 	 * treatment but the intervention never arrived, so they dilute the arm and
@@ -346,6 +490,9 @@ function armStats(list: GameMetric[]): ArmStats {
 		medianDelivered: deliveredValues.length ? median(deliveredValues) : null,
 		zeroDeliveredRate: deliveredValues.length
 			? deliveredValues.filter((v) => v === 0).length / deliveredValues.length
+			: null,
+		deliveryRate: deliveredValues.length
+			? deliveredValues.filter((v) => v > 0).length / deliveredValues.length
 			: null,
 	};
 }
@@ -515,6 +662,9 @@ export function compareArms(metrics: GameMetric[], by: CompareBy = "memory"): Ar
 		moneyDelta,
 		incomeDelta,
 		deliveredDelta,
+		deliveryPValue: enough ? fisherExactTwoSided(deliveredOf(withLessons), deliveredOf(withoutLessons)) : null,
+		mannWhitneyPValue: enough ? mannWhitneyTwoSided(deliveredOf(withLessons), deliveredOf(withoutLessons)) : null,
+		meanDiffCi: enough ? bootstrapMeanDiffCi(deliveredOf(withLessons), deliveredOf(withoutLessons)) : null,
 		deliveredConclusive:
 			a.count >= MIN_LESSON_SAMPLE &&
 			b.count >= MIN_LESSON_SAMPLE &&

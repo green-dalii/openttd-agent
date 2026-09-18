@@ -746,7 +746,7 @@ lsof -nP -iTCP:<port> -sTCP:LISTEN   # 复核
 「这属于同一次逻辑变更吗」。
 
 **规则**：见 `AGENTS.md` §8。判定标准：**「如果我在写第一版时就知道这些，还会单独提交吗？」**
-答"不会" → `git commit --amend`（本仓库无 remote，amend 是安全默认）。
+答"不会" → `git commit --amend`（有 remote 后：**仅对未 push 的提交**安全）。
 
 ---
 
@@ -756,7 +756,7 @@ lsof -nP -iTCP:<port> -sTCP:LISTEN   # 复核
 
 **现象**：`ROADMAP.md` 末尾有一份「开发纪律」5 条，与 `AGENTS.md` §2 铁律**重复表述**；
 `ROADMAP.md` 顶部的进度速览还停留在旧版本，完全没有反映 v0.6.0 做的事。
-另：我把"26 个 commit 未 push"写进 ROADMAP——**实际这个仓库根本没有 remote**，
+另：我把"26 个 commit 未 push"写进 ROADMAP——**当时这个仓库根本没有 remote**（2026-09-17 起有），
 错误结论被白纸黑字记下。
 
 **根因**：写文档时"就近复制"而不是"指向权威位置"；没有人核对数字/结论。

@@ -614,3 +614,55 @@ describe("delivered：分布感知统计 + 判据守卫", () => {
 		expect(compareArms(few).deliveredConclusive).toBe(false);
 	});
 });
+
+/**
+ * 障碍模型（hurdle）统计量（2026-09-17，第一性原理）。
+ *
+ * 实测 33 局：**70% 的局 delivered=0**，非零局 mean≈32 / range 13–77。
+ * 即数据生成过程 = `P(>0)=p` × 正值重尾。力量模拟（真实分布）显示：
+ *   n=5/臂 时 Mann-Whitney 力量 **0.08**、Fisher 0.07、均值 t 0.20
+ *   n=40/臂 才到 0.50；要 0.80 需 ~80–100 局/臂（≈24 小时/轮，不可行）
+ * → 均值比较既不是最强的，也不是最匹配 DGP 的。
+ *
+ * 因此主统计量改为**障碍率**（delivering 局占比，Fisher 精确检验）+
+ * Mann-Whitney（秩，稳健于重尾）；均值只作描述并附自助法区间。
+ */
+describe("hurdle 统计量：零率 / Fisher / Mann-Whitney / 自助法", () => {
+	const run = (arm: "treatment" | "control", delivered: number) => ({
+		...toGameMetric(meta({ outcome: { constructionDone: delivered > 0, money: "1", stations: 2, delivered } })),
+		arm,
+	});
+	const many = (arm: "treatment" | "control", vals: number[]) => vals.map((v) => run(arm, v));
+
+	it("deliveryRate = 非零局占比（障碍率，DGP 的 p）", () => {
+		const cmp = compareArms([...many("treatment", [0, 30, 40, 0, 0, 20]), ...many("control", [0, 0, 0, 10, 0, 0])]);
+		expect(cmp.withLessons.deliveryRate).toBeCloseTo(3 / 6, 6);
+		expect(cmp.withoutLessons.deliveryRate).toBeCloseTo(1 / 6, 6);
+	});
+
+	it("Fisher 精确检验：6/6 vs 1/6 的障碍率差异给出 p 值", () => {
+		const cmp = compareArms([...many("treatment", [0, 30, 40, 0, 0, 20]), ...many("control", [0, 0, 0, 10, 0, 0])]);
+		expect(cmp.deliveryPValue).not.toBeNull();
+		expect(cmp.deliveryPValue!).toBeGreaterThan(0.05); // 6 局太小，不该显著
+	});
+
+	it("Mann-Whitney 秩检验对重尾稳健（同一数据给出 p 值）", () => {
+		const cmp = compareArms([...many("treatment", [0, 30, 40, 0, 0, 20]), ...many("control", [0, 0, 0, 10, 0, 0])]);
+		expect(cmp.mannWhitneyPValue).not.toBeNull();
+		expect(cmp.mannWhitneyPValue!).toBeGreaterThan(0);
+		expect(cmp.mannWhitneyPValue!).toBeLessThanOrEqual(1);
+	});
+
+	it("自助法 95% 区间：区间跨 0 → 明确报'不确定'（重尾下比 p 值更诚实）", () => {
+		const cmp = compareArms([...many("treatment", [0, 30, 40, 0, 0, 20]), ...many("control", [0, 0, 0, 10, 0, 0])]);
+		expect(cmp.meanDiffCi).not.toBeNull();
+		const [lo, hi] = cmp.meanDiffCi!;
+		expect(lo).toBeLessThan(hi);
+	});
+
+	it("样本不足（<MIN）→ 统计量为 null，不假装算过", () => {
+		const cmp = compareArms([run("treatment", 5), run("control", 1)]);
+		expect(cmp.deliveryPValue).toBeNull();
+		expect(cmp.mannWhitneyPValue).toBeNull();
+	});
+});

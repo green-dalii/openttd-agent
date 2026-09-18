@@ -176,7 +176,9 @@ scripts/       # dev 辅助 (gen-squirrel, setup-sandbox)
 已提交但**仍属同一次工作**的修正（写错、写漏、补充说明）→ **`git commit --amend`**，
 不要追加 `fix:` / `correct:` / `docs: 补充…` 之类的补丁 commit。
 
-- **本仓库无 remote**（见 `ROADMAP.md` 顶部），因此 amend **是安全默认**。
+- **本仓库现有 remote**：`origin` = `github.com/green-dalii/openttd-agent`（2026-09-17 建，
+  见 `ROADMAP.md` 顶部）。因此 amend 只对**尚未 push 的提交**安全；已 push 的提交要改，
+  先确认没有别人基于它工作，再 `git push --force-with-lease`（**禁止**裸 `--force`）。
 - 追加新 commit 的正当理由只有两个：(a) 已经 push / 他人可能基于它工作；
   (b) 这是**独立的后续目标**，不是本次工作的收尾。
 - 判定标准：**「如果我在写第一版时就知道这些，还会单独提交吗？」** 答"不会"→ amend。
