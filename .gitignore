@@ -14,3 +14,6 @@ data/
 /.scratch/
 /probe*.mjs
 /vfy*.mjs
+# Provider credentials must never be committed (they live in the run's data dir).
+credentials.json
+llm.json
