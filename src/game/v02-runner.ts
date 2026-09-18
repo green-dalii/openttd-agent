@@ -53,6 +53,17 @@ export async function runV02(cfg: Config, opts: V02Options = {}): Promise<number
 	let stopRequested = false;
 	/** Raw OpenTTD date from the GS channel (fine episode clock, ~3 game days). */
 	let gsRawDate: number | null = null;
+	/**
+	 * `EX done …` is TRANSIENT: the executor switches to vehicle telemetry almost
+	 * immediately, so testing the CURRENT phase misses it - which is how the first
+	 * S0 batch silently never sent a single fleet request, and would have reported
+	 * "no gradient" as if that were a fact about the game.
+	 */
+	let seenDone = false;
+	/** Fleet size measured AFTER the request (the probe's own effect). */
+	let fleetAfterRequest: number | null = null;
+	/** Did the probe actually send its request? Runs where it did not are void. */
+	let fleetProbeFired = false;
 	let resolveStopped: (() => void) | null = null;
 
 	const requestStop = (_code: number) => {
@@ -111,6 +122,10 @@ export async function runV02(cfg: Config, opts: V02Options = {}): Promise<number
 					if (p.isAi) {
 						companiesByName.set(p.name, p.id);
 						if (p.name.startsWith("EX ")) {
+							// Latch "done" cumulatively: the phase is transient (telemetry
+							// follows immediately), and the fleet probe must not depend on
+							// catching it at a poll instant.
+							if (p.name.startsWith("EX done")) seenDone = true;
 							if (executorPhase !== p.name) {
 								executorPhase = p.name;
 								console.log(`[v02] Executor phase -> "${p.name}"`);
@@ -198,12 +213,22 @@ export async function runV02(cfg: Config, opts: V02Options = {}): Promise<number
 
 	// --- 5b. S2-S4: wait for the executor to finish construction (done phase),
 	// then confirm the world changed: >=1 road vehicle in stats, cash spent. ---
-	const buildDeadline = Date.now() + 120_000;
-	while (!executorPhase.startsWith("EX done") && Date.now() < buildDeadline && !stopRequested) {
+	// Generous on purpose. This used to be 120s, which a ~130-tile road does not
+	// finish in - so the wait timed out, the fleet probe below was skipped, and the
+	// first S0 batch would have reported "no gradient" while never having changed
+	// the fleet at all. The episode clock bounds the wait now.
+	const buildDeadline = Date.now() + 60 * 60_000;
+	while (!seenDone && !executorPhase.startsWith("EX done") && Date.now() < buildDeadline && !stopRequested) {
 		client?.poll(AdminUpdateType.CompanyInfo, ALL_COMPANIES);
 		await sleep(500);
 	}
-	if (executorPhase.startsWith("EX done")) {
+	if (!seenDone && !executorPhase.startsWith("EX done")) {
+		console.log(
+			"[v02] WARNING: construction never reported done before the episode ended - " +
+				"the fleet probe did NOT run, so this run cannot say anything about fleet size",
+		);
+	}
+	if (seenDone || executorPhase.startsWith("EX done")) {
 		console.log(`[v02] S4 construction done: phase="${executorPhase}"`);
 		// Stats: company 0 should now own >=1 road vehicle + 2 stations.
 		let vehicles = -1;
@@ -219,6 +244,7 @@ export async function runV02(cfg: Config, opts: V02Options = {}): Promise<number
 		console.log(`[v02] S4 live route: vehicles=${vehicles} stations=${stations}`);
 
 		if (opts.addVehicles !== undefined && opts.addVehicles > 0) {
+			fleetProbeFired = true;
 			console.log(`[v02] baseline probe: requesting ${opts.addVehicles} vehicles on job=101`);
 			client.gameScript(JSON.stringify({ cmd: "add_vehicles", company: 0, job: 101, count: opts.addVehicles }));
 			// Wait for the ack so the executor's mailbox saw the request.
@@ -229,7 +255,24 @@ export async function runV02(cfg: Config, opts: V02Options = {}): Promise<number
 				client?.poll(AdminUpdateType.CompanyInfo, ALL_COMPANIES);
 				await sleep(250);
 			}
-			console.log(`[v02] baseline probe: request delivered (executor applies fleet changes)`);
+			// Observe the EFFECT, not just the send (the project's own rule). The
+			// first batch asked and never checked, so a request that was ignored
+			// would have looked identical to one that worked.
+			const appliedDeadline = Date.now() + 60_000;
+			while (Date.now() < appliedDeadline && !stopRequested) {
+				client?.poll(AdminUpdateType.CompanyStats, 0);
+				await sleep(600);
+				const v = world.snapshot().companies.get(0)?.stats?.vehicles ?? -1;
+				if (v > vehicles) {
+					fleetAfterRequest = v;
+					break;
+				}
+			}
+			console.log(
+				fleetAfterRequest === null
+					? `[v02] baseline probe: requested ${opts.addVehicles} vehicles, observed fleet did NOT grow (was ${vehicles})`
+					: `[v02] baseline probe: requested ${opts.addVehicles}, observed fleet ${vehicles} -> ${fleetAfterRequest}`,
+			);
 		}
 		// Economy snapshot for the report.
 		let money = -1n;
@@ -391,6 +434,10 @@ export async function runV02(cfg: Config, opts: V02Options = {}): Promise<number
 		costTotal: 0,
 		arm: "control",
 		memory: { lessonsInjected: 0, strategiesInjected: 0, routeFactsInjected: 0 },
+		// The probe's own effect: what fleet the request actually produced.
+		fleetRequested: opts.addVehicles ?? null,
+		fleetObservedAfterRequest: fleetAfterRequest,
+		fleetProbeFired,
 		// G1: the oracle probe is a measurement too, so it records its horizon.
 		simulatedDays: episodeEnd.simulatedDays,
 		horizonDays: episode.plan.horizonDays,
