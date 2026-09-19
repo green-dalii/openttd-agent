@@ -168,6 +168,12 @@ export async function runFinalizeAndReflect(args: FinalizeAndReflectArgs): Promi
 					seed: cfg.seed,
 					summary: {
 						money: c0?.economy ? Number(c0.economy.money) : 0,
+						// The outcome the run is actually judged by (SPEC §10.65) plus
+						// the simulated length; without them reflection reasons about
+						// spending, not about throughput.
+						delivered: c0?.deliveredRun?.total ?? null,
+						simulatedDays: args.episode.simulatedDays,
+						episodeStop: args.episode.stopReason,
 						vehicleCount: c0?.stats?.vehicles ?? 0,
 						stationCount: c0?.stats?.stations ?? 0,
 						decisions: finalTelemetry.totals.decisions,

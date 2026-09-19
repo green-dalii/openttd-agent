@@ -334,3 +334,43 @@ describe("reflect: buildReflectionEvidence(喂给模型的事实)", () => {
 		for (const line of out) expect(isSpeculative(line)).toBe(false);
 	});
 });
+
+/**
+ * 反思必须看到**判据本身**（2026-09-18 对齐检查）。
+ *
+ * 事故：反思的 outcome 只有 money / vehicles / stations，而 money 被施工花费与
+ * 贷款主导（每局都是负收入）；实验却用 `deliveredRun`（运货量）评分。
+ * 于是**经验从最混杂的信号里蒸馏**、却用另一个量去评判——记忆学错了对象。
+ * 缺读数必须显式写"not measured"，不得印成 0。
+ */
+describe("反思输入必须包含产出指标与窗口长度", () => {
+	const facts = (summary: Record<string, unknown>) => ({
+		sessionId: "s1",
+		seed: 7,
+		summary: {
+			money: 100000,
+			vehicleCount: 6,
+			stationCount: 4,
+			decisions: 5,
+			toolCalls: 10,
+			toolFailures: 0,
+			constructionDone: true,
+			durationMs: 60000,
+			...summary,
+		},
+		evidence: ["fact"],
+	});
+
+	it("有读数时打印交付量与每游戏日速率", () => {
+		const { user } = buildReflectionPrompt(facts({ delivered: 300, simulatedDays: 150, episodeStop: "horizon" }));
+		expect(user).toMatch(/cargo delivered during the run: 300/);
+		expect(user).toMatch(/2\.00\/game day/);
+		expect(user).toMatch(/episode ended because: horizon/);
+	});
+
+	it("没有读数时说 not measured，而不是印 0", () => {
+		const { user } = buildReflectionPrompt(facts({ delivered: null }));
+		expect(user).toMatch(/cargo delivered during the run: not measured/);
+		expect(user).not.toMatch(/cargo delivered during the run: 0/);
+	});
+});

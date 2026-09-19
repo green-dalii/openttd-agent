@@ -21,6 +21,21 @@ export interface ReflectionFacts {
 	seed: number;
 	summary: {
 		money: number;
+		/**
+		 * Cargo delivered during the run (the harness's own outcome metric, SPEC
+		 * §10.65) and the simulated length of the episode.
+		 *
+		 * Why they belong here: the reflection used to see only money, which is
+		 * dominated by construction spending and loans - i.e. lessons were being
+		 * distilled from the most confounded signal available, while the
+		 * experiment scored the agent on cargo throughput. Reflection must reason
+		 * about the quantity the run is judged by, or memory learns the wrong
+		 * subject. Absent stays absent (never printed as 0).
+		 */
+		delivered?: number | null;
+		simulatedDays?: number | null;
+		/** Why the episode ended: "horizon" | "wall_cap" | null (unknown). */
+		episodeStop?: string | null;
 		vehicleCount: number;
 		stationCount: number;
 		decisions: number;
@@ -103,6 +118,17 @@ export function buildReflectionPrompt(facts: ReflectionFacts): ReflectionPrompt 
 		"",
 		"Outcome:",
 		`- final money: ${s.money}`,
+		// The outcome the harness actually scores. Printed only when measured.
+		...(typeof s.delivered === "number"
+			? [
+					`- cargo delivered during the run: ${s.delivered}${
+						typeof s.simulatedDays === "number" && s.simulatedDays > 0
+							? ` over ${s.simulatedDays} game days (${(s.delivered / s.simulatedDays).toFixed(2)}/game day)`
+							: ""
+					}`,
+				]
+			: ["- cargo delivered during the run: not measured"]),
+		...(s.episodeStop ? [`- the episode ended because: ${s.episodeStop}`] : []),
 		`- vehicles: ${s.vehicleCount}, stations: ${s.stationCount}`,
 		`- construction completed: ${s.constructionDone === null ? "unknown" : String(s.constructionDone)}`,
 		`- LLM decisions: ${s.decisions}, tool calls: ${s.toolCalls}, failures: ${s.toolFailures}`,

@@ -40,6 +40,12 @@
   判定优先用它、**两臂同源**（`ArmComparison.deliveredSource`），旧行回落原始值并标注为不可比。
 - 澄清 `rc=1` 的含义（=施工未达成 DONE，不是崩溃）并在输出中明示。
 
+### Fixed（反思输入补上产出指标，2026-09-18）
+
+- 反思（局终 lessons 蒸馏）的 outcome 现在包含 `delivered` / `simulatedDays` /
+  `episodeStop`，并打印每游戏日速率；缺读数写 "not measured" 而非 0。
+  此前反思只看 money（被施工花费与贷款主导），却用 `deliveredRun` 评判——**学错了对象**。
+
 ### Added（S1/G4：预建场景，施工移出测量窗，2026-09-18）
 
 - 新增 `--scenario prebuilt`：开局先用确定性蓝图建好线路，**等到可运营才开始测量窗**，
