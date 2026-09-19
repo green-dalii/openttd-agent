@@ -56,6 +56,8 @@ export interface SessionMetaLike {
 		deliveredRunComplete?: boolean;
 		/** GS error replies (channel health, SPEC §10.66). */
 		gsErrors?: number;
+		/** Per-decision tool-budget refusals (R1): >0 means the run hit its ceiling. */
+		toolBudgetBlocks?: number;
 		/** Simulated days covered (G1, SPEC §10.68). */
 		simulatedDays?: number;
 		/** Episode horizon in simulated days (null = none). */
@@ -111,6 +113,8 @@ export interface GameMetric {
 	deliveredRunComplete: boolean | null;
 	/** GS error replies during the run; null when not reported (legacy rows). */
 	gsErrors: number | null;
+	/** Tool calls refused by the per-decision budget; null when not reported. */
+	toolBudgetBlocks: number | null;
 	/** Simulated days this run covered; null when not reported (legacy rows). */
 	simulatedDays: number | null;
 	/** Episode horizon in simulated days; null when not reported or none set. */
@@ -356,6 +360,7 @@ export function toGameMetric(
 				: null,
 		deliveredRunComplete: o && typeof o.deliveredRunComplete === "boolean" ? o.deliveredRunComplete : null,
 		gsErrors: num(o && o.gsErrors),
+		toolBudgetBlocks: num(o && o.toolBudgetBlocks),
 		simulatedDays: num(o && o.simulatedDays),
 		horizonDays: o && typeof o.horizonDays === "number" ? o.horizonDays : null,
 		reachedHorizon: o && typeof o.reachedHorizon === "boolean" ? o.reachedHorizon : null,
@@ -577,6 +582,47 @@ function armStats(list: GameMetric[], source: DeliveredSource = "raw"): ArmStats
  * 1-vs-1 comparison is noise.
  */
 export type CompareBy = "memory" | "freeze";
+
+/**
+ * Aggregated disclosure for a metric that must never be silently zero.
+ *
+ * 事故（2026-09-18，R1）：`channel health` 这行披露**从未出现在任何实验日志里**。
+ * 两个原因叠加：(1) 打印它的 `m3-verdict.ts` 不在跑实验的那条路径上
+ * （`run-experiment.ts` 有自己的摘要）；(2) 即使跑了也永远显示 "not reported" ——
+ * 它把 `ArmSummary` 对象当成账本行去取 `gsErrors`，取到 undefined 就被过滤掉了。
+ * 于是"§10.66 会在收益主张前披露通道健康"这句话在实现上是**假的**。
+ *
+ * 规则：聚合与缺省语义只有一处实现（这里），脚本只负责打印；
+ * 且 `reported` 与 `total` 分开报——**缺报不是 0**。
+ */
+export interface MetricStat {
+	/** Number of rows that actually reported this metric. */
+	reported: number;
+	/** Largest value seen among reporting rows (0 when none reported). */
+	max: number;
+	/** Sum over reporting rows (0 when none reported). */
+	total: number;
+}
+
+/** Aggregate one numeric metric across rows; `null` means "nobody reported it". */
+export function metricStat(values: Array<number | null | undefined>): MetricStat | null {
+	const nums = values.filter((v): v is number => typeof v === "number" && Number.isFinite(v));
+	if (nums.length === 0) return null;
+	return { reported: nums.length, max: Math.max(...nums), total: nums.reduce((a, b) => a + b, 0) };
+}
+
+/** Human-readable form used by every verdict printer (`not reported` ≠ 0). */
+export function formatMetricStat(stat: MetricStat | null): string {
+	return stat ? `n=${stat.reported} max=${stat.max} total=${stat.total}` : "not reported";
+}
+
+/** Channel health + tool ceiling for one arm: both can invalidate a comparison. */
+export function degradationStats(rows: GameMetric[]): { gsErrors: MetricStat | null; toolBudgetBlocks: MetricStat | null } {
+	return {
+		gsErrors: metricStat(rows.map((m) => m.gsErrors)),
+		toolBudgetBlocks: metricStat(rows.map((m) => m.toolBudgetBlocks)),
+	};
+}
 
 export function compareArms(metrics: GameMetric[], by: CompareBy = "memory"): ArmComparison {
 	// Two exclusions, for two different reasons.

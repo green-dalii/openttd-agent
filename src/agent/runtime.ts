@@ -5,13 +5,23 @@
  *   决策循环需要的 hooks（beforeToolCall 预检 / afterToolCall 审计）接好。
  *   streamFn 由调用方注入 —— 生产用真实 provider，测试用 pi-ai 的 faux provider
  *   （见 test/unit/agent-runtime.test.ts），因此本模块单测不触网。
- * 事实来源: SPEC §4.1-§4.2；pi-agent-core AgentOptions/AgentState。
+ * 事实来源: SPEC §4.1-§4.2；pi-agent-core AgentOptions/AgentState；ADR §10.74。
  * 禁止: 在此直接创建网络 provider；禁止等待施工完成（异步由 loop 编排）。
+ *
+ * R1（2026-09-18，ADR §10.74 "库的默认值不是契约"）在这里补了三件库已提供、
+ * 而框架原先没用的事：
+ *   1. **每决策工具预算**：`beforeToolCall` 是唯一能让模型"看到拒绝理由"的位置，
+ *      实测出现过 193 次工具调用/局（17.5 次/决策，正常 2–3）；
+ *   2. **`sessionId`**：provider 提示缓存（每决策 15–56k tokens）；
+ *   3. **deliberation 档位**（`thinkingLevel`/`thinkingBudgets`）：默认保持 "off"，
+ *      以便"有无 deliberation"能被当作可测变量。
+ * 变更型工具的**执行顺序**由工具自己声明 `executionMode:"sequential"`（见 tools/index.ts）——
+ * 游戏按 FIFO 应用命令，并发会打乱台账顺序。
  */
 
 import { Agent } from "@earendil-works/pi-agent-core";
 import type { AgentMessage, AgentTool, BeforeToolCallResult } from "@earendil-works/pi-agent-core";
-import type { Model } from "@earendil-works/pi-ai";
+import type { Model, ThinkingBudgets, ThinkingLevel } from "@earendil-works/pi-ai";
 import type { AgentDeps, ActionResult } from "./types.js";
 import { createTools } from "./tools/index.js";
 
@@ -55,7 +65,26 @@ export interface RuntimeOptions {
 	transformContext?: (messages: AgentMessage[]) => Promise<AgentMessage[]>;
 	/** Optional audit hook fired after each tool call. */
 	onActionResult?: (tool: string, result: ActionResult) => void;
+	/**
+	 * Session id forwarded to providers for prompt caching (pi-agent-core `sessionId`).
+	 * One id per game run: the system prompt + tool schemas are re-sent on every
+	 * decision, so a cache-aware provider can reuse them.
+	 */
+	sessionId?: string;
+	/**
+	 * Max tool calls allowed inside ONE decision (a prompt and its answer).
+	 * Measured: normal decisions use 2–3; one pathological run used 17.5 per
+	 * decision across 193 calls and burned 82% of its arm's tokens. Default 12
+	 * leaves room for genuine exploration but cuts a runaway short.
+	 */
+	maxToolCallsPerDecision?: number;
+	/** Deliberation level; `"off"` (default) preserves pre-R1 behaviour. */
+	thinkingLevel?: ThinkingLevel;
+	thinkingBudgets?: ThinkingBudgets;
 }
+
+/** Normal decisions use 2–3 tool calls; a runaway measured 17.5 per decision. */
+export const DEFAULT_MAX_TOOL_CALLS_PER_DECISION = 12;
 
 /** Convert agent messages → LLM messages: drop UI-only custom messages. */
 export function defaultConvertToLlm(messages: AgentMessage[]) {
@@ -67,17 +96,36 @@ export function defaultConvertToLlm(messages: AgentMessage[]) {
 	}) as never;
 }
 
+/** Handle returned by `createAgent`: the agent plus what telemetry needs from the runtime. */
+export interface AgentRuntime {
+	agent: Agent;
+	tools: AgentTool[];
+	/**
+	 * Tool calls refused because the per-decision budget was exhausted.
+	 * Reported so a run can never silently degrade into "the agent stopped
+	 * exploring" without the experiment seeing it (SPEC §10.66 channel health).
+	 */
+	getBudgetBlocks(): number;
+}
+
 /** Build the tools + Agent for a run. */
-export function createAgent(opts: RuntimeOptions): { agent: Agent; tools: AgentTool[] } {
+export function createAgent(opts: RuntimeOptions): AgentRuntime {
 	const tools = createTools(opts.deps);
+	const budget = opts.maxToolCallsPerDecision ?? DEFAULT_MAX_TOOL_CALLS_PER_DECISION;
+	let callsThisDecision = 0;
+	let budgetBlocks = 0;
+
 	const agent = new Agent({
 		streamFn: opts.streamFn,
 		convertToLlm: defaultConvertToLlm,
 		transformContext: opts.transformContext,
+		// Provider prompt cache key (ADR §10.74): stable per run.
+		sessionId: opts.sessionId,
+		thinkingBudgets: opts.thinkingBudgets,
 		initialState: {
 			systemPrompt: opts.systemPrompt ?? SYSTEM_PROMPT,
 			model: opts.model,
-			thinkingLevel: "off",
+			thinkingLevel: opts.thinkingLevel ?? "off",
 			tools,
 			messages: [],
 		},
@@ -88,6 +136,20 @@ export function createAgent(opts: RuntimeOptions): { agent: Agent; tools: AgentT
 			if (!tools.some((t) => t.name === name)) {
 				return { block: true, reason: `unknown tool: ${name}` };
 			}
+			// Per-decision budget. Blocking (not throwing) is the point: the reason
+			// is handed to the model as a tool error, so it can still decide with
+			// the observations it already has. Blocked calls do not consume budget.
+			if (budget > 0 && callsThisDecision >= budget) {
+				budgetBlocks += 1;
+				return {
+					block: true,
+					reason:
+						`tool budget for this decision is exhausted (${budget} calls used). ` +
+						"Further tool calls in this decision are refused. Answer with the " +
+						"observations you already have; you get a fresh budget next decision.",
+				};
+			}
+			callsThisDecision += 1;
 			return undefined;
 		},
 		afterToolCall: async (ctx) => {
@@ -98,5 +160,13 @@ export function createAgent(opts: RuntimeOptions): { agent: Agent; tools: AgentT
 			return undefined;
 		},
 	});
-	return { agent, tools };
+
+	// One decision = one prompt→answer. `agent_start` is emitted once per run
+	// before any tool preflight, so the budget resets exactly at that boundary
+	// without the caller having to remember to do it.
+	agent.subscribe((event) => {
+		if (event.type === "agent_start") callsThisDecision = 0;
+	});
+
+	return { agent, tools, getBudgetBlocks: () => budgetBlocks };
 }

@@ -16,6 +16,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, openSync } from "node:fs";
 import { join } from "node:path";
 import { evolutionView } from "../src/evolution/web-view.js";
+import { degradationStats, formatMetricStat } from "../src/evolution/metrics.js";
 
 interface Args {
 	dir: string;
@@ -135,6 +136,15 @@ console.log(
 			: "treatment = memory injected; control = --no-memory"
 	})`,
 );
+// 降级披露必须在任何收益主张之前：GS 通道错误与"工具封顶"都意味着本局的数字
+// 来自一个被削弱的 agent（SPEC §10.66 + R1/ADR §10.74）。缺报 ≠ 0。
+{
+	const d = degradationStats(view.metrics);
+	console.log(
+		`channel health: GS errors/run ${formatMetricStat(d.gsErrors)}  ` +
+			`tool budget refusals/run ${formatMetricStat(d.toolBudgetBlocks)}`,
+	);
+}
 console.log(`runs: ${view.metrics.length}  conclusive: ${view.arms.conclusive}`);
 console.log(`note: ${view.arms.note || "(none)"}`);
 const fmt = (label: string, a: typeof view.arms.withLessons) =>

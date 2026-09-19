@@ -52,11 +52,11 @@ function fakeWorld() {
 
 const completeOnce = vi.fn(async () => "ok");
 
-async function runFinalize(dir: string, ledger: RouteLedger, decisions: number) {
+async function runFinalize(dir: string, ledger: RouteLedger, decisions: number, session = fakeSession()) {
 	return runFinalizeAndReflect({
 		cfg: { dataDir: dir, seed: 7 } as never,
 		world: fakeWorld(),
-		session: fakeSession(),
+		session,
 		telemetry: fakeTelemetry(decisions),
 		executorPhase: "EX boot j-1",
 		reachedDone: false,
@@ -65,6 +65,7 @@ async function runFinalize(dir: string, ledger: RouteLedger, decisions: number) 
 		routeLedger: ledger,
 		getRouteStats: () => [],
 		gsErrors: 0,
+		toolBudgetBlocks: 3,
 		scenario: "freeform",
 		episode: { simulatedDays: 0, horizonDays: null, reachedHorizon: false, stopReason: null },
 		arm: "control" as const,
@@ -128,6 +129,24 @@ describe("C-1 接线：决策上下文注入事实行", () => {
  * N2-5 缺陷的守卫：arm 必须**落进 metrics.jsonl**，否则 compareArms 只能靠
  * 注入计数推断（/tmp/n2ab 因此把 5v5 算成 4v6）。
  */
+describe("R1 接线：工具预算拒绝要进遥测（不许静默降级）", () => {
+	it("finalize 交给会话落盘的 metric 里带着 toolBudgetBlocks", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "r1-budget-"));
+		const ledger = new RouteLedger();
+		// 有下单是产出记录的前提（C-2：躺平局不产出记录）
+		ledger.record({ job: 101, fromTown: 9, toTown: 17, decision: 1, orderedAt: 1 });
+		const session = fakeSession();
+		const seen: Array<{ outcome?: { toolBudgetBlocks?: number; gsErrors?: number } }> = [];
+		(session as never as { finalize: (a: never) => void }).finalize = ((a: never) => {
+			seen.push(a);
+		}) as never;
+		await runFinalize(dir, ledger, 2, session);
+		expect(seen.at(-1)?.outcome?.toolBudgetBlocks).toBe(3);
+		// 通道健康仍然并行记录（预算拒绝不是"通道坏了"，两者分开报）
+		expect(seen.at(-1)?.outcome?.gsErrors).toBe(0);
+	});
+});
+
 describe("arm 落盘守卫（N2-5）", () => {
 	it("finalize 写入的 arm 出现在 evolution/metrics.jsonl", async () => {
 		const meta = toGameMetric(

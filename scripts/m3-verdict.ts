@@ -15,6 +15,7 @@
  * 收尾时实测过。交接文档里的命令必须是**跑得通**的，所以落成文件。
  */
 import { evolutionView, type EvolutionView } from "../src/evolution/web-view.js";
+import { degradationStats, formatMetricStat } from "../src/evolution/metrics.js";
 
 const dataDir = process.argv[2];
 if (!dataDir) {
@@ -48,19 +49,23 @@ if (arms.treatmentWithoutInjection > 0) {
 }
 console.log(`money delta   : ${arms.moneyDelta ?? "—"}`);
 console.log(`income delta  : ${arms.incomeDelta?.toFixed(0) ?? "—"}`);
-// Channel health (SPEC §10.66): a partially broken GS channel degrades per run
-// and hides inside the comparison. Print it before any benefit claim.
+// 降级披露（SPEC §10.66 + R1）：GS 通道错误与工具封顶都会让本局的数字
+// 来自一个被削弱的 agent，必须在任何收益主张之前打印。规则唯一实现在
+// src/evolution/metrics.ts（曾经这里把 ArmSummary 当账本行用，
+// 于是这行永远显示 "not reported" —— 见 metrics.ts 的注释）。
 {
-	const health = (rows: typeof arms.withLessons[]) =>
-		rows.map((m) => m.gsErrors).filter((v): v is number => typeof v === "number");
-	const hw = health([arms.withLessons]);
-	const hc = health([arms.withoutLessons]);
-	const worst = (l: number[]) => (l.length ? Math.max(...l) : null);
-	const fmtH = (l: number[]) =>
-		l.length ? `n=${l.length} max=${worst(l)} total=${l.reduce((a, b) => a + b, 0)}` : "not reported";
+	const rowsOf = (arm: string) => view.metrics.filter((m) => m.arm === arm);
+	const wit = degradationStats(rowsOf("treatment"));
+	const wit_out = degradationStats(rowsOf("control"));
 	console.log(
-		`channel health (GS errors/run): with-memory ${fmtH(hw)}  without ${fmtH(hc)}  ` +
+		`channel health (GS errors/run): with-memory ${formatMetricStat(wit.gsErrors)}  ` +
+			`without ${formatMetricStat(wit_out.gsErrors)}  ` +
 			`(>0 means the agent ran with a partially broken GS channel - SPEC §10.66)`,
+	);
+	console.log(
+		`tool budget (refusals/run): with-memory ${formatMetricStat(wit.toolBudgetBlocks)}  ` +
+			`without ${formatMetricStat(wit_out.toolBudgetBlocks)}  ` +
+			`(>0 means the agent hit its per-decision ceiling - R1)`,
 	);
 }
 

@@ -2856,3 +2856,64 @@ harness 应把**agent 侧机制**交给库，把**领域侧（事实/协议/测�
 R1 执行顺序与成本旋钮 · R2 经验作为**被校验的记录**（反思用工具写库、内容级守卫、
 可被推翻）· R3 自我评估（类型化消息）· R4 `recall` 检索工具 · R5 学习曲线实验 ·
 R6 目标与判据一致 + 动作面扩展。
+
+## 10.75 R1 实施结果：执行顺序 / 工具预算 / 缓存与**披露路径**（2026-09-18）
+
+ADR 见 §10.74。本节是**实测事实**（真机 `/tmp/r1smoke`，`--n 1 --scenario prebuilt --game-days 30`）。
+
+### 1. 工具执行顺序：默认 `parallel` 是真实缺陷（已修）
+
+pi-agent-core 的默认执行模式是 `parallel`，而游戏按 **FIFO** 应用命令（§10.39.1）。
+同一条助手消息里的两个变更命令因此会**重叠执行**。实测 trace（单测内的时序探针）：
+
+```
+修复前: start:pause, start:unpause, end:pause, end:unpause   ← 第二条在第一条结束前开始
+修复后: start:pause, end:pause, start:unpause, end:unpause
+```
+
+`build_bus_route` / `add_vehicles` / `set_pause` 现声明 `executionMode:"sequential"`
+（只读工具不变）。测试锁顺序 AND 声明，两者缺一不可。
+
+### 2. 每决策工具预算（已修，且**可观测**）
+
+实测：正常决策 2–3 次工具调用；有一局 **193 次 / 17.5 次每决策**（烧掉该臂 82% tokens）。
+预算默认 **12 次/决策**，在 `beforeToolCall` 里 block 并把理由交回模型
+（库会把 blocked 结果作为工具错误回给模型，所以它能改用已有观察作答）。
+被拒绝的次数记入 `GameMetric.toolBudgetBlocks`，并在**两个 verdict**里打印
+（`tool budget (refusals/run)`）。
+
+真机冒烟（horizon 30）：两局均 `toolBudgetBlocks=0`，工具调用 4.5 次/决策
+→ 12 这个上限不会误伤正常工作。
+
+### 3. `sessionId`：**我原先的假设错了**
+
+ADR 里我写"未设 sessionId → 无 provider 缓存"。实测**缓存本来就发生了**：
+
+| 目录（R1 之前） | cacheRead / totalTokens | 命中率 |
+|---|---|---|
+| `/tmp/pbcal` | 664,145 / 1,501,457 | 44.2% |
+| `/tmp/cal2` | 834,374 / 2,252,694 | 37.0% |
+| `/tmp/ab900` | 963,687 / 2,288,005 | 42.1% |
+
+`sessionId` 现在显式设置（语义更正确、对缓存键敏感的后端友好），但
+**冒烟局只有 2 次决策（76.9% 命中），不足以支持任何"提升"主张** → 记为**未测量**。
+
+### 4. deliberation 旋钮：已接线，**未测量**
+
+`thinkingLevel` / `thinkingBudgets` 现在是 `createAgent` 的参数，默认 `"off"`
+（= R1 之前的行为，测量口径不变）。"off vs low" 的对比**尚未运行**，不得当作结论。
+
+### 5. 披露路径缺陷：`channel health` 从未真正出现过（已修）
+
+§10.66 声称"verdict 在任何收益主张之前打印通道健康"。事实核查：
+
+```
+grep -rh "channel health" /tmp/*.log       → 0 处
+```
+
+两个原因叠加：① 打印它的 `m3-verdict.ts` **不在跑实验的那条路径上**
+（`run-experiment.ts` 有自己的摘要，且当年就没有这一行）；② 即使跑了也永远显示
+`not reported` —— 它把 `ArmSummary` 对象当账本行取 `gsErrors`，取到 undefined 被过滤掉。
+
+现在聚合只有一处实现（`metricStat` / `degradationStats`，`src/evolution/metrics.ts`），
+两个 verdict 都打印，并已实测**真的取到数**（`n=2 max=0 total=0`）。**缺报仍报 `not reported`，不是 0。**

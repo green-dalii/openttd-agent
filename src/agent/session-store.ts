@@ -87,6 +87,8 @@ export interface SessionMeta {
 		 * next to the outcome it silently affected.
 		 */
 		gsErrors?: number;
+		/** Tool calls refused by the per-decision budget (R1; absent = not reported). */
+		toolBudgetBlocks?: number;
 		/**
 		 * Simulated days this run covered (G1, SPEC §10.68). The comparable
 		 * opportunity denominator: two runs with different values measured

@@ -110,6 +110,129 @@ describe("createAgent", () => {
 	});
 });
 
+/**
+ * R1 — 与 pi-agent-core 的协同（ADR 见 SPEC §10.74）。
+ *
+ * 三条都是"库已提供、而我们没用"的机制，其中第一条是**领域不变量**：
+ *  - `executionMode`：游戏按 FIFO 应用命令（SPEC §10.39.1），两个变更命令并发执行
+ *    会让台账记录顺序 ≠ 实际应用顺序，归因链断掉；
+ *  - 每决策工具预算：实测有一局做出 193 次工具调用 / 17.5 次每决策（正常 2–3）；
+ *  - `sessionId`：provider 提示缓存（每决策 15–56k tokens）。
+ */
+describe("R1: pi-agent-core 协同（执行顺序 / 工具预算 / provider 缓存）", () => {
+	/** 展平 toolResult 的文本内容，用于断言"模型看到了什么"。 */
+	function resultTexts(messages: readonly { role?: string }[]): string[] {
+		const out: string[] = [];
+		for (const m of messages) {
+			if (m.role !== "toolResult") continue;
+			const content = (m as { content?: unknown }).content;
+			if (typeof content === "string") out.push(content);
+			else if (Array.isArray(content)) {
+				for (const c of content) {
+					const t = (c as { text?: unknown }).text;
+					if (typeof t === "string") out.push(t);
+				}
+			}
+		}
+		return out;
+	}
+
+	it("变更型工具声明 sequential 执行模式（只读工具不受影响）", () => {
+		const { deps } = fakeDeps();
+		const mode = (n: string) => createTools(deps).find((t) => t.name === n)?.executionMode;
+		expect(mode("build_bus_route")).toBe("sequential");
+		expect(mode("add_vehicles")).toBe("sequential");
+		expect(mode("set_pause")).toBe("sequential");
+		// 读型工具不会改变世界，并发读没有顺序问题
+		expect(mode("observe")).not.toBe("sequential");
+		expect(mode("estimate_route")).not.toBe("sequential");
+		expect(mode("inspect_route")).not.toBe("sequential");
+	});
+
+	it("同一条助手消息里的两个变更命令串行执行（并发会打乱台账顺序）", async () => {
+		const trace: string[] = [];
+		const { deps } = fakeDeps();
+		deps.sink.rconAwait = async (c: string) => {
+			trace.push(`start:${c}`);
+			await new Promise((r) => setTimeout(r, 20));
+			trace.push(`end:${c}`);
+			return "ok";
+		};
+		// 两条 set_pause 在**同一条**助手消息里：并发执行会得到 start,start,end,end
+		const { agent } = fauxAgent(deps, [
+			fauxAssistantMessage([
+				fauxToolCall("set_pause", { paused: true }),
+				fauxToolCall("set_pause", { paused: false }),
+			]),
+			fauxAssistantMessage("done"),
+		]);
+		await agent.prompt("decide");
+		expect(trace).toEqual(["start:pause", "end:pause", "start:unpause", "end:unpause"]);
+	});
+
+	it("每决策工具预算耗尽后拒绝，并把理由交给模型", async () => {
+		const { deps, rcon } = fakeDeps();
+		const faux = createFauxCore({});
+		faux.setResponses([
+			// 同一条消息里连续三次命令，预算只有 1
+			fauxAssistantMessage([
+				fauxToolCall("set_pause", { paused: true }),
+				fauxToolCall("set_pause", { paused: false }),
+				fauxToolCall("set_pause", { paused: true }),
+			]),
+			fauxAssistantMessage("done"),
+		]);
+		const { agent, getBudgetBlocks } = createAgent({
+			deps,
+			streamFn: faux.streamSimple,
+			model: faux.getModel(),
+			maxToolCallsPerDecision: 1,
+		});
+		await agent.prompt("decide");
+		expect(rcon).toHaveLength(1); // 只有预算内的那一次真的发出去了
+		expect(getBudgetBlocks()).toBe(2);
+		const texts = resultTexts(agent.state.messages as Array<{ role?: string }>);
+		expect(texts.some((t) => /budget/i.test(t))).toBe(true);
+	});
+
+	it("下一次决策会重置预算", async () => {
+		const { deps, rcon } = fakeDeps();
+		const faux = createFauxCore({});
+		// 两次 prompt，各发一条命令：预算 1 也必须两次都放行
+		faux.setResponses([
+			fauxAssistantMessage([fauxToolCall("set_pause", { paused: true })]),
+			fauxAssistantMessage("first"),
+			fauxAssistantMessage([fauxToolCall("set_pause", { paused: false })]),
+			fauxAssistantMessage("second"),
+		]);
+		const { agent, getBudgetBlocks } = createAgent({
+			deps,
+			streamFn: faux.streamSimple,
+			model: faux.getModel(),
+			maxToolCallsPerDecision: 1,
+		});
+		await agent.prompt("decide 1");
+		await agent.prompt("decide 2");
+		expect(rcon).toHaveLength(2);
+		expect(getBudgetBlocks()).toBe(0);
+	});
+
+	it("sessionId 透传给 Agent（provider 提示缓存）与 deliberation 档位", () => {
+		const { deps } = fakeDeps();
+		const faux = createFauxCore({});
+		faux.setResponses([fauxAssistantMessage("hi")]);
+		const { agent } = createAgent({
+			deps,
+			streamFn: faux.streamSimple,
+			model: faux.getModel(),
+			sessionId: "run-42",
+			thinkingLevel: "low",
+		});
+		expect(agent.sessionId).toBe("run-42");
+		expect(agent.state.thinkingLevel).toBe("low");
+	});
+});
+
 describe("defaultConvertToLlm", () => {
 	it("drops UI-only custom messages but keeps LLM messages", () => {
 		const kept = defaultConvertToLlm([

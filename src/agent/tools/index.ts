@@ -121,6 +121,10 @@ export function buildBusRouteTool(deps: AgentDeps): AgentTool<typeof BuildRouteS
 			"Construct a bus route between two towns. from_town and to_town are town ids from observe(); when either is omitted the GS picks a pair itself. " +
 			"Commands are QUEUED: routes are built in submission order, each to completion (station A, station B, road, depot, vehicle) before the next starts. " +
 			"Returns as soon as the command is delivered - construction is asynchronous in-game, so observe() afterwards to see what actually happened.",
+				// 游戏按 **FIFO** 应用命令（SPEC §10.39.1），所以这几条**变更型**工具必须串行：
+		// pi-agent-core 的默认执行模式是 `parallel`，同一条助手消息里的两条命令会并发
+		// 发出，台账（在完成时记录）的顺序就不再等于本局实际应用的顺序。ADR §10.74。
+		executionMode: "sequential",
 		parameters: BuildRouteSchema,
 		execute: async (_id, params) => {
 			const company = params.company ?? DEFAULT_COMPANY;
@@ -154,6 +158,10 @@ export function addVehiclesTool(deps: AgentDeps): AgentTool<typeof AddVehiclesSc
 			"Add road vehicles to an ALREADY RUNNING bus route (clones share its orders). " +
 			"It clones the route's lead vehicle, so it cannot create the first one — if the " +
 			"route has no vehicles yet, wait for construction to finish instead.",
+				// 游戏按 **FIFO** 应用命令（SPEC §10.39.1），所以这几条**变更型**工具必须串行：
+		// pi-agent-core 的默认执行模式是 `parallel`，同一条助手消息里的两条命令会并发
+		// 发出，台账（在完成时记录）的顺序就不再等于本局实际应用的顺序。ADR §10.74。
+		executionMode: "sequential",
 		parameters: AddVehiclesSchema,
 		execute: async (_id, params) => {
 			const company = params.company ?? DEFAULT_COMPANY;
@@ -222,6 +230,10 @@ export function setPauseTool(deps: AgentDeps): AgentTool<typeof SetPauseSchema, 
 		name: "set_pause",
 		label: "Pause/Resume Game",
 		description: "Pause or unpause the running OpenTTD server (server-level RCON).",
+				// 游戏按 **FIFO** 应用命令（SPEC §10.39.1），所以这几条**变更型**工具必须串行：
+		// pi-agent-core 的默认执行模式是 `parallel`，同一条助手消息里的两条命令会并发
+		// 发出，台账（在完成时记录）的顺序就不再等于本局实际应用的顺序。ADR §10.74。
+		executionMode: "sequential",
 		parameters: SetPauseSchema,
 		execute: async (_id, params) => {
 			const cmd = params.paused ? "pause" : "unpause";

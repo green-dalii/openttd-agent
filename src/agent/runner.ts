@@ -599,10 +599,14 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 		return text;
 	}
 
-	const { agent } = createAgent({
+	const runtime = createAgent({
 		deps,
 		streamFn,
 		model,
+		// Provider prompt cache key (ADR §10.74): stable for the whole run, so a
+		// cache-aware provider can reuse the system prompt + tool schemas that are
+		// re-sent on every one of the run's decisions.
+		sessionId: session.id,
 		// Context hygiene + cross-game lesson injection (SPEC §4.1).
 		//
 		// `lessonsProvider` existed as an unfed hook since v0.2.1: every game ran in
@@ -626,6 +630,7 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 			session.appendAudit({ type: "action_result", ts: Date.now(), tool, ok: r.ok, summary: r.summary, data: r.data });
 		},
 	});
+	const { agent } = runtime;
 
 	// Feed every agent event into telemetry (token usage, thinking, tool steps).
 	agent.subscribe((event) => {
@@ -783,6 +788,7 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 		executorPhase: hub.getPhase(), reachedDone: hub.getReachedDone(), scheduler, pendingActions, routeLedger,
 		getRouteStats: () => hub.getRouteStats(),
 		gsErrors: hub.getGsErrors(),
+		toolBudgetBlocks: runtime.getBudgetBlocks(),
 		scenario,
 		scenarioReason: prebuiltReason,
 		deliveredAtReady,

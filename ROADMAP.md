@@ -174,16 +174,21 @@ GS `route_stats` **部分失效**（§10.66，17/17 局命中，单局丢 1–92
 > ADR 与现状审计见 `SPEC.md` §10.74（**唯一权威**，本节只写**做什么/怎么验收**）。
 > 目标链缺口见下面的「对齐检查」表（P1–P8）。R 系列 = 修缺口的实施顺序。
 
-### R1 执行顺序与成本旋钮（小，先做）
+### R1 执行顺序与成本旋钮 —— ✅ 已完成（2026-09-18，SPEC §10.75）
 
-| 任务 | 做法 | 验收 |
-|---|---|---|
-| 变更型工具顺序 | `build_bus_route`/`add_vehicles`/`set_pause` 声明 `executionMode:"sequential"`（或全局 `toolExecution:"sequential"`）| 单测断言三个工具都声明了 sequential；理由写入工具契约 |
-| 每决策工具预算（S3）| 在 `beforeToolCall` 里计数并 `{block, reason}`；正常 2–3 次/决策，实测有 193 次 | 单测：超过 N 次被拒且理由可见；真机：不再出现 >50 次/决策的局 |
-| provider 缓存 | `agent.sessionId = session.id` | 实测前后 tok/dec 与决策延迟（同 horizon 各 1 局，记录到 SPEC）|
-| deliberation 预算 | 用 `thinkingBudgets` 设 `low` 档；**先测再定**（同场景 1 局 vs 现行 `off`）| 记 SPEC：质量（deliveredRun）与成本（tok/dec）的权衡 |
+| 任务 | 结果 |
+|---|---|
+| 变更型工具顺序 | ✅ 三个变更型工具声明 `executionMode:"sequential"`；实测修复前 `start,start,end,end`（重叠）→ 修复后 `start,end,start,end`。测试同时锁**声明**与**时序** |
+| 每决策工具预算 | ✅ 默认 12 次/决策，`beforeToolCall` 里 block + 理由回给模型；记入 `toolBudgetBlocks` 并在**两个 verdict** 打印。真机冒烟：0 次拒绝、4.5 次/决策 |
+| provider 缓存 | ⚠️ `sessionId` 已显式设置，但**收益未测量**。**我原先"无缓存"的假设被实测否证**（R1 前已有 37–44% 命中率）|
+| deliberation 预算 | ⚠️ 旋钮已接线（默认 `"off"` = 原行为），**off vs low 的对比尚未运行**——不得当作结论 |
+| 附带修复 | ✅ **披露路径缺陷**：`channel health` 从未出现在任何实验日志（0 处 grep），且实现取错了对象 → 聚合统一进 `metrics.ts`，两个 verdict 实测取到数（SPEC §10.75.5）|
 
-### R2 经验 = 被校验的记录（中）
+**遗留（未测项，勿声称）**：`sessionId` 的缓存收益、`deliberation off/low` 的
+质量-成本权衡。要测则各自是**一次单因子对照**（同 seed、prebuilt、固定 horizon），
+且必须先跑一局冒烟（新规）。
+
+### R2 经验 = 被校验的记录（中）—— 🔵 **当前任务**
 
 1. 反思改为**走同一个 Agent + 一个工具** `record_lesson`，参数用 TypeBox schema：
    `{observation, evidence[], outcome{metric,before,after}, confidence, supersedes?: string[]}`。
@@ -326,9 +331,9 @@ block = 5 局/臂。每个 block 看一次：**均值差的自助法 95% CI（�
 
 **现在的任务不是"A/B 记忆有没有用"，而是把经验回路修成能学**（对齐检查的 P2–P5）：
 
-1. **R1**（小，先做）：变更型工具 `executionMode:"sequential"`（否则台账顺序 ≠ 应用顺序）、
-   `beforeToolCall` 加每决策工具预算、`agent.sessionId` 开 provider 缓存、测 deliberation 预算。
-2. **R2**（中）：反思改为**用工具写库**（schema 校验 + **内容级**守卫 + `supersedes`），
+1. ~~**R1**~~ ✅ 完成（SPEC §10.75）——执行顺序、工具预算、披露路径三件已落地；
+   遗留两项**未测**旋钮（sessionId 缓存收益 / deliberation off-vs-low），要测则单独对照。
+2. **R2**（中，**当前**）：反思改为**用工具写库**（schema 校验 + **内容级**守卫 + `supersedes`），
    并迁移现有 25+ 条祈使句经验。**这是最重要的一步**——现在注入的其实是"策略"。
 3. **R3/R4**（小/中）：自我评估事实（类型化消息）+ `recall` 检索工具（顺带产出
    `recallCalls`，第一次能测"记忆有没有被用过"）。

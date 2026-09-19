@@ -40,6 +40,22 @@
   判定优先用它、**两臂同源**（`ArmComparison.deliveredSource`），旧行回落原始值并标注为不可比。
 - 澄清 `rc=1` 的含义（=施工未达成 DONE，不是崩溃）并在输出中明示。
 
+### Fixed（R1：工具执行顺序 / 预算 / 披露路径，2026-09-18）
+
+- **变更型工具改为串行执行**：`build_bus_route` / `add_vehicles` / `set_pause` 现在声明
+  `executionMode:"sequential"`。此前 pi-agent-core 的默认 `parallel` 会让同一条助手消息里的
+  两条命令**重叠发出**，而游戏按 FIFO 应用 → 台账顺序 ≠ 实际应用顺序（实测时序见 SPEC §10.75）。
+- **每决策工具预算**（默认 12 次）：在 `beforeToolCall` 里拒绝并把理由交回模型；
+  拒绝次数记入 `GameMetric.toolBudgetBlocks`，并在两个 verdict 打印"tool budget (refusals/run)"。
+  实测正常决策 2–3 次、病态局 17.5 次/决策（193 次烧掉该臂 82% tokens）。
+- **降级披露修好**：`channel health` 一行此前**从未出现在任何实验日志里**
+  （打印它的脚本不在实验路径上，且实现取错对象恒为 "not reported"）。
+  聚合统一进 `src/evolution/metrics.ts`（`metricStat`/`degradationStats`），
+  两个 verdict 都打印并已实测取到数。缺报仍报 `not reported`，不是 0。
+- 新增 `createAgent` 参数：`sessionId`（provider 缓存键）、`maxToolCallsPerDecision`、
+  `thinkingLevel` / `thinkingBudgets`（默认 `"off"` = 原行为）。**缓存收益与 deliberation
+  对比均未测量**，文档中不得声称。
+
 ### Fixed（反思输入补上产出指标，2026-09-18）
 
 - 反思（局终 lessons 蒸馏）的 outcome 现在包含 `delivered` / `simulatedDays` /

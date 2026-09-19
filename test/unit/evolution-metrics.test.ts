@@ -21,6 +21,9 @@ import {
 	summarise,
 	groupBySeed,
 	MIN_LESSON_SAMPLE,
+	degradationStats,
+	formatMetricStat,
+	metricStat,
 	type GameMetric,
 } from "../../src/evolution/metrics.js";
 import type { SessionMeta } from "../../src/agent/session-store.js";
@@ -713,5 +716,39 @@ describe("deliveredRun —— 跨季积分的流量指标优先，且两臂同�
 		expect(cmp.deliveredSource).toBe("raw");
 		expect(cmp.withLessons.meanDelivered).toBe(12);
 		expect(cmp.withoutLessons.meanDelivered).toBe(22);
+	});
+});
+
+/**
+ * 披露聚合（R1，2026-09-18）。
+ *
+ * `channel health` 这行曾**从未在实验日志里出现过**，且实现把 ArmSummary 当行用，
+ * 永远吐出 "not reported"。这里锁定两条性质：缺报 ≠ 0；聚合只有一处实现。
+ */
+describe("metricStat / degradationStats: 缺报不是 0", () => {
+	it("没人报过 → null（不是 0）", () => {
+		expect(metricStat([null, undefined])).toBeNull();
+		expect(formatMetricStat(null)).toBe("not reported");
+	});
+
+	it("真实的 0 会被报告，并与缺报区分开", () => {
+		const stat = metricStat([0, null, 0]);
+		expect(stat).toEqual({ reported: 2, max: 0, total: 0 });
+		expect(formatMetricStat(stat)).toBe("n=2 max=0 total=0");
+	});
+
+	it("混合行：只在报告行上取 max/total", () => {
+		expect(metricStat([0, 5, null, 2])).toEqual({ reported: 3, max: 5, total: 7 });
+		expect(metricStat([Number.NaN, 1])).toEqual({ reported: 1, max: 1, total: 1 });
+	});
+
+	it("degradationStats 从账本行取通道健康与工具封顶", () => {
+		const rows = [
+			{ gsErrors: 0, toolBudgetBlocks: 0 },
+			{ gsErrors: 4, toolBudgetBlocks: 2 },
+		] as unknown as Parameters<typeof degradationStats>[0];
+		const d = degradationStats(rows);
+		expect(d.gsErrors).toEqual({ reported: 2, max: 4, total: 4 });
+		expect(d.toolBudgetBlocks).toEqual({ reported: 2, max: 2, total: 2 });
 	});
 });

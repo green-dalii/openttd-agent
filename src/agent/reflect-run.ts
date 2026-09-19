@@ -41,6 +41,8 @@ export interface FinalizeAndReflectArgs {
 	 * a partially broken channel cannot hide inside a comparison.
 	 */
 	gsErrors: number;
+	/** R1: per-decision tool budget refusals (reported so a capped run is visible). */
+	toolBudgetBlocks?: number;
 	/**
 	 * EPISODE CLOCK (G1, SPEC §10.68). Recorded so a run that never reached its
 	 * simulated horizon cannot be averaged with one that did: the wall-clock cap
@@ -135,6 +137,7 @@ export async function runFinalizeAndReflect(args: FinalizeAndReflectArgs): Promi
 			deliveredRun: c0?.deliveredRun && c0.deliveredRun.total !== null ? c0.deliveredRun.total : undefined,
 			deliveredRunComplete: c0?.deliveredRun ? c0.deliveredRun.complete : undefined,
 			gsErrors: args.gsErrors,
+			toolBudgetBlocks: args.toolBudgetBlocks,
 			scenario: args.scenario,
 			scenarioReason: args.scenarioReason ?? null,
 			deliveredAtReady: args.deliveredAtReady ?? null,
