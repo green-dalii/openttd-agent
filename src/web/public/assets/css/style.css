@@ -437,8 +437,9 @@ dialog.modal p { color: var(--ink-dim); font-size: 13px; margin: 0 0 var(--sp-4)
   flex: 0 0 auto; font-size: .68rem; text-transform: uppercase; letter-spacing: .04em;
   padding: 1px 6px; border-radius: 4px; background: rgba(255, 255, 255, .08);
 }
-.mem-do .mem-kind { color: #7bc96f; }
-.mem-dont .mem-kind { color: #e06c75; }
+/* R2（2026-09-18）：经验不再分 do/dont（那是指令），徽标显示**实测读数**，
+   因此用中性色——颜色不该暗示"好/坏"，那正是旧设计的越界之处。 */
+.mem-kind { color: #9aa4b2; }
 .mem-strat .mem-kind { color: #5fb3ff; }
 
 /* --- evolution page: memory library + arm comparison -------------------- */

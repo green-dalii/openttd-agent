@@ -10,9 +10,10 @@
  * 反思只是锦上添花。让一次网络抖动把整局的结果记录带崩,是明显错误的优先级。
  */
 
+import { applySupersessions } from "./lessons.js";
 import { buildReflectionPrompt, reflectToLessons, reflectToStrategies } from "./reflect.js";
 import { evaluatePromotion, mergeStrategySamples } from "./strategies.js";
-import { appendLessons, appendStrategies, readStrategies } from "./store.js";
+import { appendLessons, appendStrategies, readLessons, readStrategies } from "./store.js";
 import type { ReflectionFacts } from "./reflect.js";
 
 /** Call the model once with one prompt. Injectable so this module stays testable. */
@@ -30,6 +31,8 @@ export interface ReflectionReport {
 	/** Populated when the model call itself failed. */
 	error?: string;
 	lessonsSaved: number;
+	/** Entries this game's observations replaced (the retraction path, R2). */
+	lessonsSuperseded: number;
 	strategiesPromoted: number;
 	/** Raw model reply length — useful for diagnosing empty responses. */
 	replyChars: number;
@@ -46,12 +49,24 @@ export async function runReflection(opts: RunReflectionOptions): Promise<Reflect
 	const now = opts.now ?? Date.now();
 	const ctx = { sessionId: opts.facts.sessionId, seed: opts.facts.seed, now };
 
+	// 反思必须看到**已记录了什么**，否则 `supersedes` 无从产生 ——
+	// `supersededBy` 从 Phase C 起就存在、`selectLessons` 也按它过滤，
+	// 但全项目没有一处给它赋值：记忆只增不减（R2）。
+	const recorded = (() => {
+		try {
+			return readLessons(opts.dataDir).map((l) => ({ id: l.id, text: l.text }));
+		} catch {
+			return [];
+		}
+	})();
+	const facts: ReflectionFacts = { ...opts.facts, recorded: opts.facts.recorded ?? recorded };
+
 	let reply: string;
 	try {
-		reply = await opts.complete(buildReflectionPrompt(opts.facts));
+		reply = await opts.complete(buildReflectionPrompt(facts));
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
-		return { ok: false, error: message, lessonsSaved: 0, strategiesPromoted: 0, replyChars: 0 };
+		return { ok: false, error: message, lessonsSaved: 0, lessonsSuperseded: 0, strategiesPromoted: 0, replyChars: 0 };
 	}
 
 	const text = typeof reply === "string" ? reply : "";
@@ -59,11 +74,23 @@ export async function runReflection(opts: RunReflectionOptions): Promise<Reflect
 	const samples = reflectToStrategies(text, { sessionId: ctx.sessionId, now });
 
 	let lessonsSaved = 0;
+	let lessonsSuperseded = 0;
 	try {
+		// 先把 `supersedes` 落到库里（作废已有的、可能已被推翻的观察），
+		// 再追加本局的新条目。落盘的库因此包含被作废者（带 supersededBy），
+		// 而注入端 `selectLessons` 会把它们滤掉 —— 记忆**可以被推翻**。
+		const existing = readLessons(opts.dataDir);
+		const applied = applySupersessions(existing, lessons);
+		const changed = applied.filter(
+			(l) => l.supersededBy && !existing.find((e) => e.id === l.id)?.supersededBy,
+		);
+		appendLessons(opts.dataDir, changed);
+		lessonsSuperseded = changed.length;
 		lessonsSaved = appendLessons(opts.dataDir, lessons);
 	} catch {
 		// Persistence failure is reported as zero saved rather than thrown.
 		lessonsSaved = 0;
+		lessonsSuperseded = 0;
 	}
 
 	let strategiesPromoted = 0;
@@ -86,5 +113,5 @@ export async function runReflection(opts: RunReflectionOptions): Promise<Reflect
 		strategiesPromoted = 0;
 	}
 
-	return { ok: true, lessonsSaved, strategiesPromoted, replyChars: text.length };
+	return { ok: true, lessonsSaved, lessonsSuperseded, strategiesPromoted, replyChars: text.length };
 }

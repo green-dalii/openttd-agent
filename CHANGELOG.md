@@ -40,6 +40,23 @@
   判定优先用它、**两臂同源**（`ArmComparison.deliveredSource`），旧行回落原始值并标注为不可比。
 - 澄清 `rc=1` 的含义（=施工未达成 DONE，不是崩溃）并在输出中明示。
 
+### Changed（R2：跨局经验从"指令"变成"带实测读数的观察"，2026-09-18）
+
+- **经验契约换代**：`Lesson.kind: "do"|"dont"` → `Lesson.outcome: {metric, before, after}`。
+  注入行由 `Previously an action like this paid off: <text>` 改为
+  `Recorded in an earlier game: <text> [delivered 420 -> 1088, seed 7]` ——
+  旧格式既是指令，又替模型断言了一个从未验证的因果。
+- **内容级守卫** `isImperative()`：作用在被注入的**文本**上（旧守卫只查包装前缀，
+  永远不可能匹配），在产出处生效并在注入处纵深防御。真机 53 条旧条目实测召回率 60%
+  （初版 36%，动词表按真机措辞扩充）——文档中已写明它只是第二道闸。
+- **迁移**：读取时排除旧形状条目（无实测读数）并**报出数量**（`legacyDropped`），
+  不重写磁盘。真机 4 个数据目录共 53 条旧条目，0 条满足新契约。
+- **经验可被推翻**：`supersededBy` 第一次被真正赋值。反思输入带上现库，模型可用
+  `supersedes:[id]` 取代旧观察；落盘时应用。修复两个缺陷：去重会让作废输给原条；
+  读取守卫只查 id+text（因此"库里有几条经验"这个数字是假的）。
+- Dashboard 记忆面板：徽标由 `do`/`avoid` 换成**实测读数**（缺读数显示 `—`），
+  新增"模板绑定 ↔ 视图模型"交叉守卫测试。
+
 ### Fixed（R1：工具执行顺序 / 预算 / 披露路径，2026-09-18）
 
 - **变更型工具改为串行执行**：`build_bus_route` / `add_vehicles` / `set_pause` 现在声明

@@ -15,10 +15,23 @@
 import { dedupeLessons, fromReflection, type Lesson, type RawLesson } from "./lessons.js";
 import type { StrategySample } from "./strategies.js";
 
+/**
+ * 反思输入里"已记录了什么"的容量上限。
+ *
+ * 为什么要有上限：这是唯一一处把**库**塞进提示词的地方，不做限制会让提示词
+ * 随游戏数线性增长。只给最近的一批，够支持 `supersedes` 即可。
+ */
+export const MAX_RECORDED_SHOWN = 24;
+
 /** Structured facts about the finished game — the only input reflection gets. */
 export interface ReflectionFacts {
 	sessionId: string;
 	seed: number;
+	/**
+	 * 已记录的观察（id + 文本），只为让 `supersedes` 有用武之地。
+	 * 缺省为空数组 —— 反思在"库为空"与"没提供库"时都不该编 id。
+	 */
+	recorded?: { id: string; text: string }[];
 	summary: {
 		money: number;
 		/**
@@ -98,18 +111,28 @@ export function buildReflectionPrompt(facts: ReflectionFacts): ReflectionPrompt 
 		: "(no structured evidence was recorded for this game)";
 
 	const system = [
-		"You review one finished OpenTTD game and extract reusable lessons.",
+		"You review one finished OpenTTD game and record what was OBSERVED.",
 		"",
 		"HARD RULES:",
-		"1. Do NOT speculate about causes. Do not use words like probably, perhaps,",
+		"1. Record OBSERVATIONS about what happened - never advice, orders or",
+		"   recommendations. 'The route delivered 137 units' is an observation;",
+		"   'build one route first' / 'you should add vehicles' are instructions and",
+		"   will be REJECTED by the validator (and you will be told why).",
+		"2. Do NOT speculate about causes. Do not use words like probably, perhaps,",
 		"   maybe, seems, or I think. If the game did not record it, you do not know it.",
-		"2. Every lesson MUST cite game facts in its `evidence` array. A lesson with an",
-		"   empty `evidence` array is discarded, so omitting it only wastes the entry.",
-		"3. Only report what the evidence below supports. Do not invent events.",
-		"4. Keep each lesson to one short, reusable sentence.",
+		"3. Every entry MUST cite game facts in its `evidence` array AND carry the",
+		"   measured reading it is about in `outcome` ({metric, before, after}).",
+		"   Either one missing means the entry is discarded, so omitting it only",
+		"   wastes the entry.",
+		"4. Only report what the evidence below supports. Do not invent events.",
+		"5. Keep each entry to one short sentence.",
+		"6. If an entry below CONTRADICTS something already recorded (see the current",
+		"   library), name the ids it replaces in `supersedes`. A later game",
+		"   disproving an earlier record is normal - say so instead of staying silent.",
 		"",
 		"Reply with JSON only, no prose:",
-		'{"lessons":[{"text":"...","kind":"do"|"dont","evidence":["..."],"confidence":0.0-1.0}],',
+		'{"lessons":[{"text":"...","outcome":{"metric":"delivered|deliveredPerDay|income|money|vehicles|stations|construction",',
+		' "before":<number>,"after":<number>},"evidence":["..."],"confidence":0.0-1.0,"supersedes":["<id>"]}],',
 		' "strategies":[{"action":"<tool name>","params":{},"value":<money delta>,"evidence":["..."]}]}',
 	].join("\n");
 
@@ -136,6 +159,17 @@ export function buildReflectionPrompt(facts: ReflectionFacts): ReflectionPrompt 
 		"",
 		"Recorded evidence (the only facts you may rely on):",
 		factsBlock,
+		// 现库：反思需要看到**已记录了什么**，否则 `supersedes` 无从产生，
+		// 而 `supersededBy` 从 Phase C 起就存在却从未被赋值 —— 记忆只增不减（R2）。
+		...(() => {
+			const lib = (facts.recorded ?? []).slice(0, MAX_RECORDED_SHOWN);
+			if (lib.length === 0) return ["", "Already recorded: (nothing yet)"];
+			return [
+				"",
+				`Already recorded (${lib.length}${(facts.recorded?.length ?? 0) > lib.length ? ` of ${facts.recorded!.length}` : ""} entries; cite an id in \`supersedes\` to replace one):`,
+				...lib.map((l) => `- [${l.id}] ${l.text}`),
+			];
+		})(),
 	].join("\n");
 
 	return { system, user };

@@ -188,19 +188,22 @@ GS `route_stats` **部分失效**（§10.66，17/17 局命中，单局丢 1–92
 质量-成本权衡。要测则各自是**一次单因子对照**（同 seed、prebuilt、固定 horizon），
 且必须先跑一局冒烟（新规）。
 
-### R2 经验 = 被校验的记录（中）—— 🔵 **当前任务**
+### R2 经验 = 被校验的记录（中）—— 🟢 R2a 完成 / 🔵 R2b 待做
 
-1. 反思改为**走同一个 Agent + 一个工具** `record_lesson`，参数用 TypeBox schema：
-   `{observation, evidence[], outcome{metric,before,after}, confidence, supersedes?: string[]}`。
-2. `execute()` 内做**内容级校验**：要求 `observation` 是**对已发生事实的陈述**
-   （拒绝祈使/建议措辞）、`evidence` 非空、`outcome` 必须是**实测指标**
-   （`delivered`/`deliveredPerDay`/`income`）；违规**抛错** → 库会把错误回给模型，
-   模型可改写（这替代了当前"只查包装前缀"的无效守卫，见 MEMORY D26）。
-3. `supersedes` 接线 `supersededBy`：反思输入带上现库（id + 文本），矛盾的经验可被作废。
-4. **迁移**：现有库（真机 25+ 条 `do/dont` 祈使句）一次性重新校验：可改写的改写、
-   不可的作废；迁移脚本放 `scripts/`，数量记入 SPEC。
+**R2a ✅（2026-09-18，SPEC §10.76）**
 
-验收：真机跑 1 局 → 新库全部是观察式记录、`supersedes` 可用、旧库无 `kind:do/dont` 残留。
+| 任务 | 结果 |
+|---|---|
+| 契约换代 | ✅ `kind: do/dont` → `outcome: {metric, before, after}`；注入行改为 `Recorded in an earlier game: … [delivered 420 -> 1088, seed 7]`，不再替模型断言因果（旧格式写 "paid off"）|
+| 内容级守卫 | ✅ `isImperative(text)` 作用在**被注入的文本**上，并在**产出处**生效（`fromReflection`）+ 注入处纵深防御。**真库实测召回率 36% → 60%**（53 条），已写明它只是**第二道闸** |
+| 迁移 | ✅ 读取时排除旧形状条目 + **计数可见**（`readLessonsReport().legacyDropped`，开局打印），**不重写磁盘**。真机 4 库 53 条旧条目 → 0 条合规 |
+| 经验可被推翻 | ✅ `supersededBy` **第一次真的被赋值**：反思输入带现库（id+文本，≤24），模型给 `supersedes`，落盘时 `applySupersessions` 作废。过程中修掉两个真缺陷：**dedupe 会让作废输给原条**（D29）、`isLesson` 只查 id+text（"库里有几条经验"因此是假的）|
+| 前端 | ✅ 面板徽标从 do/avoid 换成**实测读数**；新增**模板 ↔ 视图模型交叉守卫**（绑定到不存在的属性会渲染空白且零报错——§5.2 的"静默缺失 UI"）|
+| 单元测试 | 1011 → 全绿；新增 R2 闭环测试（跨局推翻一条旧经验）与真机形状的迁移测试 |
+
+**R2b 🔵（未做，不得声称已具备）**：反思改为**走同一个 Agent + `record_lesson` 工具**，
+让 schema 校验与拒绝理由**作为工具错误回到模型**（模型有机会改写成观察句）。
+当前反思仍是"文本补全 + JSON 解析"，守卫是**事后**生效：拒收，但不告诉模型。
 
 ### R3 自我评估（小）
 
@@ -333,7 +336,7 @@ block = 5 局/臂。每个 block 看一次：**均值差的自助法 95% CI（�
 
 1. ~~**R1**~~ ✅ 完成（SPEC §10.75）——执行顺序、工具预算、披露路径三件已落地；
    遗留两项**未测**旋钮（sessionId 缓存收益 / deliberation off-vs-low），要测则单独对照。
-2. **R2**（中，**当前**）：反思改为**用工具写库**（schema 校验 + **内容级**守卫 + `supersedes`），
+2. **R2b**（小，**当前**）：反思改为**用工具写库**（schema 校验 + **内容级**守卫 + `supersedes`），
    并迁移现有 25+ 条祈使句经验。**这是最重要的一步**——现在注入的其实是"策略"。
 3. **R3/R4**（小/中）：自我评估事实（类型化消息）+ `recall` 检索工具（顺带产出
    `recallCalls`，第一次能测"记忆有没有被用过"）。

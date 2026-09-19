@@ -113,8 +113,10 @@
         <p class="now-text" x-text="memoryInEffect().summary"></p>
         <ul class="mem-list">
           <template x-for="l in memoryInEffect().lessons" :key="l.text">
-            <li :class="l.kind === 'dont' ? 'mem-dont' : 'mem-do'">
-              <span class="mem-kind" x-text="l.kind === 'dont' ? 'avoid' : 'do'"></span>
+            <li>
+              <!-- R2: 徽标从 do/avoid（那是指令）换成**实测读数**。
+                   绑定一个不存在的属性会渲染空白且零报错——见下面的交叉守卫测试。 -->
+              <span class="mem-kind" x-text="l.outcome"></span>
               <span x-text="l.text"></span>
             </li>
           </template>

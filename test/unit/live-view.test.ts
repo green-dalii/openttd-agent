@@ -91,7 +91,7 @@ interface LiveModel {
 		active: boolean;
 		lessonsInjected: number;
 		strategiesInjected: number;
-		lessons: { text: string; kind: string; confidence: string; evidence: string[] }[];
+		lessons: { text: string; outcome: string; confidence: string; evidence: string[] }[];
 		strategies: { label: string }[];
 		summary: string;
 	};
@@ -631,12 +631,20 @@ describe("live-view: memory in effect (本局被注入了什么)", () => {
 		expect(out.summary).toContain("2");
 	});
 
-	it("保留 do / dont 的区分与证据(用户要能判断这条建议是否可信)", () => {
+	it("保留实测读数与证据(用户要能判断这条经验是否可信)", () => {
 		const out = withMemory({
-			lessons: [{ text: "avoid long routes", kind: "dont", confidence: 0.5, evidence: ["money -1 in 1953"] }],
+			lessons: [
+				{
+					text: "routes longer than 200 tiles did not finish inside the horizon",
+					outcome: { metric: "construction", before: 0, after: 1 },
+					confidence: 0.5,
+					evidence: ["road still building at the horizon"],
+				},
+			],
 		}).memoryInEffect();
-		expect(out.lessons[0]!.kind).toBe("dont");
-		expect(out.lessons[0]!.evidence).toEqual(["money -1 in 1953"]);
+		// 面板把读数渲染成人读的一行（前端是 JS，无类型；这里锁的是**显示内容**）
+		expect(out.lessons[0]!.outcome).toBe("construction 0 → 1");
+		expect(out.lessons[0]!.evidence).toEqual(["road still building at the horizon"]);
 	});
 
 	it("策略卡渲染成可读的一行(含参数)", () => {
@@ -665,5 +673,44 @@ describe("live-view: memory in effect (本局被注入了什么)", () => {
 	it("非数组字段不会炸掉渲染", () => {
 		expect(() => withMemory({ lessons: "nope", strategies: 42 }).memoryInEffect()).not.toThrow();
 		expect(withMemory({ lessons: "nope" }).memoryInEffect().lessons).toEqual([]);
+	});
+});
+
+/**
+ * 模板 ↔ 视图模型的交叉守卫（AGENTS §5.2）。
+ *
+ * 事故类型："静默缺失的 UI"——模板绑定到一个**已不存在的属性**时，
+ * 渲染结果是空白/不显示，**控制台零报错**，单测与 lint 都抓不到。
+ * R2 把 lesson 的 `kind` 换成 `outcome` 时，模板里还留着 `l.kind`：
+ * 若不改，用户会看到一个空的 do/avoid 徽标而没有任何报警。
+ * 这条测试把两边钉在一起：模板里对 lesson 用的每个字段，
+ * 视图模型都必须真的产出。
+ */
+describe("live.html: 记忆面板绑定与视图模型一致", () => {
+	it("模板对 lesson 绑定的字段都存在于 memoryInEffect() 的输出里", () => {
+		const html = readFileSync(join(PUBLIC_DIR, "pages", "live.html"), "utf8");
+		const block = html.slice(html.indexOf("mem-list"), html.indexOf("memoryInEffect().strategies"));
+		const bound = new Set<string>();
+		for (const m of block.matchAll(/\bl\.([a-zA-Z_][a-zA-Z0-9_]*)/g)) bound.add(m[1]!);
+		expect(bound.size).toBeGreaterThan(0);
+
+		const { model } = load();
+		model.memory = {
+			lessons: [
+				{
+					text: "the route delivered 137 units in 300 game days",
+					outcome: { metric: "delivered", before: 0, after: 137 },
+					confidence: 0.6,
+					evidence: ["delivered 137"],
+				},
+			],
+		};
+		const out = model.memoryInEffect();
+		const lesson = out.lessons[0]! as unknown as Record<string, unknown>;
+		for (const key of bound) {
+			expect(Object.prototype.hasOwnProperty.call(lesson, key), `模板绑定了 l.${key}，视图模型必须提供`).toBe(true);
+		}
+		// 旧的 do/dont 语义不许再出现在模板里（它是指令，不是读数）
+		expect(block).not.toMatch(/l\.kind|mem-do|mem-dont/);
 	});
 });

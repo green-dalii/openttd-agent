@@ -68,6 +68,21 @@
    * 且第 2 条没有图片(后到的 stageImage 只会补到第一个同 index 的记录上)。
    * 用 upsert 后,重复投递不再产生分歧。
    */
+  /**
+   * 把一条实测读数渲染成人读的一行（R2）。
+   *
+   * 缺读数显示 "—"，**不能**默认成 0：缺报与真实的 0 是两件事，
+   * 而记忆面板存在的意义就是让人能判断这条经验有没有依据（AGENTS §5.2）。
+   */
+  function outcomeLabel(o) {
+    if (!o || typeof o !== "object") return "—";
+    const metric = typeof o.metric === "string" ? o.metric : "";
+    const before = Number(o.before);
+    const after = Number(o.after);
+    if (!metric || !Number.isFinite(before) || !Number.isFinite(after)) return "—";
+    return `${metric} ${before} → ${after}`;
+  }
+
   function upsertStageView(list, v) {
     const arr = Array.isArray(list) ? list.slice() : [];
     const incoming = v && typeof v === "object" ? v : null;
@@ -439,7 +454,9 @@
         const lessons = rawLessons
           .map((l) => ({
             text: l && typeof l.text === "string" ? l.text.trim() : "",
-            kind: l && l.kind === "dont" ? "dont" : "do",
+            // R2: 经验不再分 do/dont（那是指令），而是带一条**实测读数**。
+            // 读数缺失时显示 “—”，不能默认成 0（缺报 ≠ 0）。
+            outcome: outcomeLabel(l && l.outcome),
             confidence: U.fmtPct(Number(l && l.confidence) || 0, 0),
             evidence: (l && Array.isArray(l.evidence) ? l.evidence : []).map(String),
           }))

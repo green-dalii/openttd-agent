@@ -71,12 +71,29 @@ describe("reflect: buildReflectionPrompt", () => {
 		expect(`${p.system}\n${p.user}`).toMatch(/json/i);
 	});
 
-	it("说明 schema:lessons 需要 text/kind/evidence", () => {
+	it("说明 schema:lessons 需要 text/outcome/evidence（R2：读数取代 do/dont）", () => {
 		const p = buildReflectionPrompt(FACTS);
 		const all = `${p.system}\n${p.user}`;
 		expect(all).toContain("text");
-		expect(all).toContain("kind");
-		expect(all).toMatch(/"do"|"dont"/);
+		expect(all).toContain("outcome");
+		expect(all).toContain("evidence");
+		// 旧的 do/dont 语义必须消失：它把经验塑造成指令（SPEC §10.22 边界）
+		expect(all).not.toMatch(/"do"\s*\|\s*"dont"/);
+		expect(all).toMatch(/never advice|OBSERVATION/i);
+	});
+
+	it("把已记录的库交给反思，并说明可以用 supersedes 取代", () => {
+		const p = buildReflectionPrompt({
+			...FACTS,
+			recorded: [{ id: "abc123", text: "the route delivered 137 units in 300 game days" }],
+		});
+		expect(p.user).toContain("[abc123]");
+		expect(p.user).toContain("the route delivered 137 units in 300 game days");
+		expect(p.user).toMatch(/supersedes/);
+	});
+
+	it("库为空时说明 nothing yet（反思不该凭空编 id）", () => {
+		expect(buildReflectionPrompt(FACTS).user).toMatch(/nothing yet/i);
 	});
 
 	it("容忍没有证据的局(不抛异常,并如实说明)", () => {
@@ -133,7 +150,7 @@ describe("reflect: isSpeculative(臆测检测)", () => {
 describe("reflect: parseReflection(响应解析)", () => {
 	const good = {
 		lessons: [
-			{ text: "build close to towns", kind: "do", evidence: ["money +12000 in 1951"] },
+			{ text: "the second town connection delivered 137 units", outcome: { metric: "delivered", before: 0, after: 137 }, evidence: ["delivered 137 in 1951"] },
 		],
 		strategies: [
 			{ action: "build_bus_route", params: { distance: 20 }, value: 9000, evidence: ["money +9000"] },
@@ -186,7 +203,7 @@ describe("reflect: reflectToLessons(端到端校验)", () => {
 
 	it("产出通过校验的 lessons", () => {
 		const out = reflectToLessons(
-			JSON.stringify({ lessons: [{ text: "go near towns", kind: "do", evidence: ["money +1"] }] }),
+			JSON.stringify({ lessons: [{ text: "the route delivered 137 units", outcome: { metric: "delivered", before: 0, after: 137 }, evidence: ["delivered 137"] }] }),
 			ctx,
 		);
 		expect(out).toHaveLength(1);
@@ -197,21 +214,29 @@ describe("reflect: reflectToLessons(端到端校验)", () => {
 		const out = reflectToLessons(
 			JSON.stringify({
 				lessons: [
-					{ text: "be better", kind: "do" },
-					{ text: "go near towns", kind: "do", evidence: ["money +1"] },
+					{ text: "the route did something", outcome: { metric: "delivered", before: 0, after: 137 } },
+					{ text: "the route delivered 137 units", outcome: { metric: "delivered", before: 0, after: 137 }, evidence: ["delivered 137"] },
 				],
 			}),
 			ctx,
 		);
-		expect(out.map((l) => l.text)).toEqual(["go near towns"]);
+		expect(out.map((l) => l.text)).toEqual(["the route delivered 137 units"]);
 	});
 
 	it("丢掉臆测性的条目(prompt 说了不许,代码也要拦)", () => {
 		const out = reflectToLessons(
 			JSON.stringify({
 				lessons: [
-					{ text: "probably the route was too long", kind: "dont", evidence: ["money -1"] },
-					{ text: "money fell 40000 in 1953", kind: "dont", evidence: ["money -40000"] },
+					{
+						text: "probably the route was too long",
+						outcome: { metric: "delivered", before: 137, after: 0 },
+						evidence: ["delivered 0"],
+					},
+					{
+						text: "money fell 40000 in 1953",
+						outcome: { metric: "money", before: 40000, after: 0 },
+						evidence: ["money -40000"],
+					},
 				],
 			}),
 			ctx,
@@ -223,8 +248,8 @@ describe("reflect: reflectToLessons(端到端校验)", () => {
 		const out = reflectToLessons(
 			JSON.stringify({
 				lessons: [
-					{ text: "Go near towns", kind: "do", evidence: ["e1"] },
-					{ text: "go near towns", kind: "do", evidence: ["e2"] },
+					{ text: "The route delivered 137 units", outcome: { metric: "delivered", before: 0, after: 137 }, evidence: ["e1"] },
+					{ text: "the route delivered 137 units", outcome: { metric: "delivered", before: 0, after: 137 }, evidence: ["e2"] },
 				],
 			}),
 			ctx,

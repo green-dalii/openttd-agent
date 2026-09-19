@@ -407,7 +407,9 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 				strategiesInjected: runMemory.strategies.length,
 				lessons: runMemory.lessons.map((l) => ({
 					text: l.text,
-					kind: l.kind,
+					// 实测读数取代了旧的 do/dont：面板要能显示"依据的数字"，
+					// 否则用户无法判断这条经验可不可信（R2）。
+					outcome: l.outcome,
 					confidence: l.confidence,
 					evidence: l.evidence,
 				})),

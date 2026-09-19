@@ -16,8 +16,10 @@ import {
 	LESSON_MAX_AGE_MS,
 	MAX_LESSONS_INJECTED,
 	dedupeLessons,
+	applySupersessions,
 	formatForInjection,
 	fromReflection,
+	isImperative,
 	lessonId,
 	normalizeLessonText,
 	selectLessons,
@@ -29,9 +31,9 @@ const NOW = 1_700_000_000_000;
 /** A well-formed lesson; override anything for the case under test. */
 function lesson(over: Partial<Lesson> = {}): Lesson {
 	return {
-		id: lessonId("build near a town with population above 500"),
-		text: "build near a town with population above 500",
-		kind: "do",
+		id: lessonId("delivered cargo rose after the second town was connected"),
+		text: "delivered cargo rose after the second town was connected",
+		outcome: { metric: "delivered", before: 420, after: 1088 },
 		confidence: 0.6,
 		evidence: ["money +12000 between 1952-01 and 1952-06"],
 		sourceSessionId: "s1",
@@ -66,35 +68,55 @@ describe("lessons: 规范化与 id", () => {
 
 describe("lessons: fromReflection(反思输出的唯一入口)", () => {
 	const ctx = { sessionId: "s1", seed: 7, now: NOW };
+	const ok = (over: Record<string, unknown> = {}) => ({
+		text: "Adding vehicles beyond 15 did not increase deliveries",
+		outcome: { metric: "delivered", before: 1088, after: 1088 },
+		evidence: ["delivered 1088 at 15 vehicles, 1088 at 18 vehicles"],
+		...over,
+	});
 
-	it("接受一条带证据的合法反思", () => {
-		const l = fromReflection(
-			{ text: "avoid building far from towns", kind: "dont", evidence: ["money fell 40000 in 1953"] },
-			ctx,
-		);
+	it("接受一条带证据、带实测读数的观察", () => {
+		const l = fromReflection(ok(), ctx)!;
 		expect(l).not.toBeNull();
-		expect(l!.kind).toBe("dont");
-		expect(l!.sourceSessionId).toBe("s1");
-		expect(l!.sourceSeed).toBe(7);
-		expect(l!.createdAt).toBe(NOW);
-		expect(l!.evidence).toEqual(["money fell 40000 in 1953"]);
-		expect(l!.supersededBy).toBeUndefined();
+		expect(l.outcome).toEqual({ metric: "delivered", before: 1088, after: 1088 });
+		expect(l.sourceSessionId).toBe("s1");
+		expect(l.sourceSeed).toBe(7);
+		expect(l.createdAt).toBe(NOW);
+		expect(l.evidence).toEqual(["delivered 1088 at 15 vehicles, 1088 at 18 vehicles"]);
+		expect(l.supersededBy).toBeUndefined();
+	});
+
+	it("拒绝**建议/祈使句**（SPEC §10.22 边界；2026-09-18 起是内容级检查）", () => {
+		// 旧契约把这些当合法 lesson（kind:do/dont）入库并注入 —— 这正是 R2 要修的
+		expect(fromReflection(ok({ text: "Build a single bus route first" }), ctx)).toBeNull();
+		expect(fromReflection(ok({ text: "expand the fleet to around 16 vehicles" }), ctx)).toBeNull();
+		expect(fromReflection(ok({ text: "DO: check the station first" }), ctx)).toBeNull();
+		expect(fromReflection(ok({ text: "avoid building far from towns" }), ctx)).toBeNull();
+	});
+
+	it("拒绝没有实测读数(outcome)的条目", () => {
+		expect(fromReflection({ text: "x happened", evidence: ["e"] }, ctx)).toBeNull();
+	});
+
+	it("拒绝把缺失值硬转成 0 的 outcome", () => {
+		expect(fromReflection(ok({ outcome: { metric: "delivered" } }), ctx)).toBeNull();
+		expect(fromReflection(ok({ outcome: { metric: "delivered", before: null, after: 3 } }), ctx)).toBeNull();
+		expect(fromReflection(ok({ outcome: { metric: "delivered", before: 1, after: "abc" } }), ctx)).toBeNull();
+	});
+
+	it("拒绝未知 metric（而不是猜一个）", () => {
+		expect(fromReflection(ok({ outcome: { metric: "vibes", before: 1, after: 2 } }), ctx)).toBeNull();
 	});
 
 	it("拒绝没有证据的条目(SPEC §5.3:只接受游戏事实佐证)", () => {
-		expect(fromReflection({ text: "be smarter", kind: "do", evidence: [] }, ctx)).toBeNull();
-		expect(fromReflection({ text: "be smarter", kind: "do" }, ctx)).toBeNull();
-		expect(fromReflection({ text: "be smarter", kind: "do", evidence: ["", "  "] }, ctx)).toBeNull();
+		expect(fromReflection(ok({ evidence: [] }), ctx)).toBeNull();
+		expect(fromReflection(ok({ evidence: undefined }), ctx)).toBeNull();
+		expect(fromReflection(ok({ evidence: ["", "  "] }), ctx)).toBeNull();
 	});
 
 	it("拒绝空文本或缺失文本", () => {
-		expect(fromReflection({ text: "   ", kind: "do", evidence: ["e"] }, ctx)).toBeNull();
-		expect(fromReflection({ kind: "do", evidence: ["e"] }, ctx)).toBeNull();
-	});
-
-	it("拒绝非法 kind(而不是猜一个)", () => {
-		expect(fromReflection({ text: "t", kind: "maybe", evidence: ["e"] }, ctx)).toBeNull();
-		expect(fromReflection({ text: "t", evidence: ["e"] }, ctx)).toBeNull();
+		expect(fromReflection(ok({ text: "   " }), ctx)).toBeNull();
+		expect(fromReflection(ok({ text: undefined }), ctx)).toBeNull();
 	});
 
 	it("拒绝非对象/空输入", () => {
@@ -104,27 +126,20 @@ describe("lessons: fromReflection(反思输出的唯一入口)", () => {
 	});
 
 	it("confidence 缺省为保守值,并夹在 0..1", () => {
-		const noConf = fromReflection({ text: "t", kind: "do", evidence: ["e"] }, ctx);
-		expect(noConf!.confidence).toBeGreaterThan(0);
-		expect(noConf!.confidence).toBeLessThanOrEqual(0.5);
-		const high = fromReflection({ text: "t2", kind: "do", evidence: ["e"], confidence: 9 }, ctx);
-		expect(high!.confidence).toBe(1);
-		const neg = fromReflection({ text: "t3", kind: "do", evidence: ["e"], confidence: -3 }, ctx);
-		expect(neg!.confidence).toBe(0);
-		const nan = fromReflection({ text: "t4", kind: "do", evidence: ["e"], confidence: "abc" }, ctx);
-		expect(Number.isFinite(nan!.confidence)).toBe(true);
+		expect(fromReflection(ok(), ctx)!.confidence).toBeGreaterThan(0);
+		expect(fromReflection(ok(), ctx)!.confidence).toBeLessThanOrEqual(0.5);
+		expect(fromReflection(ok({ confidence: 9 }), ctx)!.confidence).toBe(1);
+		expect(fromReflection(ok({ confidence: -3 }), ctx)!.confidence).toBe(0);
+		expect(Number.isFinite(fromReflection(ok({ confidence: "abc" }), ctx)!.confidence)).toBe(true);
 	});
 
 	it("清洗证据:去空白、丢弃空串、去重", () => {
-		const l = fromReflection(
-			{ text: "t", kind: "do", evidence: [" money +1 ", "money +1", "", "  "] },
-			ctx,
-		);
-		expect(l!.evidence).toEqual(["money +1"]);
+		const l = fromReflection(ok({ evidence: [" delivered 1088 ", "delivered 1088", "", "  "] }), ctx)!;
+		expect(l.evidence).toEqual(["delivered 1088"]);
 	});
 
 	it("缺少 sessionId 时拒绝(来源不可追溯的教训不得入库)", () => {
-		expect(fromReflection({ text: "t", kind: "do", evidence: ["e"] }, { sessionId: "", seed: 1, now: NOW })).toBeNull();
+		expect(fromReflection(ok(), { sessionId: "", seed: 1, now: NOW })).toBeNull();
 	});
 });
 
@@ -217,36 +232,103 @@ describe("lessons: selectLessons(注入前的过滤与限量)", () => {
 	});
 });
 
-describe("lessons: formatForInjection", () => {
-	it("把 do/dont 渲染成**对过去的陈述**，不是命令", () => {
-		// 项目范围（2026-09-12 重申）：这是 RL harness，注入的是"环境反馈"，
-		// 不是"策略"。所以绝不能出现 DO / AVOID / 你应该 这类祈使句 ——
-		// 那等于把 agent 本该自己从环境里学到的结论直接告诉它。
-		const out = formatForInjection([
-			lesson({ kind: "do", text: "build near towns" }),
-			lesson({ kind: "dont", text: "build far from towns", id: lessonId("x") }),
-		]);
-		expect(out).toHaveLength(2);
-		expect(out[0]).toContain("build near towns");
-		expect(out[1]).toContain("build far from towns");
-		for (const line of out) {
-			// 祈使/建议措辞一律不允许
-			expect(line).not.toMatch(/^(DO|AVOID|DON'T)\b/i);
-			expect(line).not.toMatch(/\byou should\b|\byou must\b|\bprefer\b|\balways\b|\bnever\b/i);
-			// 必须读起来像对发生过什么事的陈述
-			expect(line).toMatch(/previously/i);
-		}
-		// 两类仍然可辨认（否则 agent 分不清成功还是失败）
-		expect(out[0]).toMatch(/paid off/i);
-		expect(out[1]).toMatch(/did not pay off/i);
+describe("lessons: formatForInjection（内容级，不是包装级）", () => {
+	/**
+	 * 事故（2026-09-18，MEMORY D26）：注入行曾是
+	 * `Previously an action like this paid off: <text>`，而守卫断言 `^DO\b`
+	 * —— **前缀在前，那条正则永远不可能匹配**。真机库里的祈使句
+	 * （"Build a single bus route first…"、"expand the fleet to around 16 vehicles"）
+	 * 全都通过了守卫，包装还替它们断言了从未验证的因果（"paid off"）。
+	 * 守卫必须作用在**被注入的那段文本本身**。
+	 */
+	it("注入的是记录与读数，不是指令，也不替模型断言因果", () => {
+		const out = formatForInjection([lesson()]);
+		expect(out).toHaveLength(1);
+		expect(out[0]).toContain("delivered cargo rose after the second town was connected");
+		expect(out[0]).toMatch(/delivered.*420.*1088/s);
+		expect(out[0]).not.toMatch(/paid off|should|must/i);
+		expect(out[0]).not.toMatch(/^(DO|AVOID|DON'T)\b/i);
 	});
 
-	it("每条都是单行(注入进 prompt 的文本不能带换行)", () => {
-		const out = formatForInjection([lesson({ text: "line one\nline two" })]);
-		expect(out[0]).not.toContain("\n");
+	it("历史库里的祈使句即使混进来也不得被注入（纵深防御）", () => {
+		expect(formatForInjection([lesson({ id: lessonId("x"), text: "Build a single bus route first" })])).toHaveLength(0);
+	});
+});
+
+/**
+ * 内容级守卫（SPEC §10.22 边界：框架给事实，不给策略）。
+ *
+ * 必须在**产出处**生效，且理由要让模型看得见（工具抛错 → 模型改写），
+ * 而不是事后静默丢弃。
+ */
+describe("lessons: isImperative 内容检测", () => {
+	const advice = [
+		"Build a single bus route first",
+		"DO: check the station before adding vehicles",
+		"AVOID building routes longer than 100 tiles",
+		"expand the fleet to around 16 vehicles",
+		"You should add vehicles when queues grow",
+		"Add a second route to grow income",
+		"Never send the same command twice",
+		"Prefer one solid route over many half-built ones",
+		"Consider adding a second route",
+		"Make sure to unpause before issuing commands",
+		"Don't build long routes",
+		"It is better to start with one route",
+	];
+	const observations = [
+		"Requesting 15 vehicles added 5 of them",
+		"The route from town 9 to town 12 delivered 137 units over 300 game days",
+		"Adding vehicles beyond 15 did not increase deliveries in the recorded runs",
+		"Construction of a 239-tile route did not finish inside a 150 game-day horizon",
+		"Delivered cargo stayed at 0 while the executor was still building the road",
+	];
+	it.each(advice)("拒绝建议/祈使句：%s", (t) => {
+		expect(isImperative(t)).toBe(true);
+	});
+	it.each(observations)("接受对已发生事实的陈述：%s", (t) => {
+		expect(isImperative(t)).toBe(false);
+	});
+});
+
+describe("lessons: supersedes 接线（经验可以被推翻）", () => {
+	it("后一条观察可以作废前一条，被作废的不再注入", () => {
+		const a = lesson({ id: "a", text: "the first route delivered 0" });
+		const b = lesson({
+			id: "b",
+			text: "the first route delivered 137 after the depot was rebuilt",
+			supersedes: ["a"],
+		});
+		const applied = applySupersessions([a], [b]);
+		expect(applied.find((l) => l.id === "a")?.supersededBy).toBe("b");
+		expect(selectLessons(applied).map((l) => l.id)).not.toContain("a");
 	});
 
-	it("空输入得到空数组(调用方据此跳过注入)", () => {
-		expect(formatForInjection([])).toEqual([]);
+	it("不能作废自己，也不能作废不存在的 id", () => {
+		const b = lesson({ id: "b", text: "a route of 75 tiles was still building at the horizon", supersedes: ["b", "nope"] });
+		const applied = applySupersessions([], [b]);
+		expect(applied.map((l) => l.id)).toEqual(["b"]);
+		expect(applied[0]?.supersededBy).toBeUndefined();
+	});
+});
+
+describe("lessons: dedupeLessons 必须让作废胜出", () => {
+	/**
+	 * 作废是以**追加**形式表达的（同 id 再写一条带 `supersededBy` 的记录），
+	 * 两条的 confidence 与 createdAt 完全相同。若 dedupe 只按"更可信/更新"择优，
+	 * 先到的原条会赢 —— 作废被静默丢弃，记忆又变回只增不减（R2 实测踩到）。
+	 */
+	it("同 id 时，带 supersededBy 的那条胜出（即使先到的没有）", () => {
+		const plain = lesson({ id: "a", confidence: 0.9, createdAt: NOW });
+		const tomb = lesson({ id: "a", confidence: 0.9, createdAt: NOW, supersededBy: "b" });
+		expect(dedupeLessons([plain, tomb])[0]!.supersededBy).toBe("b");
+		// 反序输入也必须成立（不能依赖数组顺序）
+		expect(dedupeLessons([tomb, plain])[0]!.supersededBy).toBe("b");
+	});
+
+	it("都没作废时，仍然是更可信/更新者胜", () => {
+		const low = lesson({ id: "a", confidence: 0.2, createdAt: NOW - 5000 });
+		const high = lesson({ id: "a", confidence: 0.9, createdAt: NOW - 1000 });
+		expect(dedupeLessons([low, high])[0]!.confidence).toBe(0.9);
 	});
 });

@@ -148,10 +148,33 @@ function writeAtomic(file: string, lines: string[]): void {
 	renameSync(tmp, file);
 }
 
+/**
+ * A stored lesson must be a **validated observation**, not merely id+text.
+ *
+ * R2（2026-09-18）：旧库里的条目是 `kind:"do"|"dont"` 的祈使句，**没有实测读数**。
+ * 只查 id+text 会让它们继续当作"经验"载入（注入端再靠 formatForInjection 挡），
+ * 那既浪费注入预算，也让"库里有多少条经验"这个数字变假。
+ * 契约是"经验 = 带实测读数的观察"，所以这里按契约收口。
+ */
 function isLesson(v: unknown): v is Lesson {
 	if (!v || typeof v !== "object") return false;
-	const l = v as Lesson;
-	return typeof l.id === "string" && l.id !== "" && typeof l.text === "string";
+	const l = v as Partial<Lesson>;
+	if (typeof l.id !== "string" || l.id === "" || typeof l.text !== "string") return false;
+	const o = l.outcome;
+	return Boolean(
+		o &&
+			typeof o === "object" &&
+			typeof o.metric === "string" &&
+			Number.isFinite(Number(o.before)) &&
+			Number.isFinite(Number(o.after)),
+	);
+}
+
+/** A well-formed JSON line that is a lesson in every way except the R2 outcome field. */
+function isLegacyLesson(v: unknown): boolean {
+	if (!v || typeof v !== "object") return false;
+	const l = v as Partial<Lesson>;
+	return typeof l.id === "string" && l.id !== "" && typeof l.text === "string" && !isLesson(v);
 }
 
 function isStrategyCard(v: unknown): v is StrategyCard {
@@ -166,6 +189,39 @@ function isStrategyCard(v: unknown): v is StrategyCard {
 }
 
 /** Append lessons. Invalid entries are dropped rather than persisted. */
+/**
+ * Read the library **and report what was excluded**.
+ *
+ * R2 迁移（2026-09-18）：旧文件里是祈使句形状的条目。这里不重写磁盘
+ * （破坏性、且那是用户数据），而是读取时排除并**报出数量**——
+ * 静默过滤正是让一次比较开始说谎的方式（项目铁律）。
+ */
+export function readLessonsReport(dataDir: string): { lessons: Lesson[]; legacyDropped: number } {
+	const file = lessonsPath(dataDir);
+	if (!existsSync(file)) return { lessons: [], legacyDropped: 0 };
+	let raw: string;
+	try {
+		raw = readFileSync(file, "utf8");
+	} catch {
+		return { lessons: [], legacyDropped: 0 };
+	}
+	const valid: Lesson[] = [];
+	let legacyDropped = 0;
+	for (const line of raw.split("\n")) {
+		const t = line.trim();
+		if (!t) continue;
+		let parsed: unknown;
+		try {
+			parsed = JSON.parse(t);
+		} catch {
+			continue; // malformed line: not a legacy lesson, just noise
+		}
+		if (isLesson(parsed)) valid.push(parsed);
+		else if (isLegacyLesson(parsed)) legacyDropped += 1;
+	}
+	return { lessons: dedupeLessons(valid), legacyDropped };
+}
+
 export function appendLessons(dataDir: string, lessons: Lesson[]): number {
 	const valid = (Array.isArray(lessons) ? lessons : []).filter(isLesson);
 	if (valid.length === 0) return 0;

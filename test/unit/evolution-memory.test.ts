@@ -43,9 +43,9 @@ function lesson(over: Partial<Lesson> = {}): Lesson {
 	return {
 		id: lessonId(text),
 		text,
-		kind: "do",
+		outcome: { metric: "delivered", before: 0, after: 120 },
 		confidence: 0.6,
-		evidence: ["money +12000"],
+		evidence: ["delivered 120 after the second town was connected"],
 		sourceSessionId: "s1",
 		sourceSeed: 7,
 		createdAt: NOW - 1000,
@@ -136,11 +136,15 @@ describe("memory: loadMemory(开局读库)", () => {
 	});
 
 	it("注入内容是可辨认的'对过去的陈述'，不是祈使句", () => {
-		appendLessons(dir, [lesson({ text: "keep depots close" })]);
+		appendLessons(dir, [lesson({ text: "depots within 8 tiles of a station loaded faster" })]);
 		const lines = makeLessonProvider(loadMemory(dir, { now: NOW, inject: true }))();
-		expect(lines.join(" ")).toContain("keep depots close");
-		// RL harness：只能给"发生过什么"，不能给"该做什么"
-		expect(lines[0]).toMatch(/previously/i);
+		expect(lines.join(" ")).toContain("depots within 8 tiles of a station loaded faster");
+		// RL harness：只能给"发生过什么"，不能给"该做什么"。
+		// R2（2026-09-18）：格式从 "Previously an action like this paid off: …"
+		// 改为 "Recorded in an earlier game: … [<metric> before -> after]" ——
+		// 旧格式**替模型断言了因果**（paid off），而那条因果从未被验证过。
+		expect(lines[0]).toMatch(/recorded in an earlier game/i);
+		expect(lines[0]).not.toMatch(/paid off|should|must/i);
 		expect(lines[0]).not.toMatch(/^(do|avoid|don't)\b/i);
 	});
 
@@ -189,7 +193,12 @@ describe("reflection-run: runReflection(局终反思编排)", () => {
 
 	const GOOD = JSON.stringify({
 		lessons: [
-			{ text: "build near towns", kind: "do", evidence: ["money +12000"], confidence: 0.7 },
+			{
+				text: "the second route delivered 137 units in 300 game days",
+				outcome: { metric: "delivered", before: 0, after: 137 },
+				evidence: ["delivered 137 between 1950-01 and 1950-11"],
+				confidence: 0.7,
+			},
 		],
 		strategies: [
 			{ action: "build_bus_route", params: { distance: 20 }, value: 20000, evidence: ["money +20000"] },
@@ -248,7 +257,13 @@ describe("reflection-run: runReflection(局终反思编排)", () => {
 
 	it("没有证据的反思不落盘", async () => {
 		const r = await runReflection({
-			complete: completer(JSON.stringify({ lessons: [{ text: "be better", kind: "do" }] })),
+			complete: completer(
+				JSON.stringify({
+					lessons: [
+						{ text: "the route delivered 137 units", outcome: { metric: "delivered", before: 0, after: 137 } },
+					],
+				}),
+			),
 			dataDir: dir,
 			facts: FACTS,
 			now: NOW,
@@ -279,7 +294,15 @@ describe("reflection-run: runReflection(局终反思编排)", () => {
 		await runReflection({ complete: completer(GOOD), dataDir: dir, facts: FACTS, now: NOW });
 		await runReflection({
 			complete: completer(
-				JSON.stringify({ lessons: [{ text: "avoid long routes", kind: "dont", evidence: ["money -1"] }] }),
+				JSON.stringify({
+					lessons: [
+						{
+							text: "a 239-tile route was still under construction at the horizon",
+							outcome: { metric: "construction", before: 0, after: 1 },
+							evidence: ["road still building at the horizon"],
+						},
+					],
+				}),
 			),
 			dataDir: dir,
 			facts: { ...FACTS, sessionId: "s10" },
@@ -318,7 +341,7 @@ describe("memory: 注入到底有没有进到 prompt(接线证明)", () => {
 	// versions. So this asserts the whole chain end to end within the process:
 	// store -> loadMemory -> provider -> transformContext -> messages.
 	it("装载的 lesson 真的出现在送往模型的消息里", async () => {
-		appendLessons(dir, [lesson({ text: "keep depots close to towns" })]);
+		appendLessons(dir, [lesson({ text: "depots within 8 tiles of a station loaded faster" })]);
 		const mem = loadMemory(dir, { now: NOW, inject: true });
 		const transform = pruningTransformContext({
 			keepRecent: 5,
@@ -328,7 +351,7 @@ describe("memory: 注入到底有没有进到 prompt(接线证明)", () => {
 			{ role: "user", content: "do something" } as never,
 		]);
 		const text = JSON.stringify(out);
-		expect(text).toContain("keep depots close to towns");
+		expect(text).toContain("depots within 8 tiles of a station loaded faster");
 	});
 
 	it("策略卡也进入注入(不只是 lesson)", async () => {
@@ -351,5 +374,91 @@ describe("memory: 注入到底有没有进到 prompt(接线证明)", () => {
 		const transform = pruningTransformContext({ keepRecent: 40 });
 		const msgs = [{ role: "user", content: "hi" } as never];
 		expect(await transform(msgs)).toHaveLength(1);
+	});
+});
+
+/**
+ * R2 闭环：**经验可以被推翻**（2026-09-18）。
+ *
+ * `supersededBy` 从 Phase C 起就在类型里、`selectLessons` 也一直按它过滤，
+ * 但全项目没有一处给它赋值 —— 记忆只增不减，一条被后续游戏否证的观察会
+ * 永久注入。这条测试走完整条路：反思看到现库 → 模型给出 supersedes →
+ * 落盘时作废 → 注入端不再出现。
+ */
+describe("R2: 反思 → 落盘 的 supersede 闭环", () => {
+	/** 单次回复的 completer（局部的那个是别的 describe 的内部函数）。 */
+	const completer = (reply: string) => async () => reply;
+	it("第二局推翻第一局的观察：旧条被作废，且不再进入注入", async () => {
+		const dir = mkdtempSync(path.join(tmpdir(), "r2-sup-"));
+		// 第一局：记录一条观察
+		await runReflection({
+			complete: completer(
+				JSON.stringify({
+					lessons: [
+						{
+							text: "adding vehicles beyond 15 increased deliveries",
+							outcome: { metric: "delivered", before: 1088, after: 1200 },
+							evidence: ["delivered 1200 at 18 vehicles"],
+						},
+					],
+				}),
+			),
+			dataDir: dir,
+			facts: FACTS,
+			now: NOW,
+		});
+		const first = readLessons(dir);
+		expect(first).toHaveLength(1);
+		const victimId = first[0]!.id;
+
+		// 第二局：模型看到现库，并声明取代它
+		let seenPrompt = "";
+		const r = await runReflection({
+			complete: async (p) => {
+				seenPrompt = p.user;
+				return JSON.stringify({
+					lessons: [
+						{
+							text: "adding vehicles beyond 15 did not increase deliveries",
+							outcome: { metric: "delivered", before: 1088, after: 1088 },
+							evidence: ["delivered 1088 at 15 and at 21 vehicles"],
+							supersedes: [victimId],
+						},
+					],
+				});
+			},
+			dataDir: dir,
+			facts: { ...FACTS, sessionId: "s2" },
+			now: NOW + 1000,
+		});
+
+		// 反思提示里确实带上了现库（否则 supersedes 不可能产生）
+		expect(seenPrompt).toContain(victimId);
+		expect(r.lessonsSuperseded).toBe(1);
+
+		const after = readLessons(dir);
+		expect(after.find((l) => l.id === victimId)?.supersededBy).toBeTruthy();
+		// 注入端：被推翻的那条不再出现（selectLessons 的既有规则）
+		const injected = makeLessonProvider(loadMemory(dir, { now: NOW + 2000, inject: true }))();
+		expect(injected.join(" ")).not.toContain("adding vehicles beyond 15 increased deliveries");
+		expect(injected.join(" ")).toContain("did not increase");
+	});
+
+	it("模型给出的是建议句时，一条都不入库（内容级边界在产出处生效）", async () => {
+		const dir = mkdtempSync(path.join(tmpdir(), "r2-advice-"));
+		const r = await runReflection({
+			complete: completer(
+				JSON.stringify({
+					lessons: [
+						{ text: "Build a single bus route first", outcome: { metric: "delivered", before: 0, after: 137 }, evidence: ["e"] },
+					],
+				}),
+			),
+			dataDir: dir,
+			facts: FACTS,
+			now: NOW,
+		});
+		expect(r.lessonsSaved).toBe(0);
+		expect(readLessons(dir)).toHaveLength(0);
 	});
 });

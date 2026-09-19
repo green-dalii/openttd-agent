@@ -13,7 +13,7 @@
 
 import { formatForInjection, selectLessons, type Lesson } from "./lessons.js";
 import { formatStrategiesForInjection, selectStrategies, type StrategyCard } from "./strategies.js";
-import { readLessons, readStrategies } from "./store.js";
+import { readLessonsReport, readStrategies } from "./store.js";
 
 /** What this run will be told about previous games. */
 export interface LoadedMemory {
@@ -65,7 +65,17 @@ export function loadMemory(dataDir: string, opts: LoadMemoryOptions = {}): Loade
 	let lessons: Lesson[] = [];
 	let strategies: StrategyCard[] = [];
 	try {
-		lessons = selectLessons(readLessons(dataDir), { now, limit: opts.limit });
+		// R2：读取时报告被排除的旧形状条目（祈使句，没有实测读数）。
+		// 不重写磁盘，但**必须可见**——静默过滤会让"这次带了记忆"变成假的。
+		const lib = readLessonsReport(dataDir);
+		if (lib.legacyDropped > 0) {
+			// eslint-disable-next-line no-console
+			console.log(
+				`[memory] ignored ${lib.legacyDropped} legacy lesson(s): they are advice without a measured ` +
+					"reading, which R2 no longer counts as experience (SPEC §10.76)",
+			);
+		}
+		lessons = selectLessons(lib.lessons, { now, limit: opts.limit });
 		strategies = selectStrategies(readStrategies(dataDir), { limit: opts.strategyLimit });
 	} catch {
 		// A broken library must not stop a game from starting.

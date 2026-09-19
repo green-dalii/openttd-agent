@@ -11,7 +11,7 @@
  */
 
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
-import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
@@ -21,6 +21,7 @@ import {
 	compactStrategies,
 	lessonsPath,
 	readLessons,
+	readLessonsReport,
 	readStrategies,
 	setStrategyEnabled,
 	strategiesPath,
@@ -42,9 +43,9 @@ function lesson(over: Partial<Lesson> = {}): Lesson {
 	return {
 		id: lessonId(text),
 		text,
-		kind: "do",
+		outcome: { metric: "delivered", before: 0, after: 120 },
 		confidence: 0.6,
-		evidence: ["money +12000"],
+		evidence: ["delivered 120 after the second town was connected"],
 		sourceSessionId: "s1",
 		sourceSeed: 7,
 		createdAt: 1000,
@@ -234,5 +235,37 @@ describe("learning store: setStrategyEnabled(人工确认 guardrail)", () => {
 		const out = readStrategies(dir);
 		expect(out.find((c) => c.action === "a")!.enabled).toBe(true);
 		expect(out.find((c) => c.action === "b")!.enabled).toBe(false);
+	});
+});
+
+/**
+ * R2 迁移（2026-09-18）：磁盘上已有的库是 `kind:"do"|"dont"` 的**祈使句**。
+ *
+ * 它们没有实测读数，因此在契约上没有资格当"经验"。这里**不重写文件**
+ * （那是破坏性的），而是在读取时排除，并把排除数量**报出来**——
+ * 静默过滤正是让一次比较开始说谎的方式。
+ */
+describe("R2: 旧形状条目（无 outcome）被排除且计数可见", () => {
+	it("只有 id+text 的旧条目不再算作 lesson，并计入 legacyDropped", () => {
+		const dir = mkdtempSync(path.join(tmpdir(), "r2-legacy-"));
+		const file = lessonsPath(dir);
+		mkdirSync(path.join(dir, "evolution"), { recursive: true });
+		writeFileSync(
+			file,
+			[
+				JSON.stringify({ id: "old1", text: "Build a single bus route first", kind: "do", evidence: ["x"] }),
+				JSON.stringify({ id: "old2", text: "expand the fleet to around 16 vehicles", kind: "do", evidence: ["y"] }),
+				JSON.stringify({
+					id: "new1",
+					text: "the route delivered 137 units in 300 game days",
+					outcome: { metric: "delivered", before: 0, after: 137 },
+					evidence: ["delivered 137"],
+				}),
+			].join("\n") + "\n",
+			"utf8",
+		);
+		const report = readLessonsReport(dir);
+		expect(report.lessons.map((l) => l.id)).toEqual(["new1"]);
+		expect(report.legacyDropped).toBe(2);
 	});
 });
