@@ -169,6 +169,65 @@ GS `route_stats` **部分失效**（§10.66，17/17 局命中，单局丢 1–92
 
 ---
 
+## 🔴 R 系列：与 pi-agent-core 协同的"经验回路"改造（2026-09-18 定稿）
+
+> ADR 与现状审计见 `SPEC.md` §10.74（**唯一权威**，本节只写**做什么/怎么验收**）。
+> 目标链缺口见下面的「对齐检查」表（P1–P8）。R 系列 = 修缺口的实施顺序。
+
+### R1 执行顺序与成本旋钮（小，先做）
+
+| 任务 | 做法 | 验收 |
+|---|---|---|
+| 变更型工具顺序 | `build_bus_route`/`add_vehicles`/`set_pause` 声明 `executionMode:"sequential"`（或全局 `toolExecution:"sequential"`）| 单测断言三个工具都声明了 sequential；理由写入工具契约 |
+| 每决策工具预算（S3）| 在 `beforeToolCall` 里计数并 `{block, reason}`；正常 2–3 次/决策，实测有 193 次 | 单测：超过 N 次被拒且理由可见；真机：不再出现 >50 次/决策的局 |
+| provider 缓存 | `agent.sessionId = session.id` | 实测前后 tok/dec 与决策延迟（同 horizon 各 1 局，记录到 SPEC）|
+| deliberation 预算 | 用 `thinkingBudgets` 设 `low` 档；**先测再定**（同场景 1 局 vs 现行 `off`）| 记 SPEC：质量（deliveredRun）与成本（tok/dec）的权衡 |
+
+### R2 经验 = 被校验的记录（中）
+
+1. 反思改为**走同一个 Agent + 一个工具** `record_lesson`，参数用 TypeBox schema：
+   `{observation, evidence[], outcome{metric,before,after}, confidence, supersedes?: string[]}`。
+2. `execute()` 内做**内容级校验**：要求 `observation` 是**对已发生事实的陈述**
+   （拒绝祈使/建议措辞）、`evidence` 非空、`outcome` 必须是**实测指标**
+   （`delivered`/`deliveredPerDay`/`income`）；违规**抛错** → 库会把错误回给模型，
+   模型可改写（这替代了当前"只查包装前缀"的无效守卫，见 MEMORY D26）。
+3. `supersedes` 接线 `supersededBy`：反思输入带上现库（id + 文本），矛盾的经验可被作废。
+4. **迁移**：现有库（真机 25+ 条 `do/dont` 祈使句）一次性重新校验：可改写的改写、
+   不可的作废；迁移脚本放 `scripts/`，数量记入 SPEC。
+
+验收：真机跑 1 局 → 新库全部是观察式记录、`supersedes` 可用、旧库无 `kind:do/dont` 残留。
+
+### R3 自我评估（小）
+
+用**声明合并**新增自定义消息类型（如 `prior_results`），`convertToLlm` 渲染为紧凑事实块：
+最近 N 局的 `deliveredRun` / 每游戏日 / 车队 / 收入 / 窗口；内容**只有实测数字**（§10.22）。
+验收：单测断言渲染形状与"缺读数不印 0"；真机确认它出现在提示里（日志一行）。
+
+### R4 记忆检索工具 `recall`（中）
+
+`recall({ query?, route?, limit? })` → 返回历史**观察记录**（含 id、证据、结果数字）；
+上下文里只保留**一行存在性事实**（"N 条记录，来自 M 局；用 recall 读取"）。
+验收：单测契约；真机确认 `recall` 被调用的局里，决策上下文不再塞满全部经验；
+**新增 `recallCalls` 指标**（第一次能回答"记忆有没有被用过"）。
+
+### R5 学习曲线实验（中）——SPEC §0 目标②的直接检验
+
+`scripts/run-experiment.ts --mode sequential --sessions N`：**同一 dataDir、同一 seed、
+同一预建场景、固定 horizon**，记忆累积 N 局；分析 `deliveredRun`（及每游戏日）
+随**局序号**的趋势：Spearman ρ + 线性斜率 + bootstrap CI，并列报记忆库条数曲线。
+
+**预先登记**：N 上限 10；斜率 CI 不含 0 即停并报结论；否则报"该设计下不可判定"，
+并说明 CV（实测 0.57–0.79）与 +40% 效应所需样本（≈36/臂，与 A/B 对照）。
+**不做**：在饱和区（>15 辆）比较；混场景；把未就绪局算进趋势。
+
+### R6 目标一致 + 动作面（大，后置）
+
+- P8：把**评估标准**作为事实写进提示词（"本项目的运行按固定 horizon 内的每游戏日运货量计分"）
+  **或**改经济参数让利润可达；提示词与 verdict 必须同源。
+- P7：动作面扩展（卖车/换车/多线路/选货/融资）——在 R2–R5 证明经验回路有效之后再做。
+
+---
+
 ## 🔴 对齐检查：目标 vs 现状（2026-09-18，SPEC §0/§5/§10.22）
 
 **问**：现在这套 harness，接上 agent 后能不能"自主智能玩 + 形成持久经验增强表现"？
@@ -218,17 +277,13 @@ GS `route_stats` **部分失效**（§10.66，17/17 局命中，单局丢 1–92
 ### 1. 有实验正在跑吗？
 
 ```bash
-pgrep -fl "run-experiment"                                   # 有无 live 实验
-grep -E "^###" /tmp/cal2-runner.log | tail -3                 # 进度（每局一行 start/done）
+pgrep -fl "run-experiment|cli/run.ts"      # 无输出 = 没有 live 实验（2026-09-18 收工时如此）
 ```
 
-**本轮（2026-09-18T07:57Z 启动）**：`/tmp/cal2`，`--n 3 --demo-seconds 900 --seed 7`
-（3 局对照 + 3 局处理，≈1.7h），目的是**用修好的仪器重测 CV**：若 CV 从 ≈0.5 明显下降，
-则 §10.65/§10.66 的两个仪器缺陷就是方差主因，再按 MDE 反推 n 跑正式 A/B。
-
-```bash
-sed -n '/=== verdict/,$p' /tmp/cal2-runner.log    # 判定（含 channel health 行 + 来源声明）
-```
+**最近一轮已结束**：`/tmp/pbcal`（预建场景标定，3/臂，horizon 300）——
+**仪器全绿**（horizon 300→300/301、`gsErrors=0`、全部 `scenarioReason=ready`），
+但 **CV = 0.57 / 0.79**（未下降）→ 方差在 **agent 自己的管理决策**里，
++40% 效应需 **~36/臂 ≈ 19 小时**，故**先不做 A/B**，改走 R 系列 + R5 学习曲线。
 
 > ⚠️ **runner 日志时间戳是 UTC**（`…T07:57Z` = 本地 15:57）。判断存活用 `ps` 的 ELAPSED。
 
@@ -269,9 +324,18 @@ block = 5 局/臂。每个 block 看一次：**均值差的自助法 95% CI（�
 
 ### 5. 下一步（按序，除非新数据改变它）
 
-1. 读上面第 1 步的 verdict → 按第 2 步的规则决定停止或续跑；**结论无论正负都写进 SPEC**。
-2. 若闭环成立 → 回到 NEXT-3/4/5（地图大小旋钮 / GS-only 架构 / M4 打磨）。
-3. 穿插做 NEXT-6 卫生项（见下）。
+**现在的任务不是"A/B 记忆有没有用"，而是把经验回路修成能学**（对齐检查的 P2–P5）：
+
+1. **R1**（小，先做）：变更型工具 `executionMode:"sequential"`（否则台账顺序 ≠ 应用顺序）、
+   `beforeToolCall` 加每决策工具预算、`agent.sessionId` 开 provider 缓存、测 deliberation 预算。
+2. **R2**（中）：反思改为**用工具写库**（schema 校验 + **内容级**守卫 + `supersedes`），
+   并迁移现有 25+ 条祈使句经验。**这是最重要的一步**——现在注入的其实是"策略"。
+3. **R3/R4**（小/中）：自我评估事实（类型化消息）+ `recall` 检索工具（顺带产出
+   `recallCalls`，第一次能测"记忆有没有被用过"）。
+4. **R5**（中）：`--mode sequential` 学习曲线实验（预先登记见 R5 节）——SPEC §0 目标②的
+   直接检验，比 A/B 省一半机器时间。
+5. **R6**（大，后置）：目标与判据一致 + 动作面扩展。
+6. 穿插：NEXT-3/4/5（地图大小 / GS-only / M4 打磨）、NEXT-6 卫生项。
 
 ---
 
