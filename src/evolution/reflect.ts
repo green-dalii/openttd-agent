@@ -12,8 +12,6 @@
  * 所以宁可整条丢掉,不可放行。
  */
 
-import { dedupeLessons, fromReflection, type Lesson, type RawLesson } from "./lessons.js";
-import type { StrategySample } from "./strategies.js";
 
 /**
  * 反思输入里"已记录了什么"的容量上限。
@@ -130,10 +128,22 @@ export function buildReflectionPrompt(facts: ReflectionFacts): ReflectionPrompt 
 		"   library), name the ids it replaces in `supersedes`. A later game",
 		"   disproving an earlier record is normal - say so instead of staying silent.",
 		"",
-		"Reply with JSON only, no prose:",
-		'{"lessons":[{"text":"...","outcome":{"metric":"delivered|deliveredPerDay|income|money|vehicles|stations|construction",',
-		' "before":<number>,"after":<number>},"evidence":["..."],"confidence":0.0-1.0,"supersedes":["<id>"]}],',
-		' "strategies":[{"action":"<tool name>","params":{},"value":<money delta>,"evidence":["..."]}]}',
+		"",
+		// 协议由**工具**定义（R2b）。这里只说明怎么用，不再贴 JSON schema：
+		// 参数由工具 schema 校验，写错了会被拒并告知理由。
+		// ⚠️ 提示词与运行时是**同一份契约的两半**：改一边必须改另一边，
+		// 且由 `reflect-tools.test` / `evolution-reflect.test.ts` 的交叉守卫看住
+		// （真机事故 2026-09-19：运行时已改成工具，提示词还在要求"Reply with JSON"，
+		// 模型于是老老实实回 JSON、一个工具都没调 → "0 lessons kept" 看起来像
+		// "这局没什么可学的"，实际是契约两半不一致）。
+		"Record what you observed by CALLING THE TOOLS:",
+		"- record_lesson: call it once per observation (it takes text, outcome, evidence,",
+		"  optional confidence and optional supersedes).",
+		"- record_strategy: call it for a parameterised pattern this game provides a",
+		"  measured sample for (action, params, value, evidence).",
+		"Call them as many times as you have entries. A rejected call tells you the",
+		"reason - fix it and call again. If this game recorded nothing worth keeping,",
+		"call nothing at all (that is a valid answer).",
 	].join("\n");
 
 	const user = [
@@ -175,157 +185,22 @@ export function buildReflectionPrompt(facts: ReflectionFacts): ReflectionPrompt 
 	return { system, user };
 }
 
-export interface ParsedReflection {
-	lessons: RawLesson[];
-	strategies: Record<string, unknown>[];
-}
-
-function asObjectArray(v: unknown): Record<string, unknown>[] {
-	if (!Array.isArray(v)) return [];
-	return v.filter((x): x is Record<string, unknown> => Boolean(x) && typeof x === "object" && !Array.isArray(x));
-}
-
-/** Pull the first JSON object out of a model response that may wrap it in prose or fences. */
-function extractJsonObject(text: string): unknown {
-	const trimmed = text.trim();
-	try {
-		return JSON.parse(trimmed);
-	} catch {
-		// fall through to brace scanning
-	}
-	const start = trimmed.indexOf("{");
-	if (start === -1) return null;
-	// Scan for the balanced closing brace, ignoring braces inside strings.
-	let depth = 0;
-	let inString = false;
-	let escaped = false;
-	for (let i = start; i < trimmed.length; i++) {
-		const ch = trimmed[i]!;
-		if (inString) {
-			if (escaped) escaped = false;
-			else if (ch === "\\") escaped = true;
-			else if (ch === '"') inString = false;
-			continue;
-		}
-		if (ch === '"') inString = true;
-		else if (ch === "{") depth++;
-		else if (ch === "}") {
-			depth--;
-			if (depth === 0) {
-				try {
-					return JSON.parse(trimmed.slice(start, i + 1));
-				} catch {
-					return null;
-				}
-			}
-		}
-	}
-	return null;
-}
-
 /**
- * Parse a reflection response. Never throws: a malformed response yields empty
- * arrays, because a bad reflection must not take down the run.
- */
-export function parseReflection(text: unknown): ParsedReflection {
-	if (typeof text !== "string" || !text.trim()) return { lessons: [], strategies: [] };
-	const obj = extractJsonObject(text);
-	if (!obj || typeof obj !== "object" || Array.isArray(obj)) return { lessons: [], strategies: [] };
-	const o = obj as Record<string, unknown>;
-	return {
-		lessons: asObjectArray(o.lessons) as RawLesson[],
-		strategies: asObjectArray(o.strategies),
-	};
-}
-
-export interface LessonContext {
-	sessionId: string;
-	seed: number;
-	now: number;
-}
-
-/**
- * Parse + validate + dedupe lessons in one step.
+ * R2b（2026-09-18）：JSON 解析路径已删除。
  *
- * Rejections here are intentional: no evidence, or a speculative sentence. The
- * prompt asks the model not to speculate, and this enforces it — an instruction
- * the model can ignore is not a guardrail.
+ * 反思现在走 pi-agent-core 的 Agent + `record_lesson`/`record_strategy` 工具
+ * （见 reflect-tools.ts）：参数由 schema 校验，拒绝会作为工具错误**回到模型**。
+ * 保留"输出 JSON 再解析"会造成两条并存的契约（提示词一套、工具一套），
+ * 而本项目已为"两个地方描述同一个事实"付过代价（MEMORY D19/D22）。
+ * 校验的唯一实现在 `lessons.ts:validateLesson` 与 `reflect-tools.ts`。
  */
-export function reflectToLessons(text: unknown, ctx: LessonContext): Lesson[] {
-	const parsed = parseReflection(text);
-	const kept: Lesson[] = [];
-	for (const raw of parsed.lessons) {
-		if (isSpeculative((raw as { text?: unknown }).text)) continue;
-		const lesson = fromReflection(raw, ctx);
-		if (lesson) kept.push(lesson);
-	}
-	return dedupeLessons(kept);
+
+/** Stage checkpoint + acted-tool facts fed into the reflection prompt as evidence. */
+interface EvidenceInput {
+	stages?: { gameDate?: unknown; turn?: unknown; note?: unknown }[];
+	actions?: { tool?: unknown; ok?: unknown; summary?: unknown }[];
 }
 
-export interface StrategyContext {
-	sessionId: string;
-	now: number;
-}
-
-function cleanEvidenceList(v: unknown): string[] {
-	if (!Array.isArray(v)) return [];
-	const out = new Set<string>();
-	for (const item of v) {
-		if (typeof item !== "string") continue;
-		const t = item.replace(/\s+/g, " ").trim();
-		if (t) out.add(t);
-	}
-	return [...out];
-}
-
-/**
- * Coerce a model-supplied number strictly.
- *
- * `Number(null)` is 0 and `Number("")` is 0, which would turn a MISSING value into
- * a confident "no payoff" — and then the promotion gate would treat it as a real
- * sample. Absent/junk must be rejected, not zeroed (the same trap as `fmtInt(null)`).
- */
-function toFiniteNumber(v: unknown): number | null {
-	if (v === null || v === undefined || typeof v === "boolean") return null;
-	if (typeof v === "string" && !v.trim()) return null;
-	const n = Number(v);
-	return Number.isFinite(n) ? n : null;
-}
-
-/** Validate strategy candidates into samples the promotion gate can consume. */
-export function reflectToStrategies(text: unknown, ctx: StrategyContext): StrategySample[] {
-	const parsed = parseReflection(text);
-	const out: StrategySample[] = [];
-	for (const raw of parsed.strategies) {
-		const action = typeof raw.action === "string" ? raw.action.trim() : "";
-		if (!action) continue;
-		const value = toFiniteNumber(raw.value);
-		if (value === null) continue;
-		const evidence = cleanEvidenceList(raw.evidence);
-		if (evidence.length === 0) continue;
-		const params =
-			raw.params && typeof raw.params === "object" && !Array.isArray(raw.params)
-				? (raw.params as Record<string, number | string>)
-				: {};
-		out.push({ action, params, value, evidence, sessionId: ctx.sessionId, createdAt: ctx.now });
-	}
-	return out;
-}
-
-/** Minimal shapes so this stays decoupled from agent/runtime types. */
-export interface EvidenceInput {
-	stages?: Array<{ gameDate?: unknown; turn?: unknown; note?: unknown }>;
-	actions?: Array<{ tool?: unknown; ok?: unknown; summary?: unknown }>;
-}
-
-/**
- * Reduce a game's recorded stage summaries and action results to factual lines.
- *
- * This is the *only* evidence reflection is allowed to reason from (SPEC §5.3),
- * so it stays strictly descriptive: what happened, when, and whether it worked.
- * No interpretation is added here — interpretation is exactly what we refuse to
- * let the model invent, and we must not smuggle it in through input either.
- */
 export function buildReflectionEvidence(input: EvidenceInput): string[] {
 	const out: string[] = [];
 	for (const s of Array.isArray(input?.stages) ? input.stages : []) {

@@ -2980,3 +2980,61 @@ Recorded in an earlier game: <text> [delivered 420 -> 1088, seed 7]
 拒绝理由作为工具错误回到模型，让它改写成观察句）。当前反思仍是"文本补全 + JSON 解析"，
 守卫是**事后**生效（拒收但不告诉模型），因此**模型没有机会自我纠正**。
 这一半属于 R2 的剩余工作。
+
+## 10.77 R2b 实施结果：反思改走 Agent + 记录工具（2026-09-18/19）
+
+### 1. 机制
+
+反思不再是"文本补全 + JSON 解析"，而是**同一个 pi-agent-core `Agent` + 两个工具**：
+
+| 工具 | 参数（schema 校验） | 拒绝条件（`execute` 抛错） |
+|---|---|---|
+| `record_lesson` | `text, outcome{metric,before,after}, evidence[], confidence?, supersedes?` | 建议/祈使句、缺 `outcome`、缺证据、缺来源 |
+| `record_strategy` | `action, params?, value, evidence[]` | 无 action、`value` 非有限数、缺证据 |
+
+抛错会把**理由作为工具结果交回模型**（pi-agent-core 的契约），模型下一轮可以改写重试
+——这是解析 JSON 做不到的（旧路上拒绝是静默的）。校验的唯一实现在
+`lessons.ts:validateLesson`（与工具共用），旧的 `parseReflection` /
+`reflectToLessons` / `reflectToStrategies` **已删除**（两条并存的契约是漂移源）。
+
+provider 失败在库里是**状态**而非异常：要读 `agent.state.errorMessage`，
+否则一次网络故障会伪装成"这局没什么可记录的"。
+
+### 2. 真机事故：提示词与运行时是**同一份契约的两半**
+
+改成工具后第一次真机跑（`/tmp/r2smoke`，2 局）：**两局都 `0 lesson(s) kept`
+且 0 次拒绝**。根因不在模型：**提示词仍在要求 `Reply with JSON only`**，
+模型于是老实回 JSON、一个工具都不调。而 `lessonsSaved: 0` 在日志里与
+"这局确实没什么可学"**完全一样**——静默失败（与 MEMORY D26/D28 同类）。
+
+**修复**（三件，缺一不可）：
+1. 提示词改为**说明工具用法**（并去掉 JSON schema）；
+2. **契约交叉守卫**测试：提示词里点名的每个 `record_*` 工具必须真实存在、
+   不得再出现 "reply with JSON"、必须说明"被拒会给出理由"；
+3. **可观测性**：报告里新增 `toolCalls`，当模型**一次都没调用记录工具**时打印
+   `reflection WARNING: … this is NOT the same as 'nothing to record'`。
+
+### 3. 修复后的真机复验（`/tmp/r2b2`，1 臂 1 局）
+
+| 指标 | control | treatment |
+|---|---|---|
+| 落盘观察 | **2 条**（各带实测读数） | 0 |
+| 注入 | — | `lessonsInjected: 2`, `routeFactsInjected: 2` |
+| 反思工具调用 | >0（无警告） | **0（警告触发）** |
+| `gsErrors` / `toolBudgetBlocks` | 0 / 0 | 0 / 0 |
+
+落盘的观察（对比旧的祈使句 "Build a single bus route first"）：
+
+```
+- Route job 102 (towns 10->0) was ordered at decision 1 but no completion was recorded before …
+  outcome {metric:"construction", before:0, after:1}
+- Two routes were ordered across two decisions in 32 game days, leaving one route (job 102) …
+  outcome {metric:"construction", before:0, after:2}
+```
+
+### 4. 未决（不得声称）
+
+同一配置下 **1/2 局的模型一次都没调用记录工具**（警告已如实打出）。
+成因未定（模型选择？提示词强度？），因此**反思的产出率本身是一个待测对象**，
+不是"已解决"。可能的下一步：把"0 调用"视为反思失败并重试一次，或在提示词里
+要求"至少尝试一次"。

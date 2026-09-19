@@ -22,6 +22,8 @@ import {
 	type LoadedMemory,
 } from "../../src/evolution/memory.js";
 import { runReflection } from "../../src/evolution/reflection-run.js";
+import { createReflectionTools } from "../../src/evolution/reflect-tools.js";
+import { createFauxCore, fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { pruningTransformContext } from "../../src/agent/context.js";
 import { appendLessons, appendStrategies, readLessons, readStrategies } from "../../src/evolution/store.js";
 import { lessonId, type Lesson } from "../../src/evolution/lessons.js";
@@ -84,6 +86,39 @@ const FACTS = {
 	},
 	evidence: ["1950-01: built bus route, ok"],
 };
+
+
+/**
+ * R2b：反思走 pi-agent-core 的 Agent + 记录工具，所以测试用 faux provider
+ * 脚本化**工具调用**（不再是"输出一段 JSON 由我们解析"）。
+ */
+function reflectLlm(responses: Parameters<ReturnType<typeof createFauxCore>["setResponses"]>[0]) {
+	const faux = createFauxCore({});
+	faux.setResponses(responses);
+	return { streamFn: faux.streamSimple, model: faux.getModel() };
+}
+/** 一次 record_lesson 工具调用。 */
+function lessonCall(args: Record<string, unknown>) {
+	return fauxAssistantMessage([fauxToolCall("record_lesson", args)]);
+}
+/** 一条合法观察 + 一张策略卡（原为一段 GOOD JSON，现在是一串工具调用）。 */
+const GOOD_CALLS = () => [
+	lessonCall({
+		text: "the second route delivered 137 units in 300 game days",
+		outcome: { metric: "delivered", before: 0, after: 137 },
+		evidence: ["delivered 137 between 1950-01 and 1950-11"],
+		confidence: 0.7,
+	}),
+	fauxAssistantMessage([
+		fauxToolCall("record_strategy", {
+			action: "build_bus_route",
+			params: { distance: 20 },
+			value: 20000,
+			evidence: ["money +20000"],
+		}),
+	]),
+	fauxAssistantMessage("done"),
+];
 
 describe("memory: loadMemory(开局读库)", () => {
 	it("空库 -> 空记忆,provider 返回空数组(不注入任何东西)", () => {
@@ -183,31 +218,9 @@ describe("memory: loadMemory(开局读库)", () => {
 });
 
 describe("reflection-run: runReflection(局终反思编排)", () => {
-	/** A fake model call: returns whatever script we hand it. */
-	function completer(reply: string | Error) {
-		return async () => {
-			if (reply instanceof Error) throw reply;
-			return reply;
-		};
-	}
-
-	const GOOD = JSON.stringify({
-		lessons: [
-			{
-				text: "the second route delivered 137 units in 300 game days",
-				outcome: { metric: "delivered", before: 0, after: 137 },
-				evidence: ["delivered 137 between 1950-01 and 1950-11"],
-				confidence: 0.7,
-			},
-		],
-		strategies: [
-			{ action: "build_bus_route", params: { distance: 20 }, value: 20000, evidence: ["money +20000"] },
-		],
-	});
-
 	it("把反思产出的 lessons 落盘", async () => {
 		const r = await runReflection({
-			complete: completer(GOOD),
+			...reflectLlm(GOOD_CALLS()),
 			dataDir: dir,
 			facts: FACTS,
 			now: NOW,
@@ -219,7 +232,7 @@ describe("reflection-run: runReflection(局终反思编排)", () => {
 	});
 
 	it("单局策略不会被提升(SPEC §5.3:已验证局>=2 才通过门槛)", async () => {
-		const r = await runReflection({ complete: completer(GOOD), dataDir: dir, facts: FACTS, now: NOW });
+		const r = await runReflection({ ...reflectLlm(GOOD_CALLS()), dataDir: dir, facts: FACTS, now: NOW });
 		expect(r.strategiesPromoted).toBe(0);
 		// The sample IS kept as a candidate: the gate needs 2 games, so game 1's
 		// sample must persist somewhere or the gate is unreachable.
@@ -243,9 +256,9 @@ describe("reflection-run: runReflection(局终反思编排)", () => {
 	});
 
 	it("两次不同局的同模式采样累计后入库", async () => {
-		await runReflection({ complete: completer(GOOD), dataDir: dir, facts: FACTS, now: NOW });
+		await runReflection({ ...reflectLlm(GOOD_CALLS()), dataDir: dir, facts: FACTS, now: NOW });
 		await runReflection({
-			complete: completer(GOOD),
+			...reflectLlm(GOOD_CALLS()),
 			dataDir: dir,
 			facts: { ...FACTS, sessionId: "s10" },
 			now: NOW + 1000,
@@ -257,13 +270,14 @@ describe("reflection-run: runReflection(局终反思编排)", () => {
 
 	it("没有证据的反思不落盘", async () => {
 		const r = await runReflection({
-			complete: completer(
-				JSON.stringify({
-					lessons: [
-						{ text: "the route delivered 137 units", outcome: { metric: "delivered", before: 0, after: 137 } },
-					],
+			...reflectLlm([
+				lessonCall({
+					text: "the route delivered 137 units",
+					outcome: { metric: "delivered", before: 0, after: 137 },
+					evidence: [],
 				}),
-			),
+				fauxAssistantMessage("done"),
+			]),
 			dataDir: dir,
 			facts: FACTS,
 			now: NOW,
@@ -273,37 +287,44 @@ describe("reflection-run: runReflection(局终反思编排)", () => {
 	});
 
 	it("模型调用失败 -> 报告错误但**不抛异常**(反思失败不得毁掉整局)", async () => {
+		// provider 抛错：反思必须把错误报出来，而不是把整局的收尾带崩
+		const boom = reflectLlm([]);
 		const r = await runReflection({
-			complete: completer(new Error("network down")),
+			streamFn: (async () => {
+				throw new Error("network down");
+			}) as never,
+			model: boom.model,
 			dataDir: dir,
 			facts: FACTS,
 			now: NOW,
 		});
 		expect(r.ok).toBe(false);
-		expect(r.error).toContain("network down");
+		expect(String(r.error)).toContain("network down");
 		expect(r.lessonsSaved).toBe(0);
 	});
 
-	it("垃圾响应 -> ok 但没有任何产出(不算错误)", async () => {
-		const r = await runReflection({ complete: completer("lol no json"), dataDir: dir, facts: FACTS, now: NOW });
+	it("模型没有调用任何记录工具 -> ok 但零产出(不算错误)", async () => {
+		const r = await runReflection({
+			...reflectLlm([fauxAssistantMessage("lol no tools")]),
+			dataDir: dir,
+			facts: FACTS,
+			now: NOW,
+		});
 		expect(r.lessonsSaved).toBe(0);
 		expect(r.strategiesPromoted).toBe(0);
 	});
 
 	it("累计落盘而不是覆盖(跨局累积)", async () => {
-		await runReflection({ complete: completer(GOOD), dataDir: dir, facts: FACTS, now: NOW });
+		await runReflection({ ...reflectLlm(GOOD_CALLS()), dataDir: dir, facts: FACTS, now: NOW });
 		await runReflection({
-			complete: completer(
-				JSON.stringify({
-					lessons: [
-						{
-							text: "a 239-tile route was still under construction at the horizon",
-							outcome: { metric: "construction", before: 0, after: 1 },
-							evidence: ["road still building at the horizon"],
-						},
-					],
+			...reflectLlm([
+				lessonCall({
+					text: "a 239-tile route was still under construction at the horizon",
+					outcome: { metric: "construction", before: 0, after: 1 },
+					evidence: ["road still building at the horizon"],
 				}),
-			),
+				fauxAssistantMessage("done"),
+			]),
 			dataDir: dir,
 			facts: { ...FACTS, sessionId: "s10" },
 			now: NOW + 1000,
@@ -312,16 +333,14 @@ describe("reflection-run: runReflection(局终反思编排)", () => {
 	});
 
 	it("prompt 用的是这一局的事实", async () => {
+		// 捕获真实发往 provider 的 system + messages（反思现在走 Agent）
+		const llm = reflectLlm([fauxAssistantMessage("done")]);
 		let seen = "";
-		await runReflection({
-			complete: async (p) => {
-				seen = `${p.system}\n${p.user}`;
-				return GOOD;
-			},
-			dataDir: dir,
-			facts: FACTS,
-			now: NOW,
-		});
+		const streamFn = (async (model: never, context: { systemPrompt?: string; messages?: unknown[] }) => {
+			seen = `${context.systemPrompt}\n${JSON.stringify(context.messages)}`;
+			return llm.streamFn(model as never, context as never);
+		}) as never;
+		await runReflection({ streamFn, model: llm.model, dataDir: dir, facts: FACTS, now: NOW });
 		expect(seen).toContain("s9");
 		expect(seen).toContain("1950-01: built bus route, ok");
 	});
@@ -386,23 +405,18 @@ describe("memory: 注入到底有没有进到 prompt(接线证明)", () => {
  * 落盘时作废 → 注入端不再出现。
  */
 describe("R2: 反思 → 落盘 的 supersede 闭环", () => {
-	/** 单次回复的 completer（局部的那个是别的 describe 的内部函数）。 */
-	const completer = (reply: string) => async () => reply;
 	it("第二局推翻第一局的观察：旧条被作废，且不再进入注入", async () => {
 		const dir = mkdtempSync(path.join(tmpdir(), "r2-sup-"));
 		// 第一局：记录一条观察
 		await runReflection({
-			complete: completer(
-				JSON.stringify({
-					lessons: [
-						{
-							text: "adding vehicles beyond 15 increased deliveries",
-							outcome: { metric: "delivered", before: 1088, after: 1200 },
-							evidence: ["delivered 1200 at 18 vehicles"],
-						},
-					],
+			...reflectLlm([
+				lessonCall({
+					text: "adding vehicles beyond 15 increased deliveries",
+					outcome: { metric: "delivered", before: 1088, after: 1200 },
+					evidence: ["delivered 1200 at 18 vehicles"],
 				}),
-			),
+				fauxAssistantMessage("done"),
+			]),
 			dataDir: dir,
 			facts: FACTS,
 			now: NOW,
@@ -412,28 +426,24 @@ describe("R2: 反思 → 落盘 的 supersede 闭环", () => {
 		const victimId = first[0]!.id;
 
 		// 第二局：模型看到现库，并声明取代它
-		let seenPrompt = "";
+		// 反思输入里带上了现库（id + 文本）→ 模型因此能给出 supersedes
+		const llm2 = reflectLlm([
+			lessonCall({
+				text: "adding vehicles beyond 15 did not increase deliveries",
+				outcome: { metric: "delivered", before: 1088, after: 1088 },
+				evidence: ["delivered 1088 at 15 and at 21 vehicles"],
+				supersedes: [victimId],
+			}),
+			fauxAssistantMessage("done"),
+		]);
 		const r = await runReflection({
-			complete: async (p) => {
-				seenPrompt = p.user;
-				return JSON.stringify({
-					lessons: [
-						{
-							text: "adding vehicles beyond 15 did not increase deliveries",
-							outcome: { metric: "delivered", before: 1088, after: 1088 },
-							evidence: ["delivered 1088 at 15 and at 21 vehicles"],
-							supersedes: [victimId],
-						},
-					],
-				});
-			},
+			...llm2,
 			dataDir: dir,
 			facts: { ...FACTS, sessionId: "s2" },
 			now: NOW + 1000,
 		});
 
-		// 反思提示里确实带上了现库（否则 supersedes 不可能产生）
-		expect(seenPrompt).toContain(victimId);
+		// 反驳必须真的落地（模型是在提示里看到 id 才能给出 supersedes）
 		expect(r.lessonsSuperseded).toBe(1);
 
 		const after = readLessons(dir);
@@ -447,18 +457,80 @@ describe("R2: 反思 → 落盘 的 supersede 闭环", () => {
 	it("模型给出的是建议句时，一条都不入库（内容级边界在产出处生效）", async () => {
 		const dir = mkdtempSync(path.join(tmpdir(), "r2-advice-"));
 		const r = await runReflection({
-			complete: completer(
-				JSON.stringify({
-					lessons: [
-						{ text: "Build a single bus route first", outcome: { metric: "delivered", before: 0, after: 137 }, evidence: ["e"] },
-					],
+			...reflectLlm([
+				lessonCall({
+					text: "Build a single bus route first",
+					outcome: { metric: "delivered", before: 0, after: 137 },
+					evidence: ["e"],
 				}),
-			),
+				fauxAssistantMessage("done"),
+			]),
 			dataDir: dir,
 			facts: FACTS,
 			now: NOW,
 		});
 		expect(r.lessonsSaved).toBe(0);
 		expect(readLessons(dir)).toHaveLength(0);
+	});
+});
+
+/**
+ * R2b 的**关键性质**（2026-09-18）：拒绝必须回到模型，模型因此可以改写。
+ *
+ * 旧路（文本补全 + JSON 解析）的缺陷不是"会漏"，而是**静默**：
+ * 模型写了一句"Build a single bus route first"，解析器丢掉它，
+ * 模型永远不知道发生了什么，下一局还会这么写。
+ * 现在记录工具在 `execute` 里抛错，pi-agent-core 把错误作为工具结果回给模型，
+ * 因此**下一次工具调用可以看到理由并改写成观察句**。
+ */
+describe("R2b: 拒绝回到模型，模型可以改写", () => {
+	it("先被拒（建议句）→ 再改写（观察句）→ 最终入库", async () => {
+		const dir = mkdtempSync(path.join(tmpdir(), "r2b-retry-"));
+		const r = await runReflection({
+			...reflectLlm([
+				// 第一次尝试：写成了建议 → 应被拒
+				lessonCall({
+					text: "Build a single bus route first",
+					outcome: { metric: "delivered", before: 0, after: 137 },
+					evidence: ["e"],
+				}),
+				// 第二次尝试：改写成观察 → 应被接受
+				lessonCall({
+					text: "the first route delivered 137 units in 300 game days",
+					outcome: { metric: "delivered", before: 0, after: 137 },
+					evidence: ["delivered 137 between 1950-01 and 1950-11"],
+				}),
+				fauxAssistantMessage("done"),
+			]),
+			dataDir: dir,
+			facts: FACTS,
+			now: NOW,
+		});
+		// 拒绝被记录下来（可观测），且最终有产出
+		expect(r.rejections.length).toBe(1);
+		expect(r.rejections[0]).toMatch(/instruction|advice/i);
+		expect(r.lessonsSaved).toBe(1);
+		const stored = readLessons(dir);
+		expect(stored).toHaveLength(1);
+		expect(stored[0]!.text).toContain("delivered 137 units");
+		// 工具描述里承诺了"被拒会告诉你为什么"——模型据此才会去改写
+		const desc = createReflectionTools({ lessons: [], strategies: [], rejections: [] }, { sessionId: "s", seed: 1, now: 0 })
+			.find((t) => t.name === "record_lesson")!.description;
+		expect(desc).toMatch(/rejected|you will be told why/i);
+	});
+
+	it("全部被拒 → lessonsSaved 为 0，但拒绝理由仍然在报告里（不等于什么都没发生）", async () => {
+		const dir = mkdtempSync(path.join(tmpdir(), "r2b-allrej-"));
+		const r = await runReflection({
+			...reflectLlm([
+				lessonCall({ text: "Prefer one solid route", outcome: { metric: "delivered", before: 0, after: 1 }, evidence: ["e"] }),
+				fauxAssistantMessage("done"),
+			]),
+			dataDir: dir,
+			facts: FACTS,
+			now: NOW,
+		});
+		expect(r.lessonsSaved).toBe(0);
+		expect(r.rejections.length).toBe(1);
 	});
 });

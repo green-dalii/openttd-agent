@@ -17,10 +17,8 @@ import {
 	buildReflectionEvidence,
 	buildReflectionPrompt,
 	isSpeculative,
-	parseReflection,
-	reflectToLessons,
-	reflectToStrategies,
 } from "../../src/evolution/reflect.js";
+import { createReflectionTools } from "../../src/evolution/reflect-tools.js";
 
 const FACTS = {
 	sessionId: "s1",
@@ -66,9 +64,10 @@ describe("reflect: buildReflectionPrompt", () => {
 		expect(p.user).toContain("7");
 	});
 
-	it("明确要求 JSON 输出(否则解析层只能靠猜)", () => {
+	it("要求模型**调用记录工具**（R2b：不再有 JSON 解析层）", () => {
 		const p = buildReflectionPrompt(FACTS);
-		expect(`${p.system}\n${p.user}`).toMatch(/json/i);
+		expect(p.system).toMatch(/record_lesson/);
+		expect(p.system).not.toMatch(/json/i);
 	});
 
 	it("说明 schema:lessons 需要 text/outcome/evidence（R2：读数取代 do/dont）", () => {
@@ -147,163 +146,96 @@ describe("reflect: isSpeculative(臆测检测)", () => {
 	});
 });
 
-describe("reflect: parseReflection(响应解析)", () => {
-	const good = {
-		lessons: [
-			{ text: "the second town connection delivered 137 units", outcome: { metric: "delivered", before: 0, after: 137 }, evidence: ["delivered 137 in 1951"] },
-		],
-		strategies: [
-			{ action: "build_bus_route", params: { distance: 20 }, value: 9000, evidence: ["money +9000"] },
-		],
+/**
+ * R2b（2026-09-18）：反思不再"输出 JSON 由我们解析"，而是**调用记录工具**。
+ * 这里测工具契约本身；"拒绝能不能让模型改写"在 evolution-memory.test.ts 里
+ * 用 faux provider 走 end-to-end。
+ */
+describe("reflect-tools: 记录工具就是校验点", () => {
+	const ctx = { sessionId: "s1", seed: 7, now: 1234 };
+	const call = async (name: string, args: Record<string, unknown>) => {
+		const sink = {
+			lessons: [] as { id: string }[],
+			strategies: [] as { action: string; value: number }[],
+			rejections: [] as string[],
+		};
+		const tool = createReflectionTools(sink as never, ctx).find((t) => t.name === name)!;
+		let error: string | null = null;
+		try {
+			await tool.execute("c1", args as never);
+		} catch (e) {
+			error = e instanceof Error ? e.message : String(e);
+		}
+		return { sink, error };
 	};
 
-	it("解析裸 JSON", () => {
-		const r = parseReflection(JSON.stringify(good));
-		expect(r.lessons).toHaveLength(1);
-		expect(r.strategies).toHaveLength(1);
+	it("合法观察被收下", async () => {
+		const { sink, error } = await call("record_lesson", {
+			text: "the route delivered 137 units in 300 game days",
+			outcome: { metric: "delivered", before: 0, after: 137 },
+			evidence: ["delivered 137"],
+		});
+		expect(error).toBeNull();
+		expect(sink.lessons).toHaveLength(1);
+		expect(sink.rejections).toEqual([]);
 	});
 
-	it("解析 markdown 代码块包裹的 JSON(模型最常这么输出)", () => {
-		const r = parseReflection("Here is my analysis:\n```json\n" + JSON.stringify(good) + "\n```\nDone.");
-		expect(r.lessons).toHaveLength(1);
+	it("建议句**抛错**（pi-agent-core 会把错误作为工具结果回给模型）", async () => {
+		const { sink, error } = await call("record_lesson", {
+			text: "Build a single bus route first",
+			outcome: { metric: "delivered", before: 0, after: 137 },
+			evidence: ["e"],
+		});
+		expect(error).toMatch(/instruction|advice/i);
+		expect(sink.lessons).toHaveLength(0);
+		// 理由被记下来：拒绝必须是可观测的，不能静默
+		expect(sink.rejections).toHaveLength(1);
 	});
 
-	it("解析前后带散文的 JSON", () => {
-		const r = parseReflection(`Sure. ${JSON.stringify(good)} Hope this helps.`);
-		expect(r.lessons).toHaveLength(1);
+	it("没有实测读数 → 抛错并说明要什么", async () => {
+		const { error } = await call("record_lesson", { text: "x happened", evidence: ["e"] });
+		expect(error).toMatch(/outcome is required/i);
 	});
 
-	it("缺失的数组字段视为空,不抛异常", () => {
-		const r = parseReflection(JSON.stringify({ lessons: [] }));
-		expect(r.lessons).toEqual([]);
-		expect(r.strategies).toEqual([]);
+	it("没有证据 → 抛错", async () => {
+		const { error } = await call("record_lesson", {
+			text: "the route delivered 137 units",
+			outcome: { metric: "delivered", before: 0, after: 137 },
+			evidence: [],
+		});
+		expect(error).toMatch(/evidence/i);
 	});
 
-	it("垃圾输入得到空结果(而不是异常)", () => {
-		expect(parseReflection("no json here").lessons).toEqual([]);
-		expect(parseReflection("").lessons).toEqual([]);
-		expect(parseReflection("{ broken json").lessons).toEqual([]);
-		expect(parseReflection(undefined as unknown as string).lessons).toEqual([]);
+	it("策略工具要求实测 value 与证据", async () => {
+		const bad = await call("record_strategy", { action: "build_bus_route", value: Number.NaN, evidence: ["e"] });
+		expect(bad.error).toMatch(/value/i);
+		const noEvidence = await call("record_strategy", { action: "build_bus_route", value: 10, evidence: [] });
+		expect(noEvidence.error).toMatch(/evidence/i);
+		const good = await call("record_strategy", {
+			action: "build_bus_route",
+			params: { distance: 20 },
+			value: 20000,
+			evidence: ["money +20000"],
+		});
+		expect(good.error).toBeNull();
+		expect(good.sink.strategies[0]!.value).toBe(20000);
 	});
 
-	it("非对象/数组型 JSON 顶层得到空结果", () => {
-		expect(parseReflection("[1,2,3]").lessons).toEqual([]);
-		expect(parseReflection("42").lessons).toEqual([]);
-		expect(parseReflection("null").lessons).toEqual([]);
-	});
-
-	it("数组里的非对象元素被丢弃", () => {
-		const r = parseReflection(JSON.stringify({ lessons: [null, "x", 1, good.lessons[0]] }));
-		expect(r.lessons).toHaveLength(1);
-	});
-});
-
-describe("reflect: reflectToLessons(端到端校验)", () => {
-	const ctx = { sessionId: "s1", seed: 7, now: 1234 };
-
-	it("产出通过校验的 lessons", () => {
-		const out = reflectToLessons(
-			JSON.stringify({ lessons: [{ text: "the route delivered 137 units", outcome: { metric: "delivered", before: 0, after: 137 }, evidence: ["delivered 137"] }] }),
-			ctx,
-		);
-		expect(out).toHaveLength(1);
-		expect(out[0]!.sourceSessionId).toBe("s1");
-	});
-
-	it("丢掉没有证据的条目", () => {
-		const out = reflectToLessons(
-			JSON.stringify({
-				lessons: [
-					{ text: "the route did something", outcome: { metric: "delivered", before: 0, after: 137 } },
-					{ text: "the route delivered 137 units", outcome: { metric: "delivered", before: 0, after: 137 }, evidence: ["delivered 137"] },
-				],
-			}),
-			ctx,
-		);
-		expect(out.map((l) => l.text)).toEqual(["the route delivered 137 units"]);
-	});
-
-	it("丢掉臆测性的条目(prompt 说了不许,代码也要拦)", () => {
-		const out = reflectToLessons(
-			JSON.stringify({
-				lessons: [
-					{
-						text: "probably the route was too long",
-						outcome: { metric: "delivered", before: 137, after: 0 },
-						evidence: ["delivered 0"],
-					},
-					{
-						text: "money fell 40000 in 1953",
-						outcome: { metric: "money", before: 40000, after: 0 },
-						evidence: ["money -40000"],
-					},
-				],
-			}),
-			ctx,
-		);
-		expect(out.map((l) => l.text)).toEqual(["money fell 40000 in 1953"]);
-	});
-
-	it("同一响应里重复的教训被去重", () => {
-		const out = reflectToLessons(
-			JSON.stringify({
-				lessons: [
-					{ text: "The route delivered 137 units", outcome: { metric: "delivered", before: 0, after: 137 }, evidence: ["e1"] },
-					{ text: "the route delivered 137 units", outcome: { metric: "delivered", before: 0, after: 137 }, evidence: ["e2"] },
-				],
-			}),
-			ctx,
-		);
-		expect(out).toHaveLength(1);
-	});
-
-	it("整段垃圾响应得到空数组", () => {
-		expect(reflectToLessons("total nonsense", ctx)).toEqual([]);
-	});
-});
-
-describe("reflect: reflectToStrategies", () => {
-	it("产出可入库的采样(含 action/params/value/evidence/sessionId)", () => {
-		const out = reflectToStrategies(
-			JSON.stringify({
-				strategies: [
-					{ action: "build_bus_route", params: { distance: 20 }, value: 9000, evidence: ["money +9000"] },
-				],
-			}),
-			{ sessionId: "s1", now: 500 },
-		);
-		expect(out).toHaveLength(1);
-		expect(out[0]!.action).toBe("build_bus_route");
-		expect(out[0]!.value).toBe(9000);
-		expect(out[0]!.sessionId).toBe("s1");
-	});
-
-	it("丢掉没有证据或没有 action 的候选", () => {
-		const out = reflectToStrategies(
-			JSON.stringify({
-				strategies: [
-					{ action: "build_bus_route", params: {}, value: 9000 },
-					{ params: {}, value: 9000, evidence: ["e"] },
-					{ action: "build_bus_route", params: {}, value: Number.NaN, evidence: ["e"] },
-				],
-			}),
-			{ sessionId: "s1", now: 500 },
-		);
-		expect(out).toEqual([]);
-	});
-
-	it("params 非对象时归一为空对象", () => {
-		const out = reflectToStrategies(
-			JSON.stringify({
-				strategies: [{ action: "a", params: "nonsense", value: 10, evidence: ["e"] }],
-			}),
-			{ sessionId: "s1", now: 500 },
-		);
-		expect(out[0]!.params).toEqual({});
-	});
-
-	it("垃圾响应得到空数组", () => {
-		expect(reflectToStrategies("nope", { sessionId: "s1", now: 1 })).toEqual([]);
+	it("同一条观察在同一个反思里只记一次", async () => {
+		const sink = {
+			lessons: [] as { id: string }[],
+			strategies: [] as { action: string; value: number }[],
+			rejections: [] as string[],
+		};
+		const tool = createReflectionTools(sink as never, ctx).find((t) => t.name === "record_lesson")!;
+		const args = {
+			text: "the route delivered 137 units",
+			outcome: { metric: "delivered", before: 0, after: 137 },
+			evidence: ["e"],
+		};
+		await tool.execute("c1", args as never);
+		await tool.execute("c2", args as never);
+		expect(sink.lessons).toHaveLength(1);
 	});
 });
 
@@ -397,5 +329,55 @@ describe("反思输入必须包含产出指标与窗口长度", () => {
 		const { user } = buildReflectionPrompt(facts({ delivered: null }));
 		expect(user).toMatch(/cargo delivered during the run: not measured/);
 		expect(user).not.toMatch(/cargo delivered during the run: 0/);
+	});
+});
+
+/**
+ * 契约两半的交叉守卫（2026-09-19 真机事故）。
+ *
+ * 反思的协议同时存在于**提示词**与**运行时工具**里。R2b 把运行时改成工具调用后，
+ * 提示词仍在要求 "Reply with JSON only" → 模型回 JSON、一个工具都不调 →
+ * `0 lesson(s) kept`，而日志看起来像"这局没什么可学的"。
+ * 这类不一致是**静默**的，所以要用测试把两半钉在一起。
+ */
+describe("reflect: 提示词与工具契约必须一致", () => {
+	const ctx = { sessionId: "s", seed: 1, now: 0 };
+	const tools = createReflectionTools({ lessons: [], strategies: [], rejections: [] }, ctx);
+	const prompt = buildReflectionPrompt({
+		sessionId: "s",
+		seed: 1,
+		recorded: [],
+		summary: {
+			money: 0,
+			delivered: 0,
+			simulatedDays: 30,
+			episodeStop: "horizon",
+			vehicleCount: 0,
+			stationCount: 0,
+			decisions: 0,
+			toolCalls: 0,
+			toolFailures: 0,
+			constructionDone: null,
+			durationMs: 0,
+		},
+		evidence: [],
+	});
+
+	it("提示词点名的每个工具都真实存在", () => {
+		const named = [...prompt.system.matchAll(/\b(record_[a-z_]+)\b/g)].map((m) => m[1]!);
+		expect(named.length).toBeGreaterThan(0);
+		for (const name of new Set(named)) {
+			expect(tools.some((t) => t.name === name), `提示词提到 ${name}，但它不存在`).toBe(true);
+		}
+	});
+
+	it("不再要求模型用 JSON 回复（那会让它一个工具都不调）", () => {
+		expect(prompt.system).not.toMatch(/reply with json/i);
+		expect(prompt.system).toMatch(/call/i);
+	});
+
+	it("必须告诉模型：被拒会给出理由（否者它无从改写）", () => {
+		expect(prompt.system).toMatch(/reject/i);
+		expect(prompt.system).toMatch(/tells you the reason|call again/i);
 	});
 });

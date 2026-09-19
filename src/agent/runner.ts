@@ -585,21 +585,6 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 	 * act on the game, and it must not pollute the agent's own turn/telemetry
 	 * accounting with a call that is not a decision.
 	 */
-	async function completeOnce(prompt: { system: string; user: string }): Promise<string> {
-		const stream = (await streamFn(
-			model,
-			{
-				systemPrompt: prompt.system,
-				messages: [{ role: "user", content: prompt.user }],
-			} as never,
-			{} as never,
-		)) as AsyncIterable<{ type?: string; delta?: unknown }>;
-		let text = "";
-		for await (const ev of stream) {
-			if (ev && ev.type === "text_delta" && typeof ev.delta === "string") text += ev.delta;
-		}
-		return text;
-	}
 
 	const runtime = createAgent({
 		deps,
@@ -812,7 +797,9 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 				maxHoldMs: f.maxHoldMs,
 			};
 		})(),
-		completeOnce,
+		// R2b: 反思也用 pi-agent-core 的 Agent（工具契约 + 拒绝回到模型），
+		// 因此它需要 provider 与模型，而不是一个"文本补全"回调。
+		reflectLlm: { streamFn, model },
 	});
 
 	await teardown();

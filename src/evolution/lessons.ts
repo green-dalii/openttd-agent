@@ -212,37 +212,76 @@ function cleanEvidence(v: unknown): string[] {
  * sentence, **no measured outcome**, **no game-fact evidence**, or no source session. Callers must drop nulls rather than invent
  * defaults — a lesson with fabricated evidence is worse than no lesson.
  */
-export function fromReflection(raw: unknown, ctx: ReflectionContext): Lesson | null {
-	if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+export type LessonVerdict = { ok: true; lesson: Lesson } | { ok: false; reason: string };
+
+/**
+ * Validate one candidate and explain the refusal.
+ *
+ * 为什么需要**理由**（2026-09-18, R2b）：拒绝在两条路上被消费——
+ * ① 解析旧式 JSON 回复时静默丢弃；② 反思走 pi-agent-core 的工具时，
+ * 理由会作为**工具错误回到模型**，模型因此可以改写成一条观察句再试。
+ * 一条"为什么被拒"是给模型的反馈，不是日志装饰。
+ */
+export function validateLesson(raw: unknown, ctx: ReflectionContext): LessonVerdict {
+	if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+		return { ok: false, reason: "argument must be an object with text/outcome/evidence" };
+	}
 	const r = raw as RawLesson;
 
 	const text = typeof r.text === "string" ? r.text.replace(/\s+/g, " ").trim() : "";
-	if (!text) return null;
+	if (!text) return { ok: false, reason: "text is required" };
 
-	// 内容级边界：一条经验必须是**对已发生事实的陈述**。祈使/建议句在这里就被拒，
-	// 理由会由调用方（工具 execute 抛错 / 反思重试提示）交回模型改写。
-	if (isImperative(text)) return null;
+	// 内容级边界：一条经验必须是**对已发生事实的陈述**。
+	if (isImperative(text)) {
+		return {
+			ok: false,
+			reason:
+				"this reads as an instruction or advice. Record what HAPPENED instead " +
+				"(e.g. 'the route delivered 137 units in 300 game days'), not what to do.",
+		};
+	}
 
 	const outcome = toOutcome(r.outcome);
-	if (!outcome) return null;
+	if (!outcome) {
+		return {
+			ok: false,
+			reason:
+				"outcome is required and must be a MEASURED reading: " +
+				'{metric: "delivered"|"deliveredPerDay"|"income"|"money"|"vehicles"|"stations"|"construction", ' +
+				"before: <number>, after: <number>}. A missing reading cannot be zero.",
+		};
+	}
 
 	const evidence = cleanEvidence(r.evidence);
-	if (evidence.length === 0) return null;
+	if (evidence.length === 0) {
+		return { ok: false, reason: "evidence is required: cite the game facts this observation rests on" };
+	}
 
-	if (!ctx || typeof ctx.sessionId !== "string" || !ctx.sessionId) return null;
+	if (!ctx || typeof ctx.sessionId !== "string" || !ctx.sessionId) {
+		return { ok: false, reason: "no source session: an unattributable lesson cannot be stored" };
+	}
 
 	const id = lessonId(text);
 	return {
-		id,
-		text,
-		outcome,
-		confidence: clampConfidence(r.confidence),
-		evidence,
-		supersedes: toSupersedes(r.supersedes, id),
-		sourceSessionId: ctx.sessionId,
-		sourceSeed: Number.isFinite(Number(ctx.seed)) ? Number(ctx.seed) : -1,
-		createdAt: Number.isFinite(Number(ctx.now)) ? Number(ctx.now) : 0,
+		ok: true,
+		lesson: {
+			id,
+			text,
+			outcome,
+			confidence: clampConfidence(r.confidence),
+			evidence,
+			supersedes: toSupersedes(r.supersedes, id),
+			sourceSessionId: ctx.sessionId,
+			sourceSeed: Number.isFinite(Number(ctx.seed)) ? Number(ctx.seed) : -1,
+			createdAt: Number.isFinite(Number(ctx.now)) ? Number(ctx.now) : 0,
+		},
 	};
+}
+
+/** Back-compat wrapper: the long-standing "null means rejected" entry point. */
+export function fromReflection(raw: unknown, ctx: ReflectionContext): Lesson | null {
+	const v = validateLesson(raw, ctx);
+	return v.ok ? v.lesson : null;
 }
 
 /**

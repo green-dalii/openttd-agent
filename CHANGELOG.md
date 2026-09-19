@@ -40,6 +40,22 @@
   判定优先用它、**两臂同源**（`ArmComparison.deliveredSource`），旧行回落原始值并标注为不可比。
 - 澄清 `rc=1` 的含义（=施工未达成 DONE，不是崩溃）并在输出中明示。
 
+### Changed（R2b：反思改走 Agent + 记录工具，2026-09-19）
+
+- 反思不再"输出 JSON 由框架解析"，而是走 pi-agent-core 的 `Agent` 调用
+  `record_lesson` / `record_strategy` 工具：参数由 schema 校验，
+  **被拒的理由作为工具错误回到模型**，模型可以改写成观察句再试。
+  校验唯一实现在 `validateLesson`；`parseReflection` / `reflectToLessons` /
+  `reflectToStrategies` 已删除（两条并存的契约是漂移源）。
+- provider 失败按库的契约读 `agent.state.errorMessage`，不再把它伪装成
+  "这局没什么可记录的"。
+- 新增 `ReflectionReport.toolCalls` 与一条 WARNING：模型一次都没调用记录工具时
+  明确区分"没接线/协议不一致"与"确实没什么可记"。
+- 修复真机事故：运行时改成工具后提示词仍要求 "Reply with JSON only"，
+  导致两局 `0 lessons kept` 且无任何拒绝（静默）。现已加**契约交叉守卫测试**
+  （提示词点名的工具必须存在、不得再教旧协议、必须说明被拒会给理由）。
+- 反思现在与决策共用同一套消息/工具机制（少一套自造协议）。
+
 ### Changed（R2：跨局经验从"指令"变成"带实测读数的观察"，2026-09-18）
 
 - **经验契约换代**：`Lesson.kind: "do"|"dont"` → `Lesson.outcome: {metric, before, after}`。

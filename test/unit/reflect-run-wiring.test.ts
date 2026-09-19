@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { createFauxCore, fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { mkdtempSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -50,7 +51,24 @@ function fakeWorld() {
 	} as never;
 }
 
-const completeOnce = vi.fn(async () => "ok");
+/**
+ * R2b：反思现在走 Agent + 工具，所以这个接线测试只需要一个**可用的 stub provider**
+ * （它什么都不记录 → 反思零产出，但整条收尾路径必须照常跑完）。
+ */
+const reflectCalls = { n: 0 };
+function reflectLlmStub() {
+	const faux = createFauxCore({});
+	faux.setResponses([fauxAssistantMessage("nothing to record")]);
+	const base = faux.streamSimple;
+	return {
+		// 计数包装：用来断言"这一局到底有没有调用反思模型"（C-2 同源规则）
+		streamFn: (async (...args: unknown[]) => {
+			reflectCalls.n++;
+			return (base as unknown as (...a: unknown[]) => unknown)(...args);
+		}) as never,
+		model: faux.getModel(),
+	};
+}
 
 async function runFinalize(dir: string, ledger: RouteLedger, decisions: number, session = fakeSession()) {
 	return runFinalizeAndReflect({
@@ -69,7 +87,7 @@ async function runFinalize(dir: string, ledger: RouteLedger, decisions: number, 
 		scenario: "freeform",
 		episode: { simulatedDays: 0, horizonDays: null, reachedHorizon: false, stopReason: null },
 		arm: "control" as const,
-		completeOnce: completeOnce as never,
+		reflectLlm: reflectLlmStub(),
 	});
 }
 
@@ -91,19 +109,19 @@ describe("C-1 接线：局终落盘路线事实", () => {
 	it("躺平局（零下单）：不写文件、不调用 LLM 反思（C-2 同源）", async () => {
 		const dir = mkdtempSync(join(tmpdir(), "rf-"));
 		const ledger = new RouteLedger(); // 无任何 record
-		completeOnce.mockClear();
+		reflectCalls.n = 0;
 		await runFinalize(dir, ledger, 3); // 有决策但零下单
 		expect(existsSync(join(dir, "evolution", "route-facts.jsonl"))).toBe(false);
-		expect(completeOnce).not.toHaveBeenCalled(); // C-2：躺平局的"教训"不产出
+		expect(reflectCalls.n).toBe(0); // C-2：躺平局的"教训"不产出
 	});
 
 	it("有下单但全未完成的局：仍然反思（可行性教训有效），事实如实落盘", async () => {
 		const dir = mkdtempSync(join(tmpdir(), "rf-"));
 		const ledger = new RouteLedger();
 		ledger.record({ job: 101, fromTown: 9, toTown: 17, decision: 3, orderedAt: 2 });
-		completeOnce.mockClear();
+		reflectCalls.n = 0;
 		await runFinalize(dir, ledger, 3);
-		expect(completeOnce).toHaveBeenCalled(); // 下单过 → 有可反思的内容
+		expect(reflectCalls.n).toBeGreaterThan(0); // 下单过 → 有可反思的内容
 		const raw = readFileSync(join(dir, "evolution", "route-facts.jsonl"), "utf8");
 		expect(raw).toContain('"completed":false');
 	});

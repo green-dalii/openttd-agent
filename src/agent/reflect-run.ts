@@ -10,6 +10,8 @@
 import { buildReflectionEvidence } from "../evolution/reflect.js";
 import { routeFactsFromLedger, saveRouteFacts } from "../evolution/route-facts.js";
 import type { RouteStats } from "./route-stats.js";
+import type { Agent } from "@earendil-works/pi-agent-core";
+import type { Model } from "@earendil-works/pi-ai";
 import { runReflection } from "../evolution/reflection-run.js";
 import { buildStageSummary } from "./session-store.js";
 import { totalsFromTelemetry, formatGameDate } from "./runner-helpers.js";
@@ -67,7 +69,12 @@ export interface FinalizeAndReflectArgs {
 	};
 	/** Verified-freeze stats (SPEC §10.60); null when the run never froze. */
 	freezeStats?: { confirmed: number; unconfirmed: number; failures: number; watchdogTrips: number; maxHoldMs: number } | null;
-	completeOnce: (p: { system: string; user: string }) => Promise<string>;
+	/**
+	 * Reflection LLM access (R2b). The reflection pass runs through the same
+	 * pi-agent-core Agent with `record_lesson`/`record_strategy` tools, so it needs
+	 * the provider stream function and model rather than a plain text completion.
+	 */
+	reflectLlm: { streamFn: ConstructorParameters<typeof Agent>[0]["streamFn"]; model: Model<string> };
 }
 
 /**
@@ -88,7 +95,7 @@ export async function runFinalizeAndReflect(args: FinalizeAndReflectArgs): Promi
 		getRouteStats,
 		arm,
 		freezeStats,
-		completeOnce,
+		reflectLlm,
 	} = args;
 	const snap = world.snapshot();
 	const c0 = snap.companies.get(0);
@@ -164,7 +171,8 @@ export async function runFinalizeAndReflect(args: FinalizeAndReflectArgs): Promi
 		saveRouteFacts(cfg.dataDir, routeFactsFromLedger(routeLedger.all(), statsByJob));
 		try {
 			const report = await runReflection({
-				complete: completeOnce,
+				streamFn: reflectLlm.streamFn,
+				model: reflectLlm.model,
 				dataDir: cfg.dataDir,
 				facts: {
 					sessionId: session.id,
