@@ -40,6 +40,20 @@
   判定优先用它、**两臂同源**（`ArmComparison.deliveredSource`），旧行回落原始值并标注为不可比。
 - 澄清 `rc=1` 的含义（=施工未达成 DONE，不是崩溃）并在输出中明示。
 
+### Added（M1：反思可诊断 + 有界重试 + 产出率披露，2026-09-19）
+
+- 反思结果现在写进**会话审计**（`type:"reflection"`）：模型调了哪些记录工具、
+  被拒几次、重试几次、存了几条、失败原因、以及**回复预览**（单行、≤300 字符）。
+  此前只有 `0 lesson(s) kept` 一行 console —— 看不出模型说了什么，失败无从诊断。
+- **有界重试**：成功反思若一个记录工具都没调用，则再问一次（上限 1 次），
+  重试消息列出该局已知事实，并明说"仍无可支撑就什么都别记"。
+  次数进报告与审计，两个 verdict 披露。
+- 新增 `reflection-stats`（`src/evolution/reflection-stats.ts`）与 verdict 行
+  `reflection: N run(s) recorded (M failed), zero-tool-call runs …`；
+  **协议信号与基础设施故障分别计数、分别告警**（真机上 provider 失败曾被误报为协议问题）。
+- 真机 6 局（`/tmp/m1a`、`/tmp/m1b`）：反思稳定产出（1–4 条观察/局），
+  **`supersedes` 首次在真机生效**（两局分别作废 1 与 2 条旧观察）。
+
 ### Docs（能力判定 + MEMORY 精简，2026-09-19）
 
 - 新增 **M-PLAY 里程碑**（ROADMAP）：把"LLM 能否自主玩一局"变成可辩护的主张，

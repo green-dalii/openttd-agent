@@ -25,6 +25,57 @@ import { evaluatePromotion, mergeStrategySamples } from "./strategies.js";
 import { appendLessons, appendStrategies, readLessons, readStrategies } from "./store.js";
 import type { ReflectionFacts } from "./reflect.js";
 
+/**
+ * How many times the reflection pass may ask (1 = no retry).
+ *
+ * 上限写死为 2：一次重试能救回"协议滑了一跤"，但**不能**变成"问到模型编出东西为止"。
+ * 每次额外提问都是钱，而且离"逼模型凑数"只差一步——所以次数要记账、要披露。
+ */
+export const MAX_REFLECTION_ATTEMPTS = 2;
+
+/**
+ * The re-ask after a tool-less reply.
+ *
+ * 关键在于它给的是**事实**（这一局实际记录了什么），而不是压力：
+ * 模型因此可以**如实**把已知事实写成观察；并且明说"仍然无可支撑就什么都别记"。
+ */
+export function retryMessage(facts: ReflectionFacts, maxFacts = 12): string {
+	const factsList = (facts.evidence ?? []).slice(0, maxFacts).map((e) => `- ${e}`);
+	return [
+		"You replied without calling any recording tool.",
+		"",
+		"This game DID record facts. Here they are again, verbatim:",
+		...(factsList.length ? factsList : ["- (the world-state log for this game was empty)"]),
+		"",
+		"Call `record_lesson` once for each observation these facts support (with its measured",
+		"`outcome`). If, after reading them, you still have nothing supportable, call nothing -",
+		"a fabricated observation is worse than an empty one.",
+	].join("\n");
+}
+
+/** Flatten an assistant message's content into plain text (string or block array). */
+function assistantText(content: unknown): string {
+	if (typeof content === "string") return content;
+	if (!Array.isArray(content)) return "";
+	const parts: string[] = [];
+	for (const block of content) {
+		const b = block as { type?: string; text?: unknown };
+		if (b && b.type === "text" && typeof b.text === "string") parts.push(b.text);
+	}
+	return parts.join(" ");
+}
+
+/**
+ * One bounded, single-line preview: this string goes into logs and the report.
+ * The ellipsis is counted INSIDE the cap — a caller that asserts `<= max` must not
+ * be defeated by our own decoration.
+ */
+export function preview(text: string, max = 300): string {
+	const flat = String(text ?? "").replace(/\s+/g, " ").trim();
+	if (flat.length <= max) return flat;
+	return max <= 1 ? flat.slice(0, max) : `${flat.slice(0, max - 1)}…`;
+}
+
 export interface RunReflectionOptions {
 	/** Provider stream function (injected: production = real provider, tests = faux). */
 	streamFn: ConstructorParameters<typeof Agent>[0]["streamFn"];
@@ -56,6 +107,18 @@ export interface ReflectionReport {
 	 * 计数，两者在日志里长得一模一样，而后者是**接线失败**（AGENTS §5.1 的教训）。
 	 */
 	toolCalls: number;
+	/** Names of the recording tools the model called, in order (diagnosis: M1). */
+	toolNames: string[];
+	/** How many times the pass re-asked after the model called no recording tool. */
+	retries: number;
+	/**
+	 * What the model actually said, whitespace-collapsed and capped.
+	 *
+	 * 为什么必须有（M1, 2026-09-19）：同配置下 1/2 局模型一次工具都没调用，
+	 * 而当时唯一的记录是 `0 lesson(s) kept` —— **看不出模型说了什么**，
+	 * 诊断因此卡住。凡是会产出结论的路径，都要留下"当时到底发生了什么"的证据（D28 同类）。
+	 */
+	replyPreview: string;
 	strategiesPromoted: number;
 	/** Raw model reply length — useful for diagnosing empty responses. */
 	replyChars: number;
@@ -104,21 +167,40 @@ export async function runReflection(opts: RunReflectionOptions): Promise<Reflect
 	});
 
 	let replyChars = 0;
+	let replyText = "";
+	const toolNames: string[] = [];
+	// 显式计数：用循环变量推断会在退出时多算一次（`attempt` 已经自增过）。
+	let retries = 0;
 	try {
 		agent.subscribe((event) => {
 			if (event.type === "tool_execution_start" && String(event.toolName).startsWith("record_")) {
 				recordCalls += 1;
+				toolNames.push(String(event.toolName));
 			}
 			if (event.type === "message_end") {
 				const m = event.message as { role?: string; content?: unknown };
-				if (m.role === "assistant" && typeof m.content === "string") replyChars += m.content.length;
+				if (m.role === "assistant") {
+					// 文本可能在 content 字符串里，也可能是 content block 数组
+					const text = assistantText(m.content);
+					if (text) {
+						replyChars += text.length;
+						replyText += (replyText ? " " : "") + text;
+					}
+				}
 			}
 		});
-		await agent.prompt(prompt.user);
-		// provider 失败在 pi-agent-core 里是**状态**而不是抛出的异常：
-		// 库把错误记在 `agent.state.errorMessage` 上并让本轮结束。读它，
-		// 否则一次网络故障会伪装成"这局没什么可记录的"（静默降级）。
-		if (agent.state.errorMessage) throw new Error(String(agent.state.errorMessage));
+		// 最多问两次：第一次按常规提示；如果模型一个记录工具都没调用，
+		// 再问一次，并把 **harness 已知的事实**列给它——让"如实记录"比"编造"更容易。
+		// 重试用的是库自己的 `agent.prompt()`（同一会话续问），不是自造协议。
+		for (let attempt = 1; attempt <= MAX_REFLECTION_ATTEMPTS; attempt += 1) {
+			if (attempt > 1) retries += 1;
+			await agent.prompt(attempt === 1 ? prompt.user : retryMessage(facts));
+			// provider 失败在 pi-agent-core 里是**状态**而不是抛出的异常：
+			// 库把错误记在 `agent.state.errorMessage` 上并让本轮结束。读它，
+			// 否则一次网络故障会伪装成"这局没什么可记录的"（静默降级）。
+			if (agent.state.errorMessage) throw new Error(String(agent.state.errorMessage));
+			if (recordCalls > 0) break;
+		}
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
 		return {
@@ -128,6 +210,9 @@ export async function runReflection(opts: RunReflectionOptions): Promise<Reflect
 			lessonsSuperseded: 0,
 			rejections: sink.rejections,
 			toolCalls: recordCalls,
+			toolNames,
+			retries,
+			replyPreview: preview(replyText),
 			strategiesPromoted: 0,
 			replyChars,
 		};
@@ -176,15 +261,6 @@ export async function runReflection(opts: RunReflectionOptions): Promise<Reflect
 		strategiesPromoted = 0;
 	}
 
-	if (recordCalls === 0) {
-		// 模型一次都没调用记录工具：这**不是**"没什么可记"，而是协议/接线问题，
-		// 必须显式喊出来（真机上沉默过一整天，见 R2b 事故）。
-		// eslint-disable-next-line no-console
-		console.log(
-			"[evolution] reflection WARNING: the model called no recording tool - " +
-				"nothing was recorded, and this is NOT the same as 'nothing to record'",
-		);
-	}
 	if (sink.rejections.length > 0) {
 		// 拒绝必须可见：一局里"全部被拒"和"本来就没什么可记"是两件事。
 		// eslint-disable-next-line no-console
@@ -193,12 +269,26 @@ export async function runReflection(opts: RunReflectionOptions): Promise<Reflect
 				`(the model was told why and could retry)`,
 		);
 	}
+	const previewText = preview(replyText);
+	if (recordCalls === 0) {
+		// 模型一次都没调用记录工具：**这不是**"没什么可记"，而是协议/接线问题，
+		// 必须显式喊出来，并把它实际说的内容一起留下（M1 诊断所需）。
+		// eslint-disable-next-line no-console
+		console.log(
+			`[evolution] reflection WARNING: the model called no recording tool - ` +
+				`nothing was recorded, and this is NOT the same as 'nothing to record'. ` +
+				`reply="${previewText}"`,
+		);
+	}
 	return {
 		ok: true,
 		lessonsSaved,
 		lessonsSuperseded,
 		rejections: sink.rejections,
 		toolCalls: recordCalls,
+		toolNames,
+		retries,
+		replyPreview: previewText,
 		strategiesPromoted,
 		replyChars,
 	};

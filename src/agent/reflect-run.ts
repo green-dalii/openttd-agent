@@ -210,6 +210,23 @@ export async function runFinalizeAndReflect(args: FinalizeAndReflectArgs): Promi
 							`${report.strategiesPromoted} strategy card(s) promoted`
 					: `[evolution] reflection failed: ${report.error}`,
 			);
+			// 反思的**证据**要能事后诊断，而不是只活在 /tmp 的 console 里（M1）。
+			// 落审计：模型调了哪些工具、被拒几次、它到底说了什么（截断）。
+			session.appendAudit({
+				type: "reflection",
+				ts: Date.now(),
+				ok: report.ok,
+				// 失败原因也要留下：否则"反思失败"同样是不可诊断的
+				error: report.error ?? null,
+				lessonsSaved: report.lessonsSaved,
+				lessonsSuperseded: report.lessonsSuperseded,
+				strategiesPromoted: report.strategiesPromoted,
+				toolCalls: report.toolCalls,
+				toolNames: report.toolNames,
+				retries: report.retries,
+				rejections: report.rejections,
+				replyPreview: report.replyPreview,
+			});
 		} catch (err) {
 			console.log(`[evolution] reflection error: ${err instanceof Error ? err.message : String(err)}`);
 		}

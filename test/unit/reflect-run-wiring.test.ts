@@ -147,6 +147,30 @@ describe("C-1 接线：决策上下文注入事实行", () => {
  * N2-5 缺陷的守卫：arm 必须**落进 metrics.jsonl**，否则 compareArms 只能靠
  * 注入计数推断（/tmp/n2ab 因此把 5v5 算成 4v6）。
  */
+/**
+ * M1（2026-09-19）：反思的证据必须落在**会跑的那条路径**上。
+ *
+ * 曾经反思的回复只进 console（/tmp 日志会丢），于是"为什么这局 0 lesson"
+ * 无从诊断。走完 `runFinalizeAndReflect` 之后，审计里必须真的有一条 reflection 记录
+ * ——断言"函数被调用"不等于断言"证据被写下"（MEMORY D28）。
+ */
+describe("M1 接线：反思证据落审计", () => {
+	it("有下单的局：audit.jsonl 里出现 reflection 记录（含工具调用与回复预览）", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "m1-audit-"));
+		const ledger = new RouteLedger();
+		ledger.record({ job: 101, fromTown: 9, toTown: 17, decision: 1, orderedAt: 1 });
+		const session = fakeSession();
+		const seen: Record<string, unknown>[] = [];
+		(session as never as { appendAudit: (r: Record<string, unknown>) => void }).appendAudit = (r) =>
+			seen.push(r);
+		await runFinalize(dir, ledger, 2, session);
+		const refl = seen.find((r) => r.type === "reflection");
+		expect(refl, "审计里必须有一条 reflection 记录").toBeTruthy();
+		expect(refl).toHaveProperty("toolCalls");
+		expect(refl).toHaveProperty("replyPreview");
+	});
+});
+
 describe("R1 接线：工具预算拒绝要进遥测（不许静默降级）", () => {
 	it("finalize 交给会话落盘的 metric 里带着 toolBudgetBlocks", async () => {
 		const dir = mkdtempSync(join(tmpdir(), "r1-budget-"));

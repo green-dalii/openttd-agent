@@ -17,6 +17,7 @@ import { existsSync, openSync } from "node:fs";
 import { join } from "node:path";
 import { evolutionView } from "../src/evolution/web-view.js";
 import { degradationStats, formatMetricStat } from "../src/evolution/metrics.js";
+import { reflectionStats } from "../src/evolution/reflection-stats.js";
 
 interface Args {
 	dir: string;
@@ -144,6 +145,30 @@ console.log(
 		`channel health: GS errors/run ${formatMetricStat(d.gsErrors)}  ` +
 			`tool budget refusals/run ${formatMetricStat(d.toolBudgetBlocks)}`,
 	);
+	// M1：反思到底有没有干活。0 调用的局**必须**与"这局没什么可学"分开看。
+	const refl = reflectionStats(args.dir);
+	if (refl.runs > 0) {
+		console.log(
+			`reflection: ${refl.runs} run(s) recorded (${refl.failedRuns} failed), ` +
+				`zero-tool-call runs ${refl.zeroCallRuns}, retried ${refl.runsWithRetry}  ` +
+				`tool calls/run ${formatMetricStat(refl.toolCalls)}  ` +
+				`observations/run ${formatMetricStat(refl.lessonsSaved)}`,
+		);
+		// 两种成因分开报：协议/接线信号 ≠ 基础设施故障（曾把后者报成前者）
+		if (refl.failedRuns > 0) {
+			console.log(
+				`WARNING: ${refl.failedRuns} reflection run(s) FAILED before recording anything` +
+					(refl.firstError ? ` (first: ${refl.firstError})` : "") +
+					" - that is an infrastructure signal, not a protocol one.",
+			);
+		}
+		if (refl.zeroCallRuns > 0) {
+			console.log(
+				"WARNING: at least one run's reflection called NO recording tool - that is a " +
+					"protocol/wiring signal, not 'nothing to record' (see M1 / SPEC §10.78).",
+			);
+		}
+	}
 }
 console.log(`runs: ${view.metrics.length}  conclusive: ${view.arms.conclusive}`);
 console.log(`note: ${view.arms.note || "(none)"}`);

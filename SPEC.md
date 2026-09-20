@@ -3038,3 +3038,63 @@ provider 失败在库里是**状态**而非异常：要读 `agent.state.errorMes
 成因未定（模型选择？提示词强度？），因此**反思的产出率本身是一个待测对象**，
 不是"已解决"。可能的下一步：把"0 调用"视为反思失败并重试一次，或在提示词里
 要求"至少尝试一次"。
+
+## 10.78 M1：反思产出率变成可诊断、可重试、可披露的事实（2026-09-19）
+
+### 1. 为什么先做"可诊断"
+
+R2b 修好后，同配置下仍观察到"某局 0 条 lesson"。当时能查到的唯一记录是
+`0 lesson(s) kept` ——**看不出模型到底说了什么**，于是只能猜（恰好是本项目最忌讳的做法）。
+反思 Agent 的消息当时没有任何落点。
+
+**修法**：`ReflectionReport` 增加 `toolNames` / `retries` / `replyPreview`
+（单行、**上限 300 字符含省略号**），并把整条反思记录写进**会话审计**：
+
+```
+audit.jsonl: {type:"reflection", ok, error, lessonsSaved, lessonsSuperseded,
+              strategiesPromoted, toolCalls, toolNames, retries, rejections, replyPreview}
+```
+
+审计是权威（console 只在 `/tmp` 里，会丢），并且 `/tmp` 与审计的区别正是 D28 的教训：
+**证据要落在不会消失的介质里、并在产出判决的那条路径上被打印**。
+
+### 2. 有界重试：让"如实记录"比"编造"更容易
+
+模型一次记录工具都没调用时，再问一次（`agent.prompt()` 续问，用库自己的 API）。
+重试消息的关键设计：它列出 **harness 已知的事实**（这一局记录了什么：下单、完成、
+车队、运量），并明确写"若读完仍然无可支撑的观察就什么都不要记"。
+→ 提供的是**证据**而不是压力：编造比如实更费力。
+**上限 1 次**（`MAX_REFLECTION_ATTEMPTS = 2`），且次数进报告与审计。
+
+### 3. 真机结果（`/tmp/m1a` 2 局 + `/tmp/m1b` 4 局，`--scenario prebuilt --game-days 30`）
+
+| 局 | toolCalls | retries | observations | superseded | ok |
+|---|---|---|---|---|---|
+| m1a-ctl | 3 | 0 | 3 | 0 | ✅ |
+| m1a-trt | 3 | 0 | 2 | 0 | ✅ |
+| m1b-ctl1 | 4 | 0 | 4 | 0 | ✅ |
+| m1b-trt1 | 2 | 0 | 2 | **1** | ✅ |
+| m1b-ctl2 | 3 | 0 | 3 | **2** | ✅ |
+| m1b-trt2 | 0 | 0 | 0 | 0 | ❌ provider 失败 |
+
+- **反思现在稳定产出**：7 局成功反思里 6 局有观察入库（1–4 条/局）。
+- **`supersedes` 首次在真机生效**（两局分别作废 1 与 2 条旧观察 → `supersededBy` 真的被写）。
+- **重试机制未被真机触发**（0/7）：修复提示词后，"成功但一个工具都没调用"只见过一次
+  （`/tmp/r2b2` trt，早于重试实现）。→ **重试目前只有单测覆盖，真机效果未验证**，不得声称。
+
+### 4. 我自己在这一步踩的坑（已修）
+
+第一次跑完 `/tmp/m1b`，verdict 打出
+`zero-tool-call runs 1` 并警告"协议/接线信号"——而那一局其实是 **provider 失败**
+（`ok:false, toolCalls:0`）。**两个成因被混在一起，基础设施故障被读成提示词问题。**
+
+修法：`reflectionStats` 只把 `ok !== false` 且 `toolCalls === 0` 记为协议信号，
+另外单列 `failedRuns` / `firstError`，两个 verdict 分别打印各自的 WARNING。
+审计同时记录 `error` —— 失败本身也要可诊断。
+
+### 5. 反思统计的来源与边界
+
+新增 `src/evolution/reflection-stats.ts`（纯读 + 聚合，缺报返回 `null` 而非 0）。
+它**不读 metrics.jsonl**：反思发生在 `session.finalize()` 之后（metric 行已写完），
+所以 `reflectionRetries` 这类字段**不可能**出现在 metric 行里——
+硬塞只会得到一个永远 `undefined` 的字段（D19/D22 的经典形态）。

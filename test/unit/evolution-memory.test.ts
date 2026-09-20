@@ -534,3 +534,132 @@ describe("R2b: 拒绝回到模型，模型可以改写", () => {
 		expect(r.rejections.length).toBe(1);
 	});
 });
+
+/**
+ * M1（2026-09-19）：反思产出率必须**可诊断**。
+ *
+ * 事故：同配置下 1/2 局模型一次记录工具都没调用。当时唯一的记录是
+ * `0 lesson(s) kept`——**看不出模型到底说了什么**（M1 诊断因此卡住）。
+ * 规则（D28 同类）：一条会产出结论的路径，必须留下"当时到底发生了什么"的证据。
+ */
+describe("M1: 反思的回复必须可诊断", () => {
+	it("模型没调用工具时，报告里带着它实际说的内容（截断）", async () => {
+		const dir = mkdtempSync(path.join(tmpdir(), "m1-preview-"));
+		const long = "I reviewed the game and there is nothing worth recording. ".repeat(20);
+		const r = await runReflection({
+			...reflectLlm([fauxAssistantMessage(long)]),
+			dataDir: dir,
+			facts: FACTS,
+			now: NOW,
+		});
+		expect(r.toolCalls).toBe(0);
+		expect(r.replyPreview.length).toBeGreaterThan(0);
+		expect(r.replyPreview.length).toBeLessThanOrEqual(300); // 有界，不能把整段回复塞进报告
+		expect(r.replyPreview).toContain("nothing worth recording");
+		// 单行：报告是要打进日志的，换行会伪造结构
+		expect(r.replyPreview).not.toMatch(/\n/);
+	});
+
+	it("调用了工具时同样记录工具名（诊断用：模型有没有按提示词走）", async () => {
+		const dir = mkdtempSync(path.join(tmpdir(), "m1-names-"));
+		const r = await runReflection({
+			...reflectLlm([
+				lessonCall({
+					text: "the route delivered 137 units in 300 game days",
+					outcome: { metric: "delivered", before: 0, after: 137 },
+					evidence: ["delivered 137"],
+				}),
+				fauxAssistantMessage("done"),
+			]),
+			dataDir: dir,
+			facts: FACTS,
+			now: NOW,
+		});
+		expect(r.toolCalls).toBe(1);
+		expect(r.toolNames).toEqual(["record_lesson"]);
+	});
+
+	it("重复调用同一工具会全部记下（诊断它尝试了几次）", async () => {
+		const dir = mkdtempSync(path.join(tmpdir(), "m1-names2-"));
+		const r = await runReflection({
+			...reflectLlm([
+				lessonCall({ text: "Prefer one solid route", outcome: { metric: "delivered", before: 0, after: 1 }, evidence: ["e"] }),
+				lessonCall({
+					text: "the route delivered 137 units",
+					outcome: { metric: "delivered", before: 0, after: 137 },
+					evidence: ["e"],
+				}),
+				fauxAssistantMessage("done"),
+			]),
+			dataDir: dir,
+			facts: FACTS,
+			now: NOW,
+		});
+		expect(r.toolNames).toEqual(["record_lesson", "record_lesson"]);
+		expect(r.rejections).toHaveLength(1);
+	});
+});
+
+/**
+ * M1 重试（2026-09-19）：模型"一个工具都没调"时，**再问一次**。
+ *
+ * 为什么这不算"逼模型编造"：重试消息里给的是 **harness 已知的事实**
+ * （这一局下了哪些单、跑到什么阶段、运了多少货）——于是"如实记录"比"编造"更容易。
+ * 判据也写死在提示里："若读完这些仍然无可支撑的观察，就什么都不要记"。
+ * 重试**上限一次**，且次数必须进报告与账本（否则"重试了多少次"无从审计）。
+ */
+describe("M1: 0 工具调用时重试一次（有界、记账、不逼编造）", () => {
+	it("第一次没调工具 → 重试后成功记录（retries=1）", async () => {
+		const dir = mkdtempSync(path.join(tmpdir(), "m1-retry-"));
+		const r = await runReflection({
+			...reflectLlm([
+				fauxAssistantMessage("I have reviewed the game."),
+				lessonCall({
+					text: "the route delivered 137 units in 300 game days",
+					outcome: { metric: "delivered", before: 0, after: 137 },
+					evidence: ["delivered 137"],
+				}),
+				fauxAssistantMessage("done"),
+			]),
+			dataDir: dir,
+			facts: FACTS,
+			now: NOW,
+		});
+		expect(r.retries).toBe(1);
+		expect(r.toolCalls).toBe(1);
+		expect(r.lessonsSaved).toBe(1);
+	});
+
+	it("第二次仍不调工具 → 如实报告 0（retries=1，不假装成功）", async () => {
+		const dir = mkdtempSync(path.join(tmpdir(), "m1-retry2-"));
+		const r = await runReflection({
+			...reflectLlm([fauxAssistantMessage("nothing to record"), fauxAssistantMessage("still nothing")]),
+			dataDir: dir,
+			facts: FACTS,
+			now: NOW,
+		});
+		expect(r.retries).toBe(1);
+		expect(r.toolCalls).toBe(0);
+		expect(r.lessonsSaved).toBe(0);
+		expect(r.replyPreview).toContain("still nothing"); // 留下最后一次回复
+	});
+
+	it("第一次就调了工具 → **不重试**（faux 只排了一份回复，多余调用会暴露）", async () => {
+		const dir = mkdtempSync(path.join(tmpdir(), "m1-noretry-"));
+		const r = await runReflection({
+			...reflectLlm([
+				lessonCall({
+					text: "the route delivered 137 units in 300 game days",
+					outcome: { metric: "delivered", before: 0, after: 137 },
+					evidence: ["delivered 137"],
+				}),
+				fauxAssistantMessage("done"),
+			]),
+			dataDir: dir,
+			facts: FACTS,
+			now: NOW,
+		});
+		expect(r.retries).toBe(0);
+		expect(r.lessonsSaved).toBe(1);
+	});
+});

@@ -16,6 +16,7 @@
  */
 import { evolutionView, type EvolutionView } from "../src/evolution/web-view.js";
 import { degradationStats, formatMetricStat } from "../src/evolution/metrics.js";
+import { reflectionStats } from "../src/evolution/reflection-stats.js";
 
 const dataDir = process.argv[2];
 if (!dataDir) {
@@ -67,6 +68,28 @@ console.log(`income delta  : ${arms.incomeDelta?.toFixed(0) ?? "—"}`);
 			`without ${formatMetricStat(wit_out.toolBudgetBlocks)}  ` +
 			`(>0 means the agent hit its per-decision ceiling - R1)`,
 	);
+	// M1：反思的产出率（0 调用的局 = 协议/接线信号，不是"没什么可学"）
+	const refl = reflectionStats(dataDir);
+	console.log(
+		`reflection: ${refl.runs} run(s) recorded (${refl.failedRuns} failed), ` +
+			`zero-tool-call runs ${refl.zeroCallRuns}, retried ${refl.runsWithRetry}  ` +
+			`tool calls/run ${formatMetricStat(refl.toolCalls)}  ` +
+			`observations/run ${formatMetricStat(refl.lessonsSaved)}`,
+	);
+	// 两种成因分开报：协议/接线信号 ≠ 基础设施故障（曾把后者报成前者）
+	if (refl.failedRuns > 0) {
+		console.log(
+			`WARNING: ${refl.failedRuns} reflection run(s) FAILED before recording anything` +
+				(refl.firstError ? ` (first: ${refl.firstError})` : "") +
+				" - that is an infrastructure signal, not a protocol one.",
+		);
+	}
+	if (refl.zeroCallRuns > 0) {
+		console.log(
+			"WARNING: at least one run's reflection called NO recording tool - that is a " +
+				"protocol/wiring signal, not 'nothing to record' (see M1 / SPEC §10.78).",
+		);
+	}
 }
 
 console.log(
