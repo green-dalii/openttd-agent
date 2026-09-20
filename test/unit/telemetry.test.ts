@@ -57,6 +57,71 @@ const ev = {
 		({ type: "tool_execution_end", toolCallId: id, toolName: name, result, isError }) as AgentEvent,
 };
 
+describe("Telemetry — peak request size (G6)", () => {
+	// 事实来源：pi-ai `Usage`（dist/types.d.ts）= input/output/cacheRead/cacheWrite/reasoning/totalTokens。
+	// 一次请求送进模型的 prompt = input + cacheRead + cacheWrite（三个输入侧字段之和）；
+	// `reasoning` 是 output 的子集，不属于 prompt。
+	function usageWith(prompt: number, output = 10): Usage {
+		return {
+			input: prompt,
+			output,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: prompt + output,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		} as Usage;
+	}
+	function seen(t: Telemetry, u: Usage): void {
+		t.ingestAgentEvent(ev.msgStart(assistantMsg({ usage: u })));
+		t.ingestAgentEvent(ev.msgEnd(assistantMsg({ usage: u })));
+	}
+
+	it("记录单次请求的最大 prompt（不是最后一次、也不是累计）", () => {
+		const t = new Telemetry();
+		t.ingestAgentEvent(ev.turnStart());
+		seen(t, usageWith(5000));
+		seen(t, usageWith(41000));
+		seen(t, usageWith(7000));
+		expect(t.snapshot().usage.peakRequest.tokens).toBe(41000);
+		// 累计值必须仍然正确（峰值不能污染累计）
+		expect(t.snapshot().usage.total.input).toBe(5000 + 41000 + 7000);
+	});
+
+	it("缓存读写的 prompt 部分也算进请求大小（否则会低估真实上下文）", () => {
+		const t = new Telemetry();
+		// 10 万 tokens 的 prompt 里 9 万命中缓存；只读 input 会把它报成 1 万
+		seen(t, {
+			input: 10000,
+			output: 500,
+			cacheRead: 90000,
+			cacheWrite: 0,
+			totalTokens: 100500,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		} as Usage);
+		expect(t.snapshot().usage.peakRequest.tokens).toBe(100000);
+	});
+
+	it("没有 usage 的调用不参与峰值（缺失 ≠ 0）", () => {
+		const t = new Telemetry();
+		seen(t, undefined as unknown as Usage);
+		expect(t.snapshot().usage.peakRequest.tokens).toBe(0);
+		expect(t.snapshot().usage.peakRequest.turn).toBeNull();
+	});
+
+	it("峰值附带它发生在第几个 turn（可回溯，而不是只有一个数）", () => {
+		const t = new Telemetry();
+		t.ingestAgentEvent(ev.turnStart());
+		seen(t, usageWith(9000));
+		t.ingestAgentEvent(ev.turnStart());
+		seen(t, usageWith(30000));
+		t.ingestAgentEvent(ev.turnStart());
+		seen(t, usageWith(12000));
+		const peak = t.snapshot().usage.peakRequest;
+		expect(peak.tokens).toBe(30000);
+		expect(peak.turn).toBe(2);
+	});
+});
+
 describe("Telemetry — usage accumulation", () => {
 	it("sums token usage across messages and groups it by turn", () => {
 		const t = new Telemetry();

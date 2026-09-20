@@ -55,6 +55,14 @@ export interface TelemetrySnapshot {
 	steps: StepRecord[];
 	usage: {
 		total: UsageView;
+		/**
+		 * Largest single request prompt in this session (G6).
+		 *
+		 * 为什么需要：`total` 是**累计**，无法回答"离模型上下文窗口还有多远"——
+		 * 而那是决定"要不要压缩上下文"的唯一事实。缺失时 `tokens` 为 0、`turn` 为 null
+		 * （"没测到"≠"很小"）。
+		 */
+		peakRequest: { tokens: number; turn: number | null };
 		byTurn: { turn: number; usage: UsageView; steps: number }[];
 		byTool: { tool: string; calls: number; failures: number; avgDurationMs: number }[];
 	};
@@ -164,6 +172,7 @@ export class Telemetry {
 	private lastActivityAt = Date.now();
 
 	private totalUsage: UsageView = zeroUsage();
+	private peakRequest: { tokens: number; turn: number | null } = { tokens: 0, turn: null };
 	private turnUsage = new Map<number, { usage: UsageView; steps: number }>();
 	private toolStats = new Map<string, { calls: number; failures: number; totalMs: number }>();
 	private brain: { provider: string | null; model: string | null; kind: "real" | "faux" | null } = {
@@ -269,6 +278,7 @@ export class Telemetry {
 			steps: this.steps.map((s) => ({ ...s })),
 			usage: {
 				total: { ...this.totalUsage },
+				peakRequest: { ...this.peakRequest },
 				byTurn: [...this.turnUsage.entries()]
 					.sort((a, b) => a[0] - b[0])
 					.map(([turn, v]) => ({ turn, usage: { ...v.usage }, steps: v.steps })),
@@ -319,6 +329,9 @@ export class Telemetry {
 		this.push(rec);
 		if (usage) {
 			this.totalUsage = addUsage(this.totalUsage, usage);
+			// 峰值 = 本次请求送进模型的 prompt 大小（输入侧三字段之和；reasoning 属于 output）。
+			const prompt = usage.input + usage.cacheRead + usage.cacheWrite;
+			if (prompt > this.peakRequest.tokens) this.peakRequest = { tokens: prompt, turn };
 			const t = this.turnUsage.get(turn) ?? { usage: zeroUsage(), steps: 0 };
 			t.usage = addUsage(t.usage, usage);
 			this.turnUsage.set(turn, t);

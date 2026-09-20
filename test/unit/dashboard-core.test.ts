@@ -262,6 +262,7 @@ describe("session store", () => {
 				activeTurn: 3,
 				steps: [],
 				usage: {
+					peakRequest: { tokens: 0, turn: null },
 					total: {
 						input: 5,
 						output: 6,

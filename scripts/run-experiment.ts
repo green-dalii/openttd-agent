@@ -143,7 +143,9 @@ console.log(
 	const d = degradationStats(view.metrics);
 	console.log(
 		`channel health: GS errors/run ${formatMetricStat(d.gsErrors)}  ` +
-			`tool budget refusals/run ${formatMetricStat(d.toolBudgetBlocks)}`,
+			`tool budget refusals/run ${formatMetricStat(d.toolBudgetBlocks)}  ` +
+			// G6：累计 token 回答不了"离上下文窗口还有多远"，单次请求峰值才能。
+			`peak request tokens: ${formatMetricStat(d.peakRequestTokens)}`,
 	);
 	// M1：反思到底有没有干活。0 调用的局**必须**与"这局没什么可学"分开看。
 	const refl = reflectionStats(args.dir);

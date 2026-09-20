@@ -742,6 +742,24 @@ describe("metricStat / degradationStats: 缺报不是 0", () => {
 		expect(metricStat([Number.NaN, 1])).toEqual({ reported: 1, max: 1, total: 1 });
 	});
 
+	it("G6：峰值请求大小进入披露（max = 各局最大值；旧行缺报 ≠ 0）", () => {
+		const rows = [
+			{ gsErrors: 0, toolBudgetBlocks: 0, peakRequestTokens: 41000 },
+			{ gsErrors: 0, toolBudgetBlocks: 0, peakRequestTokens: 96000 },
+			{ gsErrors: 0, toolBudgetBlocks: 0, peakRequestTokens: null }, // 旧记录：未测量
+		] as unknown as Parameters<typeof degradationStats>[0];
+		const d = degradationStats(rows) as { peakRequestTokens?: { reported: number; max: number } };
+		expect(d.peakRequestTokens).toEqual({ reported: 2, max: 96000, total: 137000 });
+	});
+
+	it("全部未测量 → not reported（不能说成 0）", () => {
+		const rows = [{ gsErrors: 0, toolBudgetBlocks: 0, peakRequestTokens: null }] as unknown as Parameters<
+			typeof degradationStats
+		>[0];
+		const d = degradationStats(rows) as { peakRequestTokens?: unknown };
+		expect(formatMetricStat(d.peakRequestTokens as never)).toBe("not reported");
+	});
+
 	it("degradationStats 从账本行取通道健康与工具封顶", () => {
 		const rows = [
 			{ gsErrors: 0, toolBudgetBlocks: 0 },

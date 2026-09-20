@@ -75,7 +75,12 @@ export interface SessionMetaLike {
 		decisions?: number;
 		toolCalls?: number;
 		toolFailures?: number;
-		usage?: { totalTokens?: number; costTotal?: number };
+		usage?: {
+			totalTokens?: number;
+			costTotal?: number;
+			peakRequestTokens?: number;
+			peakRequestTurn?: number | null;
+		};
 	};
 }
 
@@ -134,6 +139,9 @@ export interface GameMetric {
 	toolFailures: number;
 	totalTokens: number;
 	costTotal: number;
+	/** G6: largest single request prompt, or null when the run measured none. */
+	peakRequestTokens: number | null;
+	peakRequestTurn: number | null;
 	/** Facts injected from route-facts.jsonl (C-1) - counts toward treatment. */
 	routeFactsInjected?: number;
 	/**
@@ -378,6 +386,9 @@ export function toGameMetric(
 		toolFailures: num(t && t.toolFailures),
 		totalTokens: num(u.totalTokens),
 		costTotal: num(u.costTotal),
+		// G6：未知为 null（"没测到"≠"很小"）
+		peakRequestTokens: u.peakRequestTokens === undefined ? null : num(u.peakRequestTokens),
+		peakRequestTurn: typeof u.peakRequestTurn === "number" ? u.peakRequestTurn : null,
 		memory: {
 			lessonsInjected: num(memory && memory.lessonsInjected),
 			strategiesInjected: num(memory && memory.strategiesInjected),
@@ -393,6 +404,8 @@ export interface MetricSummary {
 	builtRate: number | null;
 	totalTokens: number;
 	costTotal: number;
+	/** G6: largest single request prompt seen (null when no run measured one). */
+	peakRequestTokens: number | null;
 }
 
 /** Roll a set of runs up into headline numbers. */
@@ -407,6 +420,11 @@ export function summarise(metrics: GameMetric[]): MetricSummary {
 		builtRate: known.length ? built / known.length : null,
 		totalTokens: list.reduce((a, m) => a + m.totalTokens, 0),
 		costTotal: list.reduce((a, m) => a + m.costTotal, 0),
+		// 峰值取各局最大值；全部未测则 null（不是 0）
+		peakRequestTokens: list.reduce<number | null>(
+			(a, m) => (m.peakRequestTokens === null ? a : a === null ? m.peakRequestTokens : Math.max(a, m.peakRequestTokens)),
+			null,
+		),
 	};
 }
 
@@ -617,10 +635,21 @@ export function formatMetricStat(stat: MetricStat | null): string {
 }
 
 /** Channel health + tool ceiling for one arm: both can invalidate a comparison. */
-export function degradationStats(rows: GameMetric[]): { gsErrors: MetricStat | null; toolBudgetBlocks: MetricStat | null } {
+export function degradationStats(rows: GameMetric[]): {
+	gsErrors: MetricStat | null;
+	toolBudgetBlocks: MetricStat | null;
+	/**
+	 * G6: largest single request prompt, `max` = the biggest across runs.
+	 *
+	 * 这是"离上下文窗口还有多远"的唯一事实来源（累计 token 回答不了）。
+	 * 旧记录没有这个字段 → 算未测量（`not reported`），**不是 0**。
+	 */
+	peakRequestTokens: MetricStat | null;
+} {
 	return {
 		gsErrors: metricStat(rows.map((m) => m.gsErrors)),
 		toolBudgetBlocks: metricStat(rows.map((m) => m.toolBudgetBlocks)),
+		peakRequestTokens: metricStat(rows.map((m) => m.peakRequestTokens)),
 	};
 }
 

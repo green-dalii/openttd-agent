@@ -2827,9 +2827,9 @@ harness 应把**agent 侧机制**交给库，把**领域侧（事实/协议/测�
 | `beforeToolCall` / `afterToolCall` | ✅ 已用（未知工具拦截；动作结果回流台账）| 保持 |
 | `transformContext` | ✅ 已用（剪枝 + 记忆注入）| 保持；P3 改为类型化消息 |
 | `convertToLlm` | ✅ 已用（丢弃 UI-only 角色）| 自定义角色目前靠 `as never` 强转，应改**声明合并**使其有类型 |
-| **工具执行顺序** | ❌ **未设置 → 默认 `parallel`** | **领域不变量被违反**：游戏按 FIFO 应用命令（§10.39.1），并发执行会让"台账记录顺序 ≠ 实际应用顺序"。变更型工具必须 `executionMode:"sequential"` |
-| `sessionId`（provider 缓存）| ❌ 未设置 | 每决策 15–56k tokens 无缓存；设稳定 sessionId 可省成本/延迟（需实测） |
-| `thinkingLevel` / `thinkingBudgets` | `"off"`，无预算 | 出现过 1.48M token 单局（193 次工具调用）；deliberation 需要**可测的**预算旋钮 |
+| **工具执行顺序** | ✅ **已修（R1）**：变更型工具声明 `executionMode:"sequential"` | 领域不变量已由代码保证；实测批次顺序 `start,end,start,end` |
+| `sessionId`（provider 缓存）| ✅ 已设（R1）= session id | ⚠️ **收益未测量**：设之前就有 37–44% 缓存命中（§10.75），所以"设 sessionId 才省缓存"这个猜测被证伪，收益记为未测 |
+| `thinkingLevel` / `thinkingBudgets` | ✅ 已接线（R1），默认 `"off"` | ⚠️ `off`-vs-`low` 的质量/成本权衡**未测量**（单局曾出现 1.48M token、193 次工具调用，D16） |
 | `steer()` / 追加队列 | ❌ 未用 | 长决策期间世界在变；事件唤醒之外，可中途告知事实（可选） |
 | `shouldStopAfterTurn` | ❌ 未用 | 优雅停止/压缩点；当前由自建循环的 episode 时钟负责（§10.69），暂不需要 |
 | `/harness/session`（会话后端）| ❌ 未用（自建 SessionStore + JSONL）| 自建件承载**领域**记录（metrics/audit/savegame），保留；不引入后端直到有实测需求 |
@@ -3240,3 +3240,101 @@ agent 在为一件做不到的事优化，而"它为什么优化"与"我们量�
 - 但**"车队规模"目前不是一个可靠可用的动作**：`M3-1b` 需要改执行器
   （把最新的 `V:` 请求锁存并在阶段允许时尽快应用，或把车队管理从阶段机里挪出来），
   改完仍要用同一条探针在真机上证明**扩容与缩编都真的发生**。
+
+## 10.82 第一性原理复检：能力面、空缺与协同结论（2026-09-19）
+
+> 触发：项目所有者问"当前 harness 还缺什么？能否自主玩 + 自进化？机制是否完善？
+> 是否充分用了 pi-agent-core？还需要哪些协同（CoDesign）工作？"
+> 本节是**用实际安装产物核对**后的答案（不是凭印象）。
+
+### A. 库的能力面（`@earendil-works/pi-agent-core@0.85.1`，据 `dist/*.d.ts` 导出表）
+
+根入口 `.` 导出**远不止 `Agent`**：
+
+| 族 | 导出（节选） | 我们 |
+|---|---|---|
+| Agent 核心 | `Agent`、`AgentOptions`、`AgentTool` | ✅ 用了 `Agent` |
+| **完整 harness** | `AgentHarness`（`prompt`/`skill`/`promptFromTemplate`/`compact`/`drive`/`lane(s)`/`steer`/`followUp`/`nextRun`/`setActiveTools`/`setModel`/`setThinkingLevel`/`appendMessage`/`appendCustomEntry`/`findEntries`/`navigateTree`/`resume`/`getResult`/`recordUsage`/`waitForIdle`） | ❌ **完全未用** |
+| **会话后端** | `./harness/session`：`JsonlSessionRepo`、`MemorySessionRepo`、`MemoryStorage`、`fork`/`commit`/`mutation-line`、类型化 `values`（`getValue`/`scanValues`/`readList`）、`scanEntries`/`scanBranch`/`scanUsage` | ❌ 未用（自建 `SessionStore` + JSONL） |
+| **压缩** | `compact`、`compactWithRequest`、`prepareCompaction`、`shouldCompact`、`estimateContextTokens`、`estimateTokens`、`getLastAssistantUsage`、`DEFAULT_COMPACTION_SETTINGS`（`reserveTokens:16384`、`keepRecentTokens:20000`）、分支摘要 `generateBranchSummary` | ❌ **未用** |
+| 技能/模板 | `Skill`、`PromptTemplate`（`./harness/skills`、`./harness/prompt-templates`） | ❌ 未用（提示词硬编码在 `runtime.ts`） |
+| 工具集 | `./harness/tools`（读写/搜索/执行等内置工具） | ❌ 未用（领域工具自己写，**应当如此**：agent 不该能读写宿主文件） |
+| 遥测 | `AGENT_TELEMETRY_SCHEMAS`、`defineTelemetrySchema`、`startAiSpan`/`startHarnessSpan`、`createTypedSpanStarter` | ❌ 未用（自建 `Telemetry`/audit/metrics） |
+| 执行环境 | `./harness/env/nodejs`：`NodeExecutionEnv`、`Shell`、`FileSystem` | ❌ 未用（同上：环境越界风险） |
+| 其他 | `./proxy`、`./search`、`setDefaultStreamFn`、`reduceLaneSnapshot` | ❌ 未用 |
+
+**`AgentOptions` 逐项**：已用 `initialState`/`streamFn`/`convertToLlm`/`transformContext`/
+`beforeToolCall`/`afterToolCall`/`thinkingLevel`/`thinkingBudgets`/`sessionId`；
+**未用** `followUpMode`/`steeringMode`/`getApiKey`/`maxRetryDelayMs`/`onPayload`/`onResponse`/
+`prepareNextTurn(WithContext)`/`shouldStopAfterTurn`/`toolExecution`/`transport`。
+
+**`Agent` 实例方法**：只用 `prompt`/`state`/`subscribe`；未用 `steer`/`followUp`/`continue`/
+`abort`/`reset`/`waitForIdle`/`hasQueuedMessages`/`signal` 及各队列清理。
+
+### B. 四个问题的答案（证据）
+
+**① 能自主玩一局吗？→ 能，但"玩法上限"被环境卡住。**
+无人值守可跑完整局（100+ 局；`llm.kind=real`、`mode=agent`、触发器 `start/event/phase_change/wait_until`），
+但动作面只有 6 个工具、其中变更型 3 个（`build_bus_route`/`set_route_vehicles`/`set_pause`），
+而**车队杠杆被阶段门控**（§10.81），所以**可靠的运营动作实际只有 1–2 个**，
+每 ~300 游戏日只有 **10–16 次**有后果的决策。结论同 **D32**：瓶颈在环境暴露的动作数。
+
+**② 能自进化吗？→ 闭环存在，但缺"选择压力"。**
+记录（反思 + 工具 + 审计）✅ · 存储（类型化、可推翻）✅ · 注入（记录式、非建议）✅ ·
+推翻（`supersededBy` 已在真机生效）✅ · 归因（决策→结果台账）✅。
+**但**：没有任何一环**按结果淘汰经验**——作废只来自模型自己的判断；
+且"经验是否让成绩变好"**从未被验证**（A/B 因 CV 0.57–0.79 被推迟）。
+所以现在准确说法是：**反思式自进化，而非结果式**。
+
+**③ 机制完善吗？→ 测量链接近完备（G1–G6），有两处真空缺。**
+- **上下文的峰值从未被记录**（此前只有累计 token）。1.48M token 单局（D16）+ 我们的剪枝
+  是"最近 40 条消息、丢弃而非摘要" ⇒ **无法回答"离模型上下文窗口还有多远"**，
+  也就无法判断是否需要压缩。→ **本次补 G6**（下面 §10.83）。
+- **没有检索**：经验只按类别整体注入，agent 无法按需取用（M4 的 `recall`）。
+
+**④ 充分用了库吗？→ 否，但是"有理由的未用"与"无理由的未用"混在一起了。**
+- **应当未用**：内置工具、`NodeExecutionEnv`（文件/shell 越界——本项目铁律是 agent 不碰宿主）、
+  execution env 类能力。
+- **无理由未用（真缺口）**：`estimateContextTokens`/`shouldCompact`（判断与压缩）、
+  `findEntries`/类型化会话值（检索底座）、`shouldStopAfterTurn`/`prepareNextTurn`（官方循环钩子）。
+- **已用但方式可以更好**：`steeringMode`/`followUpMode` 未设（用默认），`abort`/`waitForIdle` 未用。
+
+### C. 由本次复检得出的决策规则（写下来，避免每轮重猜）
+
+1. **引入库机制的门槛是"实测暴露的问题"**，不是"库里有"。压缩与检索先量化（G6），
+   再决定是否引入（ADR §10.74 已规定"引入前先在 SPEC 记理由"）。
+2. **不引入会扩大 agent 权限的库能力**（文件/ shell / 执行环境）——那是领域边界，不是缺功能。
+3. **能力审计必须对着安装产物（`.d.ts` 导出表）做**。§10.74 的审计把整个
+   `harness/session` 压成一行"暂不引入"，于是**压缩、可查询历史、类型化会话值**
+   三块能力被一起漏掉——这正是 §10.74 需要修订的原因（本轮已修其过时行）。
+
+## 10.83 G6 实测：单次请求峰值 5–7k tokens ⇒ **不需要上下文压缩**（2026-09-19）
+
+**方法**：`scripts/run-experiment.ts --dir /tmp/g6 --n 1 --scenario prebuilt --game-days 30 --seed 7`
+（两臂各一局，真机、真实 provider）。
+
+```
+channel health: GS errors/run n=2 max=0 total=0  tool budget refusals/run n=2 max=0 total=0
+                 peak request tokens: n=2 max=7324 total=12512
+reflection: 2 run(s) recorded (0 failed), zero-tool-call runs 0, retried 0
+            tool calls/run n=2 max=3 total=5   observations/run n=2 max=3 total=5
+```
+
+| 臂 | 决策 | 工具调用 | 单次请求峰值 | 峰值所在 turn | 累计 tokens | 模拟天数 |
+|---|---|---|---|---|---|---|
+| control | 2 | 9 | **5 188** | 6 | 24 802 | 31 |
+| treatment | 3 | 9 | **7 324** | 9 | 44 808 | 32 |
+
+**结论（可执行的决策）**：
+
+1. **不需要引入上下文压缩。** 单次请求峰值 ~5–7k tokens，而所用模型的上下文窗口在
+   10 万量级（>10×余量）；我们的剪枝（最近 40 条消息）在这个规模下**从未生效**。
+   按 §10.74 的规定，这条"实测不需要"的结论要**写下来**，避免下一轮重新怀疑。
+2. **D16 的"148 万 token 单局"是累计量，不是峰值**——它来自一次失控的决策
+   （193 次工具调用），而 R1 的**每决策工具预算**（12）已经封住这个失效模式；
+   本局 9 次调用/局、**0 次封顶拒绝**。
+3. **披露路径已证明能收到数据**（D28）：这是它第一次在有新字段的真实数据上运行，
+   两臂都有数字；旧数据仍显示 `not reported`（未测量 ≠ 0）。
+4. **仍未测量的边界**：horizon 更长的局（300+ 游戏日、更多决策）峰值会不会显著更高？
+   本局只有 2–3 次决策。**若做 M5 学习曲线（长局）**，届时用同一字段复核一次即可——
+   这正是把它做成**每次运行都记录**的字段（而不是一次性探针）的原因。

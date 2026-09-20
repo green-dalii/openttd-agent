@@ -68,6 +68,13 @@ console.log(`income delta  : ${arms.incomeDelta?.toFixed(0) ?? "—"}`);
 			`without ${formatMetricStat(wit_out.toolBudgetBlocks)}  ` +
 			`(>0 means the agent hit its per-decision ceiling - R1)`,
 	);
+	// G6：单次请求峰值 = "离模型上下文窗口还有多远"的事实（累计 token 回答不了）。
+	// 两者都为 not reported 说明没有任何一局量到过（旧记录也算未测量）。
+	console.log(
+		`peak request tokens: with-memory ${formatMetricStat(wit.peakRequestTokens)}  ` +
+			`without ${formatMetricStat(wit_out.peakRequestTokens)}  ` +
+			`(G6 - decides whether context compaction is needed at all)`,
+	);
 	// M1：反思的产出率（0 调用的局 = 协议/接线信号，不是"没什么可学"）
 	const refl = reflectionStats(dataDir);
 	console.log(

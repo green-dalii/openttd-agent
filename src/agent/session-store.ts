@@ -135,6 +135,17 @@ export interface SessionTotals {
 		reasoning: number;
 		totalTokens: number;
 		costTotal: number;
+		/**
+		 * G6: largest single request prompt (input+cacheRead+cacheWrite).
+		 *
+		 * **可选**：这个字段既可能"没测到"，也可能是**旧记录**（本字段加入之前写的
+		 * metric 行）。读取侧一律按"未测量"处理（`toGameMetric` → null，永远不是 0）。
+		 * 生产侧的接线由 `runner-helpers.test.ts` 保证，而不是靠把字段设成必填——
+		 * 必填只会让历史数据与夹具变得不合法，并不能证明它真的被填上。
+		 */
+		peakRequestTokens?: number;
+		/** Which turn the peak happened on; null/absent when nothing was measured. */
+		peakRequestTurn?: number | null;
 	};
 }
 
@@ -177,6 +188,8 @@ function emptyTotals(): SessionTotals {
 			reasoning: 0,
 			totalTokens: 0,
 			costTotal: 0,
+			peakRequestTokens: 0,
+			peakRequestTurn: null,
 		},
 	};
 }
@@ -408,7 +421,12 @@ export class SessionStore {
 				decisions: t.totals.decisions,
 				toolCalls: t.totals.toolCalls,
 				toolFailures: t.totals.toolFailures,
-				usage: { ...t.usage.total },
+				usage: {
+					...t.usage.total,
+					// 旧版 telemetry.json 没有 peakRequest → 未测量（见 runner-helpers 的说明）
+					peakRequestTokens: t.usage.peakRequest?.tokens,
+					peakRequestTurn: t.usage.peakRequest?.turn ?? null,
+				},
 			},
 		};
 	}

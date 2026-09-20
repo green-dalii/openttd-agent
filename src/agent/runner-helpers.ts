@@ -44,6 +44,14 @@ export function totalsFromTelemetry(
 			reasoning: u.reasoning,
 			totalTokens: u.totalTokens,
 			costTotal: u.costTotal,
+			// G6：累计值回答不了"离上下文窗口还有多远"，峰值才能。
+			//
+			// 宽容读取是**有意**的：`telemetry.json` 可能是旧版本写的（没有 `peakRequest`），
+			// 而这个函数既用于实时快照、也用于从磁盘读回的记录。缺形状 = **未测量**
+			// （undefined/null），绝不编造成 0——"没测到"与"测到 0"是两件事。
+			// 生产侧真的填上了值，由 `runner-helpers.test.ts` 与真机数据（SPEC §10.83）保证。
+			peakRequestTokens: t.usage.peakRequest?.tokens,
+			peakRequestTurn: t.usage.peakRequest?.turn ?? null,
 		},
 	};
 }
