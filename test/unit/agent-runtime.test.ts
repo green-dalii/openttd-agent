@@ -46,7 +46,7 @@ function fauxAgent(deps: AgentDeps, responses: Parameters<ReturnType<typeof crea
 }
 
 describe("createAgent", () => {
-	it("installs the six tools and the default system prompt", () => {
+	it("installs the seven tools and the default system prompt", () => {
 		const { deps } = fakeDeps();
 		const faux = createFauxCore({});
 		faux.setResponses([fauxAssistantMessage("hi")]);
@@ -57,6 +57,7 @@ describe("createAgent", () => {
 			"inspect_route",
 			"build_bus_route",
 			"set_route_vehicles",
+			"retire_route",
 			"set_pause",
 		]);
 		expect(agent.state.systemPrompt).toBe(SYSTEM_PROMPT);

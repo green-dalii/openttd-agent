@@ -39,6 +39,8 @@ describe("executor-status: 阶段词汇表解码", () => {
 			"EX fleet_noveh j100",
 			"EX fleet_nodepot j100",
 			"EX fleet_wait4 j100",
+			"EX retire7C14 j100",
+			"EX retire_unknown102 j100",
 			"EX fleetg12L12C14 j100",
 			"EX fleets4L4s8f0C7 j100",
 			"EX fleetok4C4 j100",
@@ -255,6 +257,22 @@ describe("M3-1b: 卖出相位要把「卖出」与「消失」分开", () => {
 		const d = decodeExecutorPhase("EX fleetsold2g0w0b0C4 j101");
 		expect(d.description).toMatch(/sold 2/);
 		expect(d.description).not.toMatch(/disappeared/);
+	});
+});
+
+describe("M3-2a: 退役相位", () => {
+	it("retire7C14：说明退役已开始、几辆车被送去车库", () => {
+		const d = decodeExecutorPhase("EX retire7C14 j101");
+		expect(d.description).toMatch(/retire/i);
+		expect(d.description).toMatch(/7/);
+		expect(d.description).toMatch(/owns 14/);
+		expect(d.description).not.toMatch(/state "/);
+	});
+
+	it("retire_unknown102：未知线路必须具名拒绝（不能说成已退役）", () => {
+		const d = decodeExecutorPhase("EX retire_unknown102 j101");
+		expect(d.description).toMatch(/no record|unknown|not.*known/i);
+		expect(d.description).not.toMatch(/state "/);
 	});
 });
 

@@ -40,6 +40,28 @@
   判定优先用它、**两臂同源**（`ArmComparison.deliveredSource`），旧行回落原始值并标注为不可比。
 - 澄清 `rc=1` 的含义（=施工未达成 DONE，不是崩溃）并在输出中明示。
 
+### Added（M3-2a：每线路登记表 + 退役一条线路，2026-09-19）
+
+- **新工具 `retire_route`**（第 7 个）：停掉一条线路并卖掉它的**全部车辆，含头车**——
+  与 `set_route_vehicles` 不同（后者永不卖头车、因此无法清空线路）。
+  只对**执行器本局建过**的线路有效；车辆必须停进车库才卖得掉，所以是逐步生效。
+- **执行器新增跨 job 的线路登记表** `_routes[job] = {vehicles, lead, depot, retired}`：
+  此前 `_fleetOwned`/`_vehicle` 在切 job 时被重置，导致"关掉一条**旧**线路"（真实场景：
+  先建的线后来亏钱）根本做不到，`V:` 请求针对旧 job 也会被 `fleet_otherjob` 拒绝。
+- 切 job 时**先登记再重置**；退役是终态（清掉该 job 标牌，避免被 `FindNextJob` 重建）；
+  未知线路具名拒绝 `retire_unknown`。
+- 真机（`/tmp/m32*`）：扩容 3→8、退役 8→2（余下 2 辆是 prebuilt 场景自己的车）。
+- 新增两条**用重放证明会失败**的 Squirrel 守卫：①同一标识符不得既当 array（`.append(`）
+  又当 table（`.rawin(`）；②函数内不得先用后声明。两者都由本阶段的真机缺陷驱动
+  （`_retiredJobs` 用错 table 方法、`fleet_wait` 相位引用未声明的 `cur`——后者只丢汇报、不坏功能）。
+- **`retireRouteTool`/`setRouteVehiclesTool` 等变更型工具**：`retire_route` 亦为 `executionMode: "sequential"`。
+- ⚠️ **工具清单 2026-09-19 前后不可直接比较**（新增 `retire_route`）。
+
+### Changed（测试基础设施：真机局运行时不给出假红，2026-09-19）
+
+- `test/unit/preflight.test.ts` 现在检测游戏端口（3977/3979）是否被占用：若真机局在跑，
+  **跳过**该组用例并打印明确原因与清理命令，而不是产出 5 个看不懂的失败（MEMORY D5，本日已违反三次）。
+
 ### Added（G7：拒绝在"判据不会动"的配置上做比较，2026-09-19）
 
 - 新增 `MIN_COMPARABLE_HORIZON_DAYS = 180`（2 个季度）与 `horizonIsComparable()`：

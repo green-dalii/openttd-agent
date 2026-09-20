@@ -45,6 +45,8 @@ export interface V02Options {
 	 * 这条探针存在的意义就是把它从"读源码"变成"量过的行为"（MEMORY D8/D19）。
 	 */
 	shrinkTo?: number;
+	/** M3-2a probe: retire this job and observe whether the fleet goes away. */
+	retireJob?: number;
 	/**
 	 * Episode horizon in SIMULATED game days (G1, SPEC §10.68). The oracle probe
 	 * measures "delivered as a function of fleet size", so every rep must observe
@@ -360,6 +362,29 @@ export async function runV02(cfg: Config, opts: V02Options = {}): Promise<number
 		console.log(`[v02] company money=${money}`);
 	} else {
 		console.log(`[v02] S2-S4 WARN: construction not done (last phase "${executorPhase}")`);
+	}
+
+	// --- M3-2a: 退役探针 ------------------------------------------------------
+	// 唯一能回答"能不能关掉一条线路"的地方：请求退役，然后观测**车队是否消失**。
+	// 与其它探针同规则：报请求、观测效果（公司车辆数由 admin 通道 + 引擎相位双重印证）。
+	if (opts.retireJob !== undefined && opts.retireJob > 0) {
+		const before = world.snapshot().companies.get(0)?.stats?.vehicles ?? -1;
+		console.log(`[v02] retire probe: requesting retirement of job ${opts.retireJob} (fleet is ${before})`);
+		client.gameScript(JSON.stringify({ cmd: "retire_route", company: 0, job: opts.retireJob }));
+		const retireDeadline = Date.now() + 420_000;
+		let after = before;
+		while (Date.now() < retireDeadline && !stopRequested) {
+			client?.poll(AdminUpdateType.CompanyStats, 0);
+			await sleep(600);
+			after = world.snapshot().companies.get(0)?.stats?.vehicles ?? -1;
+			if (after === 0) break;
+		}
+		console.log(
+			after === 0
+				? `[v02] retire probe: fleet ${before} -> 0 (route retired)`
+				: `[v02] retire probe: requested, fleet ${before} -> ${after} (NOT zero)`,
+		);
+		console.log(`[v02] retire probe: final executor phase "${executorPhase ?? "(none)"}"`);
 	}
 
 	// --- 6. observe until stop (or demoSeconds auto-stop) ---

@@ -25,6 +25,7 @@ export type ExecutorStage =
 	| "depot"
 	| "vehicle"
 	| "fleet"
+	| "retire"
 	| "done"
 	| "heartbeat"
 	| "error"
@@ -62,6 +63,8 @@ const STAGE_BY_PREFIX: [string, ExecutorStage][] = [
 	["dpt", "depot"],
 	["bus_", "vehicle"],
 	["fleet", "fleet"],
+	// 退役是独立阶段：它不能与"缩编"共用标签——两者语义不同（一个是调规模、一个是收摊）
+	["retire", "retire"],
 	["done", "done"],
 ];
 
@@ -322,6 +325,25 @@ export function decodeExecutorPhase(input: string): ExecutorPhase {
 		base.stage = "depot";
 		base.detail = { outcome };
 		base.description = `building the depot: ${what}.`;
+		return base;
+	}
+
+	// --- retirement (M3-2a) ---
+	// 必须放在 `bus_/fleet` 块**之外**：`retire…` 不以这两者开头，放在块内会落到泛型兜底，
+	// 于是"退役"会被读成 `executor reports: EX retire7C14`（测试当场抓到）。
+	if (s.startsWith("retire_unknown")) {
+		base.description =
+			"a retirement was requested for a route this executor has no record of, so nothing " +
+			"was done. It only knows the routes it built in this session.";
+		return base;
+	}
+	if (s.startsWith("retire")) {
+		// `retire<queued>C<owned>`：已把 queued 辆车送去车库卖出，公司现有 owned 辆。
+		const queued = /^retire(\d+)/.exec(s)?.[1];
+		const owned = /C(\d+)/.exec(s)?.[1];
+		base.description =
+			`the route is being retired: ${queued ?? "?"} vehicle(s) were sent to a depot to be sold` +
+			(owned !== undefined ? `; the company owns ${owned} vehicle(s).` : ".");
 		return base;
 	}
 

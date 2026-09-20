@@ -6,6 +6,7 @@
  * 禁止: 在此发起真实网络请求（LLM 探测用注入的 stub）。
  */
 
+import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 import { existsSync, mkdtempSync, rmSync, writeFileSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -30,7 +31,41 @@ function cfgFor(dir: string, over: Record<string, string> = {}) {
 	);
 }
 
-describe("preflight", () => {
+/**
+ * 真机局运行期间**不要跑 gate**（MEMORY D5）。
+ *
+ * 这条规则我今天违反了三次，每次的代价都是"5 个看不懂的 preflight 失败 +
+ * 一次差点误判为回归"。preflight 的端口检查会看到游戏占用的 3977/3979 →
+ * 「端口被占」用例通过、「不需要 LLM」等用例失败——**看起来像代码坏了，其实是环境**。
+ *
+ * 所以把它变成一条**明确的、带指令的消息**：检测到游戏端口被占用就跳过这组用例并说明原因。
+ * 跳过（而不是失败）是诚实的：那些断言在"端口被占"的前提下本来就不成立。
+ */
+const GAME_PORTS = [3977, 3979];
+
+function gameRunIsLive(): boolean {
+	try {
+		const out = execFileSync("lsof", ["-nP", "-iTCP", "-sTCP:LISTEN"], { encoding: "utf8" });
+		return GAME_PORTS.some((p) => new RegExp(`:${p}\\b`).test(out));
+	} catch {
+		return false; // lsof 不可用就当没有在跑（不能因此阻断门禁）
+	}
+}
+
+const live = gameRunIsLive();
+if (live) {
+	// 这是**给人看的环境提示**，不是调试残留：门禁失败时必须一眼看出是环境而不是代码。
+	// eslint-disable-next-line no-console
+	console.warn(
+		"\n[gate] 检测到 OpenTTD 端口（3977/3979）被占用：真机局正在运行。\n" +
+			"       跳过 preflight 用例——这不是代码缺陷（MEMORY D5）。\n" +
+			"       要跑完整门禁：先 `pkill -f \"cli/run.ts\"` + `pkill -f \"OpenTTD.app/Contents/MacOS/openttd\"`。\n",
+	);
+}
+
+// D5：真机局在跑时这组断言不成立（端口被占是环境条件，不是回归）。
+const d = live ? describe.skip : describe;
+d("preflight (live-run guard applied)", () => {
 	it("fails on a missing OpenTTD binary and says how to fix it", async () => {
 		const dir = tmp();
 		try {

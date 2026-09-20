@@ -262,6 +262,57 @@ const SetPauseSchema = Type.Object({
 });
 
 /** `set_pause` — pause/resume the dedicated server. */
+const RetireRouteSchema = Type.Object({
+	job: Type.Number({ description: "The route (blueprint job id) to retire." }),
+	company: Type.Optional(Type.Number({ description: "Company id. Defaults to 0." })),
+});
+
+/**
+ * Retire a route: stop serving it and sell **all** of its vehicles.
+ *
+ * 这是与"缩编"不同的动作，契约必须把区别说清，因为模型据此学因果：
+ *   - 缩编有下限（头车永不卖），**退役没有**：整条线路（含头车）都会被卖掉；
+ *   - 退役只对**执行器在本局建过**的线路有效（它只认自己的账）；
+ *   - 车必须**停在车库内**才卖得掉，所以生效是逐步的（先回车库、再卖）。
+ *
+ * 最后一点是引擎前置条件（SPEC §10.84，`vehicle_cmd.cpp:261`），不是策略：
+ * 不告诉模型，它只会看到"我请求了、车队没变"。
+ */
+export function retireRouteTool(deps: AgentDeps): AgentTool<typeof RetireRouteSchema, ActionResult> {
+	return {
+		name: "retire_route",
+		label: "Retire Route",
+		description:
+			"Stop serving a bus route and sell its whole fleet, **including the lead vehicle** " +
+			"(unlike set_route_vehicles, which never sells the lead and therefore cannot empty a " +
+			"route). It only works for routes this executor built in the current session: it has no " +
+			"record of anything else. Vehicles are sold only once they are parked in a depot, so the " +
+			"fleet shrinks over the following game days rather than instantly.",
+		executionMode: "sequential",
+		parameters: RetireRouteSchema,
+		execute: async (_id, params) => {
+			const company = params.company ?? DEFAULT_COMPANY;
+			const snap = deps.state.snapshot();
+			const c0 = snap.companies.get(company);
+			const phase =
+				typeof (c0?.info as { name?: unknown } | undefined)?.name === "string"
+					? String((c0?.info as { name?: string }).name)
+					: null;
+			const cmd = { cmd: "retire_route", company, job: params.job };
+			deps.sink.gameScript(JSON.stringify(cmd));
+			return toResult({
+				ok: true,
+				summary:
+					`requested retirement of route ${params.job} (company=${company}). This reports the ` +
+					"REQUEST, not the result: the executor sells the route's vehicles once they are " +
+					"parked in a depot, so observe() is what reports the fleet." +
+					(phase ? ` Its current phase is "${phase}".` : ""),
+				data: { ...cmd, executorPhase: phase },
+			});
+		},
+	};
+}
+
 export function setPauseTool(deps: AgentDeps): AgentTool<typeof SetPauseSchema, ActionResult> {
 	return {
 		name: "set_pause",
@@ -436,6 +487,7 @@ export function createTools(deps: AgentDeps): AgentTool<TSchema, ActionResult>[]
 		inspectRouteTool(deps),
 		buildBusRouteTool(deps),
 		setRouteVehiclesTool(deps),
+		retireRouteTool(deps),
 		setPauseTool(deps),
 	];
 }

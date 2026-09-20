@@ -513,6 +513,8 @@ class BridgeV1 extends GSController {
             this.BuildBusRoute(obj);
         } else if (cmd == "add_vehicles") {
             this.AddVehicles(obj);
+        } else if (cmd == "retire_route") {
+            this.RetireRoute(obj);
         } else if (cmd == "blueprint") {
             this.PlaceBlueprint(obj);
         } else if (cmd == "status") {
@@ -747,6 +749,34 @@ class BridgeV1 extends GSController {
      * `count` vehicles. Placed as a `NUTZ:bp:<job>:V:<count>` sign in the
      * executor's company mode (same mailbox as S/E/D). job defaults to the
      * most recent route job this GS issued. */
+    /* 退役一条线路（M3-2a）：放 `X:1` 标牌，执行器卖掉该线路全部车辆。
+     * 与 add_vehicles 一样，ack 只说"请求已送达信箱"，不谎报结果。 */
+    function RetireRoute(obj) {
+        if (!obj.rawin("company")) {
+            GSAdmin.Send({ kind = "err", cmd = "retire_route", reason = "no company" });
+            return;
+        }
+        local exec = obj["company"];
+        local job = obj.rawin("job") ? obj["job"] : (100 + this._route_seq - 1);
+        local job_str = "" + job;
+        local mode = GSCompanyMode(exec);
+        local sl = GSSignList();
+        foreach (s, _ in sl) {
+            local n = GSSign.GetName(s);
+            if (n != null && n.len() > (7 + job_str.len()) &&
+                n.slice(0, 8) == "NUTZ:bp:" + job_str + ":X:") {
+                GSSign.RemoveSign(s);
+            }
+        }
+        local anchor = this.FindFreeTileNear(GSTown.GetLocation(GSTownList().Begin()), 10);
+        local sign_placed = 0;
+        if (GSSign.BuildSign(anchor, "NUTZ:bp:" + job_str + ":X:1")) sign_placed = 1;
+        GSAdmin.Send({ kind = "ack", cmd = "retire_route", job = job, company = exec,
+                       signPlaced = sign_placed,
+                       note = "retirement requested; the executor sells the route's vehicles "
+                            + "once they are parked in a depot" });
+    }
+
     function AddVehicles(obj) {
         if (!obj.rawin("company")) {
             GSAdmin.Send({ kind = "err", cmd = "add_vehicles", reason = "no company" });

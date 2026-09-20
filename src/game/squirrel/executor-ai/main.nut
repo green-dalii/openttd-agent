@@ -33,6 +33,14 @@ class ExecutorV1 extends AIController {
     _fleetWaitAnnounced = ""; // last deferred request we announced (M3-1b: one phase per request)
     _fleetSell = [];     // clones told to go to the depot, waiting to be sold (M3-1b)
     _fleetRefused = "";  // last "job:want" refused for being another job's request
+    /* 按线路登记（M3-2a，SPEC §10.86）。
+     * 为什么必须存在：`_fleetOwned` / `_vehicle` 在切 job 时被重置，于是执行器
+     * **不记得旧线路的车队**——"关掉一条正在亏钱的旧线路"（真实场景恰恰是先建的线）
+     * 就永远做不到。`_routes[job]` 是**跨 job 保留**的唯一目的地：
+     *   vehicles = 该线路的车（含头车）；lead = 头车；depot = 车库瓦片；retired = 已退役
+     */
+    _routes = {};        // job -> { vehicles = [], lead = -1, depot = -1, retired = false }
+    _retiredJobs = {};   // job -> true：已退役的线路（table 集合；array 没有 rawin/in）
     _roadCur = -1;       // segmented-road: current front reached
     _roadSeg = 0;
     _roadSegStep = 0;
@@ -127,6 +135,8 @@ class ExecutorV1 extends AIController {
         }
         // 卖车跨 tick：车库里的车每轮检查一次（队列为空时立即返回）。
         this.ProcessFleetSells();
+        // 退役请求（X:1）任何阶段都检查：它正是"关掉一条正在亏钱的线路"这个动作。
+        this.CheckRetireRequests();
         if (this._stage == "done" && !this._reportDone) {
             this._reportDone = true;
             // Count our own road stations (ground-truth that we built stops).
@@ -151,6 +161,14 @@ class ExecutorV1 extends AIController {
                 // Reset EVERY per-route field to its constructor value. A missed
                 // one leaks state across jobs (a stale _roadCur made job N+1
                 // believe road-laying had already started).
+                // 先把刚完成的线路**存进登记表**，再重置当前字段（顺序不能反）。
+                // 退役与"给旧线路调车队"都依赖这份记录。
+                this._routes[this._job] <- {
+                    vehicles = this._fleetOwned,
+                    lead = this._vehicle,
+                    depot = (this._slotD.bp == null ? -1 : this._slotD.bp[0]),
+                    retired = false,
+                };
                 this._job = next;
                 this._slotA = { label = "A", bp = null, tried = 0 };
                 this._slotB = { label = "B", bp = null, tried = 0 };
@@ -788,6 +806,7 @@ class ExecutorV1 extends AIController {
             // 头车也是这条线路的车队成员（`V:N` 现在表示"线路应有 N 辆车"）。
             // 不把它计入会让 `cur` 永远比真实车队少 1，于是"设为 1"会克隆出 2 辆。
             this._fleetOwned.append(v);
+            this.RegisterRoute(this._job);
         }
         if (!AIVehicle.IsValidVehicle(v)) {
             local es = AIError.GetLastErrorString();
@@ -1034,15 +1053,6 @@ class ExecutorV1 extends AIController {
         }
         this._fleetRefused = "";
         if (want == this._fleetApplied) return; // already satisfied
-        // 到这里为止：harness 发来一个**尚未满足**的车队请求，而执行器可能正在施工。
-        // 施工期不能改车队是**环境事实**，不是失败；但如果不说，模型只会看到
-        // "我请求了、什么都没变"（D20）。所以说一次：推迟到能应用的时候。
-        local waitKey = "" + want;
-        if (waitKey != this._fleetWaitAnnounced) {
-            this._fleetWaitAnnounced = waitKey;
-            // 带上当前计数：`fleet_wait4c12L12` = 请求 4、我们数到 12 辆、列表 12 条。
-            this.SetPhase("fleet_wait" + want + "c" + cur + "L" + this._fleetOwned.len());
-        }
         // Count the vehicles THIS executor cloned for the job it is building, not
         // every vehicle the company owns: `want` is per route, so company-wide
         // accounting made one route's fleet satisfy another route's request.
@@ -1058,6 +1068,19 @@ class ExecutorV1 extends AIController {
         local cur = 0;
         foreach (vid in this._fleetOwned) {
             if (AIVehicle.IsValidVehicle(vid)) cur++;
+        }
+        // 到这里为止：harness 发来一个**尚未满足**的车队请求，而执行器可能正在施工。
+        // 施工期不能改车队是**环境事实**，不是失败；但如果不说，模型只会看到
+        // "我请求了、什么都没变"（D20）。所以说一次：推迟到能应用的时候。
+        //
+        // ⚠️ 这行必须在 `local cur` **之后**：曾经它写在前面，于是每次首次车队请求都
+        // 抛 `the index 'cur' does not exist` —— 动作照样在下一轮生效，但**推迟信号全丢**，
+        // 日志里只剩一条 exc: 错误相位（SPEC §10.86，真机 /tmp/m32b 抓到）。
+        local waitKey = "" + want;
+        if (waitKey != this._fleetWaitAnnounced) {
+            this._fleetWaitAnnounced = waitKey;
+            // `fleet_wait4c12L12` = 请求 4、我们数到 12 辆、列表 12 条。
+            this.SetPhase("fleet_wait" + want + "c" + cur + "L" + this._fleetOwned.len());
         }
         if (cur < want) {
             if (!AIVehicle.IsValidVehicle(this._vehicle)) {
@@ -1145,6 +1168,91 @@ class ExecutorV1 extends AIController {
                 "fleetsold" + sold + "g" + gone + "w" + this._fleetSell.len() +
                     "b" + blocked + "C" + this.CountOwnVehicles()
             );
+        }
+    }
+
+    /* 把当前线路的状态写进登记表（幂等）。切 job 时也会调用同一份逻辑。 */
+    function RegisterRoute(job) {
+        local prev = this._routes.rawin(job) ? this._routes[job] : null;
+        this._routes[job] <- {
+            vehicles = this._fleetOwned,
+            lead = this._vehicle,
+            depot = (this._slotD.bp == null ? -1 : this._slotD.bp[0]),
+            retired = (prev != null && prev.retired == true),
+        };
+    }
+
+    /* 该线路的车队（当前线路用活字段，旧线路用登记表）。 */
+    function RouteVehicles(job) {
+        if (job == this._job) return this._fleetOwned;
+        if (this._routes.rawin(job)) return this._routes[job].vehicles;
+        return null;
+    }
+
+    /* 退役：把一条线路的**全部**车辆（含头车）送回车库并卖掉。
+     *
+     * 与普通缩编的区别只有两点，但两点都关键：
+     *   ① 下限 1 不适用——头车也要卖，否则线路永远留着一辆车在跑；
+     *   ② 退役是**终态**：标牌要清掉、job 要记入 `_retiredJobs`，
+     *      否则 FindNextJob 会把它当成待建工作再建一遍。
+     * 车辆本身仍然必须"停在车库内"才能卖（引擎前置条件，见 §10.84）。
+     */
+    function RetireRoute(job) {
+        local list = this.RouteVehicles(job);
+        if (list == null) {
+            // 未知线路必须具名拒绝：静默会让模型以为退役生效了（D20）。
+            this.SetPhase("retire_unknown" + job);
+            return;
+        }
+        local queued = 0;
+        foreach (vid in list) {
+            if (!AIVehicle.IsValidVehicle(vid)) continue;
+            local already = false;
+            foreach (q in this._fleetSell) if (q == vid) already = true;
+            if (already) { queued++; continue; }
+            if (AIVehicle.SendVehicleToDepot(vid)) {
+                this._fleetSell.append(vid);
+                queued++;
+            }
+        }
+        this._routes[job] <- {
+            vehicles = list,
+            lead = (job == this._job ? this._vehicle : this._routes[job].lead),
+            depot = (job == this._job ? (this._slotD.bp == null ? -1 : this._slotD.bp[0]) : this._routes[job].depot),
+            retired = true,
+        };
+        // table 集合：`in` 判断存在、`<-` 新建槽位（array 没有 rawin，用错就是运行时异常）
+        if (!(job in this._retiredJobs)) this._retiredJobs[job] <- true;
+        this.RemoveJobSigns(job);
+        this.SetPhase("retire" + queued + "C" + this.CountOwnVehicles());
+    }
+
+    /* 清掉某个 job 的 NUTZ 标牌（退役后必须清：否则会被重新捡起来重建）。 */
+    function RemoveJobSigns(job) {
+        local prefix = "NUTZ:bp:" + job + ":";
+        local sl = AISignList();
+        foreach (sid, _ in sl) {
+            local txt = AISign.GetName(sid);
+            if (txt == null) continue;
+            if (txt.len() >= prefix.len() && txt.slice(0, prefix.len()) == prefix) {
+                AISign.RemoveSign(sid);
+            }
+        }
+    }
+
+    /* 已登记的线路里有没有待处理的退役（X:1）请求。 */
+    function CheckRetireRequests() {
+        local sl = AISignList();
+        foreach (sid, _ in sl) {
+            local txt = AISign.GetName(sid);
+            if (txt == null || txt.len() < 5) continue;
+            if (txt.slice(0, 5) != "NUTZ:") continue;
+            local parts = this.Split(txt.slice(5), ":");
+            if (parts.len() < 4) continue;
+            if (parts[0] != "bp" || parts[2] != "X") continue;
+            local job = this.ToInt(parts[1]);
+            if (job in this._retiredJobs) continue;
+            this.RetireRoute(job);
         }
     }
 

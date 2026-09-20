@@ -4,6 +4,7 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+	retireRouteTool,
 	setRouteVehiclesTool,
 	buildBusRouteTool,
 	createTools,
@@ -131,6 +132,59 @@ describe("build_bus_route tool", () => {
  * 而旧工具名 `add_vehicles` 与契约只讲扩容 —— **能力存在，却没被暴露成可用的动作**。
  * 现在正名为"设置车队规模"，并把下限与"0 不是退役"写进契约。
  */
+/**
+ * M3-2a：退役工具（SPEC §10.86）。
+ *
+ * 这是运输公司最有后果的动词之一：**关掉一条正在亏钱的线路**。
+ * 契约必须说清三件事，因为模型据此学习因果：
+ *   ① 它卖的是**整条线路**的车（含头车）——与"缩编"的下限 1 不同；
+ *   ② 它只对**执行器建过**的线路有效（执行器只认本局自己建的线）；
+ *   ③ 车必须**停在车库里**才卖得掉，所以是"请求 + 逐步生效"，不是瞬时。
+ */
+describe("retire_route tool（M3-2a）", () => {
+	/** A company entry, as the admin port reports it. */
+	function fleetState(n: number, phase = "EX rd s0 r0 j101"): StateReader {
+		return fakeState({
+			companies: new Map([
+				[0, { info: { id: 0, name: phase, isAi: true }, stats: { vehicles: n, stations: 2 } }],
+			]) as never,
+		});
+	}
+
+	it("名字与描述讲清了「整条线路」与「与缩编不同」", () => {
+		const { sink } = fakeSink();
+		const tool = retireRouteTool({ sink, state: fleetState(3) });
+		expect(tool.name).toBe("retire_route");
+		expect(String(tool.description)).toMatch(/retire|stops? serving/i);
+		// 必须点明头车也会被卖（否则模型会以为还会剩一辆在跑）
+		expect(String(tool.description)).toMatch(/including the (lead|first)|also the lead/i);
+	});
+
+	it("发出 retire_route 命令，并把「请求」与「结果」分开说明", async () => {
+		const { sink, gameScript } = fakeSink();
+		const tool = retireRouteTool({ sink, state: fleetState(3) });
+		const res = await tool.execute("c1", { job: 101 });
+		expect(JSON.parse(gameScript[0]!)).toEqual({ cmd: "retire_route", company: 0, job: 101 });
+		const d = (res as { details: { ok: boolean; summary: string } }).details;
+		expect(d.ok).toBe(true);
+		// 不能声称已退役：只有执行器的相位能证明
+		expect(d.summary).toMatch(/request|observ/i);
+	});
+
+	it("回报当前执行器阶段（生效时机的唯一线索）", async () => {
+		const { sink } = fakeSink();
+		const tool = retireRouteTool({ sink, state: fleetState(3, "EX R12 d0 a3 #2 j101") });
+		const res = await tool.execute("c1", { job: 101 });
+		const d = (res as { details: { summary: string } }).details;
+		expect(d.summary).toContain("EX R12 d0 a3 #2 j101");
+	});
+
+	it("变更型工具必须串行执行（游戏按 FIFO 应用命令）", () => {
+		const { sink } = fakeSink();
+		expect(retireRouteTool({ sink, state: fleetState(3) }).executionMode).toBe("sequential");
+	});
+});
+
 describe("set_route_vehicles tool（M3-1：正名暴露双向能力）", () => {
 	/** A company entry with a given vehicle count, as the admin port reports it. */
 	function stateWithVehicles(n: number): StateReader {
@@ -313,6 +367,8 @@ describe("createTools", () => {
 			"inspect_route",
 			"build_bus_route",
 			"set_route_vehicles",
+			// M3-2a：运输公司最有后果的动词之一——关掉一条正在亏钱的线路
+			"retire_route",
 			"set_pause",
 		]);
 	});
