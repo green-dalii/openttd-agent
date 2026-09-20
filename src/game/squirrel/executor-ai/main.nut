@@ -30,6 +30,8 @@ class ExecutorV1 extends AIController {
     _radius = -1;
     _fleetApplied = -1;  // last applied fleet size from a V sign
     _fleetOwned = [];    // vehicles cloned for the CURRENT job (per-route accounting, G3)
+    _fleetWaitAnnounced = ""; // last deferred request we announced (M3-1b: one phase per request)
+    _fleetSell = [];     // clones told to go to the depot, waiting to be sold (M3-1b)
     _fleetRefused = "";  // last "job:want" refused for being another job's request
     _roadCur = -1;       // segmented-road: current front reached
     _roadSeg = 0;
@@ -112,9 +114,19 @@ class ExecutorV1 extends AIController {
             this.PhaseDepot();
         } else if (this._stage == "bus") {
             this.PhaseBus();
-        } else if (this._stage == "done" && this._vehicle >= 0) {
+        }
+        // 车队请求在**任何阶段**都被尝试（2026-09-19，M3-1b / SPEC §10.84）。
+        //
+        // 曾经这里只是 `} else if (this._stage == "done" && this._vehicle >= 0) {`：
+        // 真机实测（§10.81）执行器发完缩编请求后再没回到过 `done`，于是请求**永不生效**，
+        // 而工具只会说"请求已发出" —— 模型只能学到"请求车队没用"（D20 同源）。
+        // 现在：`done` 每轮尝试（沿用原行为），其他阶段按 `_loopSeq` 节流尝试；
+        // 不能应用时由 CheckAddVehicles 给出**具名**理由（fleet_noveh/fleet_nodepot/fleet_wait）。
+        if (this._stage == "done" || this._loopSeq % 40 == 0) {
             this.CheckAddVehicles();
         }
+        // 卖车跨 tick：车库里的车每轮检查一次（队列为空时立即返回）。
+        this.ProcessFleetSells();
         if (this._stage == "done" && !this._reportDone) {
             this._reportDone = true;
             // Count our own road stations (ground-truth that we built stops).
@@ -152,6 +164,8 @@ class ExecutorV1 extends AIController {
                 this._radius = -1;
                 this._fleetApplied = -1;
                 this._fleetOwned = [];
+                this._fleetWaitAnnounced = "";
+                this._fleetSell = [];
                 this._roadCur = -1;
                 this._roadSeg = 0;
                 this._roadSegStep = 0;
@@ -770,6 +784,11 @@ class ExecutorV1 extends AIController {
         }
         local depotTile = this._slotD.bp[0];
         local v = AIVehicle.BuildVehicle(depotTile, engine);
+        if (AIVehicle.IsValidVehicle(v)) {
+            // 头车也是这条线路的车队成员（`V:N` 现在表示"线路应有 N 辆车"）。
+            // 不把它计入会让 `cur` 永远比真实车队少 1，于是"设为 1"会克隆出 2 辆。
+            this._fleetOwned.append(v);
+        }
         if (!AIVehicle.IsValidVehicle(v)) {
             local es = AIError.GetLastErrorString();
             if (es == null) es = "" + AIError.GetLastError();
@@ -1015,12 +1034,30 @@ class ExecutorV1 extends AIController {
         }
         this._fleetRefused = "";
         if (want == this._fleetApplied) return; // already satisfied
+        // 到这里为止：harness 发来一个**尚未满足**的车队请求，而执行器可能正在施工。
+        // 施工期不能改车队是**环境事实**，不是失败；但如果不说，模型只会看到
+        // "我请求了、什么都没变"（D20）。所以说一次：推迟到能应用的时候。
+        local waitKey = "" + want;
+        if (waitKey != this._fleetWaitAnnounced) {
+            this._fleetWaitAnnounced = waitKey;
+            // 带上当前计数：`fleet_wait4c12L12` = 请求 4、我们数到 12 辆、列表 12 条。
+            this.SetPhase("fleet_wait" + want + "c" + cur + "L" + this._fleetOwned.len());
+        }
         // Count the vehicles THIS executor cloned for the job it is building, not
         // every vehicle the company owns: `want` is per route, so company-wide
         // accounting made one route's fleet satisfy another route's request.
+        // `foreach (a, b in array)`：**a 是下标，b 才是值**（Squirrel 语法
+        // `'foreach' '(' [index_id ','] value_id 'in' exp ')'`）。
+        // 这里曾经写 `foreach (v, _ in this._fleetOwned)` 并把 `v` 当车辆 id 用：
+        // 于是"数车队"数的是"id 等于 0..N-1 的车是否存在"，而下面的卖车调用
+        // `SellVehicle(v)` 卖的是**与这条线路无关的 id**——
+        // 连"永不卖头车"的守卫（`v == this._vehicle`）比较的也是下标与车辆 id，
+        // 从来没有生效过。真机证据：请求 12 → 车队 3→15（克隆 12 辆，不是"设为 12"），
+        // 请求 4 → 相位说 fleet4，而公司车队始终 15（SPEC §10.84）。
+        // 规则：array 一律用单变量形式（与本仓库其它处一致，list/table 才用双变量）。
         local cur = 0;
-        foreach (v, _ in this._fleetOwned) {
-            if (AIVehicle.IsValidVehicle(v)) cur++;
+        foreach (vid in this._fleetOwned) {
+            if (AIVehicle.IsValidVehicle(vid)) cur++;
         }
         if (cur < want) {
             if (!AIVehicle.IsValidVehicle(this._vehicle)) {
@@ -1028,6 +1065,12 @@ class ExecutorV1 extends AIController {
                 // It used to `return` silently, so a request for vehicles from a
                 // route with zero vehicles looked like it had been accepted.
                 this.SetPhase("fleet_noveh");
+                return;
+            }
+            if (this._slotD.bp == null) {
+                // 克隆需要"在哪个车库克隆"（AIVehicle.CloneVehicle 的第一个参数）。
+                // 施工早期（还没建车库）请求会走到这里；具名说明，而不是抛异常。
+                this.SetPhase("fleet_nodepot");
                 return;
             }
             while (cur < want) {
@@ -1038,28 +1081,77 @@ class ExecutorV1 extends AIController {
                 cur++;
             }
             this._fleetApplied = want;
-            this.SetPhase("fleet" + cur);
+            this.SetPhase("fleetg" + cur + "L" + this._fleetOwned.len() + "C" + this.CountOwnVehicles());
         } else if (cur > want) {
             // Sell clones this job owns, newest first; never the lead vehicle.
-            local keep = [];
-            foreach (v, _ in this._fleetOwned) {
-                if (!AIVehicle.IsValidVehicle(v)) continue;
-                if (cur <= want) {
-                    keep.append(v);
-                    continue;
-                }
-                if (v == this._vehicle) {
-                    keep.append(v);
-                    continue;
-                }
-                if (AIVehicle.SellVehicle(v)) cur--; else keep.append(v);
+            // **卖车必须先把车开回车库**（OpenTTD `src/vehicle_cmd.cpp:261`：
+            // `if (!front->IsStoppedInDepot()) return CommandCost(STR_ERROR_*_MUST_BE_STOPPED_INSIDE_DEPOT…)`）。
+            // 实测（/tmp/m31e，相位 `fleets12L12s0f11C14`）：当场 `SellVehicle` 对**正在跑**的
+            // 克隆车 11 次全部被引擎拒绝 → 车队一辆都没少。所以缩编只能是
+            // "送回车库 → 等它停下 → 再卖" 的多轮动作，由 ProcessFleetSells() 在每轮推进。
+            local toSell = cur - want;
+            local pending = [];
+            // 新克隆优先（数组尾部），**绝不卖头车**（它承载本线路的订单）。
+            local i = this._fleetOwned.len() - 1;
+            while (i >= 0 && toSell > 0) {
+                local vid = this._fleetOwned[i];
+                i--;
+                if (!AIVehicle.IsValidVehicle(vid)) continue;
+                if (vid == this._vehicle) continue;
+                if (AIVehicle.SendVehicleToDepot(vid)) { pending.append(vid); toSell--; }
             }
-            this._fleetOwned = keep;
+            foreach (vid in pending) this._fleetSell.append(vid);
             this._fleetApplied = want;
-            this.SetPhase("fleet" + cur);
+            this.SetPhase("fleetsend" + pending.len() + "C" + this.CountOwnVehicles());
         } else {
             this._fleetApplied = want;
+            // 曾经这里**什么都不说**：`cur == want` 时静默"已满足"，于是
+            // "请求被满足"与"请求根本没被处理"在日志里长得一模一样（D20 同源）。
+            this.SetPhase("fleetok" + want + "C" + this.CountOwnVehicles());
         }
+    }
+
+    /* 公司自有车辆数（引擎真值）。
+     * 为什么放进相位：harness 侧只能通过 admin 的 CompanyStats 看车队，而那个通道
+     * 是**周期性推送**的——当"相位说卖到 4"与"admin 说还是 15"冲突时，无法判断
+     * 是卖车没生效还是读数陈旧。把引擎自己的计数写进相位，冲突就没有了。 */
+    /* 推进"送回车库 → 卖出"：每轮尝试一次，直到车库里的车被卖掉。
+     * 单独成函数是因为卖车跨多个游戏 tick（车要开回车库），不能在一个循环里等。 */
+    function ProcessFleetSells() {
+        if (this._fleetSell.len() == 0) return;
+        local waiting = [];
+        local sold = 0;
+        local blocked = 0;
+        local gone = 0;
+        foreach (vid in this._fleetSell) {
+            // 车辆"不在了"必须**单独计数**：真机上 `fleetsend8` 只卖出 4 辆就 `w0`，
+            // 其余 4 辆是**静默消失**的（它们没被卖，却也不存在了）。把"消失"与"卖出"
+            // 分开报，才不会把一次删除读成一次成功的卖出（D20 同源）。
+            if (!AIVehicle.IsValidVehicle(vid)) { gone++; continue; }
+            if (!AIVehicle.IsStoppedInDepot(vid)) { waiting.append(vid); continue; }
+            if (AIVehicle.SellVehicle(vid)) sold++; else { blocked++; waiting.append(vid); }
+        }
+        this._fleetSell = waiting;
+        if (this._fleetSell.len() == 0) {
+            // 清掉已卖掉的条目（失效 id 会被计数忽略，但留着会让人误解车队规模）
+            local live = [];
+            foreach (vid in this._fleetOwned) {
+                if (AIVehicle.IsValidVehicle(vid)) live.append(vid);
+            }
+            this._fleetOwned = live;
+        }
+        if (sold > 0 || gone > 0 || (blocked > 0 && this._fleetSell.len() == 0)) {
+            this.SetPhase(
+                "fleetsold" + sold + "g" + gone + "w" + this._fleetSell.len() +
+                    "b" + blocked + "C" + this.CountOwnVehicles()
+            );
+        }
+    }
+
+    function CountOwnVehicles() {
+        local n = 0;
+        foreach (vid, _ in AIVehicleList()) n++;
+        return n;
     }
 
     function DumpBus() {

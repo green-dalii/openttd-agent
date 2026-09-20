@@ -336,6 +336,68 @@ export function decodeExecutorPhase(input: string): ExecutorPhase {
 				"a fleet change was requested but the company owns no vehicle to copy, so nothing was done.";
 			return base;
 		}
+		// 方向化相位（SPEC §10.84）：`fleet12` 曾经同时表示"克隆到 12"与"卖到 12"
+		// 两种完全不同的行为——两个成因共用一个信号，正是 D20 那类错误因果的来源。
+		if (s.startsWith("fleetsold")) {
+			const n = (re: RegExp) => re.exec(s)?.[1];
+			const sold = n(/sold(\d+)/);
+			const gone = n(/g(\d+)/);
+			const wait = n(/w(\d+)/);
+			const owned = n(/C(\d+)/);
+			base.description =
+				`the executor sold ${sold ?? "?"} clone(s)` +
+				// "消失"与"卖出"必须分开读：前者是车辆被删除（例如车库被重建），不是卖出成功。
+				(gone !== undefined && gone !== "0" ? `, ${gone} disappeared without being sold` : "") +
+				(wait !== undefined ? `, ${wait} still on the way to the depot` : "") +
+				(owned !== undefined ? `; the company owns ${owned} vehicle(s).` : ".");
+			return base;
+		}
+		if (/^fleet[gs]\d/.test(s)) {
+			// 形状：`fleetg<now>L<len>`（克隆）或 `fleets<now>L<len>s<sold>f<failed>`（卖出）。
+			// 解析必须锚定在**尾部**：直接对整个串跑 `s(\d+)` 会先匹配到 "fleets4" 里的
+			// "s4"，把"卖到 4"读成"卖了 4 辆"。
+			const grow = s[5] === "g";
+			const m = /^(\d+)L(\d+)(?:s(\d+)f(\d+))?(?:C(\d+))?$/.exec(s.slice(6));
+			const now = m?.[1] ?? "?";
+			const len = m?.[2];
+			const sold = m?.[3];
+			const failed = m?.[4];
+			const owned = /C(\d+)/.exec(s)?.[1];
+			base.description =
+				(grow
+					? `the executor cloned vehicles until the route had ${now} vehicle(s)`
+					: `the executor sold clones until the route had ${now} vehicle(s)` +
+						(sold !== undefined ? ` (sold ${sold}, the engine refused ${failed})` : "")) +
+				(len !== undefined ? `; it tracks ${len} vehicle(s) for this route` : "") +
+				// 引擎真值：把"我们数到几辆"与"游戏里实际有几辆"分开。
+				(owned !== undefined ? `, and the company owns ${owned} vehicle(s).` : ".");
+			return base;
+		}
+		if (s.startsWith("fleetok")) {
+			// 静默的"已满足"曾经与"没被处理"无法区分（D20 同源）。说清楚，并带上引擎真值。
+			const owned = /C(\d+)/.exec(s)?.[1];
+			base.description =
+				"the fleet request is already satisfied: the route has the requested number of " +
+				"vehicles, so the executor changed nothing" +
+				(owned !== undefined ? `; the company owns ${owned} vehicle(s).` : ".");
+			return base;
+		}
+		if (s.startsWith("fleet_wait")) {
+			// M3-1b（SPEC §10.84）：请求被**推迟**（执行器正在施工），不是被拒绝。
+			// 说清三件事：请求收到了、没有丢、什么时候会被尝试。
+			base.description =
+				"the fleet request was received but is deferred: the executor applies fleet " +
+				"changes only while it is not building, and it is currently building. It will " +
+				"be attempted again automatically until it is applied.";
+			return base;
+		}
+		if (s === "fleet_nodepot") {
+			// 克隆需要"在哪个车库克隆"；施工早期车库还没建好。
+			base.description =
+				"the fleet request needs a depot to clone from and the executor has not built " +
+				"one for this route yet, so nothing was done.";
+			return base;
+		}
 		if (s === "fleet_otherjob") {
 			// G3 (SPEC §10.67 layer 4): the executor only applies fleet signs for the
 			// job it is CURRENTLY building. It used to skip the others in silence, so

@@ -3338,3 +3338,91 @@ reflection: 2 run(s) recorded (0 failed), zero-tool-call runs 0, retried 0
 4. **仍未测量的边界**：horizon 更长的局（300+ 游戏日、更多决策）峰值会不会显著更高？
    本局只有 2–3 次决策。**若做 M5 学习曲线（长局）**，届时用同一字段复核一次即可——
    这正是把它做成**每次运行都记录**的字段（而不是一次性探针）的原因。
+
+## 10.84 M3-1b：车队杠杆真正的两处缺陷，与"缩编必须先进车库"（2026-09-19）
+
+### 缺陷 1：`foreach` 在 array 上是 (下标, 值)，结算代码把它当成了 (值, 忽略)
+
+Squirrel 语法（参考手册，2026-09-19 核对）：
+`'foreach' '(' [index_id ','] value_id 'in' exp ')' stat` —— **双变量的第一个是下标**。
+
+`_fleetOwned` 是普通 array（`[]` + `.append()`），却写成
+`foreach (v, _ in this._fleetOwned)` 并把 `v` 当车辆 id 用。后果：
+
+1. **计数错**：`AIVehicle.IsValidVehicle(v)` 数的是"id 等于 0..N-1 的车是否存在"；
+2. **卖错车**：`SellVehicle(v)` 卖的是**与这条线路无关的 id**；
+3. **守卫失效**：`if (v == this._vehicle)` 比较的是**下标与车辆 id**，
+   于是"永不卖头车"这条守卫**从未生效过**。
+
+真机表现：请求 12 → 车队 3 → **14**（是"克隆 11 辆到 12 辆"，不是"设为 12"）。
+
+### 缺陷 2：车辆只能在**停在车库内**时被卖出
+
+权威依据（OpenTTD `src/vehicle_cmd.cpp:261`，2026-09-19 核对）：
+
+```cpp
+if (!front->IsStoppedInDepot())
+    return CommandCost(STR_ERROR_TRAIN_MUST_BE_STOPPED_INSIDE_DEPOT + to_underlying(front->type));
+```
+
+而克隆路径当场 `StartStopVehicle(cv)` 把车**开出了车库**，所以"当场卖车"必然失败。
+实测证据（`/tmp/m31e`，相位 `fleets12L12s0f11C14`）：
+
+```
+fleets12L12s0f11C14
+  cur=12  L(列表长度)=12  s(卖出)=0  f(引擎拒绝)=11  C(引擎真值车队)=14
+```
+
+**11 次 `SellVehicle` 全部被引擎拒绝，车队一辆没少**——而旧相位 `fleet4` 同时表示
+"克隆到 4"与"卖到 4"两种完全相反的行为，这正是 D20 那类错误因果的来源。
+
+### 修法（三处，全部有静态守卫）
+
+1. **array 一律单变量** `foreach (vid in this._fleetOwned)`；本仓库对 array 用单变量、
+   对 list/table 才用双变量（`foreach (sid, _ in AISignList())`）。
+   守卫：`squirrel-api-guard.test.ts` 对已知 array 字段禁用双变量形式。
+2. **头车计入本线路车队**（`_fleetOwned.append(v)` 于建车处）：`V:N` 自此表示
+   **"这条线路应有 N 辆车"**，而不是"N 辆克隆"。
+3. **缩编 = 送回车库 → 等它停下 → 再卖**：新增跨 tick 状态机
+   `_fleetSell` + `ProcessFleetSells()`（`SendVehicleToDepot` → `IsStoppedInDepot` → `SellVehicle`），
+   每轮推进一次。
+4. **相位区分方向并带上引擎真值**：`fleetg<cur>L<len>C<owned>`（克隆）/
+   `fleetsend<k>C<owned>`（已送车库待卖）/ `fleetsold<s>w<wait>b<blocked>C<owned>`（卖出）/
+   `fleetok<want>C<owned>`（已满足，以前**什么都不说**）/ `fleet_wait<want>c<cur>L<len>`（推迟）。
+
+### 为什么把引擎真值写进相位
+
+harness 只能通过 admin 的 `CompanyStats`（周期性推送）看车队。当"相位说卖到 4"与
+"admin 说还是 15"冲突时，无法判断是**卖车没生效**还是**读数陈旧**。执行器把
+`CountOwnVehicles()`（引擎自己的计数）写进相位后，两种解释当场分开——
+本次正是靠它确认"车队真的没少"，从而把根因锁定到引擎的卖车前置条件上。
+
+### 兼容性（必须记住）
+
+`V:N` 的**语义变了**：旧行为是"再克隆 N 辆"（`_fleetOwned` 从空开始计数，且头车不计入），
+新行为是"这条线路应有 N 辆车"。因此 **2026-09-19 之前与之后的车队实验数字不可直接比较**
+——包括 S0 神谕梯度（`/tmp/s0-v{6,12,18}-r*`，当年标称 fleet 9/15/21 实为 3+N）。
+
+### 真机验证（`/tmp/m31f`，`--v02 --add-vehicles 12 --shrink-to 4 --game-days 300 --seed 7`）
+
+```
+EX fleetg12L12C14      ← 克隆到「线路 12 辆」（引擎真值 14）
+EX fleetsend8C14       ← 送 8 辆回车库（12 - 4 = 8，目标算术正确）
+EX fleetsold1g…w3b0C9  ← 卖出 1 辆、3 辆在路上，引擎真值 9
+EX fleetsold1…w2b0C8
+EX fleetsold1…w1b0C7
+EX fleetsold1…w0b0C6   ← 持续收敛
+[v02] shrink probe: requested 4, observed fleet 14 -> 10   ← 探针实测车队下降
+```
+
+**结论**：`V:<count>` 现在**双向可用**，`--shrink-to` 探针从假说变成量过的行为。
+三处缺陷（array `foreach` 取下标、卖车前置条件、相位不辨方向）都有静态守卫。
+
+### 遗留问题（已具名，尚未定性）
+
+`fleetsend8` 只卖出 4 辆就 `w0`：其余 4 辆**从未被卖却也不存在了**——相位把它们报为
+`g<gone>`（消失）而不是「卖出」。最可能的原因是执行器的阶段机在重建线路/车库时，
+把停在车库里的待卖车一起删掉了（本局中执行器确实在 `fleetsold` 期间重新进入了 `road` 阶段）。
+这条**已单独计数**（`fleetsold<s>g<gone>w<wait>b<blocked>C<owned>`），下一次真机运行即可判定，
+不需要再猜。⚠️ 在那之前，「缩编到 N」只能描述为「分批卖出并逐步收敛」，
+不能声称「一次请求即精确到 N」。

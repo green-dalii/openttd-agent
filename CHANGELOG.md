@@ -40,6 +40,25 @@
   判定优先用它、**两臂同源**（`ArmComparison.deliveredSource`），旧行回落原始值并标注为不可比。
 - 澄清 `rc=1` 的含义（=施工未达成 DONE，不是崩溃）并在输出中明示。
 
+### Fixed（M3-1b：车队杠杆的两处真实缺陷，2026-09-19）
+
+- **`foreach` 在 array 上是 (下标, 值)**，而车队会计把它当成了 (值, 忽略)：
+  "数车队"数的是"id 等于 0..N-1 的车是否存在"，`SellVehicle(v)` 卖的是与线路无关的 id，
+  而"永不卖头车"的守卫（`v == this._vehicle`）比较的是下标与车辆 id，**从未生效**。
+  真机证据：请求 12 → 车队 3→14（是"克隆到 12 辆"，不是"设为 12"）。
+  现在 array 一律单变量，并有静态守卫（对已知 array 字段禁用双变量形式）。
+- **缩编此前不可能成功**：OpenTTD 要求车辆 `IsStoppedInDepot` 才允许卖出
+  （`src/vehicle_cmd.cpp:261`），而克隆路径当场把车开出车库 → 11 次 `SellVehicle`
+  全部被引擎拒绝（相位 `fleets12L12s0f11C14`，车队一辆没少）。
+  改为跨 tick 状态机：`SendVehicleToDepot` → `IsStoppedInDepot` → `SellVehicle`。
+- `V:N` 的语义随之明确为**"这条线路应有 N 辆车"**（头车计入）。
+  ⚠️ **因此 2026-09-19 前后的车队实验数字不可直接比较**（含 S0 神谕梯度：当年标称
+  fleet 9/15/21，实为"3+N"）。
+- 车队相位改为可辨且带**引擎真值**：`fleetg<cur>L<len>C<owned>`（克隆）、
+  `fleetsend<k>C<owned>`（已送车库待卖）、`fleetsold<s>w<wait>b<blocked>C<owned>`（卖出）、
+  `fleetok<want>C<owned>`（已满足，以前什么都不说）、`fleet_wait<want>c<cur>L<len>`（推迟）。
+  工具描述同步改为"执行器在任何阶段都会尝试，但需要线路已有头车与车库"。
+
 ### Added（G6：把"离上下文窗口还有多远"变成已测量，2026-09-19）
 
 - 遥测新增**单次请求峰值**：`usage.peakRequest = {tokens, turn}`，其中

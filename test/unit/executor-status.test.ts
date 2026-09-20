@@ -37,6 +37,14 @@ describe("executor-status: 阶段词汇表解码", () => {
 			"EX dpt_ok j100",
 			"EX bus_noeng j100",
 			"EX fleet_noveh j100",
+			"EX fleet_nodepot j100",
+			"EX fleet_wait4 j100",
+			"EX fleetg12L12C14 j100",
+			"EX fleets4L4s8f0C7 j100",
+			"EX fleetok4C4 j100",
+			"EX fleetsend8C14 j100",
+			"EX fleetsold1g4w3b0C9 j100",
+			"EX fleet_wait4c12L12 j100",
 			"EX done stN2 r1 bus j100",
 			"EX hb road #11 j100",
 			"EX exc:whatever j100",
@@ -229,6 +237,77 @@ describe("phaseStage/isErrorPhase — 新闻门（2026-09-12，代价：整整�
  * 话都不说**。这违反本项目自己的铁律："工具必须能观测自身效果或明确拒绝"。
  * 修法：executor 在跳过时给出诚实信号 `fleet_otherjob`，harness 解码后送到 agent。
  */
+/**
+ * M3-1b（SPEC §10.84）：请求被**推迟**（执行器正在施工）与"没有头车可克隆"
+ * 都必须是具名信号。否则模型只能看到"我请求了、什么都没变"，并据此学到
+ * "请求车队没用"这种**错误因果**（D20 同源）。
+ */
+describe("M3-1b: 卖出相位要把「卖出」与「消失」分开", () => {
+	it("fleetsold1g4w3b0C9：卖出 1 辆、4 辆消失、3 辆还在路上、公司 9 辆", () => {
+		const d = decodeExecutorPhase("EX fleetsold1g4w3b0C9 j101");
+		expect(d.stage).toBe("fleet");
+		expect(d.description).toMatch(/sold 1/);
+		expect(d.description).toMatch(/4 disappeared/);
+		expect(d.description).toMatch(/owns 9/);
+	});
+
+	it("没有消失时不提消失（g0 不该被读成异常）", () => {
+		const d = decodeExecutorPhase("EX fleetsold2g0w0b0C4 j101");
+		expect(d.description).toMatch(/sold 2/);
+		expect(d.description).not.toMatch(/disappeared/);
+	});
+});
+
+describe("M3-1b: 车队相位必须区分「克隆」与「卖出」两种行为", () => {
+	it("fleetg12L12：说明是克隆到 12，并报出本线路车队条目数", () => {
+		const d = decodeExecutorPhase("EX fleetg12L12 j101");
+		expect(d.stage).toBe("fleet");
+		expect(d.description).toMatch(/cloned/i);
+		expect(d.description).not.toMatch(/sold/i);
+	});
+
+	it("fleets4L4s8f0C7：说明卖出到 4、卖出/被拒数量，以及引擎里的公司车辆数", () => {
+		const d = decodeExecutorPhase("EX fleets4L4s8f0C7 j101");
+		expect(d.stage).toBe("fleet");
+		expect(d.description).toMatch(/sold/i);
+		expect(d.description).toMatch(/8/);
+		// 引擎真值必须出现：它是"卖车是否真的生效"的唯一权威读数
+		expect(d.description).toMatch(/owns 7/);
+		expect(d.description).not.toMatch(/state "/);
+	});
+
+	it("fleetok4C4：已满足也要说话（静默与没处理无法区分）", () => {
+		const d = decodeExecutorPhase("EX fleetok4C4 j101");
+		expect(d.description).toMatch(/already satisfied/i);
+		expect(d.description).toMatch(/owns 4/);
+	});
+
+	it("fleet_wait4c12L12：推迟时带上我们数到几辆", () => {
+		const d = decodeExecutorPhase("EX fleet_wait4c12L12 j101");
+		expect(d.description).toMatch(/deferred/i);
+	});
+});
+
+describe("M3-1b: 车队请求被推迟 / 缺车库时也要说出来", () => {
+	it("fleet_wait4：说明请求已被收到、只是要等到能应用的时候", () => {
+		const d = decodeExecutorPhase("EX fleet_wait4 j101");
+		expect(d.stage).toBe("fleet");
+		expect(d.detail).toMatchObject({ outcome: "wait4" });
+		// 必须让读者知道：请求**没有丢**，只是被推迟（与"拒绝"不同）。
+		expect(d.description).toMatch(/deferred|not applied yet|waiting/i);
+		// 关键：不能是泛型兜底（`vehicles: state "wait4".`）——那只是把 token 抄了一遍，
+		// 对模型毫无因果信息。这条断言是本节存在的理由。
+		expect(d.description).not.toMatch(/state "/);
+	});
+
+	it("fleet_nodepot：说明克隆需要车库，而车库还没建好", () => {
+		const d = decodeExecutorPhase("EX fleet_nodepot j101");
+		expect(d.stage).toBe("fleet");
+		expect(d.description).toMatch(/depot/i);
+		expect(d.description).not.toMatch(/state "/);
+	});
+});
+
 describe("G3: 车队请求被跳过时必须说出来", () => {
 	it("fleet_otherjob：报出请求针对的不是当前施工的线路", () => {
 		const d = decodeExecutorPhase("EX fleet_otherjob j101");

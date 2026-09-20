@@ -175,9 +175,9 @@ export function setRouteVehiclesTool(deps: AgentDeps): AgentTool<typeof SetRoute
 			"the current fleet clones the route's lead vehicle (clones share its orders); a count " +
 			"BELOW it sells the route's newest clones. The lead vehicle is never sold, so 1 is the " +
 			"floor and a route cannot be emptied this way. It cannot create the first vehicle of a " +
-			"route: with no vehicles there is nothing to clone. The executor reads this request only " +
-			"while it is not building (its phase is not a build stage), so a request can be postponed " +
-			"until then.",
+			"route: with no vehicles there is nothing to clone. The executor attempts fleet requests " +
+			"in any stage, but can only apply one when the route already has a lead vehicle (and a " +
+			"depot to clone from), so a request can be deferred until then.",
 				// 游戏按 **FIFO** 应用命令（SPEC §10.39.1），所以这几条**变更型**工具必须串行：
 		// pi-agent-core 的默认执行模式是 `parallel`，同一条助手消息里的两条命令会并发
 		// 发出，台账（在完成时记录）的顺序就不再等于本局实际应用的顺序。ADR §10.74。
@@ -246,7 +246,10 @@ export function setRouteVehiclesTool(deps: AgentDeps): AgentTool<typeof SetRoute
 					`requested fleet size ${params.count} (${direction}: currently ${vehicles}, ` +
 					`company=${company}). This reports the REQUEST, not the resulting fleet; ` +
 					"observe() reports the fleet." +
-					(phase ? ` The executor reads fleet requests only while it is not building; its current phase is "${phase}".` : ""),
+					(phase
+						? ` The executor applies fleet requests when the route has a lead vehicle and a ` +
+							`depot; its current phase is "${phase}".`
+						: ""),
 				data: { ...cmd, vehiclesBefore: vehicles, direction, executorPhase: phase },
 			};
 			return toResult(r);

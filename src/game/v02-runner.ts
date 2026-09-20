@@ -296,28 +296,28 @@ export async function runV02(cfg: Config, opts: V02Options = {}): Promise<number
 						"nothing to sell, so this run says nothing about shrinking",
 				);
 			} else {
-				// **Wait for the executor to be in `done` BEFORE asking.**
+				// **故意在"执行器正忙"的时候发**（M3-1b，SPEC §10.84）。
 				//
-				// 2026-09-19 真机证伪：`CheckAddVehicles()` 只在
-				// `_stage == "done" && _vehicle >= 0` 时被调用（`executor-ai/main.nut:115`），
-				// 所以施工期间发来的 `V:` 请求**不会被读**（请求是延迟的，不是丢失的）。
-				// 第一版探针发完只等 60 秒 → 车队没变，我差点得出"环境不支持缩编"的结论。
-				// 正确做法：等阶段回到 `done` 再发，然后观测。
-				const doneDeadline = Date.now() + 300_000;
-				let sawDone = false;
-				while (Date.now() < doneDeadline && !stopRequested) {
+				// 2026-09-19 的第一版探针是"等 `done` 再发"，因为当时 `CheckAddVehicles()`
+				// 只挂在 `} else if (this._stage == "done" && this._vehicle >= 0) {`。
+				// 那是**被测对象的缺陷**，不是环境事实：施工期占一局的大部分时间，
+				// 实测中执行器发完请求后再没回到过 `done` → 请求永不生效（§10.81）。
+				// 修好后（任意阶段尝试 + 推迟具名），探针必须验证**更难的那条路**：
+				// 忙时发，车队仍应下降。若只测"done 时发"，就等于只验证了本来的行为。
+				const phaseNow = () =>
+					[...world.snapshot().companies.values()]
+						.map((c) => String(c.info?.name ?? ""))
+						.find((n) => n.startsWith("EX ")) ?? "(unknown)";
+				const busyDeadline = Date.now() + 120_000;
+				let sentWhile = phaseNow();
+				while (Date.now() < busyDeadline && !stopRequested && /^EX done/.test(sentWhile)) {
+					// 等一个"正在施工"的时刻（不施工时也有意义，但那是弱情形）
 					client?.poll(AdminUpdateType.CompanyInfo, ALL_COMPANIES);
 					await sleep(500);
-					const names = [...world.snapshot().companies.values()].map((c) => String(c.info?.name ?? ""));
-					if (names.some((n) => n.startsWith("EX done"))) {
-						sawDone = true;
-						break;
-					}
+					sentWhile = phaseNow();
 				}
 				console.log(
-					sawDone
-						? `[v02] shrink probe: executor reports done; requesting ${opts.shrinkTo} (fleet is ${from})`
-						: `[v02] shrink probe: executor never reported done within 300s; sending anyway (request will be DEFERRED)`,
+					`[v02] shrink probe: executing stage "${sentWhile}"; requesting ${opts.shrinkTo} (fleet is ${from})`,
 				);
 				client.gameScript(
 					JSON.stringify({ cmd: "add_vehicles", company: 0, job: 101, count: opts.shrinkTo }),
@@ -330,7 +330,8 @@ export async function runV02(cfg: Config, opts: V02Options = {}): Promise<number
 				}
 				// Observe the EFFECT, not the send (same rule as the growth probe):
 				// the executor applies on its own tick, so poll until the fleet drops.
-				const shrinkDeadline = Date.now() + 60_000;
+				// 谁在施工 → 请求被推迟到能应用的时候，所以窗口要够长（≥5 分钟）。
+				const shrinkDeadline = Date.now() + 420_000;
 				while (Date.now() < shrinkDeadline && !stopRequested) {
 					client?.poll(AdminUpdateType.CompanyStats, 0);
 					await sleep(600);
