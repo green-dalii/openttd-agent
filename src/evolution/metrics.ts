@@ -623,6 +623,41 @@ export interface MetricStat {
 }
 
 /** Aggregate one numeric metric across rows; `null` means "nobody reported it". */
+/**
+ * G7（SPEC §10.85）：判据在**这个配置**下会不会动。
+ *
+ * 真机事实：horizon=30 的 19 局 `deliveredRun` **全部为 0**；horizon=300 的 6 局
+ * 全部非 0（90–589）。判据由 `COMPANY_ECONOMY.deliveredCargo` 积分而来，而那是
+ * **按季度重置**的计数器（`QUARTER_DAYS = 90`，SPEC §10.65），所以短于一周期的窗口
+ * 只能观测到"没有变化"——那不是"效果为零"，是**判据恒为常数、什么都测不出来**。
+ *
+ * 一个恒为常数的判据，任何比较都是谎言（AGENTS §2 铁律 5 的同类）：守卫要在跑之前拦住。
+ */
+export const MIN_COMPARABLE_HORIZON_DAYS = 180; // 2 × QUARTER_DAYS
+
+/** Is this horizon long enough for the delivery criterion to be able to move? */
+export function horizonIsComparable(horizonDays: number | null | undefined): boolean {
+	return typeof horizonDays === "number" && horizonDays >= MIN_COMPARABLE_HORIZON_DAYS;
+}
+
+/**
+ * Is the outcome actually able to discriminate in this set of runs?
+ *
+ * `degenerate` means: every run delivered nothing (or nothing was measured at all).
+ * That is *not* the same as "the treatment had no effect", and reporting it as an
+ * effect size would be a silent lie - so the verdicts must say it out loud.
+ */
+export function deliveredOutcome(rows: Array<{ deliveredRun: number | null }>): {
+	measured: number;
+	nonZero: number;
+	degenerate: boolean;
+} {
+	const list = rows ?? [];
+	const measured = list.filter((r) => r.deliveredRun !== null && r.deliveredRun !== undefined).length;
+	const nonZero = list.filter((r) => typeof r.deliveredRun === "number" && r.deliveredRun !== 0).length;
+	return { measured, nonZero, degenerate: nonZero === 0 };
+}
+
 export function metricStat(values: Array<number | null | undefined>): MetricStat | null {
 	const nums = values.filter((v): v is number => typeof v === "number" && Number.isFinite(v));
 	if (nums.length === 0) return null;

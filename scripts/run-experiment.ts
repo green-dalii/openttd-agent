@@ -16,7 +16,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, openSync } from "node:fs";
 import { join } from "node:path";
 import { evolutionView } from "../src/evolution/web-view.js";
-import { degradationStats, formatMetricStat } from "../src/evolution/metrics.js";
+import { degradationStats, deliveredOutcome, formatMetricStat, horizonIsComparable, MIN_COMPARABLE_HORIZON_DAYS } from "../src/evolution/metrics.js";
 import { reflectionStats } from "../src/evolution/reflection-stats.js";
 
 interface Args {
@@ -44,6 +44,23 @@ function parseArgs(argv: string[]): Args {
 	}
 	if (!existsSync(join(dir, "credentials.json")) || !existsSync(join(dir, "llm.json"))) {
 		console.error(`ERROR: ${dir} must contain credentials.json and llm.json (copy from the provider setup dir).`);
+		process.exit(2);
+	}
+	// G7（SPEC §10.85）：**跑之前**就拦住退化配置。
+	//
+	// 判据 `deliveredRun` 由按季度重置的计数器积分而来（QUARTER_DAYS = 90）。实测：
+	// horizon=30 的 19 局 deliveredRun **全部为 0**，horizon=300 的 6 局全部非 0。
+	// 所以在短于 2 个季度的 horizon 上做 A/B，测的是一个**恒为常数**的判据——
+	// 那不是"样本不足"，是"这个比较什么都测不出来"。真机时间很贵，不能这样花。
+	const hz = get("--game-days") ? Number(get("--game-days")) : undefined;
+	if (!horizonIsComparable(hz)) {
+		console.error(
+			`ERROR: --game-days ${hz ?? "(unset)"} cannot support a comparison.\n` +
+				`  The outcome (deliveredRun) integrates a quarterly-reset counter, so horizons below\n` +
+				`  ${MIN_COMPARABLE_HORIZON_DAYS} game days measure a constant 0 (measured: 19/19 runs at 30 days).\n` +
+				`  Use --game-days ${MIN_COMPARABLE_HORIZON_DAYS} or more, or run a single smoke run via\n` +
+				`  \`pnpm run cli --agent --game-days 30\` if you only need plumbing verification.`,
+		);
 		process.exit(2);
 	}
 	return {
@@ -141,6 +158,17 @@ console.log(
 // 来自一个被削弱的 agent（SPEC §10.66 + R1/ADR §10.74）。缺报 ≠ 0。
 {
 	const d = degradationStats(view.metrics);
+	// G7：判据能不能动，先于任何"有无效果"的主张。
+	{
+		const dep = deliveredOutcome(view.metrics);
+		if (dep.degenerate) {
+			console.log(
+				`!! OUTCOME IS CONSTANT: ${dep.measured} of ${view.metrics.length} run(s) measured, ` +
+					`none delivered anything. This comparison cannot detect an effect - it is NOT ` +
+					`evidence of "no effect" (SPEC §10.85).`,
+			);
+		}
+	}
 	console.log(
 		`channel health: GS errors/run ${formatMetricStat(d.gsErrors)}  ` +
 			`tool budget refusals/run ${formatMetricStat(d.toolBudgetBlocks)}  ` +

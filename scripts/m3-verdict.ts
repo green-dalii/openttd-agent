@@ -15,7 +15,7 @@
  * 收尾时实测过。交接文档里的命令必须是**跑得通**的，所以落成文件。
  */
 import { evolutionView, type EvolutionView } from "../src/evolution/web-view.js";
-import { degradationStats, formatMetricStat } from "../src/evolution/metrics.js";
+import { degradationStats, deliveredOutcome, formatMetricStat } from "../src/evolution/metrics.js";
 import { reflectionStats } from "../src/evolution/reflection-stats.js";
 
 const dataDir = process.argv[2];
@@ -75,6 +75,16 @@ console.log(`income delta  : ${arms.incomeDelta?.toFixed(0) ?? "—"}`);
 			`without ${formatMetricStat(wit_out.peakRequestTokens)}  ` +
 			`(G6 - decides whether context compaction is needed at all)`,
 	);
+	// G7：判据能不能动，必须先于"有无效果"的主张（SPEC §10.85）。
+	{
+		const dep = deliveredOutcome(view.metrics);
+		if (dep.degenerate) {
+			console.log(
+				`!! OUTCOME IS CONSTANT: ${dep.measured} of ${view.metrics.length} run(s) measured, ` +
+					`none delivered anything -> this comparison cannot detect an effect (SPEC §10.85).`,
+			);
+		}
+	}
 	// M1：反思的产出率（0 调用的局 = 协议/接线信号，不是"没什么可学"）
 	const refl = reflectionStats(dataDir);
 	console.log(

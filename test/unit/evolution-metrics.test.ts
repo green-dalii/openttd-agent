@@ -14,6 +14,7 @@
  * 禁止: 在此做 IO；不要在 metrics 里推断因果（SPEC §5.3 明确禁止臆测因果）。
  */
 
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
 	compareArms,
@@ -22,7 +23,10 @@ import {
 	groupBySeed,
 	MIN_LESSON_SAMPLE,
 	degradationStats,
+	deliveredOutcome,
 	formatMetricStat,
+	horizonIsComparable,
+	MIN_COMPARABLE_HORIZON_DAYS,
 	metricStat,
 	type GameMetric,
 } from "../../src/evolution/metrics.js";
@@ -725,6 +729,56 @@ describe("deliveredRun —— 跨季积分的流量指标优先，且两臂同�
  * `channel health` 这行曾**从未在实验日志里出现过**，且实现把 ArmSummary 当行用，
  * 永远吐出 "not reported"。这里锁定两条性质：缺报 ≠ 0；聚合只有一处实现。
  */
+/**
+ * G7（SPEC §10.85）：判据在**这个配置**下会不会动。
+ *
+ * 真机事实：horizon=30 的 19 局 `deliveredRun` **全部为 0**，而 horizon=300 的 6 局
+ * 全部非 0（90–589）。原因是判据由 `COMPANY_ECONOMY.deliveredCargo` 积分而来，
+ * 而那是**按季度重置**的计数器（我们的 `QUARTER_DAYS = 90`，SPEC §10.65）——
+ * 短于一个季度的窗口只能观测到"没有变化"。
+ *
+ * 因此"30 天的 A/B"不是样本不足，而是**判据恒为常数**：它什么都测不出来。
+ * 一个恒为常数的判据，任何比较都是谎言——守卫必须在跑之前就拦住。
+ */
+describe("G7: 判据退化检测（常数判据不能比较）", () => {
+	it("全部为 0 或未测 → 报退化（这不是「没有效果」）", () => {
+		const rows = [
+			{ deliveredRun: 0 },
+			{ deliveredRun: 0 },
+		] as unknown as Parameters<typeof deliveredOutcome>[0];
+		const d = deliveredOutcome(rows);
+		expect(d.degenerate).toBe(true);
+		expect(d.measured).toBe(2);
+	});
+
+	it("有非零值 → 不报退化", () => {
+		const rows = [{ deliveredRun: 0 }, { deliveredRun: 152 }] as unknown as Parameters<
+			typeof deliveredOutcome
+		>[0];
+		expect(deliveredOutcome(rows).degenerate).toBe(false);
+	});
+
+	it("全部未测量 → 也报退化（说明判据根本没接上）", () => {
+		const rows = [{ deliveredRun: null }] as unknown as Parameters<typeof deliveredOutcome>[0];
+		const d = deliveredOutcome(rows);
+		expect(d.degenerate).toBe(true);
+		expect(d.measured).toBe(0);
+	});
+});
+
+describe("G7: 可比 horizon 的下限由计数器粒度决定", () => {
+	it("下限是 2 个季度（积分需要跨过一个完整的季度边界）", () => {
+		expect(MIN_COMPARABLE_HORIZON_DAYS).toBe(180);
+	});
+
+	it("30 天的配置被判定为不可比，300 天可以", () => {
+		expect(horizonIsComparable(30)).toBe(false);
+		expect(horizonIsComparable(120)).toBe(false);
+		expect(horizonIsComparable(180)).toBe(true);
+		expect(horizonIsComparable(300)).toBe(true);
+	});
+});
+
 describe("metricStat / degradationStats: 缺报不是 0", () => {
 	it("没人报过 → null（不是 0）", () => {
 		expect(metricStat([null, undefined])).toBeNull();
@@ -768,5 +822,30 @@ describe("metricStat / degradationStats: 缺报不是 0", () => {
 		const d = degradationStats(rows);
 		expect(d.gsErrors).toEqual({ reported: 2, max: 4, total: 4 });
 		expect(d.toolBudgetBlocks).toEqual({ reported: 2, max: 2, total: 2 });
+	});
+});
+
+/**
+ * D28 的机械守卫：**披露必须走在判据路径上**。
+ *
+ * G7 的退化检测只有在"每个会打印比较结论的地方"都调用它时才有意义；
+ * 曾经我们踩过这个坑（`channel health` 只写在 m3-verdict 里、且读的是错误的字段，
+ * 于是那一行永远显示 not reported）。这条测试保证：两个 verdict 与实验脚本
+ * 都不会悄悄把守卫删掉。
+ */
+describe("G7: 退化守卫必须在所有会下结论的路径上", () => {
+	const files = ["scripts/run-experiment.ts", "scripts/m3-verdict.ts"];
+	it.each(files)("%s 使用 deliveredOutcome 或 horizonIsComparable", (f) => {
+		const src = readFileSync(f, "utf8");
+		expect(
+			src.includes("deliveredOutcome(") || src.includes("horizonIsComparable("),
+			`${f} 必须检查判据是否会动（SPEC §10.85 / D28）`,
+		).toBe(true);
+	});
+
+	it("实验脚本在跑之前拒绝短于 2 个季度的比较", () => {
+		const src = readFileSync("scripts/run-experiment.ts", "utf8");
+		expect(src).toContain("horizonIsComparable(hz)");
+		expect(src).toContain("MIN_COMPARABLE_HORIZON_DAYS");
 	});
 });

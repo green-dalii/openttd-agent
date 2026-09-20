@@ -40,6 +40,16 @@
   判定优先用它、**两臂同源**（`ArmComparison.deliveredSource`），旧行回落原始值并标注为不可比。
 - 澄清 `rc=1` 的含义（=施工未达成 DONE，不是崩溃）并在输出中明示。
 
+### Added（G7：拒绝在"判据不会动"的配置上做比较，2026-09-19）
+
+- 新增 `MIN_COMPARABLE_HORIZON_DAYS = 180`（2 个季度）与 `horizonIsComparable()`：
+  判据 `deliveredRun` 由**按季度重置**的计数器积分而来，短于一个季度的窗口只能观测到
+  "没有变化"。**实测：horizon=30 的 19 局 deliveredRun 全部为 0；horizon=300 的 6 局全部非 0。**
+- `scripts/run-experiment.ts` 现在**在跑之前**拒绝短于下限的比较（真机时间很贵），
+  并指向单局 smoke 的替代做法；两个 verdict 在结果里打印
+  `!! OUTCOME IS CONSTANT … this is NOT evidence of "no effect"`。
+- 静态守卫：所有会下比较结论的脚本都必须调用退化检查（D28 的机械化）。
+
 ### Fixed（M3-1b：车队杠杆的两处真实缺陷，2026-09-19）
 
 - **`foreach` 在 array 上是 (下标, 值)**，而车队会计把它当成了 (值, 忽略)：
