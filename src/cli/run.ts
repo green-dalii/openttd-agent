@@ -35,6 +35,8 @@ interface CliArgs {
 	mode: "probe" | "dry-run" | "watch" | "v02" | "agent" | "serve" | "version" | "help";
 	/** v02 baseline probe: after construction, request this many vehicles on the demo route. */
 	addVehicles?: number;
+	/** M3-1 oracle probe: request a LOWER fleet size and observe the fleet shrink (v02 only). */
+	shrinkTo?: number;
 	/** Agent: pause the world while the model thinks + acts (verified freeze). */
 	freeze?: boolean;
 	year?: number;
@@ -73,6 +75,9 @@ export function parseArgs(argv: string[]): CliArgs {
 	let gameDays: number | undefined;
 	let scenario: "freeform" | "prebuilt" | undefined;
 	let addVehicles: number | undefined;
+	// M3-1: the oracle probe verifies fleet size in BOTH directions (environment fact:
+	// `V:<count>` below the current fleet sells the newest clones).
+	let shrinkTo: number | undefined;
 	let freeze = false;
 	let llmBaseUrl: string | undefined;
 	let llmApiKey: string | undefined;
@@ -104,6 +109,9 @@ export function parseArgs(argv: string[]): CliArgs {
 				break;
 			case "--add-vehicles":
 				addVehicles = parseIntNum(argv[++i], "--add-vehicles");
+				break;
+			case "--shrink-to":
+				shrinkTo = parseIntNum(argv[++i], "--shrink-to");
 				break;
 			case "--scenario": {
 				const v = argv[++i];
@@ -174,7 +182,7 @@ export function parseArgs(argv: string[]): CliArgs {
 		// compile: `args.foo` is simply undefined, so the flag silently does
 		// nothing while the help text still advertises it. Fourth instance of
 		// "parsed but dropped" found on 2026-09-12 (MEMORY.md A5).
-		mode, year, seed, timeoutMs, aiName, webPort, demoSeconds, gameDays, scenario, addVehicles, freeze,
+		mode, year, seed, timeoutMs, aiName, webPort, demoSeconds, gameDays, scenario, addVehicles, shrinkTo, freeze,
 		llmBaseUrl, llmApiKey, llmModel, llmApi, offlineDemo, skipPreflight,
 		injectMemory,
 	};
@@ -313,6 +321,7 @@ async function main(): Promise<number> {
 				demoSeconds: args.demoSeconds,
 				gameDays: args.gameDays,
 				addVehicles: args.addVehicles,
+				shrinkTo: args.shrinkTo,
 			});
 		} catch (e) {
 			console.error("[v02] ERROR:", e instanceof Error ? e.message : e);

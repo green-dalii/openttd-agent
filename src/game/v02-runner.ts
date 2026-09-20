@@ -39,6 +39,13 @@ export interface V02Options {
 	 */
 	addVehicles?: number;
 	/**
+	 * M3-1（2026-09-19）：请求一个**低于当前车队**的数量，并观测车队是否真的下降。
+	 * 环境事实（源码确证于 `executor-ai/main.nut:CheckAddVehicles`）：`V:<count>` 在
+	 * `cur > want` 时卖车（最新优先、永不卖头车）。源码说会卖 ≠ 真的会卖——
+	 * 这条探针存在的意义就是把它从"读源码"变成"量过的行为"（MEMORY D8/D19）。
+	 */
+	shrinkTo?: number;
+	/**
 	 * Episode horizon in SIMULATED game days (G1, SPEC §10.68). The oracle probe
 	 * measures "delivered as a function of fleet size", so every rep must observe
 	 * the same amount of world - otherwise the gradient mixes in window length.
@@ -64,6 +71,8 @@ export async function runV02(cfg: Config, opts: V02Options = {}): Promise<number
 	let fleetAfterRequest: number | null = null;
 	/** Did the probe actually send its request? Runs where it did not are void. */
 	let fleetProbeFired = false;
+	/** Post-shrink observation (M3-1); null when the probe could not run. */
+	let fleetAfterShrink: number | null = null;
 	let resolveStopped: (() => void) | null = null;
 
 	const requestStop = (_code: number) => {
@@ -274,6 +283,70 @@ export async function runV02(cfg: Config, opts: V02Options = {}): Promise<number
 					: `[v02] baseline probe: requested ${opts.addVehicles}, observed fleet ${vehicles} -> ${fleetAfterRequest}`,
 			);
 		}
+
+		// --- M3-1: the SAME lever, the other direction ---------------------------
+		// 环境事实（源码确证于 `executor-ai/main.nut:CheckAddVehicles`）：`V:<count>`
+		// 低于当前车队时会**卖车**（最新优先、永不卖头车）。源码说会卖 ≠ 真的会卖——
+		// 这条探针把它从"读源码"变成"量过的行为"（MEMORY D8/D19）。
+		if (opts.shrinkTo !== undefined && opts.shrinkTo > 0) {
+			const from = fleetAfterRequest ?? vehicles;
+			if (from <= opts.shrinkTo) {
+				console.log(
+					`[v02] shrink probe NOT run: fleet is ${from}, not above ${opts.shrinkTo} - ` +
+						"nothing to sell, so this run says nothing about shrinking",
+				);
+			} else {
+				// **Wait for the executor to be in `done` BEFORE asking.**
+				//
+				// 2026-09-19 真机证伪：`CheckAddVehicles()` 只在
+				// `_stage == "done" && _vehicle >= 0` 时被调用（`executor-ai/main.nut:115`），
+				// 所以施工期间发来的 `V:` 请求**不会被读**（请求是延迟的，不是丢失的）。
+				// 第一版探针发完只等 60 秒 → 车队没变，我差点得出"环境不支持缩编"的结论。
+				// 正确做法：等阶段回到 `done` 再发，然后观测。
+				const doneDeadline = Date.now() + 300_000;
+				let sawDone = false;
+				while (Date.now() < doneDeadline && !stopRequested) {
+					client?.poll(AdminUpdateType.CompanyInfo, ALL_COMPANIES);
+					await sleep(500);
+					const names = [...world.snapshot().companies.values()].map((c) => String(c.info?.name ?? ""));
+					if (names.some((n) => n.startsWith("EX done"))) {
+						sawDone = true;
+						break;
+					}
+				}
+				console.log(
+					sawDone
+						? `[v02] shrink probe: executor reports done; requesting ${opts.shrinkTo} (fleet is ${from})`
+						: `[v02] shrink probe: executor never reported done within 300s; sending anyway (request will be DEFERRED)`,
+				);
+				client.gameScript(
+					JSON.stringify({ cmd: "add_vehicles", company: 0, job: 101, count: opts.shrinkTo }),
+				);
+				// Let the executor's mailbox see the request (it does not report back).
+				const mailboxDeadline = Date.now() + 8_000;
+				while (Date.now() < mailboxDeadline && !stopRequested) {
+					client?.poll(AdminUpdateType.CompanyInfo, ALL_COMPANIES);
+					await sleep(250);
+				}
+				// Observe the EFFECT, not the send (same rule as the growth probe):
+				// the executor applies on its own tick, so poll until the fleet drops.
+				const shrinkDeadline = Date.now() + 60_000;
+				while (Date.now() < shrinkDeadline && !stopRequested) {
+					client?.poll(AdminUpdateType.CompanyStats, 0);
+					await sleep(600);
+					const v = world.snapshot().companies.get(0)?.stats?.vehicles ?? -1;
+					if (v >= 0 && v < from) {
+						fleetAfterShrink = v;
+						break;
+					}
+				}
+				console.log(
+					fleetAfterShrink === null
+						? `[v02] shrink probe: requested ${opts.shrinkTo}, observed fleet DID NOT shrink (still ${from})`
+						: `[v02] shrink probe: requested ${opts.shrinkTo}, observed fleet ${from} -> ${fleetAfterShrink}`,
+				);
+			}
+		}
 		// Economy snapshot for the report.
 		let money = -1n;
 		const econDeadline = Date.now() + 8_000;
@@ -438,6 +511,10 @@ export async function runV02(cfg: Config, opts: V02Options = {}): Promise<number
 		fleetRequested: opts.addVehicles ?? null,
 		fleetObservedAfterRequest: fleetAfterRequest,
 		fleetProbeFired,
+		// M3-1: the OTHER direction of the same lever. Durable evidence (a console line
+		// in /tmp disappears; the metric row is what a later session can check).
+		shrinkRequested: opts.shrinkTo ?? null,
+		fleetObservedAfterShrink: fleetAfterShrink,
 		// G1: the oracle probe is a measurement too, so it records its horizon.
 		simulatedDays: episodeEnd.simulatedDays,
 		horizonDays: episode.plan.horizonDays,

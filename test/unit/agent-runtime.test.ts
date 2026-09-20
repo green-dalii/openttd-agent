@@ -56,7 +56,7 @@ describe("createAgent", () => {
 			"estimate_route",
 			"inspect_route",
 			"build_bus_route",
-			"add_vehicles",
+			"set_route_vehicles",
 			"set_pause",
 		]);
 		expect(agent.state.systemPrompt).toBe(SYSTEM_PROMPT);
@@ -141,7 +141,7 @@ describe("R1: pi-agent-core 协同（执行顺序 / 工具预算 / provider 缓�
 		const { deps } = fakeDeps();
 		const mode = (n: string) => createTools(deps).find((t) => t.name === n)?.executionMode;
 		expect(mode("build_bus_route")).toBe("sequential");
-		expect(mode("add_vehicles")).toBe("sequential");
+		expect(mode("set_route_vehicles")).toBe("sequential");
 		expect(mode("set_pause")).toBe("sequential");
 		// 读型工具不会改变世界，并发读没有顺序问题
 		expect(mode("observe")).not.toBe("sequential");
@@ -305,7 +305,7 @@ describe("structured plan extraction (SPEC §4.2 step 2)", () => {
 			fauxAssistantMessage([
 				fauxText(
 					'Considering cash. {"goal":"restore profitability","plan":["add buses"],' +
-						'"immediate_action":"add_vehicles","wait_until":{"game_days":30},"rationale":"income negative"}',
+						'"immediate_action":"set_route_vehicles","wait_until":{"game_days":30},"rationale":"income negative"}',
 				),
 			]),
 		]);
@@ -441,7 +441,7 @@ describe("harness boundary: 框架不替 agent 做决定", () => {
 			},
 		};
 		const tools = createTools(withCompany);
-		const add = tools.find((t) => t.name === "add_vehicles")!;
+		const add = tools.find((t) => t.name === "set_route_vehicles")!;
 		const res = await add.execute("c1", { count: 1 });
 		const summary = String((res as { details?: { summary?: string } }).details?.summary ?? "");
 		assertNoStrategy("add_vehicles refusal", summary);

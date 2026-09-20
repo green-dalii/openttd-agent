@@ -89,6 +89,9 @@ export interface SessionMeta {
 		gsErrors?: number;
 		/** Tool calls refused by the per-decision budget (R1; absent = not reported). */
 		toolBudgetBlocks?: number;
+		/** Oracle probe (M3-1): fleet size requested downward, and what was observed. */
+		shrinkRequested?: number | null;
+		fleetObservedAfterShrink?: number | null;
 		/**
 		 * Simulated days this run covered (G1, SPEC §10.68). The comparable
 		 * opportunity denominator: two runs with different values measured

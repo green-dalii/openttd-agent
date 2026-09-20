@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from "vitest";
 import {
-	addVehiclesTool,
+	setRouteVehiclesTool,
 	buildBusRouteTool,
 	createTools,
 	inspectRouteTool,
@@ -122,7 +122,16 @@ describe("build_bus_route tool", () => {
 	});
 });
 
-describe("add_vehicles tool", () => {
+/**
+ * M3-1（2026-09-19）：车队规模是一个**双向**动作。
+ *
+ * 环境事实（SPEC §10.80，源码确证于 `executor-ai/main.nut:CheckAddVehicles`）：
+ * `V:<count>` 在 `cur < want` 时克隆头车扩容，在 `cur > want` 时**卖车**
+ * （"newest first; never the lead vehicle"）；下限是 1，`count < 1` 被当作"无请求"。
+ * 而旧工具名 `add_vehicles` 与契约只讲扩容 —— **能力存在，却没被暴露成可用的动作**。
+ * 现在正名为"设置车队规模"，并把下限与"0 不是退役"写进契约。
+ */
+describe("set_route_vehicles tool（M3-1：正名暴露双向能力）", () => {
 	/** A company entry with a given vehicle count, as the admin port reports it. */
 	function stateWithVehicles(n: number): StateReader {
 		return fakeState({
@@ -132,11 +141,70 @@ describe("add_vehicles tool", () => {
 		});
 	}
 
-	it("sends count + company when the route already has vehicles", async () => {
+	it("扩容：车队 3 → 请求 5，命令带 count 且说明是请求（不是结果）", async () => {
 		const { sink, gameScript } = fakeSink();
-		const tool = addVehiclesTool({ sink, state: stateWithVehicles(3) });
-		await tool.execute("c1", { count: 5 });
+		const tool = setRouteVehiclesTool({ sink, state: stateWithVehicles(3) });
+		const res = await tool.execute("c1", { count: 5 });
 		expect(JSON.parse(gameScript[0]!)).toEqual({ cmd: "add_vehicles", company: 0, count: 5 });
+		const d = (res as { details: { ok: boolean; summary: string } }).details;
+		expect(d.ok).toBe(true);
+		// 工具报的是"请求"，世界由 observe() 报告 —— 这条语义必须留在 summary 里
+		expect(d.summary).toMatch(/request/i);
+	});
+
+	it("缩编：车队 6 → 请求 2，同样发出（环境会卖掉最新的克隆）", async () => {
+		const { sink, gameScript } = fakeSink();
+		const tool = setRouteVehiclesTool({ sink, state: stateWithVehicles(6) });
+		const res = await tool.execute("c1", { count: 2 });
+		expect(JSON.parse(gameScript[0]!)).toEqual({ cmd: "add_vehicles", company: 0, count: 2 });
+		const d = (res as { details: { ok: boolean; summary: string } }).details;
+		expect(d.ok).toBe(true);
+		// 契约里必须能读到"减少"的含义，否则 agent 无从知道这是允许的
+		expect(d.summary).toMatch(/2|6/);
+	});
+
+	it("工具名与描述都讲清了双向语义（名字即契约）", () => {
+		const { sink } = fakeSink();
+		const tool = setRouteVehiclesTool({ sink, state: stateWithVehicles(3) });
+		expect(tool.name).toBe("set_route_vehicles");
+		expect(String(tool.description)).toMatch(/clone|grow|increase/i);
+		expect(String(tool.description)).toMatch(/sell|reduce|decrease/i);
+	});
+
+	/**
+	 * 2026-09-19 真机证伪（SPEC §10.81）：
+	 * `CheckAddVehicles()` 只在 `_stage == "done"` 时被调用（`executor-ai/main.nut:115`），
+	 * 于是施工期间发来的请求**不会被读**。真机上缩编请求发出后执行器再没回到 `done`，
+	 * 车队全程不变 —— 我差点把"环境不支持缩编"当成结论。
+	 *
+	 * 因此工具必须把**当前执行器阶段**作为事实一并回报：否则模型只会看到
+	 * "我请求了、什么都没变"，然后学会"请求车队没用"这种错误因果（D20）。
+	 */
+	it("回报当前执行器阶段（请求被延迟的原因是可观测事实）", async () => {
+		const { sink } = fakeSink();
+		// 阶段由公司名携带（EX <stage> …），与 observe() 看到的是同一来源
+		const state = fakeState({
+			companies: new Map([
+				[0, { info: { id: 0, name: "EX rd s0 r12 d69 j101", isAi: true }, stats: { vehicles: 6, stations: 2 } }],
+			]) as never,
+		});
+		const tool = setRouteVehiclesTool({ sink, state });
+		const res = await tool.execute("c1", { count: 2 });
+		const d = (res as { details: { ok: boolean; summary: string } }).details;
+		expect(d.ok).toBe(true);
+		// 阶段原样回报（它是 harness 的既有事实通道，不是新造的）
+		expect(d.summary).toContain("EX rd s0 r12 d69 j101");
+	});
+
+	it("count 小于 1 被 schema 拦下（环境把 V:0 当作\"无请求\"，不是退役）", () => {
+		const { sink } = fakeSink();
+		const tool = setRouteVehiclesTool({ sink, state: stateWithVehicles(3) });
+		// 用 schema 校验 0：不应通过（否则 agent 会以为能"清零"）
+		const check = (tool.parameters as { safeParse?: (v: unknown) => { success: boolean } }).safeParse;
+		if (check) {
+			expect(check.call(tool.parameters, { count: 0 }).success).toBe(false);
+		}
+		expect(String(tool.description)).toMatch(/at least 1|minimum 1|1 vehicle|never sold/i);
 	});
 
 	// 2026-09-12 真实事故（用户 e2e 日志）:
@@ -151,7 +219,7 @@ describe("add_vehicles tool", () => {
 	// 工具**能**看见 `vehicles`（observe 用的就是它），所以不许再说谎。
 	it("车队为空时拒绝，并说明为什么（克隆不出第一台车）", async () => {
 		const { sink, gameScript } = fakeSink();
-		const tool = addVehiclesTool({ sink, state: stateWithVehicles(0) });
+		const tool = setRouteVehiclesTool({ sink, state: stateWithVehicles(0) });
 		const res = await tool.execute("c1", { count: 1 });
 		const details = (res as { details: { ok: boolean; summary: string } }).details;
 		expect(details.ok, "claiming success here is what made the model retry forever").toBe(false);
@@ -166,7 +234,7 @@ describe("add_vehicles tool", () => {
 		// the fleet" —— 那是**建议**,等于把该由它自己总结的教训直接剧透给它。
 		// 拒绝信息应当像函数签名:说清"这个动作做不到、为什么",不说"你该做什么"。
 		const { sink } = fakeSink();
-		const tool = addVehiclesTool({ sink, state: stateWithVehicles(0) });
+		const tool = setRouteVehiclesTool({ sink, state: stateWithVehicles(0) });
 		const res = await tool.execute("c1", { count: 4 });
 		const summary = (res as { details: { summary: string } }).details.summary;
 		// The contract fact that makes it impossible:
@@ -179,7 +247,7 @@ describe("add_vehicles tool", () => {
 
 	it("公司不存在时同样拒绝（不猜）", async () => {
 		const { sink, gameScript } = fakeSink();
-		const tool = addVehiclesTool({ sink, state: fakeState() });
+		const tool = setRouteVehiclesTool({ sink, state: fakeState() });
 		const res = await tool.execute("c1", { count: 2 });
 		const details = (res as { details: { ok: boolean } }).details;
 		expect(details.ok).toBe(false);
@@ -188,7 +256,7 @@ describe("add_vehicles tool", () => {
 
 	it("允许的 count 不会因为 0 车而被误拦（3 台车要 5 台仍然照发）", async () => {
 		const { sink, gameScript } = fakeSink();
-		const tool = addVehiclesTool({ sink, state: stateWithVehicles(3) });
+		const tool = setRouteVehiclesTool({ sink, state: stateWithVehicles(3) });
 		const res = await tool.execute("c1", { count: 5 });
 		expect((res as { details: { ok: boolean } }).details.ok).toBe(true);
 		expect(gameScript).toHaveLength(1);
@@ -244,7 +312,7 @@ describe("createTools", () => {
 			"estimate_route",
 			"inspect_route",
 			"build_bus_route",
-			"add_vehicles",
+			"set_route_vehicles",
 			"set_pause",
 		]);
 	});

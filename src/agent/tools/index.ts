@@ -143,26 +143,46 @@ export function buildBusRouteTool(deps: AgentDeps): AgentTool<typeof BuildRouteS
 	};
 }
 
-const AddVehiclesSchema = Type.Object({
-	count: Type.Number({ description: "Total vehicles desired on the route (>=1)", minimum: 1, maximum: 20 }),
+const SetRouteVehiclesSchema = Type.Object({
+	count: Type.Number({
+		description:
+			"Target number of vehicles on the route (at least 1). Higher than the current fleet = more " +
+			"vehicles; lower = fewer. 0 is not accepted: the environment treats a count below 1 as no " +
+			"request at all, so a route cannot be emptied this way.",
+		minimum: 1,
+		maximum: 20,
+	}),
 	company: Type.Optional(Type.Number({ description: "Executor company id (default 0)" })),
 	job: Type.Optional(Type.Number({ description: "Optional explicit job id; if omitted the GS assigns one. Re-sending a completed job id is ignored." })),
 });
 
-/** `add_vehicles` — scale the active route's fleet (clones the lead vehicle). */
-export function addVehiclesTool(deps: AgentDeps): AgentTool<typeof AddVehiclesSchema, ActionResult> {
+/**
+ * `set_route_vehicles` — set the target fleet size of an already running route.
+ *
+ * M3-1（2026-09-19，SPEC §10.80）：这个动作**本来就是双向的**，但旧名字
+ * （`add_vehicles`）与旧契约只讲扩容，于是"缩编"这个能力存在却从未被行使——
+ * agent 不会去试一个名字叫"加车"的动作来减车。名字即契约。
+ *
+ * 环境事实（源码确证）：`V:<count>` 在低于当前车队时卖车（最新优先、永不卖头车），
+ * 所以**下限是 1**；`count < 1` 被当作"没有请求"，不是"全部卖掉"。
+ */
+export function setRouteVehiclesTool(deps: AgentDeps): AgentTool<typeof SetRouteVehiclesSchema, ActionResult> {
 	return {
-		name: "add_vehicles",
-		label: "Add Vehicles",
+		name: "set_route_vehicles",
+		label: "Set Route Vehicles",
 		description:
-			"Add road vehicles to an ALREADY RUNNING bus route (clones share its orders). " +
-			"It clones the route's lead vehicle, so it cannot create the first one — if the " +
-			"route has no vehicles yet, wait for construction to finish instead.",
+			"Set the target number of road vehicles on an ALREADY RUNNING bus route. A count ABOVE " +
+			"the current fleet clones the route's lead vehicle (clones share its orders); a count " +
+			"BELOW it sells the route's newest clones. The lead vehicle is never sold, so 1 is the " +
+			"floor and a route cannot be emptied this way. It cannot create the first vehicle of a " +
+			"route: with no vehicles there is nothing to clone. The executor reads this request only " +
+			"while it is not building (its phase is not a build stage), so a request can be postponed " +
+			"until then.",
 				// 游戏按 **FIFO** 应用命令（SPEC §10.39.1），所以这几条**变更型**工具必须串行：
 		// pi-agent-core 的默认执行模式是 `parallel`，同一条助手消息里的两条命令会并发
 		// 发出，台账（在完成时记录）的顺序就不再等于本局实际应用的顺序。ADR §10.74。
 		executionMode: "sequential",
-		parameters: AddVehiclesSchema,
+		parameters: SetRouteVehiclesSchema,
 		execute: async (_id, params) => {
 			const company = params.company ?? DEFAULT_COMPANY;
 
@@ -197,23 +217,37 @@ export function addVehiclesTool(deps: AgentDeps): AgentTool<typeof AddVehiclesSc
 				return toResult({
 					ok: false,
 					summary:
-						`not sent: company ${company} has 0 vehicles. add_vehicles scales an ` +
-						"existing fleet by cloning the route's lead vehicle; with no vehicles " +
-						"there is nothing to clone.",
+						`not sent: company ${company} has 0 vehicles. This action changes the size of an ` +
+						"EXISTING fleet by cloning the route's lead vehicle; with no vehicles there is " +
+						"nothing to clone.",
 					data: { company, vehicles },
 				});
 			}
 
+			// 方向由请求与当前读数共同决定，且必须出现在 summary 里：模型据此才能
+			// 区分"我请求了扩容"与"我请求了缩编"（数字相同、方向不同是两件事）。
+			const direction = params.count > vehicles ? "grow" : params.count < vehicles ? "shrink" : "unchanged";
+			// `cmd: "add_vehicles"` 是 **GS 的线上命令名**（协议，未改，改了要同步 Squirrel 与
+			// 旧日志解析）；`set_route_vehicles` 才是**给 agent 看的工具名**。
+			// 两者同名过一段时间，是"名字即契约"最容易骗人的地方——这里显式区分。
 			const cmd: Record<string, unknown> = { cmd: "add_vehicles", company, count: params.count };
 			if (params.job !== undefined) cmd.job = params.job;
 			deps.sink.gameScript(JSON.stringify(cmd));
+			// 执行器阶段是**请求何时会被读**的原因，因此必须一起回报（2026-09-19 真机证伪）：
+			// `CheckAddVehicles()` 只在 `_stage == "done"` 时被调用（executor-ai/main.nut:115），
+			// 所以施工期发来的请求只是**被推迟**。若不报这一条，模型只会看到
+			// "请求了、什么都没变"，从而学到"请求车队没用"这种**错误因果**（D20）。
+			const phase = typeof (c0?.info as { name?: unknown } | undefined)?.name === "string"
+				? String((c0?.info as { name?: string }).name)
+				: null;
 			const r: ActionResult = {
 				ok: true,
 				summary:
-					`requested fleet size ${params.count} (company=${company}, vehicles before this ` +
-					`request: ${vehicles}). This reports the REQUEST, not the resulting fleet; ` +
-					"observe() reports the fleet.",
-				data: { ...cmd, vehiclesBefore: vehicles },
+					`requested fleet size ${params.count} (${direction}: currently ${vehicles}, ` +
+					`company=${company}). This reports the REQUEST, not the resulting fleet; ` +
+					"observe() reports the fleet." +
+					(phase ? ` The executor reads fleet requests only while it is not building; its current phase is "${phase}".` : ""),
+				data: { ...cmd, vehiclesBefore: vehicles, direction, executorPhase: phase },
 			};
 			return toResult(r);
 		},
@@ -398,7 +432,7 @@ export function createTools(deps: AgentDeps): AgentTool<TSchema, ActionResult>[]
 		estimateRouteTool(deps),
 		inspectRouteTool(deps),
 		buildBusRouteTool(deps),
-		addVehiclesTool(deps),
+		setRouteVehiclesTool(deps),
 		setPauseTool(deps),
 	];
 }
