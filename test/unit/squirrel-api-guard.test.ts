@@ -350,3 +350,39 @@ describe("Squirrel packs: 局部变量不得先用后声明", () => {
 		expect(/later\b/.test(fn.body.slice(0, later))).toBe(true);
 	});
 });
+
+/**
+ * M3-2b：披露必须**粘住**才可能被采样到（SPEC §10.86 未结案 → §10.87）。
+ *
+ * 通道性质：公司名是**单值、被采样**的（harness 每 500 ms 轮询），而执行器每轮都改写它。
+ * 真机 `/tmp/m32c`：退役**生效了**（车队 8→2），但 `retire…`/`fleetsend…`/`fleetg…`
+ * 相位**一条都没进日志**——被施工相位盖掉了。动作生效 + 信号丢失 = 工具无法观测自身效果。
+ *
+ * 修法：事件相位走上带粘滞的入口（保持 N 轮不被普通活动相位覆盖），诊断类（`exc:`）可抢占。
+ */
+describe("Squirrel 执行器：事件披露必须粘滞", () => {
+	// 注意：这里**不能** stripStrings——要检查的关键字本身就是字符串字面量（`"fleet_wait" 等），
+	// 去掉字符串等于把被测对象删掉（第一版就是这么写的，于是必然误报）。
+	const src = stripComments(readFileSync(path.join("src/game/squirrel/executor-ai/main.nut"), "utf8"));
+
+	it("存在粘滞入口，且普通 SetPhase 在粘滞期内不覆盖", () => {
+		expect(src).toContain("function SetPhaseSticky(");
+		expect(src).toMatch(/function SetPhase\(p\)\s*\{[\s\S]{0,300}?_phaseHoldUntil/);
+	});
+
+	it("所有车队/退役事件都走粘滞入口（漏一个 = 那条披露又会被盖掉）", () => {
+		for (const kind of ["fleet_wait", "fleetg", "fleetsend", "fleetsold", "fleetok", "retire"]) {
+			const direct = src.includes('SetPhaseSticky("' + kind);
+			const wrapped = new RegExp('SetPhaseSticky\\(\\s*\\n?\\s*"' + kind).test(src);
+			expect(direct || wrapped, kind + " 必须用 SetPhaseSticky，否则会被施工相位盖掉").toBe(true);
+		}
+	});
+
+	it("诊断相位（exc:）绕过粘滞：错误不能被事件埋掉", () => {
+		expect(src).toContain('WritePhase("exc:"');
+	});
+
+	it("SetPhaseSticky 的 hold 必须有默认值（Squirrel 强校验参数个数，单参调用会炸）", () => {
+		expect(src).toMatch(/function SetPhaseSticky\(p, hold = null\)/);
+	});
+});

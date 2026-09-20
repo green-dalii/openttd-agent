@@ -20,6 +20,7 @@ class ExecutorV1 extends AIController {
     _slotB = { label = "B", bp = null, tried = 0 };
     _lastBeat = -1;
     _loopSeq = 0;
+    _phaseHoldUntil = -1; // 事件相位的粘滞截止（见 SetPhaseSticky）
     _pf = null;      // persisted pathfinder (see FindSegment)
     _pfFrom = -1;
     _pfTo = -1;
@@ -102,7 +103,8 @@ class ExecutorV1 extends AIController {
             // Was 16 - the truncation cut "can't execute ..." before the
             // function name, making the error undiagnosable from the log.
             if (es.len() > 24) es = es.slice(0, 24);
-            this.SetPhase("exc:" + es);
+            // 诊断**绕过粘滞**：否则一个长事件会把错误信息埋掉（那是更坏的沉默）。
+            this.WritePhase("exc:" + es);
         }
     }
 
@@ -226,7 +228,30 @@ class ExecutorV1 extends AIController {
     }
 
     /* SetPhase: 公司名编码汇报; ≤31 字符 (OpenTTD 公司名上限). */
+    /* 公司名是**单值、被采样**的通道：harness 每 500ms 轮询，而执行器每轮都改写它。
+     * 于是稀疏但重要的事件（退役、卖出、推迟）会被施工相位（`R45 d0 a0 #2`）**盖掉**——
+     * 动作生效了，归因信号却随机丢失（SPEC §10.86，真机 /tmp/m32c）。
+     *
+     * 因此按**消费者**分两个入口：
+     *   SetPhase(p)        —— "现在在做什么"（要新鲜）：可以覆盖任何东西。
+     *   SetPhaseSticky(p,n) —— "发生过什么"（要持久）：设置后**保持 n 轮不被 SetPhase 覆盖**。
+     * 诊断类（`exc:`）与心跳始终走 SetPhase，避免长事件把错误信息埋掉。
+     */
     function SetPhase(p) {
+        // 事件粘滞期内，普通活动相位不许覆盖（否则又回到"事件被盖掉"）。
+        if (this._loopSeq < this._phaseHoldUntil && p != this._phase) return;
+        this.WritePhase(p);
+    }
+
+    /* ⚠️ `hold` 必须给**默认值**：Squirrel 对调用时的参数个数强校验，
+     * 单参调用会抛 `wrong number of parameters`——而且是在**动作已执行、相位未发出**的位置，
+     * 症状与 §10.86 的两个缺陷完全一样（`/tmp/m32d`：三次操作全部生效、相位一条没进日志）。 */
+    function SetPhaseSticky(p, hold = null) {
+        this.WritePhase(p);
+        this._phaseHoldUntil = this._loopSeq + (hold == null ? 15 : hold);
+    }
+
+    function WritePhase(p) {
         local nm = "EX " + p + " j" + this._job;
         if (nm.len() > 31) nm = nm.slice(0, 31);
         AICompany.SetName(nm);
@@ -1080,20 +1105,20 @@ class ExecutorV1 extends AIController {
         if (waitKey != this._fleetWaitAnnounced) {
             this._fleetWaitAnnounced = waitKey;
             // `fleet_wait4c12L12` = 请求 4、我们数到 12 辆、列表 12 条。
-            this.SetPhase("fleet_wait" + want + "c" + cur + "L" + this._fleetOwned.len());
+            this.SetPhaseSticky("fleet_wait" + want + "c" + cur + "L" + this._fleetOwned.len());
         }
         if (cur < want) {
             if (!AIVehicle.IsValidVehicle(this._vehicle)) {
                 // Nothing to clone: this command can only SCALE an existing fleet.
                 // It used to `return` silently, so a request for vehicles from a
                 // route with zero vehicles looked like it had been accepted.
-                this.SetPhase("fleet_noveh");
+                this.SetPhaseSticky("fleet_noveh");
                 return;
             }
             if (this._slotD.bp == null) {
                 // 克隆需要"在哪个车库克隆"（AIVehicle.CloneVehicle 的第一个参数）。
                 // 施工早期（还没建车库）请求会走到这里；具名说明，而不是抛异常。
-                this.SetPhase("fleet_nodepot");
+                this.SetPhaseSticky("fleet_nodepot");
                 return;
             }
             while (cur < want) {
@@ -1104,7 +1129,7 @@ class ExecutorV1 extends AIController {
                 cur++;
             }
             this._fleetApplied = want;
-            this.SetPhase("fleetg" + cur + "L" + this._fleetOwned.len() + "C" + this.CountOwnVehicles());
+            this.SetPhaseSticky("fleetg" + cur + "L" + this._fleetOwned.len() + "C" + this.CountOwnVehicles());
         } else if (cur > want) {
             // Sell clones this job owns, newest first; never the lead vehicle.
             // **卖车必须先把车开回车库**（OpenTTD `src/vehicle_cmd.cpp:261`：
@@ -1125,12 +1150,12 @@ class ExecutorV1 extends AIController {
             }
             foreach (vid in pending) this._fleetSell.append(vid);
             this._fleetApplied = want;
-            this.SetPhase("fleetsend" + pending.len() + "C" + this.CountOwnVehicles());
+            this.SetPhaseSticky("fleetsend" + pending.len() + "C" + this.CountOwnVehicles());
         } else {
             this._fleetApplied = want;
             // 曾经这里**什么都不说**：`cur == want` 时静默"已满足"，于是
             // "请求被满足"与"请求根本没被处理"在日志里长得一模一样（D20 同源）。
-            this.SetPhase("fleetok" + want + "C" + this.CountOwnVehicles());
+            this.SetPhaseSticky("fleetok" + want + "C" + this.CountOwnVehicles());
         }
     }
 
@@ -1164,7 +1189,7 @@ class ExecutorV1 extends AIController {
             this._fleetOwned = live;
         }
         if (sold > 0 || gone > 0 || (blocked > 0 && this._fleetSell.len() == 0)) {
-            this.SetPhase(
+            this.SetPhaseSticky(
                 "fleetsold" + sold + "g" + gone + "w" + this._fleetSell.len() +
                     "b" + blocked + "C" + this.CountOwnVehicles()
             );
@@ -1201,7 +1226,7 @@ class ExecutorV1 extends AIController {
         local list = this.RouteVehicles(job);
         if (list == null) {
             // 未知线路必须具名拒绝：静默会让模型以为退役生效了（D20）。
-            this.SetPhase("retire_unknown" + job);
+            this.SetPhaseSticky("retire_unknown" + job);
             return;
         }
         local queued = 0;
@@ -1224,7 +1249,7 @@ class ExecutorV1 extends AIController {
         // table 集合：`in` 判断存在、`<-` 新建槽位（array 没有 rawin，用错就是运行时异常）
         if (!(job in this._retiredJobs)) this._retiredJobs[job] <- true;
         this.RemoveJobSigns(job);
-        this.SetPhase("retire" + queued + "C" + this.CountOwnVehicles());
+        this.SetPhaseSticky("retire" + queued + "C" + this.CountOwnVehicles());
     }
 
     /* 清掉某个 job 的 NUTZ 标牌（退役后必须清：否则会被重新捡起来重建）。 */
