@@ -47,6 +47,8 @@ export interface V02Options {
 	shrinkTo?: number;
 	/** M3-2a probe: retire this job and observe whether the fleet goes away. */
 	retireJob?: number;
+	/** M3-2c probe: queue a SECOND route so the first one becomes "not current". */
+	secondRoute?: boolean;
 	/**
 	 * Episode horizon in SIMULATED game days (G1, SPEC §10.68). The oracle probe
 	 * measures "delivered as a function of fleet size", so every rep must observe
@@ -362,6 +364,50 @@ export async function runV02(cfg: Config, opts: V02Options = {}): Promise<number
 		console.log(`[v02] company money=${money}`);
 	} else {
 		console.log(`[v02] S2-S4 WARN: construction not done (last phase "${executorPhase}")`);
+	}
+
+	// --- M3-2c: 给"非当前"线路调车队 ------------------------------------------
+	// 这一条验证的是 D20 的根因：agent 在建 job 102 时给 job 101 调车队，
+	// 旧行为是 `fleet_otherjob` 拒绝（实测同一请求重发 8 次、车队不变）。
+	// 现在登记表 `_routes` 能提供旧线路的车队，所以**必须真的生效**。
+	if (opts.secondRoute) {
+		const phaseNow = () =>
+			[...world.snapshot().companies.values()]
+				.map((c) => String(c.info?.name ?? ""))
+				.find((n) => n.startsWith("EX ")) ?? "";
+		// 1) 等第一条线路完工
+		const doneDeadline = Date.now() + 420_000;
+		while (Date.now() < doneDeadline && !stopRequested && !/^EX done/.test(phaseNow())) {
+			client?.poll(AdminUpdateType.CompanyInfo, ALL_COMPANIES);
+			await sleep(500);
+		}
+		console.log(`[v02] 2nd-route probe: first route phase "${phaseNow()}"`);
+		// 2) 排第二条线路，让 101 变成"非当前"
+		console.log("[v02] 2nd-route probe: sending build_bus_route job=102");
+		client.gameScript(stringifyJson({ cmd: "build_bus_route", company: 0, job: 102 }));
+		const switchedDeadline = Date.now() + 300_000;
+		while (Date.now() < switchedDeadline && !stopRequested && !/j102$/.test(phaseNow())) {
+			client?.poll(AdminUpdateType.CompanyInfo, ALL_COMPANIES);
+			await sleep(500);
+		}
+		console.log(`[v02] 2nd-route probe: executor now on "${phaseNow()}"`);
+		// 3) 给**旧**线路 101 调车队，看它是否真的生效
+		const before = world.snapshot().companies.get(0)?.stats?.vehicles ?? -1;
+		console.log(`[v02] 2nd-route probe: requesting +3 on OLD job 101 (fleet is ${before})`);
+		client.gameScript(JSON.stringify({ cmd: "add_vehicles", company: 0, job: 101, count: 3 }));
+		const growDeadline = Date.now() + 300_000;
+		let after = before;
+		while (Date.now() < growDeadline && !stopRequested) {
+			client?.poll(AdminUpdateType.CompanyStats, 0);
+			await sleep(600);
+			after = world.snapshot().companies.get(0)?.stats?.vehicles ?? -1;
+			if (before >= 0 && after > before) break;
+		}
+		console.log(
+			after > before
+				? `[v02] 2nd-route probe: OLD route fleet applied ✅ (${before} -> ${after})`
+				: `[v02] 2nd-route probe: OLD route request NOT applied (${before} -> ${after})`,
+		);
 	}
 
 	// --- M3-2a: 退役探针 ------------------------------------------------------

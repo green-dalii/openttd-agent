@@ -39,6 +39,8 @@ interface CliArgs {
 	shrinkTo?: number;
 	/** M3-2a probe: retire this job after the fleet probe (0 = off). */
 	retireJob?: number;
+	/** M3-2c probe: queue a second route so the first becomes non-current. */
+	secondRoute?: boolean;
 	/** Agent: pause the world while the model thinks + acts (verified freeze). */
 	freeze?: boolean;
 	year?: number;
@@ -81,6 +83,7 @@ export function parseArgs(argv: string[]): CliArgs {
 	// `V:<count>` below the current fleet sells the newest clones).
 	let shrinkTo: number | undefined;
 	let retireJob: number | undefined;
+	let secondRoute = false;
 	let freeze = false;
 	let llmBaseUrl: string | undefined;
 	let llmApiKey: string | undefined;
@@ -112,6 +115,9 @@ export function parseArgs(argv: string[]): CliArgs {
 				break;
 			case "--add-vehicles":
 				addVehicles = parseIntNum(argv[++i], "--add-vehicles");
+				break;
+			case "--second-route":
+				secondRoute = true;
 				break;
 			case "--retire-job":
 				retireJob = parseIntNum(argv[++i], "--retire-job");
@@ -188,7 +194,7 @@ export function parseArgs(argv: string[]): CliArgs {
 		// compile: `args.foo` is simply undefined, so the flag silently does
 		// nothing while the help text still advertises it. Fourth instance of
 		// "parsed but dropped" found on 2026-09-12 (MEMORY.md A5).
-		mode, year, seed, timeoutMs, aiName, webPort, demoSeconds, gameDays, scenario, addVehicles, shrinkTo, retireJob, freeze,
+		mode, year, seed, timeoutMs, aiName, webPort, demoSeconds, gameDays, scenario, addVehicles, shrinkTo, retireJob, secondRoute, freeze,
 		llmBaseUrl, llmApiKey, llmModel, llmApi, offlineDemo, skipPreflight,
 		injectMemory,
 	};
@@ -329,6 +335,7 @@ async function main(): Promise<number> {
 				addVehicles: args.addVehicles,
 				shrinkTo: args.shrinkTo,
 				retireJob: args.retireJob,
+				secondRoute: args.secondRoute,
 			});
 		} catch (e) {
 			console.error("[v02] ERROR:", e instanceof Error ? e.message : e);

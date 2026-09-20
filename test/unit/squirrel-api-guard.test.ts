@@ -386,3 +386,29 @@ describe("Squirrel 执行器：事件披露必须粘滞", () => {
 		expect(src).toMatch(/function SetPhaseSticky\(p, hold = null\)/);
 	});
 });
+
+/**
+ * M3-2c：`V:` 对**已登记的旧线路**也必须生效（SPEC §10.88）。
+ *
+ * 真实事故（D20）：agent 在建 job 102 时给 job 101 调车队，被 `fleet_otherjob` 拒绝，
+ * 于是**同一个请求重发了 8 次**、车队始终不变——它学到的因果是"请求车队没用"。
+ * 根因是执行器只认"当前 job"的字段；`_routes`（M3-2a）已能提供旧线路的车队，
+ * 所以现在：**认识的线路就应用，不认识的才具名拒绝**。
+ */
+describe("Squirrel 执行器：车队请求对已登记线路生效", () => {
+	const src = stripComments(readFileSync(path.join("src/game/squirrel/executor-ai/main.nut"), "utf8"));
+
+	it("解析所有 V 请求的 job（而不是只认当前 job）", () => {
+		expect(src).toContain("function FleetRequests()");
+		expect(src).toMatch(/function FleetTarget\(job\)[\s\S]{0,400}?_routes\.rawin\(job\)/);
+	});
+
+	it("未知与已退役线路各有具名拒绝（静默会让模型学错因果）", () => {
+		expect(src).toContain("fleet_unknown");
+		expect(src).toContain("fleet_retired");
+	});
+
+	it("缩编仍然永不卖头车（退役才是清空线路的方式）", () => {
+		expect(src).toMatch(/vid == t\.lead\) continue;/);
+	});
+});

@@ -3580,3 +3580,49 @@ fleet_wait6c1L1 → fleetg6L6C8 → fleet_wait3c6L6 → fleetsend3C8 → fleetso
 `rawin` 用在 array 上、`cur` 先用后声明、单参调用强校验——**三者的症状完全一样**：
 动作照常执行，只有**汇报路径**炸掉。若没有"相位是否真的进了日志"这个验收，
 三个都不会被发现（功能测试全绿）。守卫现在各有一条，且都经过重放证明。
+
+## 10.88 M3-2c：车队请求对**已登记的旧线路**生效（2026-09-19）
+
+### 为什么这是 D20 的根因修复
+
+`FleetRequests` 现在解析**所有** `V:` 标牌（不只当前 job）：
+- 当前 job → 活字段（原行为）；
+- **已登记 job → `_routes[job]`**（M3-2a 的登记表提供车队/头车/车库/`applied`）；
+- 未知 job → 具名 `fleet_unknown<job>`（执行器只认本局自己建的线路）；
+- 已退役 job → 具名 `fleet_retired<job>`（清空后的线路无从调车队）。
+
+真实事故（D20）：agent 在建 job 102 时给 job 101 调车队 → `fleet_otherjob` 拒绝 →
+**同一请求重发 8 次**、车队始终 6 —— 它学到的因果是"请求车队没用"。
+现在这条链路上的每一环都有具名信号：推迟（`fleet_wait<w>j<job>c<cur>L<len>`）、
+方向（`fleetg/fleetsend` 带 `j<job>`）、拒绝（unknown/retired）。
+
+### 真机验证（`/tmp/m32f` 失败 → `/tmp/m32g` 通过）
+
+`/tmp/m32f`：`--second-route` 探针**静默不执行**——
+`--second-route` 在 switch 里被解析、也传给了 v02，但**没进 `parseArgs` 的返回值**，
+`args.secondRoute` 恒为 undefined。**没有报错，一局真机白跑**（15 分钟）。
+这是本仓库第三次"声明了但没接线"（shrink 探针一次、`--second-route` 一次、
+更早 eslint 抓到过一次）→ 新增守卫：**switch 里被赋值的开关必须出现在返回值里**，
+并用重放证明（把 `secondRoute` 从返回值拿掉 → 红）。
+⚠️ 守卫第一版也是空的：`return {...}` 的结尾用 `indexOf` 猜，猜不到就切到文件末尾，
+"返回集合"于是包含整个文件的标识符——重放不红。改成**花括号配平** + 自测后才真的抓到。
+
+`/tmp/m32g`（修后）：
+
+```
+[v02] 2nd-route probe: sending build_bus_route job=102
+[v02] 2nd-route probe: executor now on "EX work j102"
+[v02] 2nd-route probe: requesting +3 on OLD job 101 (fleet is 6)
+[v02] 2nd-route probe: OLD route fleet applied ✅ (6 -> 7)
+相位：fleetok4j101C9 → fleet_wait3j101c4L4 → fleetsend1j101C9 → fleetok4j101C9
+```
+
+执行器在 **j102** 施工时处理了 j101 的请求：`count:3` 按**契约语义**（目标数量）执行为
+"从 4 缩到 3"（`fleetsend1` 送 1 辆去车库）。探针注释里写的是"+3"——那是**我写探针时的语义错误**，
+不是实现错误：`set_route_vehicles` 从 M3-1 起就是"设为目标数量"。
+
+### 本阶段教训（第三次"声明了但没接线"）
+
+探针、开关、指标字段——凡是"声明 → 赋值 → **必须出现在某个聚合点**"的链，
+最后一环最容易漏，而漏掉的症状是**静默不执行**。守卫的写法也两次翻车：
+先查声明（改声明就瞎）、再猜结尾（猜不到就全绿）。**重放证明**是唯一可信的验收。

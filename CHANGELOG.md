@@ -40,6 +40,21 @@
   判定优先用它、**两臂同源**（`ArmComparison.deliveredSource`），旧行回落原始值并标注为不可比。
 - 澄清 `rc=1` 的含义（=施工未达成 DONE，不是崩溃）并在输出中明示。
 
+### Fixed（M3-2c：给**旧**线路调车队——D20 的根因修复，2026-09-19）
+
+- 执行器现在解析**所有** `V:` 请求：当前 job 用活字段；**已登记 job 用 `_routes[job]`**
+  （车队/头车/车库/`applied` 都来自登记表）；未知 job 具名拒绝 `fleet_unknown<job>`；
+  已退役 job 具名拒绝 `fleet_retired<job>`。
+- 此前"非当前 job"一律 `fleet_otherjob` 拒绝——实测后果是 agent **同一请求重发 8 次**
+  而车队不变（D20），它学到的因果是"请求车队没用"。
+- 真机（`/tmp/m32g`）：执行器在 **j102** 施工时处理 j101 的请求，按**目标数量**语义
+  正确执行缩编（4→3，相位 `fleetsend1j101C9`）。
+- 新增 CLI 守卫：switch 里被赋值的开关必须出现在 `parseArgs` 返回值里
+  （本次 `--second-route` 就断在这最后一环：解析了、传了、没返回 → 探针静默不执行，
+  一局真机白跑；守卫用**花括号配平**抽取返回块，并用重放证明会失败）。
+- ⚠️ 相位词汇新增 `fleet_unknown`/`fleet_retired`，`fleet_wait/fleetg/fleetsend/fleetok`
+  现在带 `j<job>`；旧日志的解析不受影响（新增是后缀）。
+
 ### Fixed（M3-2b：事件披露现在真的能被看到，2026-09-19）
 
 - 披露通道按**消费者**拆分：`SetPhase`（"现在在做什么"，可覆盖）、

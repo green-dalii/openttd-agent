@@ -183,6 +183,7 @@ describe("retire_route tool（M3-2a）", () => {
 		const { sink } = fakeSink();
 		expect(retireRouteTool({ sink, state: fleetState(3) }).executionMode).toBe("sequential");
 	});
+
 });
 
 describe("set_route_vehicles tool（M3-1：正名暴露双向能力）", () => {
@@ -195,6 +196,19 @@ describe("set_route_vehicles tool（M3-1：正名暴露双向能力）", () => {
 		});
 	}
 
+	it("M3-2c：能指定 job（否则永远只能调「最后一条」线路的车队）", async () => {
+		const { sink, gameScript } = fakeSink();
+		const tool = setRouteVehiclesTool({ sink, state: stateWithVehicles(6) });
+		await tool.execute("c1", { job: 102, count: 4 });
+		expect(JSON.parse(gameScript[0]!)).toMatchObject({ cmd: "add_vehicles", job: 102, count: 4 });
+	});
+
+	it("M3-2c：不传 job 时不替模型瞎猜（省略该字段，交由环境决定）", async () => {
+		const { sink, gameScript } = fakeSink();
+		const tool = setRouteVehiclesTool({ sink, state: stateWithVehicles(6) });
+		await tool.execute("c1", { count: 4 });
+		expect(JSON.parse(gameScript[0]!).job).toBeUndefined();
+	});
 	it("扩容：车队 3 → 请求 5，命令带 count 且说明是请求（不是结果）", async () => {
 		const { sink, gameScript } = fakeSink();
 		const tool = setRouteVehiclesTool({ sink, state: stateWithVehicles(3) });

@@ -420,6 +420,17 @@ export function decodeExecutorPhase(input: string): ExecutorPhase {
 				"one for this route yet, so nothing was done.";
 			return base;
 		}
+		if (s.startsWith("fleet_unknown")) {
+			base.description =
+				"a fleet request named a route this executor has no record of - it only knows the " +
+				"routes it built itself in this session, so nothing was done.";
+			return base;
+		}
+		if (s.startsWith("fleet_retired")) {
+			base.description =
+				"a fleet request named a route that has been retired, so there is nothing left to resize.";
+			return base;
+		}
 		if (s === "fleet_otherjob") {
 			// G3 (SPEC §10.67 layer 4): the executor only applies fleet signs for the
 			// job it is CURRENTLY building. It used to skip the others in silence, so
