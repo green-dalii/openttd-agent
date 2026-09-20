@@ -320,92 +320,73 @@ GS `route_stats` **部分失效**（§10.66，17/17 局命中，单局丢 1–92
 
 ---
 
-## 🔴 COMPACT 后从这里接续（2026-09-18）
+## 🔴 COMPACT 后从这里接续（2026-09-19）
 
-> **这一段是给"compact 后的我自己"的恢复手册。** 顺序照做即可，不必重新推导。
+> 这段是给"compact 后的我自己"的**恢复手册**。按顺序做，不必重新推导。
 
-### 1. 有实验正在跑吗？
+### 1. 现在有没有实验在跑？
 
 ```bash
-pgrep -fl "run-experiment|cli/run.ts"      # 无输出 = 没有 live 实验（2026-09-18 收工时如此）
+pgrep -fl "run-experiment|cli/run.ts|OpenTTD.app"     # 无输出 = 没有（2026-09-19 收工时如此）
 ```
 
-**最近一轮已结束**：`/tmp/pbcal`（预建场景标定，3/臂，horizon 300）——
-**仪器全绿**（horizon 300→300/301、`gsErrors=0`、全部 `scenarioReason=ready`），
-但 **CV = 0.57 / 0.79**（未下降）→ 方差在 **agent 自己的管理决策**里，
-+40% 效应需 **~36/臂 ≈ 19 小时**，故**先不做 A/B**，改走 R 系列 + R5 学习曲线。
+**最近完成的真机工作**（都不是实验，是验证）：
+- `/tmp/m1a`、`/tmp/m1b`：M1 反思产出率（6 局，1–4 条观察/局，`supersedes` 首次真机生效）
+- `/tmp/m2a`：M2 计分规则改动后的 1 局观察
+- `/tmp/m31`：**M3-1 双向探针**（扩容 3→15 成功；**缩编未发生**——见 SPEC §10.81）
+- 更早、仍可查：`/tmp/pbcal`（预建标定）、`/tmp/cal900`、`/tmp/dm3`、`/tmp/s0-v*`、`/tmp/f2`（凭据）
 
-> ⚠️ **runner 日志时间戳是 UTC**（`…T07:57Z` = 本地 15:57）。判断存活用 `ps` 的 ELAPSED。
+### 2. 预先登记的停止规则 / 未验证项（**不得声称**）
 
-### 1b. 仪器状态：两个缺陷已修，必须用新指标
-
-| 缺陷 | 后果 | 现状 |
-|---|---|---|
-| `delivered` 是**当季**计数器（§10.65）| 测的是随机一段部分季度；季度相位随机浮动 | 已改为 `deliveredRun`（跨季积分，`src/game/delivery-meter.ts`）；旧行仍显示原始值并标注**不可比** |
-| `GSStation.IsStationTile` **不存在**（§10.66）| `route_stats` **部分失效**，17/17 局命中，单局丢 1–92% 读数 | 已修 + 静态守卫；新增 `GameMetric.gsErrors` 与 verdict 的 **channel health** 行 |
-
-**读数纪律**：`/tmp/ab900`、`/tmp/cal900` 两轮的 A/B **不可用于下结论**（旧判据 + 部分失明通道）。
-新结果看 `deliveredRun` 与 `gsErrors`。
-
-### 2. 预先登记的停止规则（**不许事后改**）
-
-block = 5 局/臂。每个 block 看一次：**均值差的自助法 95% CI（保守 α=0.01）**
-- CI **不含 0** → 停止并报结论（写进 SPEC，无论正负）
-- 否则续跑 block（`--n 12`，必要时 `--n 25` 为**上限**），仍不清则如实报
-  "**在该 MDE 下不可判定**"
-- **事先声明不可检出的效应：+20%**（本设计下任何可承受样本都检不出）——报告必须写明
+| 项 | 状态 |
+|---|---|
+| `sessionId` 的 provider 缓存收益 | **未测量**（R1 前已有 37–44% 命中，见 §10.75）|
+| `deliberation off-vs-low` 的质量-成本权衡 | **未测量**（旋钮已接线，默认 `"off"`）|
+| 反思**重试**的实际效果 | **未触发过**（0/7 局），仅单测覆盖 |
+| 记忆（跨局经验）是否提升成绩 | **未验证**——动作面没扩之前不再跑 A/B（CV 0.57–0.79，+40% 需 ~36/臂 ≈ 19 h）|
 
 ### 3. 恢复工作所需的环境事实
 
 | 事 | 值 |
 |---|---|
-| 凭证 | `<dataDir>/{credentials.json,llm.json}`（如 `/tmp/ab900/`、`/tmp/f2/`）。**/tmp 易失**：若被清空，实验已死，凭证需从 dashboard 的 `<dataDir>/llm.json` 或环境变量重建 |
-| OpenTTD 二进制 | 默认由 **`$HOME` 推导**（macOS Steam 路径），仓库内**不含**用户名 |
-| remote | `origin` = `git@github.com:green-dalii/openttd-agent.git`（**PUBLIC**，MIT）。amend 仅对未 push 的提交安全；已 push 用 `--force-with-lease=<ref>:<旧SHA>`，**禁止裸 `--force`** |
-| 门禁 | ⚠️ **真机实验运行期间不要跑 `pnpm run gate`**（preflight 断言端口空闲 → 假红，MEMORY D5）。实验期间用 `pnpm exec tsc --noEmit` + `pnpm exec eslint .` |
-| 改动约束 | ⚠️ **block 运行期间禁止改 `src/` 与 `scripts/run-experiment.ts`**：每局都重新 spawn `tsx src/cli/run.ts`，改源码 = 同一 block 内前后局跑不同代码（**真污染**，MEMORY D12）。允许改文档；想改代码就先等 block 结束 |
-| 证据目录（**勿删**） | `/tmp/cal900`（校准，SPEC §10.63）、`/tmp/ab900`（本轮）、`/tmp/n2ab3`（§10.62）、`/tmp/fzab2`（冻结 A/B，§10.61）、`/tmp/f2`（凭证备份）|
+| 凭证 | `<dataDir>/{credentials.json,llm.json}`（`/tmp/f2/` 是备份）。**跑真机前必须拷进实验 dataDir**，否则门禁以 `llmConfigured` 拒绝启动；`/tmp` 易失 |
+| OpenTTD 二进制 | `$HOME` 推导（macOS Steam 路径），仓库内不含用户名；单局启动时 `OPENTTD_DATA_DIR` 必须指向隔离目录 |
+| remote | `origin` = `git@github.com:green-dalii/openttd-agent.git`（**PUBLIC**，MIT）。amend 只对未 push 安全；已 push 用 `--force-with-lease`，禁止裸 `--force` |
+| 门禁 | ⚠️ **真机实验运行期间不跑 `pnpm run gate`**（preflight 断言端口空闲 → 假红，MEMORY D5）。期间用 `tsc --noEmit` + `eslint` |
+| 改动约束 | ⚠️ **block 运行期间禁止改 `src/` 与 `scripts/run-experiment.ts`**（每局重新 spawn，改源码 = 同一 block 内跑不同代码，MEMORY D12）。文档与纯分析允许；不跑重测试套件（CPU 争抢 = 偷游戏时间）|
+| 清理 | `pkill -f "cli/run.ts"` + `pkill -f "OpenTTD.app/Contents/MacOS/openttd"`；**禁止** `pkill -f openttd`（会误杀）|
+| 端口 | 3977/3979 被占用时新局起不来（`lsof -nP -iTCP:3977 -sTCP:LISTEN` 复核）|
 
 ### 4. 恢复后要读的三处（不要凭印象猜进度）
 
-1. `MEMORY.md` §0（方向与阶段状态）+ §0b（NEXT-2 方案与执行日志）
-2. `SPEC.md` §10.53–§10.63（本轮全部实测结论，**含统计量为何换代**）
-3. 本节 + 下面的「当前」条目
+1. `MEMORY.md` §0（**能力判定表 + 当前阶段 + 不漂移协议**）；索引表可按 id 直查教训（A–F，含 D32–D34）
+2. `SPEC.md` §10.74–§10.81（pi-agent-core 协同 ADR → R1/R2a/R2b → M1/M2 → **M3 动作面盘点与探针证伪**）
+3. 本节 + 上面的「🎯 M-PLAY」节
 
-### 5. 下一步（按序，除非新数据改变它）
+### 5. 下一步（按序；权威计划在「🎯 M-PLAY」节，此处只列顺序）
 
-**现在的任务不是"A/B 记忆有没有用"，而是把经验回路修成能学**（对齐检查的 P2–P5）：
+**已完成**：M1 反思可诊断+有界重试 ✅ · M2 计分规则作为事实 ✅ · M3 盘点 ✅ · M3-1 工具正名 ✅
 
-已完成的三阶段（细节都在本文件的 R 系列小节里，**事实**在 SPEC）：
+1. **M3-1b（当前，改执行器）**：`CheckAddVehicles()` 只在 `_stage == "done"` 被调用
+   （`executor-ai/main.nut:115`），施工期的 `V:` 请求**永不生效**。修法：把最新请求**锁存**，
+   在阶段允许时尽快应用（或把车队管理移出阶段机）。**验收**：`--v02 --add-vehicles 12 --shrink-to 4`
+   真机跑出 `fleetObservedAfterShrink` 非空（扩容与缩编**都发生**）。
+   ⚠️ 探针必须先等到执行器 `done` 再发（已实现），否则会得出错误结论（MEMORY D34）。
+2. **M4（原 R3/R4）**：自评事实（声明合并的类型化消息）+ `recall` 检索工具（产出 `recallCalls`）。
+   ⚠️ 新注入通道必须过 **D4 三问**（进台账 / 被 `--no-memory` 关 / 进对照判据）。
+3. **M5（原 R5）**：`--mode sequential` 学习曲线实验（预登记见 R5 节）——SPEC §0 目标②的直接检验。
+4. 穿插：`NEXT-3`（地图大小旋钮）、`NEXT-4`（GS-only 架构）、`NEXT-6`（卫生：删 `v02-runner` 死代码、裸 `catch {}` 分诊、process-manager 抖动测试）。
 
-| 阶段 | 状态 | 事实位置 |
+### 6. 本轮已交付的机制（避免重复造）
+
+| 机制 | 位置 | 说明 |
 |---|---|---|
-| **R1** 执行顺序 / 工具预算 / 披露路径 | ✅ | SPEC §10.75 |
-| **R2a** 经验 = 带实测读数的观察 + 可被推翻 | ✅ | SPEC §10.76 |
-| **R2b** 反思走 Agent + 记录工具（拒绝回到模型）| ✅ | SPEC §10.77 |
+| 反思证据 + 有界重试 + 产出率披露 | `src/evolution/reflection-stats.ts`、`reflection-run.ts` | 审计是权威（反思在 metric 行**之后**运行）|
+| 反思工具契约（拒绝回到模型）| `src/evolution/reflect-tools.ts` | 校验唯一实现在 `lessons.ts:validateLesson` |
+| 经验可被推翻 | `lessons.ts:applySupersessions` + dedupe 的"作废优先" | `supersededBy` 真的会被写 |
+| 每决策工具预算 / 顺序执行 / 披露行 | `runtime.ts`、`tools/index.ts`、`metrics.ts:degradationStats` | R1 |
+| 双向车队探针 | `--v02 --add-vehicles N --shrink-to M` | 指标 `fleetObservedAfterShrink` |
 
-**接下来按序**（**权威计划见上面的「🎯 M-PLAY」节**，此处只列顺序）：
-
-1. **R2b 的未决项**（= M1，小，先清）：同配置下 **1/2 局**模型一次都没调用记录工具
-   （新加的 WARNING 已如实打出）。先弄清是"模型选择"还是"提示词太弱"，
-   再决定是否把"0 调用"算作反思失败并重试一次。**一局就够**（`--n 1`）。
-2. **M2 目标与判据一致**（小，先做，因为它决定 agent 在为什么优化）
-3. **M3 动作面扩展**（中—大，**当前最大的阻塞**）——先做 GS 能力盘点再包工具
-4. **R3 自我评估**（= M4，小，但要守纪律）：给 agent 注入**自己的历史成绩**
-   （delivered / 每游戏日 / 车队 / 收入 / 窗口），用声明合并的类型化消息。
-   ⚠️ 这是**新的注入通道**，必须按 D4 办：进台账、被 `--no-memory` 关掉、
-   进对照谓词、在 verdict 里披露；否则控制臂被污染，"记忆有没有用"就不可比。
-5. **R4 `recall` 检索工具**（= M4）：长期经验改为**按需检索**而非全量注入，
-   顺带产出 `recallCalls`——第一次能回答"记忆到底有没有被用过"。
-6. **R5 学习曲线实验**（= M5，中）：`--mode sequential`，预先登记见 R5 节——SPEC §0 目标②的
-   直接检验，比 A/B 省一半机器时间。
-7. **R6**（大，后置）：目标与动作面的收尾。
-8. 穿插：NEXT-3/4/5（地图大小 / GS-only / M4 打磨）、NEXT-6 卫生项。
-
-**遗留的未测旋钮（不得声称已有效果）**：`sessionId` 的缓存收益、
-`deliberation off-vs-low` 的质量-成本权衡、反思**产出率**。
-
----
 
 ## 待办
 
@@ -413,15 +394,9 @@ block = 5 局/臂。每个 block 看一次：**均值差的自助法 95% CI（�
 > Dashboard 后置、先单线路跑通、渐进式重构+每阶段对齐）。
 > **每阶段收尾**：CHANGELOG / ROADMAP / MEMORY / SPEC 一次性同步（AGENTS §7 DoD）。
 
-> **接手须知（2026-09-17 更新）**
-> - 门禁：`pnpm run gate` 必须全绿（**局数不写死**——写死必然过期）。
-> - **开工前必读**：`MEMORY.md` §0（方向）+ §0b（NEXT-2 方案/状态）+
->   `SPEC.md` §10.53–§10.63（本轮全部实测结论，含统计量与样本量的推导）。
-> - **真机实验期间不要跑 gate**（preflight 断言端口空闲 → 假红；MEMORY D5）。
-> - **remote**：`origin` = `git@github.com:green-dalii/openttd-agent.git`（**private**，
->   2026-09-17 创建）。amend 仅对未 push 的提交安全；已 push 的改动用
->   `--force-with-lease`，不要裸 `--force`。
-> - **subagent 不可用**（缺 `@earendil-works/pi-server`）——所有活都内联做。
+> **接手须知**：**环境事实（门禁/remote/清理/凭证）以顶部「🔴 COMPACT 后从这里接续」§3 为唯一权威**——
+> 本节不再复制（曾经这里写"remote 是 private"，而仓库早已公开，就是重复导致的漂移）。
+> 只需记住两条最容易被违反的：**真机实验期间不跑 gate**（D5）、**block 运行期间不改 `src/`**（D12）。
 
 ### ✅ 已收口（2026-09-12～15，细节见 CHANGELOG [Unreleased] 与 SPEC §10.34–§10.49）
 
