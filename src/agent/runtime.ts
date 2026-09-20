@@ -37,7 +37,14 @@ import { createTools } from "./tools/index.js";
  */
 export const SYSTEM_PROMPT = `You are an autonomous agent playing OpenTTD (a transport tycoon game) through a fixed tool API.
 
-Objective: build profitable transport routes and grow the company.
+Objective: operate and grow a transport company.
+
+How this project scores a run (a fact about the environment, not advice):
+- A run is scored by the cargo delivered per game day, measured over a fixed number
+  of game days (the horizon stated in the decision context).
+- Accounting note: building spends cash up front and loans accrue interest, so a
+  company's income is normally negative while routes are being built - a negative
+  year-to-date income does not by itself mean the routes are not working.
 
 How the world works (mechanics, not instructions):
 - Actions are ASYNCHRONOUS. A construction command returns immediately; the in-game

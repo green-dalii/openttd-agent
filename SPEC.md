@@ -3098,3 +3098,50 @@ audit.jsonl: {type:"reflection", ok, error, lessonsSaved, lessonsSuperseded,
 它**不读 metrics.jsonl**：反思发生在 `session.finalize()` 之后（metric 行已写完），
 所以 `reflectionRetries` 这类字段**不可能**出现在 metric 行里——
 硬塞只会得到一个永远 `undefined` 的字段（D19/D22 的经典形态）。
+
+## 10.79 M2：把计分规则作为事实写进提示词（2026-09-19）
+
+### 改了什么
+
+`SYSTEM_PROMPT` 的目标句从
+
+```
+Objective: build profitable transport routes and grow the company.
+```
+
+改为
+
+```
+Objective: operate and grow a transport company.
+
+How this project scores a run (a fact about the environment, not advice):
+- A run is scored by the cargo delivered per game day, measured over a fixed number
+  of game days (the horizon stated in the decision context).
+- Accounting note: building spends cash up front and loans accrue interest, so a
+  company's income is normally negative while routes are being built - a negative
+  year-to-date income does not by itself mean the routes are not working.
+```
+
+**为什么这是事实而不是策略**：它描述"本项目如何评分"（环境的一部分，agent 有权知道）
+与一条会计事实；它**没有**说该怎么玩。既有守卫 `assertNoStrategy` 仍然全绿。
+
+**为什么必须改**：实验判据是 `deliveredRun`，而提示词要求"profitable"。
+实测 106 局里 `income>0` 的仅 **9 局**（施工期年为负）——**目标通常不可达**，
+agent 在为一件做不到的事优化，而"它为什么优化"与"我们量什么"不匹配（MEMORY D25 同源）。
+
+### 真机观察（`/tmp/m2a`，`--scenario prebuilt --game-days 30`，n=1/臂）
+
+| 臂 | 决策 | 工具调用 | 工具分布 | 车辆 | deliveredRun |
+|---|---|---|---|---|---|
+| control（`--no-memory`）| 2 | 6 | observe 6 / inspect_route 6 / set_pause 2 / **add_vehicles 3** | 13 | **0** |
+| treatment | 5 | 11 | （同上）| **32** | **0** |
+
+**只陈述观察，不做因果断言**：车队规模明显上升（13 / 32，S0 证明的饱和点约 15），
+但两局 `deliveredRun` 仍为 0——30 游戏日的窗口里，预建线路的施工占满了窗口，
+车辆来不及产生运量。**这是窗口问题，不是提示词效果的证据**；
+要判定 M2 是否改变了行为/结果，需要 horizon ≥300 的对照（尚未做）。
+
+### 兼容性代价（必须记住）
+
+提示词是**全局**改动：**2026-09-19 之前与之后的行为指标不可直接比较**
+（工具分布、决策数、车队规模都可能被这条事实改变）。跨日期比较必须在文档中说明。

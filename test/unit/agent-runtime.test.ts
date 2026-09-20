@@ -394,6 +394,25 @@ describe("harness boundary: 框架不替 agent 做决定", () => {
 		expect(SYSTEM_PROMPT).toMatch(/money|loan/i);
 	});
 
+	/**
+	 * M2（2026-09-19）：**计分规则是一个事实**，必须告诉 agent。
+	 *
+	 * 事故：提示词写着 "build profitable transport routes"，而实验判据是
+	 * `deliveredRun`（运货量）。实测 106 局里 `income>0` 的只有 9 局——
+	 * **目标通常不可达**，于是 agent 长期在为一件做不到的事优化，
+	 * 而"它在为什么优化"与"我们在量什么"根本不匹配。
+	 *
+	 * 说明这是**事实**而不是策略：它描述的是"本项目如何评分"（环境的一部分），
+	 * 不告诉 agent 该怎么玩。策略仍然要靠它自己试出来。
+	 */
+	it("把计分规则作为事实写出来（目标与判据同源）", () => {
+		expect(SYSTEM_PROMPT).toMatch(/delivered per game day|deliveries per game day|cargo delivered/i);
+		// 不再宣称一个窗口内通常不可达的目标（"profitable"）
+		expect(SYSTEM_PROMPT).not.toMatch(/build profitable/i);
+		// 但必须如实说明施工期收入为负这个**会计事实**
+		expect(SYSTEM_PROMPT).toMatch(/income.*(negative|loss)|negative while/i);
+	});
+
 	it("每个工具的 description 不含策略", () => {
 		const tools = createTools(fakeDeps().deps);
 		expect(tools.length).toBeGreaterThan(0);
