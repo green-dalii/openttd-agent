@@ -19,6 +19,8 @@ import {
 	loadMemory,
 	makeLessonProvider,
 	memoryCounts,
+	recallLessons,
+	renderRecallHit,
 	type LoadedMemory,
 } from "../../src/evolution/memory.js";
 import { runReflection } from "../../src/evolution/reflection-run.js";
@@ -661,5 +663,119 @@ describe("M1: 0 工具调用时重试一次（有界、记账、不逼编造）"
 		});
 		expect(r.retries).toBe(0);
 		expect(r.lessonsSaved).toBe(1);
+	});
+});
+
+/**
+ * M4a：按需检索（SPEC §10.89）。
+ *
+ * 契约刻意朴素：**子串匹配**，不是语义检索。测试把这条写下来，防止未来
+ * "看起来更聪明"的改动悄悄改变它——模型据此决定要不要再查一次。
+ */
+describe("recallLessons —— 按需检索", () => {
+	function lesson(id: string, text: string): Lesson {
+		return {
+			id,
+			text,
+			outcome: { metric: "delivered", before: 0, after: 100 },
+			evidence: "e",
+			confidence: "medium",
+			createdAt: 0,
+		} as unknown as Lesson;
+	}
+	const mem = {
+		lessons: [lesson("a", "Route job 101 lost money"), lesson("b", "Fleet of 6 delivered more"), lesson("c", "Two towns are close")],
+		strategies: [],
+		lines: [],
+	} as unknown as Parameters<typeof recallLessons>[0];
+
+	it("无 query 时给最近的若干条（最近在前）", () => {
+		const hits = recallLessons(mem, { limit: 2 });
+		expect(hits.map((l) => l.id)).toEqual(["c", "b"]);
+	});
+
+	it("query 是大小写不敏感的子串匹配", () => {
+		expect(recallLessons(mem, { query: "FLEET" }).map((l) => l.id)).toEqual(["b"]);
+		expect(recallLessons(mem, { query: "job 101" }).map((l) => l.id)).toEqual(["a"]);
+	});
+
+	it("查不到就返回空（不是全部、也不编造）", () => {
+		expect(recallLessons(mem, { query: "zzz" })).toEqual([]);
+	});
+
+	it("limit 有上限（不让一次调用把整库倒进上下文）", () => {
+		expect(recallLessons(mem, { limit: 999 }).length).toBe(3);
+	});
+
+	it("没有记忆（--no-memory）时返回空，而不是抛错", () => {
+		expect(recallLessons(null, { query: "x" })).toEqual([]);
+	});
+
+	it("渲染成事实行时带上实测读数（没有读数就明说）", () => {
+		const line = renderRecallHit(mem!.lessons[0]!);
+		expect(line).toContain("delivered 0 -> 100");
+		expect(line).toContain("[a]");
+	});
+});
+
+/**
+ * M4a 的第二版：**词级匹配 + 重叠排序**（SPEC §10.89）。
+ *
+ * 为什么要改：真机第一版两个查询（`recall("road completion tiles per day")`、
+ * `recall("route completion")`）都返回 **0 命中**（`/tmp/m4a` 审计）。原因不是模型乱问，
+ * 而是**子串匹配**要求整串连续出现——模型自然地问"概念"，记录却是自由文本句子。
+ * 契约里写明了"substring"没错，但证据表明这个契约在实践中没用。
+ *
+ * 下面的 fixture 全部来自真实样本（AGENTS §5）：
+ *   - 库：`/tmp/m1b/evolution/lessons.jsonl`（12 条合规教训）里的原文；
+ *   - 查询：`/tmp/m4a` 审计里模型真实发出的那两条。
+ */
+describe("recallLessons —— 词级匹配（真实库 + 真实查询）", () => {
+	// 来自 /tmp/m1b（截断到实文；outcome 补齐以通过类型）
+	function real(id: string, text: string): Lesson {
+		return {
+			id,
+			text,
+			outcome: { metric: "delivered", before: 0, after: 0 },
+			evidence: "e",
+			confidence: "low",
+			createdAt: 0,
+		} as unknown as Lesson;
+	}
+	const lib = {
+		lessons: [
+			real("l1", "The game session delivered 0 cargo units across 32 game days despite completing 3 LLM decisions and 13 tool calls."),
+			real("l2", "Route job 101 (towns 14->2) was ordered at decision 0 and the executor reported it built, but 0 cargo was delivered."),
+			real("l3", "Two of three ordered route jobs (102 and 103) showed no completion before the run ended at the horizon."),
+			real("l4", "The session ended with final money of 222972 and 3 vehicles across 4 stations after 32 game days."),
+		],
+		strategies: [],
+		lines: [],
+	} as unknown as Parameters<typeof recallLessons>[0];
+
+	it("模型真实查询「road completion tiles per day」现在必须命中（而不是 0）", () => {
+		const hits = recallLessons(lib, { query: "road completion tiles per day" });
+		expect(hits.length).toBeGreaterThan(0);
+		// 至少命中包含 completion / road 的那条
+		expect(hits.map((l) => l.id)).toContain("l3");
+	});
+
+	it("模型真实查询「route completion」也要命中", () => {
+		const hits = recallLessons(lib, { query: "route completion" });
+		expect(hits.map((l) => l.id)).toContain("l3");
+	});
+
+	it("命中条数按**词重叠**排序（更相关的在前）", () => {
+		const hits = recallLessons(lib, { query: "route jobs completion horizon" });
+		expect(hits[0]!.id).toBe("l3"); // 同时含 route/jobs/completion/horizon
+	});
+
+	it("仍然尊重 limit（词级匹配会变宽，上限更重要）", () => {
+		expect(recallLessons(lib, { query: "the of and", limit: 2 }).length).toBeLessThanOrEqual(2);
+	});
+
+	it("停用词/单字符不参与匹配（否则什么都命中）", () => {
+		// "a" / "the" / "of" 不该让整库命中
+		expect(recallLessons(lib, { query: "a the of" })).toEqual([]);
 	});
 });

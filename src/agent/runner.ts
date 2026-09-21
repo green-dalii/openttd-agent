@@ -47,7 +47,14 @@ import {
 import { createLlmApi } from "./llm-api.js";
 import { WebServer } from "../web/server.js";
 import { pruningTransformContext } from "./context.js";
-import { loadMemory, makeLessonProvider, memoryCounts, type LoadedMemory } from "../evolution/memory.js";
+import {
+	loadMemory,
+	makeLessonProvider,
+	memoryCounts,
+	recallLessons,
+	renderRecallHit,
+	type LoadedMemory,
+} from "../evolution/memory.js";
 import { routeFactsProviderFor } from "../evolution/route-facts.js";
 import { joinRoutesWithLedger } from "./route-stats.js";
 import { makeFreezeController } from "./freeze.js";
@@ -559,6 +566,17 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 	// actually has confirmed content (see docs/EVOLUTION.md §3).
 	const memory = loadMemory(cfg.dataDir, { inject: opts.injectMemory !== false });
 	const memoryProvider = makeLessonProvider(memory);
+	// M4a（SPEC §10.89）：把**这一局的记忆快照**接到 `recall` 工具上。
+	//
+	// 两条硬要求：
+	//   ① 与开局注入的是**同一份快照**（计数一致，"我读到的"与"我被告知的"不能是两回事）；
+	//   ② `--no-memory` 时必须**缺席**（工具据此具名拒绝）——否则控制臂会"有记忆但不注入"，
+	//      两臂之差就不再干净（D4：每个注入通道都要被开关控制并在判据里披露）。
+	if (opts.injectMemory !== false) {
+		deps.recall = (q) => recallLessons(memory, q).map((l) => ({ id: l.id, line: renderRecallHit(l) }));
+	}
+	deps.onRecall = (r) =>
+		session.appendAudit({ type: "recall", ts: Date.now(), query: r.query, hits: r.hits, ids: r.ids });
 	// Gated by the same switch as lessons: `--no-memory` must mean NO memory
 	// of either kind, or the control arm is not a control (m3f).
 	const routeFactsProvider = routeFactsProviderFor(cfg.dataDir, opts.injectMemory !== false);
@@ -606,7 +624,19 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 			// C-1: route facts from PREVIOUS games join the injected context
 			// (snapshot taken once at boot - same stable-set semantics as memory,
 			// which is the M3 experiment's independent variable).
-			lessonsProvider: () => [...memoryProvider(), ...routeFactsProvider()],
+			// 存在性事实（ADR §10.74 决策 4）：注入的是"选中的那几条"，而库里可能还有更多。
+			// 不说出来，模型就不知道自己还能查——`recall` 会永远不被调用，
+			// 而"记忆有没有被用"这个问题就永远没有答案（SPEC §10.89）。
+			lessonsProvider: () => [
+				...memoryProvider(),
+				...routeFactsProvider(),
+				...(memory.lessons.length > injected.lessonsInjected
+					? [
+							`${memory.lessons.length - injected.lessonsInjected} more recorded observation(s) from ` +
+								"earlier games are not shown here and can be listed or searched with recall().",
+						]
+					: []),
+			],
 		}),
 		onActionResult: (tool, r) => {
 			console.log(`[agent] tool ${tool}: ok=${r.ok} ${r.summary}`);

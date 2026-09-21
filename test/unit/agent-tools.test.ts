@@ -4,6 +4,7 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+	recallTool,
 	retireRouteTool,
 	setRouteVehiclesTool,
 	buildBusRouteTool,
@@ -383,6 +384,8 @@ describe("createTools", () => {
 			"set_route_vehicles",
 			// M3-2a：运输公司最有后果的动词之一——关掉一条正在亏钱的线路
 			"retire_route",
+			// M4a：按需检索自己过往的观测（"记忆有没有被用"的唯一测量入口）
+			"recall",
 			"set_pause",
 		]);
 	});
@@ -492,5 +495,56 @@ describe("inspect_route —— 线路经济查询（N2-2）", () => {
 	it("工具已注册进 createTools（否则模型永远看不到它）", () => {
 		const names = createTools(depsWith(() => [])).map((t) => t.name);
 		expect(names).toContain("inspect_route");
+	});
+});
+
+/**
+ * M4a（SPEC §10.89）：`recall` —— 按需检索自己过往的观测。
+ *
+ * 三条契约（模型据此学因果）：
+ *   ① 本局没有记忆时**具名拒绝**，不是"空结果"（空结果会被读成"没记到过"）；
+ *   ② 匹配是**子串**而非语义（描述里必须写明，否则模型会高估它）；
+ *   ③ 每次检索都**记账**（`recallCalls` 是"记忆到底有没有被用"的第一个测量）。
+ */
+describe("recall tool（M4a）", () => {
+	it("把检索结果作为事实行返回，并记账", async () => {
+		const { sink } = fakeSink();
+		const seen: { query: string | null; hits: number; ids: string[] }[] = [];
+		const tool = recallTool({
+			sink,
+			state: fakeState(),
+			recall: () => [{ id: "abc", line: "[abc] Route job 101 lost money (money 0 -> 100)" }],
+			onRecall: (r) => seen.push(r),
+		});
+		const res = await tool.execute("c1", { query: "money" });
+		const d = (res as { details: { ok: boolean; summary: string } }).details;
+		expect(d.ok).toBe(true);
+		expect(d.summary).toContain("Route job 101 lost money");
+		expect(seen).toEqual([{ query: "money", hits: 1, ids: ["abc"] }]);
+	});
+
+	it("本局没有记忆时具名拒绝（控制臂绝不能偷偷拿到记忆）", async () => {
+		const { sink } = fakeSink();
+		const tool = recallTool({ sink, state: fakeState() });
+		const res = await tool.execute("c1", {});
+		const d = (res as { details: { ok: boolean; summary: string } }).details;
+		expect(d.ok).toBe(false);
+		expect(d.summary).toMatch(/no memory|disabled/i);
+	});
+
+	it("描述里写明是**按词**匹配且不是语义检索", () => {
+		const { sink } = fakeSink();
+		const d = String(recallTool({ sink, state: fakeState() }).description);
+		expect(d).toMatch(/per word|any of your words/i);
+		expect(d).toMatch(/not semantic search/i);
+	});
+
+	it("查不到时说清是「查不到」，不编造", async () => {
+		const { sink } = fakeSink();
+		const tool = recallTool({ sink, state: fakeState(), recall: () => [], onRecall: () => {} });
+		const res = await tool.execute("c1", { query: "zzz" });
+		const d = (res as { details: { ok: boolean; summary: string } }).details;
+		expect(d.ok).toBe(true);
+		expect(d.summary).toMatch(/no recorded observation matches/i);
 	});
 });

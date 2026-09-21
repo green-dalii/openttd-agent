@@ -40,6 +40,15 @@ export interface AgentDeps {
 	 * success ("a tool that always says yes destroys learning").
 	 */
 	routeStats?: () => RouteStats[];
+	/**
+	 * 按需检索这一局的记忆快照（M4a，SPEC §10.89）。
+	 *
+	 * **缺席 = 本局没有记忆**（例如 `--no-memory` 的控制臂）。工具必须据此**具名拒绝**，
+	 * 而不是返回空成功——否则控制臂会静默地"有记忆但没内容"，两臂之差就不再干净（D4）。
+	 */
+	recall?: (q: { query?: string; limit?: number }) => { id: string; line: string }[];
+	/** 每次检索的记账（落到审计：让"记忆有没有被用"成为可查事实）。 */
+	onRecall?: (r: { query: string | null; hits: number; ids: string[] }) => void;
 }
 
 /** Structured result payload carried in AgentToolResult.details. */

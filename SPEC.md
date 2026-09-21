@@ -3626,3 +3626,49 @@ fleet_wait6c1L1 → fleetg6L6C8 → fleet_wait3c6L6 → fleetsend3C8 → fleetso
 探针、开关、指标字段——凡是"声明 → 赋值 → **必须出现在某个聚合点**"的链，
 最后一环最容易漏，而漏掉的症状是**静默不执行**。守卫的写法也两次翻车：
 先查声明（改声明就瞎）、再猜结尾（猜不到就全绿）。**重放证明**是唯一可信的验收。
+
+## 10.89 M4a：`recall` 按需检索——并第一次量到"记忆被用了"（2026-09-19）
+
+### 为什么加这个工具
+
+此前的记忆通道是"开局整体注入一次"：agent **无法按需取用**，我们也**无法观测它有没有被用**
+（注入计数只说明"给了"，不说明"用了"）。这是"自进化"缺的两环之一（另一环是选择压力）。
+
+四条契约（模型据此学因果，全部写进工具描述与代码注释）：
+1. 检索的是**本局装载的那份快照**（与开局注入同一份，计数一致）；
+2. 匹配是**按词**的（不是语义检索）；
+3. 本局没有记忆时（`--no-memory` 控制臂）**具名拒绝**——空结果会被读成"没记到过"，
+   而控制臂若还能检索，两臂之差就不再只是"有没有注入"（**D4 第二问**）；
+4. 每次检索**记账**（审计 `{type:"recall", query, hits, ids}`）→ `recallCalls` 可查。
+
+实现：`recallLessons`（纯函数）+ `renderRecallHit`（事实行含实测读数）+ `recallTool`
+（第 9 个工具）+ `runner` 接线（`deps.recall` 受 `opts.injectMemory !== false` 门控；
+`deps.onRecall` 落审计）。另有**存在性事实行**：库比注入集大时说
+"还可以用 recall() 列出/检索"——不这么说，工具永远不会被调用，问题就永远没有答案。
+
+### 真机结果（`/tmp/m4a`，12 条库的目录）
+
+```
+[evolution] loaded memory: 6 lesson(s), 0 strategy card(s), 0 route fact(s)
+[agent] tool recall: ok=true no recorded observation matches that (searched substring "road completion tiles per day").
+[agent] tool recall: ok=true no recorded observation matches that (searched substring "route completion").
+审计：recall 记录 2 条（query/hits/ids 都在）
+```
+
+**✅ 验收①达成**：模型**主动调用了 `recall` 两次**——存在性事实行 + 工具描述起作用了，
+"记忆有没有被用"从不可观测变成可查事实。
+
+**❌ 验收②失败（有价值的失败）**：两次都 **0 命中**。原因不是模型乱问，而是
+**子串匹配**要求整串连续出现，而模型自然地问"概念"（"road completion tiles per day"）、
+记录却是自由文本句子。契约里写"substring"没错，但**证据表明这个契约在实践中没用**。
+
+### 第二版：词级匹配 + 重叠排序（同轮修掉）
+
+- query 拆词 → 去掉停用词与 <3 字符的词（否则 "the"/"of" 会让整库命中）→ 任一词出现即命中
+  → 按**命中的不同词数**排序；
+- 测试用**真实样本**做 fixture（AGENTS §5）：库取自 `/tmp/m1b` 的真实教训原文，
+  两个 query 取自 `/tmp/m4a` 审计里模型**真实发出**的那两条 → 断言必须命中且 `l3` 靠前。
+- 实现里当场被测试抓到一处：排序正确但末尾多了一次 `reverse()`（那是给"无 query"分支的
+  "最近在前"），把最不相关的翻到了第一。
+- 工具描述与 schema 同步改成"按词匹配、更多匹配词更靠前、**不是语义检索**"——
+  契约不能停留在旧语义上（否则模型会按旧契约推理）。

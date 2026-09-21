@@ -313,6 +313,65 @@ export function retireRouteTool(deps: AgentDeps): AgentTool<typeof RetireRouteSc
 	};
 }
 
+const RecallSchema = Type.Object({
+	query: Type.Optional(
+		Type.String({
+			description:
+				"Words to look for in the recorded observations of earlier games. Matching is per word: " +
+				"a record matches if any of your words appears in it, and records matching more of your " +
+				"words come first. This is NOT semantic search - synonyms and rephrasing do not match. " +
+				"Omit it to list the most recent records.",
+		}),
+	),
+	limit: Type.Optional(Type.Number({ description: "Max records to return (default 5, max 20)." })),
+});
+
+/**
+ * 按需检索自己过往的观测。
+ *
+ * 契约有三条必须说清的事实（模型据此学习因果）：
+ *   ① 检索的是**本局装载的那份快照**（与开局注入的是同一份，计数一致）；
+ *   ② 匹配是**子串**，不是语义；
+ *   ③ 本局没有记忆时（控制臂）**明确拒绝**，而不是"空结果"——空结果会被读成"没记到过"。
+ */
+export function recallTool(deps: AgentDeps): AgentTool<typeof RecallSchema, ActionResult> {
+	return {
+		name: "recall",
+		label: "Recall Observations",
+		description:
+			"Look up observations recorded at the end of earlier games (each carries the measured reading " +
+			"it was distilled from). Matching is per word over the recorded text - a record matches if any " +
+			"of your words appears in it, and records matching more of your words rank higher. It is not " +
+			"semantic search, so rephrasing does not match. Use it when a past outcome would change what " +
+			"you do now.",
+		parameters: RecallSchema,
+		execute: async (_id, params) => {
+			if (!deps.recall) {
+				return toResult({
+					ok: false,
+					summary:
+						"no memory is available in this run (it was disabled), so there is nothing to recall.",
+					data: { available: false },
+				});
+			}
+			const hits = deps.recall({ query: params.query, limit: params.limit });
+			deps.onRecall?.({
+				query: params.query ?? null,
+				hits: hits.length,
+				ids: hits.map((h) => h.id),
+			});
+			return toResult({
+				ok: true,
+				summary:
+					hits.length === 0
+						? `no recorded observation matches that (searched ${params.query ? `for the words in "${params.query}"` : "the library"}).`
+						: `${hits.length} recorded observation(s) from earlier games:\n${hits.map((h) => `- ${h.line}`).join("\n")}`,
+				data: { available: true, query: params.query ?? null, ids: hits.map((h) => h.id) },
+			});
+		},
+	};
+}
+
 export function setPauseTool(deps: AgentDeps): AgentTool<typeof SetPauseSchema, ActionResult> {
 	return {
 		name: "set_pause",
@@ -488,6 +547,7 @@ export function createTools(deps: AgentDeps): AgentTool<TSchema, ActionResult>[]
 		buildBusRouteTool(deps),
 		setRouteVehiclesTool(deps),
 		retireRouteTool(deps),
+		recallTool(deps),
 		setPauseTool(deps),
 	];
 }

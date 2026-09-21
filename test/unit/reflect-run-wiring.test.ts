@@ -200,3 +200,27 @@ describe("arm 落盘守卫（N2-5）", () => {
 		expect(meta.memory.lessonsInjected).toBe(0);
 	});
 });
+
+/**
+ * D4 的机械守卫：**注入通道必须被 `--no-memory` 关掉，并在判据里可查**（SPEC §10.89）。
+ *
+ * `recall` 是一条**新的记忆通道**。若它在控制臂里仍然可用，两臂之差就不再只是
+ * "有没有记忆注入"，而包含"能不能检索"——比较立刻不干净（D4 三问的第二问）。
+ * 同时它必须**真的被接线**：`AgentDeps.recall` 缺席时工具会具名拒绝，
+ * 所以"忘了接线"与"故意关掉"在行为上看起来一样——只有静态守卫能分开这两种情况。
+ */
+describe("M4a：recall 的接线与开关", () => {
+	const src = readFileSync("src/agent/runner.ts", "utf8");
+
+	it("runner 把本局记忆快照接到 deps.recall（同一份快照）", () => {
+		expect(src).toMatch(/deps\.recall = \(q\) => recallLessons\(memory, q\)/);
+	});
+
+	it("deps.recall 受 --no-memory 控制（控制臂不得有检索）", () => {
+		expect(src).toMatch(/if \(opts\.injectMemory !== false\) \{\s*\n\s*deps\.recall =/);
+	});
+
+	it("每次检索都记账（落到审计：'记忆有没有被用'必须可查）", () => {
+		expect(src).toMatch(/deps\.onRecall = \(r\) =>[\s\S]{0,200}?appendAudit\(\{ type: "recall"/);
+	});
+});
