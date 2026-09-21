@@ -41,6 +41,8 @@ interface CliArgs {
 	retireJob?: number;
 	/** M3-2c probe: queue a second route so the first becomes non-current. */
 	secondRoute?: boolean;
+	/** NEXT-4 事实探针：GS 能否买车（决定动作总线的车道数）。 */
+	probeGsBuy?: boolean;
 	/** Agent: pause the world while the model thinks + acts (verified freeze). */
 	freeze?: boolean;
 	year?: number;
@@ -84,6 +86,7 @@ export function parseArgs(argv: string[]): CliArgs {
 	let shrinkTo: number | undefined;
 	let retireJob: number | undefined;
 	let secondRoute = false;
+	let probeGsBuy = false;
 	let freeze = false;
 	let llmBaseUrl: string | undefined;
 	let llmApiKey: string | undefined;
@@ -118,6 +121,9 @@ export function parseArgs(argv: string[]): CliArgs {
 				break;
 			case "--second-route":
 				secondRoute = true;
+				break;
+			case "--probe-gs-buy":
+				probeGsBuy = true;
 				break;
 			case "--retire-job":
 				retireJob = parseIntNum(argv[++i], "--retire-job");
@@ -192,9 +198,12 @@ export function parseArgs(argv: string[]): CliArgs {
 	return {
 		// Every parsed flag MUST appear here. Forgetting one does not fail to
 		// compile: `args.foo` is simply undefined, so the flag silently does
-		// nothing while the help text still advertises it. Fourth instance of
-		// "parsed but dropped" found on 2026-09-12 (MEMORY.md A5).
-		mode, year, seed, timeoutMs, aiName, webPort, demoSeconds, gameDays, scenario, addVehicles, shrinkTo, retireJob, secondRoute, freeze,
+		// nothing while the help text still advertises it. Fifth instance of
+		// "parsed but dropped": 2026-09-12 (MEMORY.md A5) x4, then 2026-09-19
+		// (`--probe-gs-buy`) - and that one happened WITH the guard test already
+		// written, because the change was checked with `tsc` instead of the guard.
+		// Run test/unit/cli-v02.test.ts after touching any flag, not tsc.
+		mode, year, seed, timeoutMs, aiName, webPort, demoSeconds, gameDays, scenario, addVehicles, shrinkTo, retireJob, secondRoute, freeze, probeGsBuy,
 		llmBaseUrl, llmApiKey, llmModel, llmApi, offlineDemo, skipPreflight,
 		injectMemory,
 	};
@@ -336,6 +345,7 @@ async function main(): Promise<number> {
 				shrinkTo: args.shrinkTo,
 				retireJob: args.retireJob,
 				secondRoute: args.secondRoute,
+				probeGsBuy: args.probeGsBuy,
 			});
 		} catch (e) {
 			console.error("[v02] ERROR:", e instanceof Error ? e.message : e);

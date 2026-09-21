@@ -48,6 +48,7 @@ export interface V02Options {
 	/** M3-2a probe: retire this job and observe whether the fleet goes away. */
 	retireJob?: number;
 	/** M3-2c probe: queue a SECOND route so the first one becomes "not current". */
+	probeGsBuy?: boolean;
 	secondRoute?: boolean;
 	/**
 	 * Episode horizon in SIMULATED game days (G1, SPEC §10.68). The oracle probe
@@ -110,6 +111,7 @@ export async function runV02(cfg: Config, opts: V02Options = {}): Promise<number
 	let gsStates = 0;
 	let executorPhase = "";
 	let routeAck: Record<string, unknown> | null = null;
+	let probeVehicleSeen = -1;
 	const companiesByName = new Map<string, number>(); // name -> id
 
 	client = new AdminClient({
@@ -188,6 +190,25 @@ export async function runV02(cfg: Config, opts: V02Options = {}): Promise<number
 		await sleep(500);
 	}
 	console.log(`[v02] executor boot phase: ${bootSeen ? executorPhase || "EX boot j-1" : "(not seen — still waiting)"}`);
+
+	// --- NEXT-4 事实探针：**GS 到底能不能买车？** ---------------------------
+	//
+	// 为什么必须实测：`docs/EXECUTOR-ARCHITECTURE.md` 写着阶段 1b"仍未验证"。
+	// 这一条事实决定两件事——(a) 动作总线是**单车道**（全在 GS）还是**双车道**
+	// （GS 建设施 / Executor AI 管载具）；(b) GS-only 架构（ROADMAP NEXT-4）是否可行。
+	// 通道现成：`probe_cm` 已在 Bridge GS 里，用与其它命令相同的 admin 路径发。
+	if (opts.probeGsBuy) {
+		console.log("[v02] GS-buy probe: sending probe_cm (company mode: road + depot + engine + BUY + orders + start)…");
+		client.gameScript(JSON.stringify({ cmd: "probe_cm", company: 0 }));
+		const d = Date.now() + 180_000;
+		while (Date.now() < d && !stopRequested) {
+			client?.poll(AdminUpdateType.CompanyStats, 0);
+			await sleep(600);
+			const v = world.snapshot().companies.get(0)?.stats?.vehicles ?? -1;
+			if (probeVehicleSeen < 0 && v > 0) probeVehicleSeen = v;
+		}
+		console.log(`[v02] GS-buy probe: company vehicles now ${probeVehicleSeen}`);
+	}
 
 	// --- 5. send build_bus_route (S1: GS plans a 2-town bus route + places
 	// S/E station signs in the executor's company mode; executor reads them) ---

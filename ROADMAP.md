@@ -389,8 +389,29 @@ pgrep -fl "run-experiment|cli/run.ts|OpenTTD.app"     # 无输出 = 没有（202
 4. **未结案的小尾巴**：`/tmp/m31f` 里 8 辆待卖车只卖出 4 辆、另 4 辆静默消失
    （相位已具名 `g<gone>`）。最可能是执行器重建车库时把停在里面待卖的车一起删了——
    下次真机跑一次即可判定（**不要靠猜**）。
-5. 穿插：`NEXT-3` 地图大小旋钮 · `NEXT-4` GS-only 架构 · `NEXT-6` 卫生（删 `v02-runner` 死代码、
+5. 穿插：`NEXT-3` 地图大小旋钮 · `NEXT-6` 卫生（删 `v02-runner` 死代码、
    裸 `catch {}` 分诊、process-manager 抖动测试）。
+
+### 6b. **ACTION-BUS**：把"不断加动词"改成"造通道"（设计见 `docs/ACTION-BUS-CODESIGN.md`）
+
+起因（用户）：动作面一直是**打补丁**式扩张。根因不是动词少，而是**一个动词的表示散落在 6 处**
+（工具 schema / 命令类型 / GS `Dispatch` / 标牌语法 / Executor 解析 / 相位解码），
+且没有单一事实源——D20/D34/D41/D43 都是这条链上的事故。
+
+**已证实的事实改变了设计**（`SPEC.md` §10.90，2026-09-19 真机）：Bridge GS **单机**即可完成
+整个巴士闭环（建路/车厂/站 → `GSVehicle.BuildVehicle`=ok:11 → 双订单 → 启动，钱照扣）。
+⇒ 总线应为**单车道**：一张分发表、一个 VM、无标牌契约。NEXT-4（GS-only）由"设想"转为"已证实可行"。
+
+| 步骤 | 范围 | 验收 |
+|------|------|------|
+| **AB-1** | `capabilities()` 只读工具：目录从现有代码**派生**（GS 命令表 / 标牌语法 / 工具名单三者一致），含守卫 | 单测三者一致 + 重放证明守卫非空 |
+| **AB-2** | `perform_action(op, args)`：GS 车道原语（设施/经济类），带 `observed` 效果字段（I1）与 `unknown_action`（I2） | 真机：一个此前没有的动词被 agent 用出来并**观测到效果** |
+| **AB-3** | pi-agent-core 接上：目录 → `setActiveTools`；结果 → `AgentToolResult.details.observed` | 单测 + `--agent` live 八条断言（AGENTS §5.1） |
+| **AB-4** | **NEXT-4 验收**：GS 自建一条完整线路并交付 > 0；长线路施工的 `GSController.Sleep` 分片 | 真机：`deliveredRun > 0` 且 `gsErrors = 0` |
+| **AB-5** | 反事实回放（`AgentHarness` session fork × savegame），独立一轮，预注册停止规则 | 同一决策点两分支的因果差；跨局 A/B 的 19 小时可省 |
+
+⚠️ 顺序理由：AB-1 零风险；AB-2 验证通道本身；AB-4 才动真实施工（且它决定 Executor AI 是否退役）；
+AB-5 最大且改实验方法，必须独立。**每步都要真机验收，不新增平行系统。**
 
 ### 6. 本轮已交付的机制（避免重复造）
 
@@ -550,7 +571,8 @@ pnpm exec tsx scripts/run-experiment.ts --dir /tmp/n2ab3 --n 5 --demo-seconds 50
 
 - **NEXT-2 扩决策空间** → **已在做，见上「当前」**（多线路/收益递增/重复博弈；
   线路经济信号与组合管理动作已落地）。
-- **NEXT-3 地图大小旋钮 / NEXT-4 GS-only 架构 / NEXT-5 M4 打磨**：次序不变。
+- **NEXT-3 地图大小旋钮 / NEXT-5 M4 打磨**：次序不变。
+- **NEXT-4 GS-only 架构**：已由 SPEC §10.90 证实**可行**；执行入口见上面 §6b 的 AB-4（不再是设想，是排期）。
 - **NEXT-6 已知未收口项（合并两份清单，非阻塞）**：
   - ~~pause 探针~~ → **2026-09-17 实测完成**（§10.59：双向有效，原因见上节）
   - process-manager flaky 测试（spawn 时序 812ms 窗口）

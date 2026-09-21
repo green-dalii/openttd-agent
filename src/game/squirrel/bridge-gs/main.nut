@@ -342,7 +342,7 @@ class BridgeV1 extends GSController {
         local out = {
             kind = "probe", cmd = "probe_cm", company = exec, stage = "init",
             cm_valid = false, road = "unset", depot = "unset", engine = "unset",
-            vehicle = "unset", orders = "unset", started = "unset",
+            vehicle = "unset", station = "unset", orders = "unset", started = "unset",
             money_before = -1, money_after = -1, note = ""
         };
         try {
@@ -398,6 +398,32 @@ class BridgeV1 extends GSController {
                 out.depot = "no-site";
             }
 
+            // (2b) bus station - **an order needs a station to point at**.
+            // The first version of this probe pointed its orders at the depot
+            // tile while passing OF_NON_STOP_INTERMEDIATE, which the API's
+            // precondition (AreOrderFlagsValid) rejects: that flag is only legal
+            // for stations/waypoints ("orders = fail"). Building the station
+            // also answers the real architectural question - can a GS alone
+            // run the whole bus loop, making the Executor AI optional?
+            out.stage = "station";
+            local stationTile = -1;
+            local sp = this.FindAdjacentLandPair(c, 24);
+            if (sp == null) {
+                out.station = "no-site";
+            } else {
+                GSRoad.SetCurrentRoadType(GSRoad.ROADTYPE_ROAD);
+                local stOk = GSRoad.BuildRoadStation(sp[0], sp[1],
+                                                     GSRoad.ROADVEHTYPE_BUS,
+                                                     GSStation.STATION_NEW);
+                if (stOk) {
+                    stationTile = sp[0];
+                    out.station = "ok";
+                } else {
+                    local sc = -1; try { sc = GSError.GetLastError(); } catch (e5) { sc = -2; }
+                    out.station = "fail:" + sc;
+                }
+            }
+
             // (3) engine - GSEngineList takes a VEHICLE TYPE. Calling it with no
             // argument is what produced "wrong number of parameters".
             out.stage = "engine";
@@ -433,12 +459,17 @@ class BridgeV1 extends GSController {
             }
 
             // (5) orders - the vehicle must have somewhere to go
+            // (5) orders - report each one separately: a combined boolean hid
+            // WHICH order the engine refused (the same reporting-path lesson as
+            // D37/D40: "action happened, report swallowed").
             out.stage = "order";
             if (veh >= 0) {
-                local a = GSOrder.AppendOrder(veh, depotTile, GSOrder.OF_NON_STOP_INTERMEDIATE);
-                local b = GSOrder.AppendOrder(veh, pair != null ? pair[0] : depotTile,
-                                              GSOrder.OF_NON_STOP_INTERMEDIATE);
-                out.orders = (a && b) ? "ok" : "fail";
+                local o1 = false; local o2 = false;
+                if (stationTile >= 0) {
+                    o1 = GSOrder.AppendOrder(veh, stationTile, GSOrder.OF_NON_STOP_INTERMEDIATE);
+                }
+                o2 = GSOrder.AppendOrder(veh, depotTile, 0);
+                out.orders = "station=" + (o1 ? "ok" : "fail") + ",depot=" + (o2 ? "ok" : "fail");
             } else {
                 out.orders = "skipped";
             }
@@ -509,6 +540,14 @@ class BridgeV1 extends GSController {
             GSAdmin.Send({ kind = "ack", cmd = "demo", job = job, placed = placed,
                            town = towns[0], tile = tA, company = exec,
                            company_signs = names.len(), names = names });
+        } else if (cmd == "probe_cm") {
+            // Company-mode capability probe (NEXT-4 fact: can a GS buy a vehicle?).
+            // It was implemented but never dispatched - `unknown cmd` was the
+            // answer for two runs. Sixth instance of "declared but not wired"
+            // (MEMORY.md D41); the fix is one dispatch entry, the cost was two
+            // machine runs. It spends company money (depot + bus), so it stays
+            // opt-in: only reachable when a caller explicitly asks for it.
+            this.ProbeCompanyMode();
         } else if (cmd == "build_bus_route") {
             this.BuildBusRoute(obj);
         } else if (cmd == "add_vehicles") {

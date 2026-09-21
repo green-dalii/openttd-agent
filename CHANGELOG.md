@@ -40,6 +40,20 @@
   判定优先用它、**两臂同源**（`ArmComparison.deliveredSource`），旧行回落原始值并标注为不可比。
 - 澄清 `rc=1` 的含义（=施工未达成 DONE，不是崩溃）并在输出中明示。
 
+### Added（事实探针：**Bridge GS 单机能跑完整巴士闭环**；ACTION-BUS 设计，2026-09-19）
+
+- 新增 CLI 开关 `--probe-gs-buy`（`--v02`）：经**生产同一条** admin 通道发 `probe_cm`，
+  实测 GS 的 company-mode 能力链。真机结果（`SPEC.md` §10.90）：
+  建路/车厂/巴士站 ok、`GSVehicle.BuildVehicle` = **ok:11**、双订单 station=ok/depot=ok、
+  启动 ok、公司账 100000 → 70416。**"GS 不能买车"这一从未验证的架构假设被推翻**，
+  NEXT-4（GS-only）由设想转为已证实可行。
+- GS `Dispatch` 补上 `probe_cm` 分支（此前函数存在但不可达，两次真机只得到 `unknown cmd`）。
+- `docs/ACTION-BUS-CODESIGN.md`（新）：动作通道的设计与迁移计划——一张分发表 + 由代码派生的
+  能力目录 + 与 pi-agent-core 的协同（`setActiveTools` 做能力协商、`details.observed` 落效果、
+  `AgentHarness` session fork × savegame 做反事实回放）。ROADMAP §6b 给出 AB-1…AB-5 排期。
+- `--probe-gs-buy` 修复"解析了但没进 `parseArgs` 返回值"（同类第 5 次；
+  守卫测试本已写好并当场抓到，暴露的新问题是**改完只跑了 `tsc`，没跑守卫**）。
+
 ### Added（M4a：`recall` 按需检索 + 第一次量到「记忆被用了」，2026-09-19）
 
 - 新增第 9 个工具 `recall`：检索**本局装载的那份记忆快照**（与开局注入同一份），

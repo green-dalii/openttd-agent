@@ -3672,3 +3672,55 @@ fleet_wait6c1L1 → fleetg6L6C8 → fleet_wait3c6L6 → fleetsend3C8 → fleetso
   "最近在前"），把最不相关的翻到了第一。
 - 工具描述与 schema 同步改成"按词匹配、更多匹配词更靠前、**不是语义检索**"——
   契约不能停留在旧语义上（否则模型会按旧契约推理）。
+
+## 10.90 决定性事实：**Bridge GS 单机可完成整个巴士闭环**（2026-09-19）
+
+### 事实
+
+用 `probe_cm`（company mode 探针，经**生产同一条** admin 通道发送）真机实测（seed 7 / macOS dedicated）：
+
+```json
+{"kind":"probe","cmd":"probe_cm","cm_valid":true,
+ "money_before":100000,"money_after":70416,
+ "road":"ok","depot":"ok","station":"ok","engine":"id116",
+ "vehicle":"ok:11","orders":"station=ok,depot=ok","started":"ok"}
+```
+
+**逐项含义**（全部是引擎真值，不是"调用返回了"）：
+
+| 步骤 | API | 结果 |
+|------|-----|------|
+| 路 | `GSRoad.BuildRoad` | ok |
+| 车厂 | `GSRoad.BuildRoadDepot` | ok |
+| **巴士站** | `GSRoad.BuildRoadStation(t, front, ROADVEHTYPE_BUS, STATION_NEW)` | ok |
+| 选车 | `GSEngineList(GSVehicle.VT_ROAD)` + Valuate 链 | id116 |
+| **买车** | `GSVehicle.BuildVehicle(depot, engine)` | **ok:11（车 id 11 真的存在）** |
+| **订单** | `GSOrder.AppendOrder(veh, stationTile, OF_NON_STOP_INTERMEDIATE)` / `(veh, depotTile, 0)` | station=ok, depot=ok |
+| 启动 | `GSVehicle.StartStopVehicle` | ok |
+| 付钱 | `GSCompany.GetBankBalance` | 100000 → 70416（全部记在公司账上） |
+
+### 为什么这是**架构级**事实
+
+此前整个项目建立在一条**从未验证**的假设上：
+"GS 不能买车，所以必须有第二个 Squirrel VM（Executor AI），并用标牌契约跨 VM 通信"
+（`docs/EXECUTOR-ARCHITECTURE.md` 自己写着"**阶段 1b 仍未验证**"）。
+实测表明：**GS 能做完整闭环**——买车、下订单、启动全部可用（`@api ai game` 的那些 API 在 GS 里确实可用）。
+
+由此：
+- **Executor AI 在物理上不是必需的**（NEXT-4 GS-only 从"设想"变成"已证实可行"）；
+- 标牌契约、跨 VM 相位编码、FIFO 执行器、`EX <phase>` 解码这一整套复杂度**是可选的**；
+- 动作总线（`docs/ACTION-BUS-CODESIGN.md`）应当**单车道**：一张分发表、一个 VM。
+
+### 尚未证明的部分（诚实边界）
+
+本探针证明的是**API 链路成立**（车存在、订单被接受、钱被扣）。
+**尚未证明**：这辆车真的**跑起来并运送了货物**——那需要"GS 自建一条完整线路 + 交付量 > 0"。
+这是 NEXT-4 的验收条件，不是本次结论。另需验证：长线路施工的 **per-tick 操作预算**
+（GS 会被引擎挂起，需 `GSController.Sleep` 分片）。
+
+### 探针自身的两个坑（都是"声明了没接线"，第 5、6 次）
+
+1. `--probe-gs-buy` 有 switch 分支、有类型、有调用点，**没进 `parseArgs` 返回值** → 静默
+   undefined（`test/unit/cli-v02.test.ts` 的守卫当场抓到，报错文案就是"探针会静默不执行"）。
+   而**这次守卫是写好了的，只是我用 `tsc` 而不是跑它**——见 MEMORY D41 的补充。
+2. `probe_cm` 函数在 GS 里存在，但 `Dispatch` 里**没有分支** → 两次真机返回 `unknown cmd`。

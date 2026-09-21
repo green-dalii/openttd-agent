@@ -20,6 +20,7 @@
  */
 import { globSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 
 const PACKS = ["src/game/squirrel/bridge-gs", "src/game/squirrel/executor-ai"];
@@ -410,5 +411,50 @@ describe("Squirrel 执行器：车队请求对已登记线路生效", () => {
 
 	it("缩编仍然永不卖头车（退役才是清空线路的方式）", () => {
 		expect(src).toMatch(/vid == t\.lead\) continue;/);
+	});
+});
+
+/**
+ * D43 / D41 的机械守卫（第 6 次的根因）：**GS 命令必须有 Dispatch 分支**。
+ *
+ * 事故：`probe_cm` 的函数在 Bridge GS 里写了很久，`Dispatch` 里却从来没有它的分支
+ * → 两次真机运行只得到 `{"kind":"err","reason":"unknown cmd"}`（白跑两局、无声无息）。
+ * 这类"声明了没接线"本仓库已发生 6 次；在 Squirrel 侧它**不会**被 tsc 或 eslint 发现。
+ *
+ * 守卫方式：TS 侧**发出**的每个 `cmd` 名字，必须在 GS 的 `Dispatch` 里有对应分支。
+ * 反向不成立（有些分支由 GS 自己触发，例如周期性 state 心跳）。
+ */
+describe("GS 命令必须有 Dispatch 分支（D43）", () => {
+	const gs = readFileSync("src/game/squirrel/bridge-gs/main.nut", "utf8");
+
+	/** GS 的 Dispatch 里 `cmd == "x"` 出现的集合。 */
+	function dispatched(): Set<string> {
+		const out = new Set<string>();
+		for (const m of gs.matchAll(/cmd\s*==\s*"([a-z_]+)"/g)) out.add(m[1]!);
+		return out;
+	}
+
+	/** TS 侧通过 admin 通道发出的命令名（`gameScript` 调用与其 JSON 载荷）。 */
+	function sent(): Set<string> {
+		const out = new Set<string>();
+		const files = execFileSync("git", ["ls-files", "src/**/*.ts", "scripts/**/*.ts"], { encoding: "utf8" })
+			.split("\n")
+			.filter(Boolean);
+		for (const f of files) {
+			const src = readFileSync(f, "utf8");
+			for (const m of src.matchAll(/gameScript\([\s\S]{0,200}?cmd:\s*"([a-z_]+)"/g)) out.add(m[1]!);
+		}
+		return out;
+	}
+
+	it("每个被发出的命令都在 Dispatch 里可达", () => {
+		const have = dispatched();
+		const missing = [...sent()].filter((c) => !have.has(c));
+		expect(missing, `这些命令被发出但 GS 没有分支（真机会得到 unknown cmd）：${missing}`).toEqual([]);
+	});
+
+	it("哨兵：探针命令确实在集合里（守卫不是空跑）", () => {
+		expect(dispatched().has("probe_cm")).toBe(true);
+		expect(sent().has("probe_cm")).toBe(true);
 	});
 });
