@@ -43,6 +43,8 @@ interface CliArgs {
 	secondRoute?: boolean;
 	/** NEXT-4 事实探针：GS 能否买车（决定动作总线的车道数）。 */
 	probeGsBuy?: boolean;
+	/** AB-4a：GS 单机建线 + 运营（NEXT-4 验收）。 */
+	probeGsRoute?: boolean;
 	/** Agent: pause the world while the model thinks + acts (verified freeze). */
 	freeze?: boolean;
 	year?: number;
@@ -87,6 +89,7 @@ export function parseArgs(argv: string[]): CliArgs {
 	let retireJob: number | undefined;
 	let secondRoute = false;
 	let probeGsBuy = false;
+	let probeGsRoute = false;
 	let freeze = false;
 	let llmBaseUrl: string | undefined;
 	let llmApiKey: string | undefined;
@@ -124,6 +127,9 @@ export function parseArgs(argv: string[]): CliArgs {
 				break;
 			case "--probe-gs-buy":
 				probeGsBuy = true;
+				break;
+			case "--probe-gs-route":
+				probeGsRoute = true;
 				break;
 			case "--retire-job":
 				retireJob = parseIntNum(argv[++i], "--retire-job");
@@ -203,7 +209,7 @@ export function parseArgs(argv: string[]): CliArgs {
 		// (`--probe-gs-buy`) - and that one happened WITH the guard test already
 		// written, because the change was checked with `tsc` instead of the guard.
 		// Run test/unit/cli-v02.test.ts after touching any flag, not tsc.
-		mode, year, seed, timeoutMs, aiName, webPort, demoSeconds, gameDays, scenario, addVehicles, shrinkTo, retireJob, secondRoute, freeze, probeGsBuy,
+		mode, year, seed, timeoutMs, aiName, webPort, demoSeconds, gameDays, scenario, addVehicles, shrinkTo, retireJob, secondRoute, freeze, probeGsBuy, probeGsRoute,
 		llmBaseUrl, llmApiKey, llmModel, llmApi, offlineDemo, skipPreflight,
 		injectMemory,
 	};
@@ -346,6 +352,7 @@ async function main(): Promise<number> {
 				retireJob: args.retireJob,
 				secondRoute: args.secondRoute,
 				probeGsBuy: args.probeGsBuy,
+				probeGsRoute: args.probeGsRoute,
 			});
 		} catch (e) {
 			console.error("[v02] ERROR:", e instanceof Error ? e.message : e);

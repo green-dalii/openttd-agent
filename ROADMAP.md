@@ -407,7 +407,9 @@ pgrep -fl "run-experiment|cli/run.ts|OpenTTD.app"     # 无输出 = 没有（202
 | **AB-1** ✅ | `capabilities()` 只读目录（SPEC §10.91）：名字**派生自活的工具数组**、可用性与工具**共用同一谓词**、每个动作必须表态 read/write | ✅ 单测 44 条 + 2 条守卫（重放证明非空）· ✅ 真机 `/tmp/ab1`：agent 开局即问，返回 `9 actions (9 usable now, 4 change game state)`；同局用出 8 类工具 / 11 决策 / 23 调用（4 个写动词全用到） |
 | **AB-2** | `perform_action(op, args)`：GS 车道原语（设施/经济类），带 `observed` 效果字段（I1）与 `unknown_action`（I2） | 真机：一个此前没有的动词被 agent 用出来并**观测到效果** |
 | **AB-3** | pi-agent-core 接上：目录 → `setActiveTools`；结果 → `AgentToolResult.details.observed` | 单测 + `--agent` live 八条断言（AGENTS §5.1） |
-| **AB-4** | **NEXT-4 验收**：GS 自建一条完整线路并交付 > 0；长线路施工的 `GSController.Sleep` 分片 | 真机：`deliveredRun > 0` 且 `gsErrors = 0` |
+| **AB-4a** ⚠️ | **GS 自建 + 自运营**（小-中，已结论，SPEC §10.92） | 跨 tick 自建完整线路（站点/路/车库/车/订单）+ `settle` 等车动 | ✅ API 链路全通 · ✅ `settle` 修好"启动≠在跑"· 真机 90 运营日 `deliveredRun=0`（同城双站是 OpenTTD 经济死胡同，waiting=0 持续；两城遇到寻路/钱双重上限）。**结论**：GS-only 在简单地形 + 短距离可行；任意长线寻路属 A*，executor **可保留**。 |
+| **AB-4b** | 🔵 NEXT-4 补验收（**可选**） | 把 executor 的寻路器（880 行）移植到 GS（投资回报比 **低**） | 真机：双城任意地形交付 > 0（仅当决定**退役** executor 时做） |
+| **AB-4** ✅ | 决定性验收：GS 自建线路 + 交付 > 0 | （被 AB-4a 部分解答；**不退役** executor 就不必做 AB-4b） | 真机：`deliveredRun > 0` 且 `gsErrors = 0` |
 | **AB-5** | 反事实回放（`AgentHarness` session fork × savegame），独立一轮，预注册停止规则 | 同一决策点两分支的因果差；跨局 A/B 的 19 小时可省 |
 
 ⚠️ **排序复审（2026-09-19，§10.90 之后）**：原次序是 AB-1 → AB-2 → AB-3 → AB-4。

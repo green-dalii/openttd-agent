@@ -32,6 +32,14 @@ const KNOWN_BAD_CALLS = [
 		reason: "the index 'IsStationTile' does not exist",
 		use: "GSStation.GetStationID(tile) + GSStation.IsValidStation(id) - the predicate lives on GSTile, not GSStation",
 	},
+	{
+		// AB-4a (2026-09-19)：GS 不暴露平地常量。`SLOPE_FLAT = 0` 在引擎侧稳定
+		// (`src/slope_type.h`)，代码里用字面量 0 + 注释解释；不要在这里"修正"成
+		// `GSMap.SLOPE_FLAT`——会再次抛 `the index 'SLOPE_FLAT' does not exist`。
+		call: "GSMap.SLOPE_FLAT",
+		reason: "the index 'SLOPE_FLAT' does not exist — GS API doesn't expose the constant; use literal 0",
+		use: "GSTile.GetSlope(tile) == 0 （见 src/game/squirrel/bridge-gs/main.nut 的 FindPaxStationSite/FindStationSiteFlat）",
+	},
 ];
 
 function packFiles(): string[] {
@@ -293,8 +301,16 @@ describe("Squirrel packs: 局部变量不得先用后声明", () => {
 	/** 绑定出现的位置：签名参数、foreach 变量、local 声明。 */
 	function bindings(fn: { sig: string; body: string }): Map<string, number> {
 		const at = new Map<string, number>();
+		// 取**真正最早**的位置，而不是"按扫描顺序第一次遇到"。
+		//
+		// 为什么（2026-09-19 的假阳性）：两次扫描是分开跑的（先 foreach、后 local），
+		// 若同名标识符既是 `local d`（靠前）又是 `foreach (d in …)`（靠后），
+		// 先跑的 foreach 会把绑定位置写到靠后那处，于是**声明本身**被误判成
+		// "在绑定前使用"。守卫的假阳性会把下一个人逼去改变量名绕过它——
+		// 那就等于把守卫拆了，所以这里修守卫而不是绕它。
 		const put = (id: string, pos: number) => {
-			if (!at.has(id)) at.set(id, pos);
+			const cur = at.get(id);
+			if (cur === undefined || pos < cur) at.set(id, pos);
 		};
 		// 签名参数（位置 0，永远算已声明）
 		for (const p of fn.sig.split(",")) {
@@ -456,5 +472,115 @@ describe("GS 命令必须有 Dispatch 分支（D43）", () => {
 	it("哨兵：探针命令确实在集合里（守卫不是空跑）", () => {
 		expect(dispatched().has("probe_cm")).toBe(true);
 		expect(sent().has("probe_cm")).toBe(true);
+	});
+});
+
+/**
+ * D44（2026-09-19）：**表键写入必须有初始化**——否则整段脚本会死，而且死得**静默**。
+ *
+ * 两次真实事故：
+ *   - M3-2a：`_retiredJobs` 当数组用（表方法 .rawin 在 array 上抛错）；
+ *   - AB-4a：`pr.lastTiles = tiles` 但状态表字面量里**没有** lastTiles 这个键 →
+ *     `the index 'lastTiles' does not exist` → **Bridge GS 整个脚本终止**。
+ *     游戏继续跑、admin 通道还活着，只有 GS 静默消失——最贵的失败形态。
+ *
+ * 规则（可机械判定）：若某个表用 `{ key = ... }` 字面量创建，则后续对它的
+ * `X.key = ...`（**不是** `X.key <- ...`）必须能在**某个**字面量里找到 `key`。
+ * 用 `<-` 是显式"新增键"，属于合法写法，不在此规则约束内。
+ */
+describe("Squirrel packs: 表键必须先初始化（D44）", () => {
+	/** 收集 `local X = { ... }`（含跨行）的键。 */
+	function tableKeys(src: string): Map<string, Set<string>> {
+		const out = new Map<string, Set<string>>();
+		const re = /(?:local\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*\{/g;
+		let m: RegExpExecArray | null;
+		while ((m = re.exec(src)) !== null) {
+			// 花括号配平取字面量本体
+			let depth = 0;
+			let i = m.index + m[0].length - 1;
+			for (; i < src.length; i++) {
+				if (src[i] === "{") depth++;
+				else if (src[i] === "}") {
+					depth--;
+					if (depth === 0) break;
+				}
+			}
+			const bodyText = src.slice(m.index + m[0].length, i);
+			const keys = out.get(m[1]!) ?? new Set<string>();
+			// 顶层键：`key = ...`（不接 `=` 的赋值，排除 `==`）
+			for (const k of bodyText.matchAll(/(?:^|[\s,{])([A-Za-z_][A-Za-z0-9_]*)\s*=(?!=)/g)) keys.add(k[1]!);
+			out.set(m[1]!, keys);
+		}
+		return out;
+	}
+
+	/**
+	 * 变量 → 表名 的别名（`local pr = this._pr;`）。
+	 *
+	 * **第一版守卫就是漏了这个而变成空跑**（重放证明抓到的）：状态表字面量挂在 `_pr` 上，
+	 * 而实际写入用的是别名 `pr.lastTiles = ...`——只按名字比对，什么都查不出来。
+	 */
+	function aliases(src: string, tables: Map<string, Set<string>>): Map<string, string> {
+		const out = new Map<string, string>();
+		for (const m of src.matchAll(/local\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:this\.)?([A-Za-z_][A-Za-z0-9_]*)\s*;/g)) {
+			const [, a, b] = m;
+			if (a && b && tables.has(b)) out.set(a, b);
+		}
+		// 别名可以套别名（local a = b; local c = a;）：迭代到不动点
+		let changed = true;
+		while (changed) {
+			changed = false;
+			for (const [a, b] of out) {
+				const t = out.get(b);
+				if (t && out.get(a) !== t) {
+					out.set(a, t);
+					changed = true;
+				}
+			}
+		}
+		return out;
+	}
+
+	it.each(packFiles())("%s: 没有对未初始化表键的写入", (f) => {
+		const src = stripStrings(stripComments(readFileSync(f, "utf8")));
+		const tables = tableKeys(src);
+		const alias = aliases(src, tables);
+		const problems: string[] = [];
+		for (const [name, keys] of tables) {
+			const names = new Set<string>([name]);
+			for (const [a, b] of alias) if (b === name) names.add(a);
+			for (const n of names) {
+				// `n.x = ` 写入（排除 `n.x <-` 与 `n.x ==`）。
+				//
+				// **必须用正则字面量**：用 `new RegExp(\`…\`)` 的人很容易写出
+				// `\\b`/`\\s`（字面反斜杠 + b），结果匹配的是控制字符 `\b` 与字母 `s`，
+				// 守卫从一开始就**从未真的匹配过任何东西**——自测用字面量正则通过了，
+				// 但守卫本体是哑的（D44 的反面教训："自测通过 ≠ 守卫工作"）。
+				// 见 test "该守卫会失败（自测...）" 末尾的正则自测——只有**走完**
+				// `new RegExp(…)` 这条路径的样例才算验证。
+				for (const m of src.matchAll(new RegExp(`\\b${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\.([A-Za-z_][A-Za-z0-9_]*)\\s*=(?!=)`, "g"))) {
+					if (!keys.has(m[1]!)) problems.push(`${n}.${m[1]}（表字面量缺这个键）`);
+				}
+			}
+		}
+		expect(
+			[...new Set(problems)],
+			"Squirrel 会在运行时抛 `the index 'X' does not exist`，并且**终止整个 GS**（静默失败）",
+		).toEqual([]);
+	});
+
+	it("该守卫会失败（自测：别名写入未初始化的键也必须被抓到）", () => {
+		// 形状照抄真实事故：字面量挂在 _pr 上，写入走别名 pr。
+		// **必须走 `new RegExp(...)` 路径**（与守卫本体一致）——上一版自测用
+		// 正则字面量通过了，但守卫本体的 `new RegExp(\`\\b…\`)` 里 `\\b` 是字面
+		// 反斜杠 + b，从未真正匹配过任何东西。
+		const sample = "local pr = this._pr; pr.missing = 2;";
+		const tables = tableKeys("this._pr = { a = 1 }; " + sample);
+		const alias = aliases("this._pr = { a = 1 }; " + sample, tables);
+		expect(alias.get("pr")).toBe("_pr");
+		expect(tables.get("_pr")!.has("missing")).toBe(false);
+		// **与守卫本体同形态**：new RegExp(template + \\b + \\s)
+		const re = new RegExp(`\\bpr\\.([A-Za-z_][A-Za-z0-9_]*)\\s*=(?!=)`, "g");
+		expect([...sample.matchAll(re)].some((m) => m[1] === "missing")).toBe(true);
 	});
 });

@@ -49,6 +49,8 @@ export interface V02Options {
 	retireJob?: number;
 	/** M3-2c probe: queue a SECOND route so the first one becomes "not current". */
 	probeGsBuy?: boolean;
+	/** AB-4a：让 GS **自己**建完并运营一条线路（NEXT-4 验收），并测量交付量。 */
+	probeGsRoute?: boolean;
 	secondRoute?: boolean;
 	/**
 	 * Episode horizon in SIMULATED game days (G1, SPEC §10.68). The oracle probe
@@ -112,6 +114,7 @@ export async function runV02(cfg: Config, opts: V02Options = {}): Promise<number
 	let executorPhase = "";
 	let routeAck: Record<string, unknown> | null = null;
 	let probeVehicleSeen = -1;
+	let probeRouteMsg: Record<string, unknown> | null = null;
 	const companiesByName = new Map<string, number>(); // name -> id
 
 	client = new AdminClient({
@@ -129,6 +132,7 @@ export async function runV02(cfg: Config, opts: V02Options = {}): Promise<number
 						}
 					} else {
 						if (p.kind === "ack" && p.cmd === "build_bus_route") routeAck = p;
+						if (p.kind === "probe_route") probeRouteMsg = p;
 						console.log(`[v02] GS msg: ${stringifyJson(p)}`);
 					}
 				}
@@ -208,6 +212,73 @@ export async function runV02(cfg: Config, opts: V02Options = {}): Promise<number
 			if (probeVehicleSeen < 0 && v > 0) probeVehicleSeen = v;
 		}
 		console.log(`[v02] GS-buy probe: company vehicles now ${probeVehicleSeen}`);
+	}
+
+	// --- AB-4a：GS 单机建线 + 运营（NEXT-4 决定性验收）----------------------
+	//
+	// 这一条路径**完全不走标牌**：没有 executor 参与，没有 `EX` 相位解码。
+	// 它要回答两件事：(a) GS 能不能跨 tick 自己建完站点/路/车库/车/订单；
+	// (b) 车真的跑起来并**运走货**吗（交付量 > 0）。
+	// 测量用与所有实验**同一个**仪表（world-state 的 deliveredRun），
+	// 因此这个数字与既有 A/B 可比（不另造一套读数）。
+	if (opts.probeGsRoute) {
+		console.log("[v02] GS route probe: asking the GS to build and run a route on its own…");
+		client.gameScript(JSON.stringify({ cmd: "probe_route_cm" }));
+		// **地平线必须活在这条路径上**（2026-09-19 的教训）：探针块插在 episode
+		// 创建之前，所以它**没有**那个时钟——第一版跑起来就再也不会停。
+		// 复制一条执行路径时，横切关注点（时钟/地平线/护栏）会留在原路径上；
+		// 因此这里显式自带时钟，并把它定义清楚：**运营**多少游戏日（不是建线耗时）。
+		const t0 = Date.now();
+		const dayNow = (): number => {
+			if (gsRawDate !== null) return gameDayFromRawDate(gsRawDate);
+			const d = world.snapshot().date;
+			if (!d) return 0;
+			return (d.year - 1950) * 360 + (d.month - 1) * 30 + (d.day - 1);
+		};
+		const runDays = opts.gameDays && opts.gameDays > 0 ? opts.gameDays : 90;
+		let runStartDay: number | null = null;
+		let lastLog = 0;
+		while (!stopRequested) {
+			client?.poll(AdminUpdateType.CompanyStats, 0);
+			client?.poll(AdminUpdateType.CompanyEconomy, 0);
+			await sleep(1000);
+			if (probeRouteMsg?.["stage"] === "run" && runStartDay === null) {
+				runStartDay = dayNow();
+				console.log(`[v02] GS route probe: buses running at game day ${runStartDay}; measuring ${runDays} days of operation`);
+			}
+			if (Date.now() - lastLog > 30_000) {
+				lastLog = Date.now();
+				const c = world.snapshot().companies.get(0);
+				const elapsed = runStartDay === null ? 0 : dayNow() - runStartDay;
+				console.log(
+					`[v02] GS route probe: day ${dayNow()} (op ${elapsed}/${runDays})` +
+						` money=${String(c?.economy?.money ?? "?")} delivered=${String(c?.deliveredRun.total ?? "null")}` +
+						` vehicles=${String(c?.stats?.vehicles ?? "?")} stage=${String(probeRouteMsg?.["stage"] ?? "-")}`,
+				);
+			}
+			if (runStartDay !== null && dayNow() - runStartDay >= runDays) {
+				console.log(`[v02] GS route probe: measured ${dayNow() - runStartDay} operating days - stopping`);
+				break;
+			}
+			if (probeRouteMsg?.["stage"] === "failed") {
+				console.log("[v02] GS route probe: probe FAILED - stopping early");
+				break;
+			}
+		}
+		const st = world.snapshot().companies.get(0);
+		const pr = probeRouteMsg as Record<string, unknown> | null;
+		console.log(
+			`[v02] GS route probe: final stage=${String(pr?.["stage"] ?? "?")}` +
+				` road=${String(pr?.["road"] ?? "?")} fails=${String(pr?.["fails"] ?? "?")}` +
+				` buses=${String(pr?.["buses"] ?? "?")} err=${String(pr?.["err"] ?? "-")}`,
+		);
+		console.log(
+			`[v02] GS route probe: deliveredRun=${String(st?.deliveredRun.total ?? "null")}` +
+				` (missing readings ${String(st?.deliveredRun.missing ?? "?")})` +
+				` money=${String(st?.economy?.money ?? "?")} wall=${Math.round((Date.now() - t0) / 1000)}s`,
+		);
+		await teardown();
+		return st?.deliveredRun.total !== null && st?.deliveredRun.total !== undefined ? 0 : 1;
 	}
 
 	// --- 5. send build_bus_route (S1: GS plans a 2-town bus route + places

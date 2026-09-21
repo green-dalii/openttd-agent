@@ -23,6 +23,10 @@ class BridgeV1 extends GSController {
     // + GetOwner), NOT by guessing from positions.
     _routes = null;
     _last_stats = 0;
+    // AB-4a 探针状态（NEXT-4：GS 能否自己建完并**运营**一条线路）。
+    // null = 未启动；表 = 进行中。生命周期是有意的一等状态：
+    // plan → stationA → stationB → road → depot → engine → buy → orders → run。
+    _pr = null;
 
     /**
      * Parse an executor company-name phase string into a typed event payload.
@@ -233,9 +237,460 @@ class BridgeV1 extends GSController {
         }
     }
 
+    /* ===================================================================
+     * AB-4a 探针：**GS 自己**建完并运营一条线路（NEXT-4 的决定性验收）。
+     *
+     * 为什么单独写而不是搬 executor：executor 的 880 行里大半是**寻路**
+     * （SegmentProbe / FindSegment / 失败回退）。本探针要回答的是**能力问题**：
+     *   ① GS 能不能跨 tick 自己建完一条线路（含站点/车库/车/订单/启动）；
+     *   ② 车真的会跑起来并**运走货**吗（交付量 > 0）。
+     * 所以它只做**直线铺路**：线路短就够用。若因地形失败，就如实汇报
+     * **引擎错误码 + 出错坐标**，而不是假装成功（D37/D40：动作执行了但报告被吞是同一族 bug）。
+     *
+     * 每 tick 只做一小段（在周期循环里被调用），因此它天然具备"生命周期"形态——
+     * 这正是动作总线要求的一等公民（§ACTION-BUS I1）。
+     * =================================================================== */
+    function StartProbeRoute() {
+        if (this._pr != null) {
+            GSAdmin.Send({ kind = "probe_route", stage = "already-running" });
+            return;
+        }
+        this._pr = {
+            stage = "plan", mode = "?", note = "",
+            a = -1, b = -1, fA = -1, fB = -1, depot = -1, engine = -1,
+            cur = -1, road = 0, fails = 0, nextReport = 0, depotFront = -1,
+            line = [], buses = [], lastTiles = [], settleStartTick = 0,
+            settleStartTiles = [], err = "",
+        };
+        GSAdmin.Send({ kind = "probe_route", stage = "started", tick = GSController.GetTick() });
+    }
+
+    /* 一行一报：阶段变化与失败都必须**被说出来**（报告被吞 = 无从诊断）。 */
+    function PrReport() {
+        local pr = this._pr;
+        local m = {
+            kind = "probe_route", stage = pr.stage, mode = pr.mode,
+            road = pr.road, fails = pr.fails, buses = pr.buses.len(),
+            money = GSCompany.GetBankBalance(0), tick = GSController.GetTick(),
+        };
+        // 需求与运动的**子事实**（否则"交付 0"无法与"没需求"区分开）：
+        //   候客量 = 站点是否真的覆盖了住户；veh/vehstate = 车是否在动。
+        local pax = this.PaxCargoId();
+        if (pax >= 0 && pr.a >= 0) {
+            local sa = GSStation.GetStationID(pr.a);
+            local sb = GSStation.GetStationID(pr.b);
+            local w = 0;
+            if (GSStation.IsValidStation(sa)) w += GSStation.GetCargoWaiting(sa, pax);
+            if (GSStation.IsValidStation(sb)) w += GSStation.GetCargoWaiting(sb, pax);
+            m.waiting <- w;
+        }
+        if (pr.buses.len() > 0) {
+            local v0 = pr.buses[0];
+            if (GSVehicle.IsValidVehicle(v0)) {
+                m.vehState <- GSVehicle.GetState(v0);
+                m.vehTile <- GSVehicle.GetLocation(v0);
+                m.profit <- GSVehicle.GetProfitThisYear(v0);
+                // 订单自省：订单**存在**不等于订单**是"去某站"**。
+                local oc = -1; local isStation = false; local dest = -1;
+                try {
+                    oc = GSOrder.GetOrderCount(v0);
+                    if (oc > 0) {
+                        isStation = GSOrder.IsGotoStationOrder(v0, 0);
+                        local o = GSOrder.GetOrderDestination(v0, 0);
+                        local od = GSOrder.GetOrderFlags(v0, 0);
+                        if (o != null) dest = o;
+                        if (od != null) m.ord0Flags <- od;
+                    }
+                } catch (e) { oc = -2; }
+                m.orderCount <- oc;
+                m.ord0Station <- isStation;
+                m.ord0Dest <- dest;
+            }
+            // 移动检测：与上一次报告比位置是否变化（"车没动"必须可测，不能靠感觉）
+            local tiles = [];
+            foreach (v in pr.buses) {
+                if (GSVehicle.IsValidVehicle(v)) tiles.push(GSVehicle.GetLocation(v));
+            }
+            if (pr.lastTiles.len() == tiles.len() && tiles.len() > 0) {
+                local same = true;
+                for (local i = 0; i < tiles.len(); i++) if (tiles[i] != pr.lastTiles[i]) same = false;
+                m.stillForOneReport <- same;
+            }
+            pr.lastTiles = tiles;
+        }
+        // 车库与路的连接（"车出不来"最常见的物理原因，必须可测）
+        if (pr.depot >= 0 && pr.depotFront >= 0) {
+            local conn = false;
+            try { conn = GSRoad.AreRoadTilesConnected(pr.depot, pr.depotFront); } catch (e) { conn = false; }
+            m.depotConn <- conn;
+        }
+        if (pr.note != "") m.note <- pr.note;
+        if (pr.err != "") m.err <- pr.err;
+        if (pr.a >= 0) m.stationA <- pr.a;
+        if (pr.b >= 0) m.stationB <- pr.b;
+        if (pr.depot >= 0) m.depot <- pr.depot;
+        if (pr.engine >= 0) m.engine <- pr.engine;
+        GSAdmin.Send(m);
+    }
+
+    function PrFail(why) {
+        this._pr.stage = "failed";
+        this._pr.err = why;
+        this.PrReport();
+    }
+
+    function ProcessProbeRoute() {
+        if (this._pr == null) return;
+        local pr = this._pr;
+        if (pr.stage == "failed" || pr.stage == "run") {
+            if (pr.stage == "run" && GSController.GetTick() > pr.nextReport) {
+                pr.nextReport = GSController.GetTick() + 200;
+                this.PrReport();
+            }
+            return;
+        }
+        if (pr.stage == "settle") {
+            // **观测到移动才进入 run**（每 tick 异步建设 → 车出来需要时间）。
+            // 但也设个硬上限，免得在不可行的场景里永远卡住。
+            local moved = false;
+            for (local i = 0; i < pr.buses.len(); i++) {
+                local v = pr.buses[i];
+                if (!GSVehicle.IsValidVehicle(v)) continue;
+                local t0 = (i < pr.settleStartTiles.len()) ? pr.settleStartTiles[i] : -1;
+                local t1 = GSVehicle.GetLocation(v);
+                if (t0 >= 0 && t1 != t0) { moved = true; break; }
+                // 即使起点是 -1（车还没拿到），现在的位置若离开 depot 也算动
+                if (t0 < 0 && t1 >= 0 && t1 != pr.depot) { moved = true; break; }
+            }
+            local elapsed = GSController.GetTick() - pr.settleStartTick;
+            if (moved) {
+                pr.note = "settled after " + elapsed + " ticks";
+                pr.stage = "run";
+                pr.nextReport = GSController.GetTick() + 200;
+                this.PrReport();
+                return;
+            }
+            if (elapsed > 2000) {
+                // 2000 tick (~27 游戏日) 还不动——具名失败，不假装"在跑"。
+                this.PrFail("settle: no bus moved after " + elapsed + " ticks (vehTile stayed at depot)");
+                return;
+            }
+            // 在路上：心报 + 不退出（继续等下一 tick）。
+            this.PrReport();
+            return;
+        }
+        try {
+        local mode = GSCompanyMode(0);
+        if (!GSCompanyMode.IsValid()) { this.PrFail("company mode invalid"); return; }
+        GSRoad.SetCurrentRoadType(GSRoad.ROADTYPE_ROAD);
+
+        if (pr.stage == "plan") {
+            // 站点选择：优先**最近**的另一座城（线路越短，直线铺路越可能成功）。
+            // 找不到 60 格内的城就在**同一座城**里放两个站——乘客仍会在两点间流动，
+            // 因此"交付量 > 0"这个能力问题依然被回答（模式如实记在 mode 里）。
+            local tlist = GSTownList();
+            if (tlist.Count() < 1) { this.PrFail("no towns"); return; }
+            tlist.Valuate(GSTown.GetPopulation);
+            tlist.Sort(GSList.SORT_BY_VALUE, false);
+            local ids = [];
+            foreach (tid, _pop in tlist) { ids.push(tid); if (ids.len() >= 10) break; }
+            local la = GSTown.GetLocation(ids[0]);
+            local best = -1; local bestD = 100000;
+            for (local i = 1; i < ids.len(); i++) {
+                local l = GSTown.GetLocation(ids[i]);
+                local d = this.Manhattan(l, la);
+                if (d < bestD) { bestD = d; best = i; }
+            }
+            local siteA = this.FindPaxStationSite(la, 12, -1, 0);
+            local siteB = null;
+            // 只接受**很短**的两城线路：本探针回答的是**能力**（GS 能否自己建完并运营），
+            // 不是**寻路**。真机实测：47 格直线第一个瓦片就撞上地形（err 260）。
+            // 长线路寻路（executor 的 880 行）仍然是独立的、未解决的工程问题，
+            // 把它混进来会让"能力"这个问题永远得不出答案。
+            if (best >= 0 && bestD <= 25) {
+                siteB = this.FindPaxStationSite(GSTown.GetLocation(ids[best]), 12, siteA[0], 6);
+                if (siteB != null) pr.mode = "two-towns d" + bestD;
+            }
+            if (siteB == null) {
+                local cx = GSMap.GetTileX(la); local cy = GSMap.GetTileY(la);
+                local ox = cx + 12;
+                if (ox > GSMap.GetMapSizeX() - 3) ox = cx - 12;
+                if (ox < 3) ox = cx + 6;
+                siteB = this.FindPaxStationSite(GSMap.GetTileIndex(ox, cy), 10, siteA[0], 6);
+                if (siteB != null) pr.mode = "same-town";
+            }
+            if (siteA == null || siteB == null) { this.PrFail("no station site"); return; }
+            pr.a = siteA[0]; pr.fA = siteA[1];
+            pr.b = siteB[0]; pr.fB = siteB[1];
+            pr.note = "dist " + this.Manhattan(pr.fA, pr.fB);
+            pr.stage = "stationA";
+            this.PrReport();
+            return;
+        }
+
+        if (pr.stage == "stationA") {
+            if (!GSRoad.BuildRoadStation(pr.a, pr.fA, GSRoad.ROADVEHTYPE_BUS, GSStation.STATION_NEW)) {
+                this.PrFail("stationA err=" + this.LastErr() + " [" + this.LastErrStr() + "]");
+                return;
+            }
+            pr.stage = "stationB"; this.PrReport(); return;
+        }
+
+        if (pr.stage == "stationB") {
+            if (!GSRoad.BuildRoadStation(pr.b, pr.fB, GSRoad.ROADVEHTYPE_BUS, GSStation.STATION_NEW)) {
+                this.PrFail("stationB err=" + this.LastErr() + " [" + this.LastErrStr() + "]");
+                return;
+            }
+            pr.stage = "road"; this.PrReport(); return;
+        }
+
+        if (pr.stage == "road") {
+            if (pr.cur < 0) pr.cur = pr.fA;
+            local tx = GSMap.GetTileX(pr.fB); local ty = GSMap.GetTileY(pr.fB);
+            local steps = 0;
+            while (steps < 8 && pr.cur != pr.fB) {
+                local cx = GSMap.GetTileX(pr.cur); local cy = GSMap.GetTileY(pr.cur);
+                local nx = cx; local ny = cy;
+                if (cx != tx) { nx = (tx > cx) ? cx + 1 : cx - 1; }
+                else if (cy != ty) { ny = (ty > cy) ? cy + 1 : cy - 1; }
+                else break;
+                // Candidates: the preferred step first, then a **bounded sidestep**.
+                // 真机实测 47 格直线第一个瓦片就撞地形（err 260），所以"直线或死"
+                // 不足以回答能力问题；但也不能变成无边界的绕行（那会掩盖"这里过不去"）。
+                // 因此：最多尝试 3 个候选、每个最多重试 1 次（清掉目标格再试），
+                // 全部失败就**具名失败**（失败次数与坐标都进报告）。
+                local cands = [[nx, ny], [cx, cy + 1], [cx, cy - 1]];
+                local placed = false;
+                local tried = 0;
+                foreach (c in cands) {
+                    tried++;
+                    local gx = c[0]; local gy = c[1];
+                    if (gx < 2 || gy < 2) continue;
+                    if (gx > GSMap.GetMapSizeX() - 3 || gy > GSMap.GetMapSizeY() - 3) continue;
+                    local next = GSMap.GetTileIndex(gx, gy);
+                    if (GSRoad.BuildRoad(pr.cur, next)) {
+                        pr.line.push(pr.cur);
+                        pr.cur = next;
+                        pr.road++;
+                        placed = true;
+                        break;
+                    }
+                    // One retry after clearing the target: foliage is the common
+                    // cause, and DemolishTile is what the executor does too.
+                    GSTile.DemolishTile(next);
+                    if (GSRoad.BuildRoad(pr.cur, next)) {
+                        pr.line.push(pr.cur);
+                        pr.cur = next;
+                        pr.road++;
+                        placed = true;
+                        break;
+                    }
+                }
+                if (!placed) {
+                    pr.fails++;
+                    this.PrFail("road " + cx + "," + cy + " tried " + tried + " err=" + this.LastErr() + " [" + this.LastErrStr() + "]");
+                    return;
+                }
+                steps++;
+            }
+            if (pr.cur == pr.fB) pr.stage = "depot";
+            this.PrReport(); return;
+        }
+
+        if (pr.stage == "depot") {
+            local dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+            local tried = 0;
+            foreach (t in pr.line) {
+                if (tried > 24) break;
+                local x = GSMap.GetTileX(t); local y = GSMap.GetTileY(t);
+                foreach (d in dirs) {
+                    local nx = x + d[0]; local ny = y + d[1];
+                    if (nx < 2 || ny < 2) continue;
+                    if (nx > GSMap.GetMapSizeX() - 3 || ny > GSMap.GetMapSizeY() - 3) continue;
+                    local cand = GSMap.GetTileIndex(nx, ny);
+                    if (cand == pr.a || cand == pr.b) continue;
+                    if (!GSTile.IsBuildable(cand)) continue;
+                    if (GSRoad.BuildRoadDepot(cand, t)) {
+                        pr.depot = cand;
+                        pr.depotFront = t;
+                        pr.stage = "engine";
+                        this.PrReport();
+                        return;
+                    }
+                }
+                tried++;
+            }
+            this.PrFail("no depot site along " + pr.line.len() + " road tiles");
+            return;
+        }
+
+        if (pr.stage == "engine") {
+            local engine = -1;
+            try {
+                local el = GSEngineList(GSVehicle.VT_ROAD);
+                el.Valuate(GSEngine.IsBuildable);
+                el.KeepValue(1);
+                el.Valuate(GSEngine.GetRoadType);
+                el.KeepValue(GSRoad.ROADTYPE_ROAD);
+                el.Valuate(GSEngine.GetMaxSpeed);
+                el.Sort(GSList.SORT_BY_VALUE, false);
+                if (!el.IsEmpty()) engine = el.Begin();
+            } catch (e) { engine = -1; }
+            if (engine < 0) { this.PrFail("no road engine"); return; }
+            pr.engine = engine;
+            pr.stage = "buy"; this.PrReport(); return;
+        }
+
+        if (pr.stage == "buy") {
+            while (pr.buses.len() < 2) {
+                local veh = GSVehicle.BuildVehicle(pr.depot, pr.engine);
+                if (!GSVehicle.IsValidVehicle(veh)) {
+                    this.PrFail("buy err=" + this.LastErr() + " [" + this.LastErrStr() + "] after " + pr.buses.len());
+                    return;
+                }
+                pr.buses.push(veh);
+            }
+            pr.stage = "orders"; this.PrReport(); return;
+        }
+
+        if (pr.stage == "orders") {
+            local started = 0;
+            foreach (v in pr.buses) {
+                local o1 = GSOrder.AppendOrder(v, pr.a, GSOrder.OF_NON_STOP_INTERMEDIATE);
+                local o2 = GSOrder.AppendOrder(v, pr.b, GSOrder.OF_NON_STOP_INTERMEDIATE);
+                local st = GSVehicle.StartStopVehicle(v);
+                if (o1 && o2 && st) started++;
+            }
+            if (started == 0) { this.PrFail("no bus got orders+start"); return; }
+            pr.note = "started " + started + "/" + pr.buses.len();
+            // **不再立刻报 run**：OpenTTD 的路/车建设是每 tick 异步完成的，`BuildRoad`
+            // 只是**安排**了瓦片建设，真正的"路"要等下一两个 tick 才存在。
+            // 第一版直接报 run → 车永远停在 depot tile（这是被测出来的：D44 之后修了
+            // 报告路径，**测量**发现 vehTile 在 60 游戏日内没有离开 depot）。
+            //
+            // 现在：先进入 settle，等"车真的动了"再算成功。这正是 ACTION-BUS I1
+            // （观测或具名拒绝）在探针侧的具体实现——"启动成功"不等于"在跑"。
+            pr.stage = "settle";
+            pr.settleStartTick = GSController.GetTick();
+            pr.settleStartTiles = [];
+            foreach (v in pr.buses) {
+                if (GSVehicle.IsValidVehicle(v)) pr.settleStartTiles.push(GSVehicle.GetLocation(v));
+                else pr.settleStartTiles.push(-1);
+            }
+            this.PrReport();
+            return;
+        }
+        } catch (e) {
+            this.PrFail("uncaught " + ("" + e));
+            return;
+        }
+    }
+
+    /* 按**乘客生产量**选站址——executor 的 BestPaxCandidate 门槛，必须照抄。
+     *
+     * 为什么（AB-4a 真机第一次的失败）：原先用 FindStationSite（只找空地），
+     * 站点可能完全不覆盖住户 → **候客量恒为 0**，车跑 60 游戏日交付 0。
+     * 这不是"GS 做不到"，而是**选址没按需求**。空地与需求是两件事。 */
+    function FindPaxStationSite(center, maxR, avoid, minSep) {
+        local pax = this.PaxCargoId();
+        if (pax < 0) return this.FindStationSite(center, maxR);
+        local cx = GSMap.GetTileX(center); local cy = GSMap.GetTileY(center);
+        local dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+        local best = null; local bestProd = -1;
+        for (local r = 0; r <= maxR; r++) {
+            for (local dx = -r; dx <= r; dx++) {
+                for (local dy = -r; dy <= r; dy++) {
+                    if (dx != -r && dx != r && dy != -r && dy != r) continue; // ring only
+                    local x = cx + dx; local y = cy + dy;
+                    if (x < 3 || y < 3) continue;
+                    if (x > GSMap.GetMapSizeX() - 4 || y > GSMap.GetMapSizeY() - 4) continue;
+                    local tile = GSMap.GetTileIndex(x, y);
+                    if (GSTile.IsWaterTile(tile)) continue;
+                    // 车站/车库都要求**平地**；斜坡的瓦片对 IsBuildable 是
+                    // true、对 BuildRoadStation/BuildRoadDepot 是 false——AB-4a 真机在
+                    // 站点 B 上踩到过 `ERR_FLAT_LAND_REQUIRED`（err=263）。
+                    //
+                    // **GS API 不暴露 `GSMap.SLOPE_FLAT`**（已实测：`the index
+                    // 'SLOPE_FLAT' does not exist`）。`SLOPE_FLAT = 0` 是引擎侧的稳定
+                    // 常量（`src/slope_type.h`）；这里用字面量并标 KNOWN_BAD_CALLS。
+                    if (GSTile.GetSlope(tile) != 0) continue;
+                    if (!GSTile.IsBuildable(tile)) continue;
+                    // 必须与已选的另一站**隔开**：两次扫描都会收敛到"全镇产量最高"的那一格，
+                    // 第一版因此把两个站选到同一块瓦片上（真机 `dist 0` → stationB ERR_UNKNOWN）。
+                    if (avoid >= 0 && this.Manhattan(tile, avoid) < minSep) continue;
+                    local prod = GSTile.GetCargoProduction(tile, pax, 1, 1, 4);
+                    if (prod <= bestProd) continue;
+                    foreach (d in dirs) {
+                        local fx = x + d[0]; local fy = y + d[1];
+                        if (fx < 3 || fy < 3) continue;
+                        if (fx > GSMap.GetMapSizeX() - 4 || fy > GSMap.GetMapSizeY() - 4) continue;
+                        local front = GSMap.GetTileIndex(fx, fy);
+                        if (GSTile.IsWaterTile(front)) continue;
+                        if (GSTile.GetSlope(front) != 0) continue;
+                        if (!GSTile.IsBuildable(front)) continue;
+                        bestProd = prod;
+                        best = [tile, front];
+                        break;
+                    }
+                }
+            }
+        }
+        if (best == null) {
+            // pax 找不到任何候选时，尝试 FindStationSite（也要平地）
+            return this.FindStationSiteFlat(center, maxR);
+        }
+        return best;
+    }
+
+    /* FindStationSite 的平地对口——原 FindStationSite 不挡坡，AB-4a 站点 B 因此报
+     * `ERR_FLAT_LAND_REQUIRED`。 */
+    function FindStationSiteFlat(center, maxR) {
+        local cx = GSMap.GetTileX(center); local cy = GSMap.GetTileY(center);
+        for (local r = 0; r <= maxR; r++) {
+            for (local dx = -r; dx <= r; dx++) {
+                for (local dy = -r; dy <= r; dy++) {
+                    if (dx != -r && dx != r && dy != -r && dy != r) continue;
+                    local x = cx + dx; local y = cy + dy;
+                    if (x < 2 || y < 2) continue;
+                    if (x >= GSMap.GetMapSizeX() || y >= GSMap.GetMapSizeY()) continue;
+                    local t = GSMap.GetTileIndex(x, y);
+                    if (GSTile.IsWaterTile(t)) continue;
+                    if (GSTile.GetSlope(t) != 0) continue;
+                    if (!GSTile.IsBuildable(t)) continue;
+                    return t;
+                }
+            }
+        }
+        return center;
+    }
+
+    /* Manhattan distance from tile coordinates (no API guesswork: GSMap has X/Y). */
+    function Manhattan(a, b) {
+        return this.Abs(GSMap.GetTileX(a) - GSMap.GetTileX(b)) +
+               this.Abs(GSMap.GetTileY(a) - GSMap.GetTileY(b));
+    }
+
+    function Abs(v) { return (v < 0) ? -v : v; }
+
+    /* 引擎错误的**人话**（可能是空串）。数字码不是诊断：`err=260` 需要查源码才知道
+     * 是什么，而 GetLastErrorString 直接给出引擎拒绝的理由。诊断能力本身是交付物。 */
+    function LastErrStr() {
+        local txt = "";
+        try { txt = "" + GSError.GetLastErrorString(); } catch (e) { txt = ""; }
+        return txt;
+    }
+
+    /* Engine error code, or a named sentinel when even that throws. */
+    function LastErr() {
+        local code = -1;
+        try { code = GSError.GetLastError(); } catch (e) { code = -2; }
+        return code;
+    }
+
     function Start() {
         while (true) {
             this.HandleEvents();
+            this.ProcessProbeRoute();
             this.EmitExecPhase();
             if (GSController.GetTick() > this._last_stats + 200) {
                 this._last_stats = GSController.GetTick();
@@ -540,6 +995,9 @@ class BridgeV1 extends GSController {
             GSAdmin.Send({ kind = "ack", cmd = "demo", job = job, placed = placed,
                            town = towns[0], tile = tA, company = exec,
                            company_signs = names.len(), names = names });
+        } else if (cmd == "probe_route_cm") {
+            // AB-4a: build AND run a route with the GS alone (NEXT-4 acceptance).
+            this.StartProbeRoute();
         } else if (cmd == "probe_cm") {
             // Company-mode capability probe (NEXT-4 fact: can a GS buy a vehicle?).
             // It was implemented but never dispatched - `unknown cmd` was the
