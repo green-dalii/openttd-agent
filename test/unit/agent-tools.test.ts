@@ -3,6 +3,7 @@
  * 事实来源: SPEC §4.3; src/agent/tools/index.ts contracts.
  */
 import { describe, expect, it } from "vitest";
+import { ACTION_EFFECTS } from "../../src/agent/tools/catalog.js";
 import {
 	recallTool,
 	retireRouteTool,
@@ -387,6 +388,8 @@ describe("createTools", () => {
 			// M4a：按需检索自己过往的观测（"记忆有没有被用"的唯一测量入口）
 			"recall",
 			"set_pause",
+			// AB-1：能力目录（"我现在能做什么"，D32 的正解）
+			"capabilities",
 		]);
 	});
 });
@@ -546,5 +549,108 @@ describe("recall tool（M4a）", () => {
 		const d = (res as { details: { ok: boolean; summary: string } }).details;
 		expect(d.ok).toBe(true);
 		expect(d.summary).toMatch(/no recorded observation matches/i);
+	});
+});
+
+/**
+ * AB-1（SPEC §10.91）：`capabilities()` —— agent 第一次能**问**环境自己有哪些动作。
+ *
+ * 起因（D32）：判断"agent 能不能做 X"的唯一可靠依据是**环境暴露了哪些动作**，
+ * 但此前这个清单只存在于工具 schema 里、且**当前是否可用**只能靠失败去发现
+ * （`inspect_route` 无 GS 通道时拒绝、`recall` 无记忆时拒绝）。
+ *
+ * 三条结构性要求（守卫证明，而不是靠纪律）：
+ *   ① 目录**从活的工具数组派生** ⇒ 名字不可能漂移；
+ *   ② 可用性判断与工具自身的拒绝**共用同一个谓词** ⇒ 目录不可能撒谎；
+ *   ③ 每个工具都必须被分类为 read/write ⇒ 新工具不能不表态。
+ */
+describe("capabilities tool（AB-1）", () => {
+	function minimalDeps(): AgentDeps {
+		const { sink } = fakeSink();
+		return { sink, state: fakeState() } as AgentDeps;
+	}
+
+	it("列出全部工具，且**不多不少**（目录派生自工具数组）", async () => {
+		const tools = createTools(minimalDeps());
+		const cap = tools.find((t) => t.name === "capabilities")!;
+		const res = await cap.execute("c1", {});
+		const d = (res as unknown as { details: { ok: boolean; data: { actions: { name: string }[] } } }).details;
+		const listed = d.data.actions.map((a) => a.name).sort();
+		expect(listed).toEqual(tools.map((t) => t.name).sort());
+	});
+
+	it("把当前**不可用**的动作标出来，并说明原因（不是等失败才发现）", async () => {
+		const tools = createTools(minimalDeps());
+		const cap = tools.find((t) => t.name === "capabilities")!;
+		const d = (await cap.execute("c1", {})).details as unknown as {
+			data: { actions: { name: string; available: boolean; why?: string }[] };
+		};
+		const recall = d.data.actions.find((a) => a.name === "recall")!;
+		const inspect = d.data.actions.find((a) => a.name === "inspect_route")!;
+		expect(recall.available).toBe(false);
+		expect(recall.why).toMatch(/memory/i);
+		expect(inspect.available).toBe(false);
+		expect(inspect.why).toMatch(/route economics/i);
+	});
+
+	it("目录说不可用 ⇒ 那个工具**真的**会拒绝（共用谓词，不是两套判断）", async () => {
+		const deps = minimalDeps();
+		const tools = createTools(deps);
+		const cap = tools.find((t) => t.name === "capabilities")!;
+		const d = (await cap.execute("c1", {})).details as unknown as {
+			data: { actions: { name: string; available: boolean }[] };
+		};
+		for (const a of d.data.actions) {
+			if (a.available || a.name === "capabilities") continue;
+			const t = tools.find((x) => x.name === a.name)!;
+			const r = (await t.execute("c1", {})).details as unknown as { ok: boolean };
+			expect(r.ok, `${a.name} 目录说不可用，但它没有拒绝`).toBe(false);
+		}
+	});
+
+	it("分类 read/write：有后果的动作必须被标出来（决策所需事实）", async () => {
+		const cap = createTools(minimalDeps()).find((t) => t.name === "capabilities")!;
+		const d = (await cap.execute("c1", {})).details as unknown as {
+			data: { actions: { name: string; effect: string }[] };
+		};
+		const byName = new Map(d.data.actions.map((a) => [a.name, a.effect]));
+		for (const w of ["build_bus_route", "set_route_vehicles", "retire_route", "set_pause"]) {
+			expect(byName.get(w), `${w} 应为 write`).toBe("write");
+		}
+		for (const r of ["observe", "estimate_route", "inspect_route", "recall", "capabilities"]) {
+			expect(byName.get(r), `${r} 应为 read`).toBe("read");
+		}
+	});
+
+	it("自己也在目录里（且是 read、永远可用）——不要让 agent 猜它有没有这个工具", async () => {
+		const cap = createTools(minimalDeps()).find((t) => t.name === "capabilities")!;
+		const d = (await cap.execute("c1", {})).details as unknown as {
+			data: { actions: { name: string; available: boolean; effect: string }[] };
+		};
+		const self = d.data.actions.find((a) => a.name === "capabilities")!;
+		expect(self.available).toBe(true);
+		expect(self.effect).toBe("read");
+	});
+});
+
+/**
+ * AB-1 的**结构性守卫**：每个动作都必须在 `ACTION_EFFECTS` 里表态。
+ *
+ * 反风险：目录若对未知动作默认成 `read`，未来某个**会改变游戏状态**的新工具
+ * 会被误标为只读——agent 会据此以为"随便调没事"。默认值必须让守卫红，而不是让语义错。
+ */
+describe("capabilities 目录的结构性守卫（AB-1）", () => {
+	it("每个暴露的工具都有 effect 分类（漏登记 = 红）", async () => {
+		const { sink } = fakeSink();
+		const tools = createTools({ sink, state: fakeState() } as AgentDeps);
+		const unclassified = tools.map((t) => t.name).filter((n) => ACTION_EFFECTS[n] === undefined);
+		expect(unclassified, `这些工具没在 ACTION_EFFECTS 里表态：${unclassified}`).toEqual([]);
+	});
+
+	it("反向：登记表里没有已经不存在的工具（清理滞留项）", () => {
+		const { sink } = fakeSink();
+		const live = new Set(createTools({ sink, state: fakeState() } as AgentDeps).map((t) => t.name));
+		const stale = Object.keys(ACTION_EFFECTS).filter((n) => !live.has(n));
+		expect(stale, `ACTION_EFFECTS 里的滞留项：${stale}`).toEqual([]);
 	});
 });

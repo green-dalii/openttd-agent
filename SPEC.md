@@ -3642,7 +3642,7 @@ fleet_wait6c1L1 → fleetg6L6C8 → fleet_wait3c6L6 → fleetsend3C8 → fleetso
 4. 每次检索**记账**（审计 `{type:"recall", query, hits, ids}`）→ `recallCalls` 可查。
 
 实现：`recallLessons`（纯函数）+ `renderRecallHit`（事实行含实测读数）+ `recallTool`
-（第 9 个工具）+ `runner` 接线（`deps.recall` 受 `opts.injectMemory !== false` 门控；
+（当时的第 8 个工具）+ `runner` 接线（`deps.recall` 受 `opts.injectMemory !== false` 门控；
 `deps.onRecall` 落审计）。另有**存在性事实行**：库比注入集大时说
 "还可以用 recall() 列出/检索"——不这么说，工具永远不会被调用，问题就永远没有答案。
 
@@ -3724,3 +3724,49 @@ fleet_wait6c1L1 → fleetg6L6C8 → fleet_wait3c6L6 → fleetsend3C8 → fleetso
    undefined（`test/unit/cli-v02.test.ts` 的守卫当场抓到，报错文案就是"探针会静默不执行"）。
    而**这次守卫是写好了的，只是我用 `tsc` 而不是跑它**——见 MEMORY D41 的补充。
 2. `probe_cm` 函数在 GS 里存在，但 `Dispatch` 里**没有分支** → 两次真机返回 `unknown cmd`。
+
+## 10.91 AB-1：`capabilities()` —— agent 第一次能**问**环境它有哪些动作（2026-09-19）
+
+### 为什么
+
+D32 的判据是"**问环境暴露了多少动作**"，但此前那份清单只散落在工具 schema 里，
+而且**当前是否可用**只能靠失败去发现：`inspect_route` 在无 GS 通道时拒绝、
+`recall` 在 `--no-memory` 时拒绝。agent 因此可能把"没接线"误学成"这条路不通"（D20 同类）。
+
+### 三条**结构性**要求（靠构造成立，不靠纪律）
+
+1. **名字派生自活的工具数组**：`createTools` 把 8 个动作构成数组，再把
+   `capabilitiesTool(deps, () => [...actions, capabilities])` 追加进去 ⇒ 目录不可能漏报/多报。
+   *实现注记*：第一版传的是**追加前**的数组，于是目录**没有列出自己**——
+   "回答'我能做什么'的工具自己不在清单里"。测试当场抓到（断言自己必须在列），改为**惰性枚举**。
+2. **可用性判断与工具自身的拒绝共用同一个谓词**（`TOOL_WIRING`）⇒ 目录不可能撒谎。
+   工具内部用 `requireRecall` / `requireRouteStats` 取门控**同时完成类型窄化**
+   （不靠 `!` 断言，那会掩盖真 bug）。
+3. **每个动作必须表态 read/write**（`ACTION_EFFECTS`）⇒ 新工具不能不表态。
+   默认值故意让守卫**红**（而不是默默按 read 处理——那会让一个会改状态的新动词被当成无害）。
+
+### 真机验收（`/tmp/ab1`，60 游戏日，预置 12 条教训库）
+
+```
+[agent] tool capabilities: ok=true 9 actions (9 usable now, 4 change game state).
+[agent] tool recall: ok=true 5 recorded observation(s) from earlier games
+```
+
+- agent **开局第二件事就问能力目录**（第一件是 `recall`）——正是设计意图；
+- 同一局里用出 8 类工具、11 次决策、23 次调用：
+  `observe 4 / estimate_route 4 / set_route_vehicles 8 / inspect_route 3 / recall 1 /
+  capabilities 1 / build_bus_route 1 / retire_route 1`，trigger 分布
+  `event 8 / phase_change 2 / start 1`（不是"只问一次"）；
+- 4 个写动词全部被真实使用过。
+
+### 守卫（两条，均重放证明非空）
+
+- 每个暴露的工具必须在 `ACTION_EFFECTS` 里；反向：登记表不得有滞留项。
+- 重放：删掉 `capabilities` 的表态 → 分类断言立刻变红（回落到 `write`，被只读清单抓到）。
+
+### 排序复审（§10.90 之后，ROI 次序应当改变）
+
+原计划 AB-1 → AB-2（`perform_action`）→ AB-3 → AB-4。既然 §10.90 已证明**GS 单机可完成闭环**，
+ROI 次序改为：**AB-4a（GS 自建线路并交付 > 0 —— NEXT-4 的决定性验收）** 先于 AB-2，
+因为(a) 它一次性消除标牌契约/跨 VM 相位/D39·D40 一整族 bug，(b) 它决定 AB-2 的分发表应该
+建在**一个 VM** 里而不是现在这种双车道形态。详见 `ROADMAP.md` §6b。

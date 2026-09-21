@@ -404,14 +404,21 @@ pgrep -fl "run-experiment|cli/run.ts|OpenTTD.app"     # 无输出 = 没有（202
 
 | 步骤 | 范围 | 验收 |
 |------|------|------|
-| **AB-1** | `capabilities()` 只读工具：目录从现有代码**派生**（GS 命令表 / 标牌语法 / 工具名单三者一致），含守卫 | 单测三者一致 + 重放证明守卫非空 |
+| **AB-1** ✅ | `capabilities()` 只读目录（SPEC §10.91）：名字**派生自活的工具数组**、可用性与工具**共用同一谓词**、每个动作必须表态 read/write | ✅ 单测 44 条 + 2 条守卫（重放证明非空）· ✅ 真机 `/tmp/ab1`：agent 开局即问，返回 `9 actions (9 usable now, 4 change game state)`；同局用出 8 类工具 / 11 决策 / 23 调用（4 个写动词全用到） |
 | **AB-2** | `perform_action(op, args)`：GS 车道原语（设施/经济类），带 `observed` 效果字段（I1）与 `unknown_action`（I2） | 真机：一个此前没有的动词被 agent 用出来并**观测到效果** |
 | **AB-3** | pi-agent-core 接上：目录 → `setActiveTools`；结果 → `AgentToolResult.details.observed` | 单测 + `--agent` live 八条断言（AGENTS §5.1） |
 | **AB-4** | **NEXT-4 验收**：GS 自建一条完整线路并交付 > 0；长线路施工的 `GSController.Sleep` 分片 | 真机：`deliveredRun > 0` 且 `gsErrors = 0` |
 | **AB-5** | 反事实回放（`AgentHarness` session fork × savegame），独立一轮，预注册停止规则 | 同一决策点两分支的因果差；跨局 A/B 的 19 小时可省 |
 
-⚠️ 顺序理由：AB-1 零风险；AB-2 验证通道本身；AB-4 才动真实施工（且它决定 Executor AI 是否退役）；
-AB-5 最大且改实验方法，必须独立。**每步都要真机验收，不新增平行系统。**
+⚠️ **排序复审（2026-09-19，§10.90 之后）**：原次序是 AB-1 → AB-2 → AB-3 → AB-4。
+既然已证明 **GS 单机可完成闭环**，ROI 次序改为 **AB-1 ✅ → AB-4a → AB-2 → AB-3 → AB-5**：
+
+- **AB-4a 先做**（`probe_cm2`）：GS 用 `GSRoad.BuildRoad` 跨 tick 自建一条**两站线路** + 买 2 辆车 +
+  站点互下订单，然后**测量交付量 > 0**。它是 NEXT-4 的决定性验收，因为它同时回答
+  ①"车真的跑起来运货了吗" ②"长施工的 per-tick 操作预算需要 `GSController.Sleep` 分片吗"。
+- 通过后再做 AB-2：那时分发表应建在**一个 VM**（GS）里，而不是先把双车道形态固化成表。
+  在 AB-4a 之前做 AB-2，等于**给一个可能被退役的架构先造好脚手架**。
+- AB-3（框架侧）、AB-5（反事实回放）次序不变。**每步都要真机验收，不新增平行系统。**
 
 ### 6. 本轮已交付的机制（避免重复造）
 

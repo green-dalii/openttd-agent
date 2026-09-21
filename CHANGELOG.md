@@ -40,6 +40,18 @@
   判定优先用它、**两臂同源**（`ArmComparison.deliveredSource`），旧行回落原始值并标注为不可比。
 - 澄清 `rc=1` 的含义（=施工未达成 DONE，不是崩溃）并在输出中明示。
 
+### Added（AB-1：`capabilities()` 能力目录 —— agent 第一次能**问**环境有哪些动作，2026-09-19）
+
+- 新增工具 `capabilities`（第 9 个）：一次调用返回本局**全部动作**、每个动作是
+  「改变游戏状态」还是「只读」、以及**当前是否可用**（不可用则附原因）。
+  真机 `/tmp/ab1`：agent 开局即问 → `9 actions (9 usable now, 4 change game state)`。
+- 三条**结构性**保证（不是靠纪律）：名字**派生自活的工具数组**（不可能漏报/多报）；
+  可用性与工具的拒绝**共用同一个谓词** `TOOL_WIRING`（目录不可能撒谎）；
+  每个动作必须在 `ACTION_EFFECTS` 里表态 read/write（新工具不能不表态，守卫重放证明非空）。
+- `inspect_route` / `recall` 的接线门控改由 `requireRouteStats` / `requireRecall` 提供，
+  既共用谓词又完成类型窄化（不再需要 `!` 断言）。
+- 修事实漂移：`recall` 是第 8 个工具（此前 SPEC/CHANGELOG 写作第 9 个）。
+
 ### Added（事实探针：**Bridge GS 单机能跑完整巴士闭环**；ACTION-BUS 设计，2026-09-19）
 
 - 新增 CLI 开关 `--probe-gs-buy`（`--v02`）：经**生产同一条** admin 通道发 `probe_cm`，

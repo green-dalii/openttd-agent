@@ -9,6 +9,7 @@
  */
 
 import { Type, type TSchema } from "typebox";
+import { capabilitiesTool, requireRecall, requireRouteStats } from "./catalog.js";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { ActionResult, AgentDeps } from "../types.js";
 import { formatRouteStats } from "../route-stats.js";
@@ -346,15 +347,11 @@ export function recallTool(deps: AgentDeps): AgentTool<typeof RecallSchema, Acti
 			"you do now.",
 		parameters: RecallSchema,
 		execute: async (_id, params) => {
-			if (!deps.recall) {
-				return toResult({
-					ok: false,
-					summary:
-						"no memory is available in this run (it was disabled), so there is nothing to recall.",
-					data: { available: false },
-				});
+			const gated = requireRecall(deps);
+			if (!gated.ok) {
+				return toResult({ ok: false, summary: gated.summary, data: { available: false } });
 			}
-			const hits = deps.recall({ query: params.query, limit: params.limit });
+			const hits = gated.recall({ query: params.query, limit: params.limit });
 			deps.onRecall?.({
 				query: params.query ?? null,
 				hits: hits.length,
@@ -496,14 +493,11 @@ export function inspectRouteTool(deps: AgentDeps): AgentTool<typeof InspectRoute
 			"all known routes.",
 		parameters: InspectRouteSchema,
 		execute: async (_id, params) => {
-			if (!deps.routeStats) {
-				return toResult({
-					ok: false,
-					summary: "route economics are not available in this mode (no GS channel reports them)",
-					data: { available: false },
-				});
+			const gated = requireRouteStats(deps);
+			if (!gated.ok) {
+				return toResult({ ok: false, summary: gated.summary, data: { available: false } });
 			}
-			const stats = deps.routeStats();
+			const stats = gated.routeStats();
 			if (stats.length === 0) {
 				return toResult({
 					ok: false,
@@ -540,7 +534,10 @@ export function inspectRouteTool(deps: AgentDeps): AgentTool<typeof InspectRoute
 }
 
 export function createTools(deps: AgentDeps): AgentTool<TSchema, ActionResult>[] {
-	return [
+	// Order matters for the model's attention but not for behaviour. The action
+	// list itself is derived from THIS array by `capabilitiesTool`, so the
+	// catalog cannot report a name that does not exist (AB-1).
+	const actions: AgentTool<TSchema, ActionResult>[] = [
 		observeTool(deps),
 		estimateRouteTool(deps),
 		inspectRouteTool(deps),
@@ -550,4 +547,6 @@ export function createTools(deps: AgentDeps): AgentTool<TSchema, ActionResult>[]
 		recallTool(deps),
 		setPauseTool(deps),
 	];
+	const capabilities = capabilitiesTool(deps, () => [...actions, capabilities]) as unknown as AgentTool<TSchema, ActionResult>;
+	return [...actions, capabilities];
 }
