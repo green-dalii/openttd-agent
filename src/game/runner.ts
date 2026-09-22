@@ -201,7 +201,7 @@ export async function runWatch(
 	const wired = {
 		version: APP_VERSION,
 		getSnapshot: () => ({
-			...(toWireSnapshot(world) as Record<string, unknown>),
+			...(toWireSnapshot(world, { routesAvailable: false }) as Record<string, unknown>),
 			// Backlog for late subscribers / reloads (docs/DASHBOARD-UI.md §7).
 			checkpoints: session.current().checkpoints,
 		}),
@@ -227,7 +227,7 @@ export async function runWatch(
 			port: opts.webPort ?? 0,
 			...wired,
 			onFirstClient: () => {
-				web?.publishSnapshot(toWireSnapshot(world));
+				web?.publishSnapshot(toWireSnapshot(world, { routesAvailable: false }));
 			},
 			// LLM provider settings + built-in provider catalog (SPEC §4).
 			llm: llmApi.llm,

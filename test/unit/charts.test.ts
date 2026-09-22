@@ -67,7 +67,7 @@ interface ChartsGlobal {
 	stackedBars: (canvas: unknown, cfg: StackedCfg) => unknown;
 	bars: unknown;
 	donut: unknown;
-	sparkline: unknown;
+	sparkline: (canvas: unknown, data: number[], cfg?: { color?: string; height?: number }) => unknown;
 	stageMap: unknown;
 	destroy: unknown;
 	util: ChartUtil;
@@ -148,8 +148,8 @@ function fakeCanvas(
 }
 
 /** Load charts.js in a bare sandbox (no document => proves load-time purity). */
-function load(): { charts: ChartsGlobal; sandbox: Record<string, unknown> } {
-	const sandbox: Record<string, unknown> = { window: {}, devicePixelRatio: 1 };
+function load(dpr = 1): { charts: ChartsGlobal; sandbox: Record<string, unknown> } {
+	const sandbox: Record<string, unknown> = { window: {}, devicePixelRatio: dpr };
 	vm.createContext(sandbox);
 	vm.runInContext(SRC, sandbox);
 	return { charts: (sandbox.window as { Charts: ChartsGlobal }).Charts, sandbox };
@@ -431,5 +431,70 @@ describe("charts delegation to uPlot", () => {
 		for (const k of ["fmtCompact", "niceTicks", "donutSlices", "stackTotals"] as const) {
 			expect(typeof charts.util[k], `util.${k}`).toBe("function");
 		}
+	});
+});
+
+/* ======================================================================
+ * Retina 回归：CSS 高度**绝不能**从 backing store 属性回读
+ * ======================================================================
+ * 2026-09-22 真机（用户机器 dpr=2）：Result 栏目的 5 个 KPI 迷你图**每帧翻倍**
+ * （26 → 52 → 104 → … 几千像素），然后被重建复位，如此往复 = "图表纵向反复爆炸"。
+ *
+ * 机制：`sparkline` 没传高度 → `fit()` 回读 `canvas.getAttribute("height")`——
+ * 而那正是 `fit()` 自己刚写进去的 `cssH × dpr`，于是每帧乘一次 dpr。
+ *
+ * **为什么四轮都没测出来**：所有 headless 探针都跑在 dpr=1，增益恰好是 1 → 恒定 26px
+ * → 每次都报"修好了"。探针没有复现用户的**设备像素比**（MEMORY D48/D51）。
+ */
+
+/** DOM 精确的假画布：`height` 属性镜像 backing store（这就是回路的那一环）。 */
+function fakeDomCanvas(clientWidth: number, ctx: unknown): FakeCanvasLike & { attrs: Record<string, string> } {
+	const attrs: Record<string, string> = {};
+	const c = {
+		attrs,
+		clientWidth,
+		style: {} as Record<string, string>,
+		get width() {
+			return Number(attrs.width ?? 300);
+		},
+		set width(v: number) {
+			attrs.width = String(v);
+		},
+		get height() {
+			return Number(attrs.height ?? 150);
+		},
+		set height(v: number) {
+			attrs.height = String(v);
+		},
+		getAttribute: (n: string) => (n in attrs ? attrs[n] : null),
+		getContext: () => ctx,
+		addEventListener: () => {},
+		getBoundingClientRect: () => ({ left: 0, top: 0, width: clientWidth, height: Number(attrs.height ?? 150) }),
+	};
+	return c as unknown as FakeCanvasLike & { attrs: Record<string, string> };
+}
+
+describe("Retina（dpr=2）不得自我放大", () => {
+	it("反复绘制迷你图，CSS 高度恒定（真机 26→52→104→… 的重放）", () => {
+		const { charts } = load(2);
+		const canvas = fakeDomCanvas(219, fakeCtx());
+		const heights: number[] = [];
+		for (let i = 0; i < 6; i++) {
+			charts.sparkline(canvas, [1, 3, 2, 5], { color: "#ffb347" });
+			heights.push(Number.parseFloat(canvas.style.height ?? ""));
+		}
+		// 每一次都必须是同一个高度：翻倍就说明 height 被当成了"上次的结果"
+		expect(heights).toEqual([26, 26, 26, 26, 26, 26]);
+		// backing store = 26 × dpr，且**恒定**（不随调用次数增长）
+		expect(canvas.height).toBe(52);
+	});
+
+	it("dpr=1 与 dpr=2 的 CSS 高度一致（dpr 只影响 backing store）", () => {
+		const a = fakeDomCanvas(219, fakeCtx());
+		const b = fakeDomCanvas(219, fakeCtx());
+		load(1).charts.sparkline(a, [1, 2, 3]);
+		load(3).charts.sparkline(b, [1, 2, 3]);
+		expect(a.style.height).toBe(b.style.height);
+		expect(b.height).toBe(78); // 26 × 3
 	});
 });

@@ -305,3 +305,34 @@ describe("快照盒子必须保持正方形（小地图叠加依赖它）", () =
 		expect(grid, "列宽必须是固定区间（minmax(a, b)），不能是 1fr 自由伸展").toMatch(/minmax\(\s*\d+px\s*,\s*\d+px\s*\)/);
 	});
 });
+
+/* ======================================================================
+ * 守卫：图表画布的**尺寸永不回读**（2026-09-22 Retina 纵向爆炸的根因）
+ * ======================================================================
+ * `fit()` 曾用 `canvas.getAttribute("height")` 当"上一次的高度"，而那个属性是它自己
+ * 写进去的 `cssH × dpr` → 每帧乘一次 dpr：Retina 上 26→52→104→…几千像素。
+ * 行为回归由 `charts.test.ts` 的 dpr=2/3 重放覆盖；这里再钉住"源码里不许再出现这种回读"，
+ * 因为同一个错误可以换个函数重新长出来。
+ */
+describe("图表尺寸回读守卫", () => {
+	const chartsSrc = readFileSync(join(PUBLIC_DIR, "assets/js/charts.js"), "utf8");
+
+	it("charts.js 不得回读 canvas 的 width/height 属性", () => {
+		const bad = [...chartsSrc.matchAll(/getAttribute\(\s*["'](width|height)["']/g)];
+		expect(
+			bad.map((m) => m[0]),
+			"尺寸只能来自样式/布局（cssBoxHeight/cssBoxWidth）；回读属性 = 每帧乘 dpr",
+		).toEqual([]);
+	});
+
+	it("SPARK_H 必须与 canvas.kpi-spark 的 CSS 高度一致（单一事实源不漂移）", () => {
+		const css = readFileSync(join(PUBLIC_DIR, "assets/css/style.css"), "utf8");
+		const m = css.match(/canvas\.kpi-spark\s*\{([^}]*)\}/) as RegExpMatchArray | null;
+		expect(m, "找不到 canvas.kpi-spark 规则").toBeTruthy();
+		const cssH = (m?.[1] ?? "").match(/height:\s*([0-9.]+)px/);
+		expect(cssH, "kpi-spark 规则里应有像素高度").toBeTruthy();
+		const jsH = chartsSrc.match(/const SPARK_H = ([0-9.]+);/);
+		expect(jsH, "charts.js 里应有 SPARK_H 常量").toBeTruthy();
+		expect(Number(cssH?.[1] ?? NaN)).toBe(Number(jsH?.[1] ?? NaN));
+	});
+});

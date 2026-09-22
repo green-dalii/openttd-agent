@@ -159,6 +159,21 @@
     return Math.max(40, Math.min(120, Math.ceil(max) + 12));
   }
 
+  /**
+   * 图例/游标读数：**带单位、宽度稳定**。
+   *
+   * 为什么（用户："图例…看不清"）：uPlot 的 live legend 每帧重排，数值宽度随数字增长
+   * 而变（`1k` → `12.5k`），整行会左右抖动。加上单位后缀后字符串形态固定，
+   * 配合 CSS 的 `tabular-nums` 就不会再抖。
+   */
+  function legendValue(fmt) {
+    return function (_u, v) {
+      const n = Number(v);
+      if (v === null || v === undefined || !Number.isFinite(n)) return "—";
+      return fmt(n);
+    };
+  }
+
   function fmtOf(fn, fallback) {
     return typeof fn === "function"
       ? fn
@@ -197,6 +212,26 @@
     return { kind: "line", data: rows, opts: lineOpts(c, series, labels) };
   }
 
+  /**
+   * 指针交互：**只在 x 轴上**拖拽缩放。
+   *
+   * 为什么只有 x（2026-09-23 用户："图表为什么没有交互控制，比如缩放、移动"）：
+   * 这里的 x 是**采样序号/游戏日期**（时间轴，可以放大看细节），而 y 是货币/计数。
+   * 允许 y 缩放会让"零基线"被推离视野，读者就再也判断不出"这条线是不是从 0 开始的"——
+   * 对收益曲线那是**误导**，不是交互。所以 x 可缩放、y 固定。
+   *
+   * `setScale: true` 是 uPlot 的按需缩放：拖动后它会自己 `setScale('x')`。
+   * **缩放状态由 uPlot 持有**，我们只在"重建图表"时才会丢掉它（形状变化），
+   * 数据帧走的是 `setData` 路径，所以用户缩放的视野在长局里不会被每秒重置。
+   */
+  function cursorOpts() {
+    return {
+      show: true,
+      points: { show: false },
+      drag: { x: true, y: false, setScale: true, uni: 1 },
+    };
+  }
+
   function lineOpts(c, series, labels) {
     const t = theme();
     const axis = axisStyle(t);
@@ -207,7 +242,7 @@
       width: 0, // filled in by the caller-visible element width
       height: c.height || 220,
       padding: [10, 10, 0, 0],
-      cursor: { show: true, points: { show: false } },
+      cursor: cursorOpts(),
       // uPlot's legend IS the readout: it lists each series and its value at the
       // cursor. Enabling it replaces both the custom tooltip this project used to
       // hand-write and the page's separate colour key.
@@ -244,6 +279,8 @@
           stroke: s.color || colours[i % colours.length],
           width: 2,
           points: { show: false },
+          // 图例读数带单位且宽度稳定（见 legendValue）。
+          value: legendValue(fmt),
           ...(showArea
             ? { fill: hexA(s.color || colours[i % colours.length], 0.12) }
             : {}),
@@ -377,6 +414,7 @@
         width: 1.2,
         fill: colour,
         points: { show: false },
+        value: legendValue(fmtOf(c.format)),
       });
     }
     if (!items || items.length === 0) {
@@ -392,7 +430,7 @@
     return {
       height: c.height || 220,
       padding: [10, 10, 0, 0],
-      cursor: { show: true, points: { show: false } },
+      cursor: cursorOpts(),
       legend: { show: true, live: true },
       scales: { x: { time: false } },
       axes: [
@@ -416,7 +454,7 @@
     return {
       height: c.height || 220,
       padding: [10, 10, 0, 0],
-      cursor: { show: true, points: { show: false } },
+      cursor: cursorOpts(),
       legend: { show: true, live: true }, // cursor readout; see lineOpts()
       scales: { x: { time: false } },
       axes: [
@@ -434,6 +472,7 @@
             label: s.name || `s${i + 1}`,
             stroke: colour,
             fill: colour,
+            value: legendValue(fmt),
             paths: window.uPlot && window.uPlot.paths && window.uPlot.paths.bars
               ? window.uPlot.paths.bars({
                   size: bar,
@@ -567,6 +606,81 @@
     el.replaceChildren(p);
   }
 
+  /* ------------------------------ zoom UI ------------------------------ */
+
+  /**
+   * 缩放有没有"退路"？
+   *
+   * 为什么必须自己做（2026-09-23 用户："图表为什么没有交互控制，比如缩放"）：
+   * uPlot 原生拖拽缩放**没有复位手段**——框选放大之后，用户除了刷新页面回不到全量视图。
+   * **一个看不见退路的交互比没有交互更糟**，所以缩放与复位必须一起给。
+   */
+  function isZoomed(u) {
+    try {
+      const xs = (u && u.data && u.data[0]) || [];
+      if (xs.length < 2) return false;
+      const min = u.scales && u.scales.x ? u.scales.x.min : null;
+      const max = u.scales && u.scales.x ? u.scales.x.max : null;
+      if (!Number.isFinite(min) || !Number.isFinite(max)) return false;
+      return min > xs[0] + 1e-9 || max < xs[xs.length - 1] - 1e-9;
+    } catch {
+      return false;
+    }
+  }
+
+  function setZoomed(el, on) {
+    const host = el && el.parentElement;
+    if (host && host.classList && host.classList.toggle) host.classList.toggle("chart-zoomed", Boolean(on));
+  }
+
+  /** 复位到全量视野（uPlot 的 `null` 极值 = 重新贴合数据）。 */
+  function resetZoom(el) {
+    const inst = instances.get(el);
+    if (!inst) return;
+    try {
+      inst.setScale("x", { min: null, max: null });
+    } catch {
+      /* chart already gone */
+    }
+    setZoomed(el, false);
+  }
+
+  /**
+   * 给宿主挂上复位按钮与双击复位（幂等：同一宿主持有一个按钮）。
+   * 按钮放在**父元素**（`.chart-box`）里：宿主的 children 归 uPlot 管，
+   * `destroy()` 会用 `replaceChildren()` 清空它。
+   */
+  function ensureZoomUi(el, instance) {
+    const host = el && el.parentElement;
+    if (!host || !host.appendChild || typeof document === "undefined" || !document.createElement) return;
+    if (!host.__chartReset) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "chart-reset";
+      btn.textContent = "reset zoom";
+      btn.addEventListener("click", function () {
+        resetZoom(el);
+      });
+      host.appendChild(btn);
+      host.__chartReset = btn;
+      host.addEventListener("dblclick", function () {
+        resetZoom(el);
+      });
+    }
+    // uPlot 在每次 `setScale` 之后调用 `hooks.setScale`（拖拽缩放会走这里）。
+    // 钩子数组按调用时读取，所以在构造之后挂也生效。
+    if (instance) {
+      instance.hooks = instance.hooks || {};
+      const prev = instance.hooks.setScale || [];
+      instance.hooks.setScale = prev.concat([
+        function () {
+          setZoomed(el, isZoomed(instance));
+        },
+      ]);
+    }
+    setZoomed(el, isZoomed(instance));
+  }
+
   /** Mount `build()`'s uPlot instance, destroying whatever was there before. */
   function mount(el, build) {
     if (!el || !uplotAvailable()) return null;
@@ -652,6 +766,7 @@
         el.style.minHeight = built.opts.height + LEGEND_RESERVE_PX + "px";
       }
       instances.set(el, instance);
+      ensureZoomUi(el, instance);
       const obs = ensureResizeObserver();
       if (obs) obs.observe(el);
       return instance;
@@ -678,6 +793,7 @@
       /* already gone */
     }
     instances.delete(el);
+    setZoomed(el, false);
     // uPlot leaves its canvas behind; clear so a redraw cannot stack them.
     if (el && el.replaceChildren) el.replaceChildren();
   }
@@ -696,6 +812,9 @@
     stackedBars: (el, cfg) => mount(el, () => toStackedData(cfg)),
     stackedArea: (el, cfg) => mount(el, () => toStackedAreaData(cfg)),
     destroy: destroy,
+    // 缩放：复位由页面/按钮共用（`isZoomed` 供探针与测试判断"要不要显示复位按钮"）。
+    resetZoom: resetZoom,
+    isZoomed: isZoomed,
     // Exposed for tests: the axis-width rule (measured from the formatted labels).
     axisSizeFor: axisSizeFor,
     // Exposed for tests: pure translations with no DOM/uPlot involvement.

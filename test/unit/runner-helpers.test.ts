@@ -1,3 +1,4 @@
+import { sendControlCommand } from "../../src/agent/runner-helpers.js";
 import { describe, expect, it } from "vitest";
 import * as RH from "../../src/agent/runner-helpers.js";
 
@@ -68,5 +69,46 @@ describe("totalsFromTelemetry —— G6 峰值请求大小", () => {
 		const t = totalsFromTelemetry(null, snap({ tokens: 0, turn: null }), 0);
 		expect(t.usage.peakRequestTokens).toBe(0);
 		expect(t.usage.peakRequestTurn).toBeNull();
+	});
+});
+
+/**
+ * `sendControlCommand`：暂停/恢复的投递必须可观测（2026-09-23 真机事故）。
+ *
+ * 旧实现 `try { client?.rcon("pause") } catch {}`：不 await → 异步失败进不了 catch
+ * （**空 catch 什么都抓不到**），且结果无人记录 → 页面可以声称"已暂停"而世界仍在跑。
+ *
+ * 事实依据（OpenTTD `src/console_cmds.cpp`）：专用服务器**首次 `pause` 不打印任何东西**，
+ * 所以 `reply === ""` 是"已投递"，而 `null` 是"超时未确认"——两者不能混为一谈。
+ */
+describe("sendControlCommand", () => {
+	it("空回显 → 已投递（专用服务器首次 pause 的正常情形）", async () => {
+		const r = await sendControlCommand({ rconAwait: async () => "" }, "pause");
+		expect(r.delivered).toBe(true);
+		expect(r.reply).toBe("");
+	});
+
+	it("超时（null）→ **未确认**，不能当成成功", async () => {
+		const r = await sendControlCommand({ rconAwait: async () => null }, "pause");
+		expect(r.delivered).toBe(false);
+		expect(r.error).toContain("timeout");
+	});
+
+	it("通道抛错 → 未投递，且错误被保留", async () => {
+		const r = await sendControlCommand(
+			{
+				rconAwait: async () => {
+					throw new Error("socket closed");
+				},
+			},
+			"unpause",
+		);
+		expect(r.delivered).toBe(false);
+		expect(r.error).toContain("socket closed");
+	});
+
+	it("没有 rcon 通道（watch 模式）→ 具名失败，而不是静默成功", async () => {
+		expect((await sendControlCommand(null, "pause")).error).toBe("no rcon channel");
+		expect((await sendControlCommand({}, "pause")).delivered).toBe(false);
 	});
 });

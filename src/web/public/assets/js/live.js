@@ -44,15 +44,6 @@
           this.follow = U.getPref("steps.follow", true);
           this.evHidden = new Set(U.getPref("ev.hidden", []));
 
-          // 视口高度变了 → 图表高度要跟着变（图表高度取自视口，见 chartHeight）。
-          // 只认**高度**变化：宽度由 ucharts 的 ResizeObserver 处理，重复响应会自找抖动。
-          this._vh = window.innerHeight;
-          let resizeTimer = null;
-          window.addEventListener("resize", () => {
-            if (resizeTimer) clearTimeout(resizeTimer);
-            resizeTimer = setTimeout(() => this.onViewportResize(), 200);
-          });
-
           this.$nextTick(() => {
             // Segmented controls are created imperatively (shared with other pages).
             if (this.$refs.cashMetric) {
@@ -83,6 +74,7 @@
             }
           });
 
+          this.bindDrawerKeys();
           this.connect();
           this.loadRun();
           this.loadCapabilities();
@@ -169,6 +161,11 @@
                 this.recent = s.recent || [];
               }
               this.totalEvents = s.totalEvents;
+              // 线路事实（2026-09-23）：后端一直有 GS 读数，只是此前**从没发到页面**。
+              // `routesAvailable` 必须单独记住：false = 这个 run 没有 GS 通道，
+              // 页面要显示"不可得"而不是"0 条线路"（编造事实）。
+              if (Array.isArray(s.routes)) this.routes = s.routes;
+              this.routesAvailable = s.routesAvailable === true;
               // These three were sent by the server all along but never consumed,
               // so a page loaded mid-run saw no stages and no memory (MEMORY.md A1:
               // "no error" only holds if the code actually ran).
@@ -272,17 +269,23 @@
           });
         },
 
+        /* ----------------------------- drawer ----------------------------- */
         /**
-         * 视口高度变了就重画图表（高度取自视口）。
+         * 详情抽屉：点卡片展开"这张卡片背后的明细"。
          *
-         * 防抖 200ms：`resize` 在拖窗口时会连发几十次，每次都重画等于自找抖动。
-         * 只在**高度**真的变了才重画——宽度由 ucharts 的 ResizeObserver 自己处理。
+         * 为什么需要（用户："比如点击车辆卡片具体展示详细信息"）：KPI 是**结论**，
+         * 运营者看到"Fleet 9 veh"之后的下一个问题是"在哪条线上"——那需要一个能展开的载荷。
+         * 规则：**没有载荷的卡片不做成可点**（假按钮 = bug，见 MEMORY B8）。
          */
-        onViewportResize() {
-          if (this._vh === window.innerHeight) return;
-          this._vh = window.innerHeight;
-          this.drawCash();
-          this.drawTokens();
+        openDrawer(id) {
+          this.drawer = this.kpiDrawer(id);
+        },
+
+        /** Esc 关闭：抽屉必须有一条键盘出路。 */
+        bindDrawerKeys() {
+          window.addEventListener("keydown", (e) => {
+            if (e.key === "Escape" && this.drawer !== null) this.drawer = null;
+          });
         },
 
         /* ---------------------------- widgets ---------------------------- */
@@ -301,7 +304,7 @@
           this.$nextTick(() => {
             if (!this.$refs.cashChart) return;
             C.line(el, {
-              series, labels, area: series.length === 1, height: this.chartHeight(260),
+              series, labels, area: series.length === 1, height: this.chartHeight(260), // 固定高度
               // `key` 标识"这张图画的是什么"：切换指标时 format 都是函数，
               // ucharts 的复用判断只能靠这个键，否则会把 cost 画成 money。
               key: "cash:" + this.cashMetric,

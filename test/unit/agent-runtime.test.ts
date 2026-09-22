@@ -452,3 +452,47 @@ describe("harness boundary: 框架不替 agent 做决定", () => {
 		expect(summary).toMatch(/clone/i);
 	});
 });
+
+/**
+ * `set_pause` 的回执措辞与**归因**（2026-09-23 长跑事故）。
+ *
+ * 事实：一个 5.7 小时的长跑，最后一次决策的动作就是 `set_pause`；游戏从此冻结、
+ * 循环再没跑过。审计里只有一行 `rcon pause answered: ""`——**空引号**。
+ * 空回复其实是正常的（OpenTTD 的 pause 控制台没有输出），但旧措辞读起来像"没有答案"，
+ * 而且它把"投递成功"说成了"命令生效"。
+ *
+ * 规则：**投递**与**效果**是两件事。效果只能由世界证明（暂停时游戏日期停止前进）。
+ */
+describe("set_pause：投递 vs 效果", () => {
+	async function run(paused: boolean, reply: string) {
+		const { deps } = fakeDeps();
+		const seen: { paused: boolean; at: number }[] = [];
+		deps.onPauseChanged = (p, at) => seen.push({ paused: p, at });
+		deps.sink.rconAwait = async () => reply;
+		const tool = createTools(deps).find((t) => t.name === "set_pause")!;
+		const res = await tool.execute("t1", { paused });
+		return {
+			res: res as { content: { text: string }[]; details: { data?: Record<string, unknown> } },
+			seen,
+		};
+	}
+
+	it("空回复 → 说清「投递成功、控制台无输出（正常）」，且 confirmedEffect=false", async () => {
+		const { res, seen } = await run(true, "");
+		const text = res.content.map((c) => c.text).join(" ");
+		expect(text).toContain("delivered");
+		expect(text).toContain("normal for pause"); // 说明空回复是正常的
+		expect(text).not.toContain('answered: ""'); // 旧措辞：把空引号当答案
+		expect(res.details.data?.confirmedEffect).toBe(false);
+		// 归因必须被上报（页面据此说"agent 自己停的"）
+		expect(seen).toHaveLength(1);
+		expect(seen[0]!.paused).toBe(true);
+	});
+
+	it("有回复 → 原样带上回复文本", async () => {
+		const { res } = await run(false, "Game unpaused");
+		const text = res.content.map((c) => c.text).join(" ");
+		expect(text).toContain("Game unpaused");
+		expect(res.details.data?.confirmedEffect).toBe(true);
+	});
+});

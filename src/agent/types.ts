@@ -49,6 +49,15 @@ export interface AgentDeps {
 	recall?: (q: { query?: string; limit?: number }) => { id: string; line: string }[];
 	/** 每次检索的记账（落到审计：让"记忆有没有被用"成为可查事实）。 */
 	onRecall?: (r: { query: string | null; hits: number; ids: string[] }) => void;
+	/**
+	 * agent **自己**通过 `set_pause` 改了游戏的暂停状态。
+	 *
+	 * 为什么需要它（2026-09-23 真实事故）：一个长跑的**最后一次决策**就是 `set_pause`，
+	 * 游戏从此冻结、循环再没跑过 5 小时；而页面上只写 `paused`，看不出是"agent 自己停的"
+	 * 还是"人按的按钮"。**谁让它停的是一个独立事实**，必须被记录并呈现——
+	 * 否则 owner 按 Pause 时状态早已是 paused，只会更困惑。
+	 */
+	onPauseChanged?: (paused: boolean, at: number) => void;
 }
 
 /** Structured result payload carried in AgentToolResult.details. */

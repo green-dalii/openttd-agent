@@ -114,3 +114,42 @@ export interface RouteStatsJoin extends RouteStats {
 	townA?: number;
 	townB?: number;
 }
+
+/** 仪表盘用的线路事实（wire 形状）。算术只在这里做一次，前端不再推导。 */
+export interface RouteWireFact {
+	job: number;
+	vehicles: number;
+	waiting: number;
+	/** 当年累计利润（-1 = GS 读不到该车；此时不要显示"亏损"）。 */
+	profitYtd: number;
+	/** 每日收益；`null` = 还不可测（年内天数太少，或没有车）。 */
+	incomePerDay: number | null;
+	townA?: number;
+	townB?: number;
+}
+
+/**
+ * GS 读数 × 账本 → 仪表盘可直接渲染的线路事实。
+ *
+ * 为什么放在 TS 侧（而不是让页面自己算）：① 算术要能单测；② `null` 与 `0` 的区别
+ * 是**事实的区别**（"不可测"≠"不赚钱"），前端不该有机会重新发明这个判断。
+ */
+export function routeWireFacts(stats: RouteStats[], ledger: LedgerPair[]): RouteWireFact[] {
+	return joinRoutesWithLedger(stats, ledger).map((r) => {
+		const f: RouteWireFact = {
+			job: r.job,
+			vehicles: r.vehicles,
+			waiting: r.waiting,
+			profitYtd: r.profit,
+			// 两个**不同**的"不可测"原因，不能混为一谈（与 formatRouteStats 同一条规则）：
+			// ① 没有车 → 收益流不可观测；② 年内天数太少 → 除以 1 会造出假的年化。
+			incomePerDay:
+				r.vehicles === 0 || dayOfYear(r.gameDate) < MIN_INCOME_DAYS
+					? null
+					: incomePerDay(r.profit, r.gameDate),
+		};
+		if (r.townA !== undefined) f.townA = r.townA;
+		if (r.townB !== undefined) f.townB = r.townB;
+		return f;
+	});
+}

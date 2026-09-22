@@ -31,7 +31,20 @@ export const MAX_WIRE_RECENT = 100;
  * refresh does not blank the chart. Omitting it is exactly the bug this file
  * was created to fix.
  */
-export function toWireSnapshot(world: WorldState): unknown {
+export interface WireSnapshotExtras {
+	/** 线路事实（只有 agent 模式有 GS 通道；watch 模式为空）。 */
+	routes?: unknown[];
+	/**
+	 * 线路数据是否**可得**。
+	 *
+	 * 为什么必须有这个标志（2026-09-23 真机）：watch 模式没有 GS 通道，线路列表
+	 * 天然为空。若只发 `routes: []`，页面会把"没有数据源"渲染成"这个公司一条线路都没有"
+	 * ——那是编造事实。**"不可用"与"零"是两种世界状态。**
+	 */
+	routesAvailable?: boolean;
+}
+
+export function toWireSnapshot(world: WorldState, extras: WireSnapshotExtras = {}): unknown {
 	const snap = world.snapshot();
 	const companies: Record<string, unknown> = {};
 	for (const [id, cs] of snap.companies) {
@@ -48,5 +61,7 @@ export function toWireSnapshot(world: WorldState): unknown {
 		companies,
 		totalEvents: snap.totalEvents,
 		recent: snap.recent.slice(-MAX_WIRE_RECENT),
+		routes: extras.routes ?? [],
+		routesAvailable: extras.routesAvailable === true,
 	};
 }

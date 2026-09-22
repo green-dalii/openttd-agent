@@ -399,10 +399,22 @@ export function setPauseTool(deps: AgentDeps): AgentTool<typeof SetPauseSchema, 
 					data: { paused: params.paused, confirmed: false },
 				});
 			}
+			// 空回复是**正常**的：OpenTTD 的 `pause`/`unpause` 控制台没有输出，
+			// 所以 `SERVER_RCON_END` 到达但一行都没打印。旧措辞 `answered: ""` 读起来
+			// 像"没有答案"，而且在 2026-09-23 的长跑里，agent 用这个工具**把自己的
+			// episode 停了 5 小时**，日志里却只有一行空引号——看不出它做了什么。
+			// 规则：把"投递"与"效果"分开说；效果只由世界（游戏日期停走）证明。
+			const delivered = reply !== "";
+			// 记录归因（谁让它停的）：这是给 owner 看的独立事实，不只是给 agent 的回执。
+			deps.onPauseChanged?.(params.paused, Date.now());
 			return toResult({
 				ok: true,
-				summary: `rcon ${cmd} answered: "${reply}"`,
-				data: { paused: params.paused, confirmed: true, reply },
+				summary: delivered
+					? `rcon ${cmd} delivered; the game replied: "${reply}"`
+					: `rcon ${cmd} delivered (the console printed no line — normal for ${cmd}). ` +
+						`Delivery is confirmed; the EFFECT is confirmed only by observing the world: ` +
+						`while paused the game date stops advancing.`,
+				data: { paused: params.paused, delivered: true, confirmedEffect: delivered, reply },
 			});
 		},
 	};

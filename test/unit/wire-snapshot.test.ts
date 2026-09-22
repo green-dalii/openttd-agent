@@ -115,3 +115,24 @@ describe("toWireSnapshot", () => {
 		expect([...snap.companies]).toEqual([]);
 	});
 });
+
+/**
+ * 线路数据（2026-09-23）：**"不可用"与"零"是两种世界状态**。
+ *
+ * watch 模式没有 GS 通道，线路列表天然为空。若只发 `routes: []`，页面会把
+ * "没有数据源"渲染成"这个公司一条线路都没有"——那是编造事实。
+ */
+describe("快照里的线路数据", () => {
+	it("默认：空数组 + `routesAvailable: false`（不是「0 条线路」）", () => {
+		const snap = toWireSnapshot(new WorldState()) as Record<string, unknown>;
+		expect(snap.routes).toEqual([]);
+		expect(snap.routesAvailable).toBe(false);
+	});
+
+	it("agent 模式：原样带上线路事实并标记可得", () => {
+		const routes = [{ job: 100, vehicles: 6, waiting: 12, profitYtd: 3650, incomePerDay: 18.25, townA: 4, townB: 20 }];
+		const snap = toWireSnapshot(new WorldState(), { routes, routesAvailable: true }) as Record<string, unknown>;
+		expect(snap.routes).toEqual(routes);
+		expect(snap.routesAvailable).toBe(true);
+	});
+});

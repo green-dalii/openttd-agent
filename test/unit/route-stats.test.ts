@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { incomePerDay, formatRouteStats, joinRoutesWithLedger } from "../../src/agent/route-stats.js";
+import { incomePerDay, formatRouteStats, joinRoutesWithLedger, routeWireFacts } from "../../src/agent/route-stats.js";
 
 /**
  * NEXT-2 N2-1：线路经济（纯函数部分）。
@@ -83,5 +83,42 @@ describe("小额速率不被四舍五入成 0（符号是事实）", () => {
 		const line = formatRouteStats({ job: 1, vehicles: 6, profit: -6, waiting: 0, gameDate: 208 });
 		expect(line).toContain("-0.03/day");
 		expect(line).not.toContain("income 0/day");
+	});
+});
+
+/**
+ * `routeWireFacts`：仪表盘消费的线路事实（2026-09-23）。
+ *
+ * 为什么单独测：页面上"这条路赚不赚钱"的**每一个**判断都来自这里，
+ * 而 `null`（不可测）与 `0`（不赚）是**两种世界状态**——混掉就是在编造事实。
+ */
+describe("routeWireFacts（仪表盘线路事实）", () => {
+	const ledger = [{ order: { job: 100, fromTown: 4, toTown: 20 } }];
+
+	it("把 GS 读数与账本两端城镇合到一起", () => {
+		const r = routeWireFacts([{ job: 100, vehicles: 6, profit: 3650, waiting: 12, gameDate: 200 }], ledger)[0]!;
+		expect(r.job).toBe(100);
+		expect(r.vehicles).toBe(6);
+		expect(r.waiting).toBe(12);
+		expect(r.townA).toBe(4);
+		expect(r.townB).toBe(20);
+		expect(r.incomePerDay).toBeCloseTo(3650 / 200, 6);
+	});
+
+	it("**没有车** → 收益不可测（null，不是 0）", () => {
+		const r = routeWireFacts([{ job: 100, vehicles: 0, profit: 0, waiting: 0, gameDate: 200 }], ledger)[0]!;
+		expect(r.incomePerDay).toBeNull();
+	});
+
+	it("**年内天数太少** → 也不报速率（否则是用 1 天样本造年化）", () => {
+		const r = routeWireFacts([{ job: 100, vehicles: 6, profit: 100, waiting: 0, gameDate: 5 }], ledger)[0]!;
+		expect(r.incomePerDay).toBeNull();
+	});
+
+	it("账本不知道的 job → 只给读数，**不编造**两端城镇", () => {
+		const r = routeWireFacts([{ job: 999, vehicles: 3, profit: 0, waiting: 0, gameDate: 200 }], ledger)[0]!;
+		expect(r.townA).toBeUndefined();
+		expect(r.townB).toBeUndefined();
+		expect(r.vehicles).toBe(3);
 	});
 });

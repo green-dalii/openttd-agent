@@ -161,3 +161,55 @@ describe("run supervisor", () => {
 		expect(sup.canControl()).toBe(false);
 	});
 });
+
+/**
+ * 暂停**归因**（2026-09-23 真实事故）。
+ *
+ * 一个长跑的最后一次决策就是 `set_pause`：游戏冻结、循环 5 小时没再跑过，
+ * 而页面只写 `paused`。owner 按 Pause 时状态早已是 paused——"为什么停了"无从判断。
+ * 因此"谁让它停的"必须是一个**独立且不被后到者覆盖**的事实：第一个让它停的人才是原因。
+ */
+describe("暂停归因", () => {
+	async function started() {
+		const hooks: { pause?: () => void; resume?: () => void } = {};
+		const sup = new RunSupervisor({
+			start: async (_mode, h) => {
+				hooks.pause = h.pause;
+				hooks.resume = h.resume;
+			},
+		});
+		await sup.start("agent");
+		return { sup, hooks };
+	}
+
+	it("页面按的 → pausedBy = dashboard", async () => {
+		const { sup } = await started();
+		await sup.pause();
+		expect(sup.state().state).toBe("paused");
+		expect(sup.state().pausedBy).toBe("dashboard");
+		expect(typeof sup.state().pausedAt).toBe("number");
+	});
+
+	it("agent 自己停的 → pausedBy = agent", async () => {
+		const { sup } = await started();
+		await sup.pause("agent");
+		expect(sup.state().pausedBy).toBe("agent");
+	});
+
+	it("**后到的暂停不覆盖归因**（第一个让它停的才是原因）", async () => {
+		const { sup } = await started();
+		await sup.pause("agent");
+		await sup.pause("dashboard"); // owner 后来按了 Pause
+		expect(sup.state().pausedBy).toBe("agent");
+	});
+
+	it("恢复后归因清空（下一次暂停由新原因决定）", async () => {
+		const { sup } = await started();
+		await sup.pause("agent");
+		await sup.resume();
+		expect(sup.state().pausedBy).toBeNull();
+		expect(sup.state().pausedAt).toBeNull();
+		await sup.pause("dashboard");
+		expect(sup.state().pausedBy).toBe("dashboard");
+	});
+});

@@ -56,7 +56,7 @@ import {
 	type LoadedMemory,
 } from "../evolution/memory.js";
 import { routeFactsProviderFor } from "../evolution/route-facts.js";
-import { joinRoutesWithLedger } from "./route-stats.js";
+import { joinRoutesWithLedger, routeWireFacts } from "./route-stats.js";
 import { makeFreezeController } from "./freeze.js";
 import { actionCatalog } from "./tools/catalog.js";
 import { RouteLedger } from "./route-ledger.js";
@@ -142,14 +142,12 @@ export interface AgentRunOptions {
 }
 
 // Pure helpers moved to ./runner-helpers.ts (REFACTOR Phase B-1).
-import {
-	savegameName,
+import { savegameName,
 	sleep,
 	formatGameDate,
 		gameDaysSinceStart,
 	describeBrainSelection,
-	HEARTBEAT_MS,
-} from "./runner-helpers.js";
+	HEARTBEAT_MS, sendControlCommand } from "./runner-helpers.js";
 
 /** Run one agent-driven session. Returns process exit code. */
 export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise<number> {
@@ -281,6 +279,17 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 		sink: client,
 		state: _world,
 		routeStats: () => hub.getRouteStats(),
+		// agent 自己调 `set_pause` → 记录归因并推给页面（"谁让它停的"是独立事实）。
+		onPauseChanged: (paused: boolean, at: number) => {
+			agentPause = { paused, at };
+			web?.publishRun({
+				state: paused ? "paused" : "running",
+				sessionId: session.id,
+				mode: "agent",
+				pausedBy: paused ? "agent" : null,
+				pausedAt: paused ? at : null,
+			});
+		},
 	};
 	let streamFn: AgentOptionsStreamFn;
 	let model: Model<string>;
@@ -397,12 +406,21 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 	// runs further down (after the provider is built). Holding it here avoids a
 	// temporal-dead-zone read when a client connects before the library is loaded.
 	let runMemory: LoadedMemory = { lessons: [], strategies: [], lines: [] };
+	// 最近一次由 **agent 自己** 发起的暂停/恢复（页面据此区分"agent 停的"与"人按的"）。
+	let agentPause: { paused: boolean; at: number } | null = null;
 	const wired = {
 		version: APP_VERSION,
 		getSnapshot: () => ({
-			...(toWireSnapshot(_world) as Record<string, unknown>),
+			...(toWireSnapshot(_world, {
+				// 线路事实：GS 读数（车辆/等待/利润）× 账本（两端城镇）。
+				// 仪表盘此前**完全没有**线路信息——数据一直存在，只是没被发出去。
+				routes: routeWireFacts(hub.getRouteStats(), routeLedger.all()),
+				routesAvailable: true,
+			}) as Record<string, unknown>),
 			telemetry: telemetry.snapshot(),
 			sessionId: session.id,
+			// 暂停归因（谁让它停的）：只有 agent 侧才有这条信息；页面按钮走 supervisor。
+			control: agentPause ? { pausedByAgent: agentPause.paused, agentPausedAt: agentPause.at } : null,
 			// Backlog for late subscribers / reloads (docs/DASHBOARD-UI.md §7).
 			checkpoints: session.current().checkpoints,
 			stages: stageViews.slice(-24),
@@ -462,23 +480,29 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 
 	// Publish the session id and expose stop/pause/resume to the supervisor.
 	if (web) web.publishRun({ state: "running", sessionId: session.id, mode: "agent" });
+	/**
+	 * 发送暂停/恢复并**记录投递结果**（不再是 fire-and-forget）。
+	 *
+	 * 为什么（2026-09-23）：旧实现是 `try { client?.rcon("pause") } catch {}`——
+	 * 不 await 的异步失败永远进不了 catch（空 catch 是假的），且结果无人记录，
+	 * 于是页面可以声称"已暂停"而世界仍在跑。投递与效果必须分开陈述。
+	 */
+	const reportControl = (cmd: "pause" | "unpause") => {
+		void sendControlCommand(client, cmd).then((r) => {
+			const how = r.delivered ? (r.reply === "" ? "delivered (no console output — normal)" : `delivered: ${r.reply}`) : `NOT CONFIRMED: ${r.error}`;
+			console.log(`[agent] rcon ${cmd} → ${how}`);
+		});
+	};
+
 	opts.control?.onReady?.({
 		stop: requestStop,
 		pause: () => {
 			scheduler.pause();
-			try {
-				client?.rcon("pause");
-			} catch {
-				/* ignore */
-			}
+			reportControl("pause");
 		},
 		resume: () => {
 			scheduler.resume(gameDaysSinceStart(deps));
-			try {
-				client?.rcon("unpause");
-			} catch {
-				/* ignore */
-			}
+			reportControl("unpause");
 		},
 	});
 

@@ -187,10 +187,51 @@
 
   /* ------------------------------ canvas ------------------------------ */
   /** Size the backing store for DPR and return a CSS-pixel coordinate system. */
+  /**
+   * 一个正的 CSS 像素值，否则 0。
+   * @param {unknown} v
+   * @returns {number}
+   */
+  function cssPx(v) {
+    const n = Number.parseFloat(String(v));
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  }
+
+  /**
+   * canvas 的**布局**高度（来自样式），**绝不**读 `height` 属性。
+   *
+   * 为什么（2026-09-22 真机，用户机器 dpr=2，一连四轮没修好）：
+   * `height` 属性是 **backing store**，而我们自己把它写成 `cssH × dpr`。
+   * 一旦拿它当"上一次的高度"回读，每画一次就乘一次 dpr：
+   * **26 → 52 → 104 → 208 → … 几千像素**，然后被元素重建复位，如此往复——
+   * 表现就是"KPI 图表纵向反复爆炸、不受控制"。
+   *
+   * `canvas.style.height` 是我们写的 CSS 值（增益 1，稳定），`getComputedStyle`
+   * 来自样式表；两者都在**布局**这一侧，不构成正反馈。
+   */
+  function cssBoxHeight(canvas) {
+    const inline = cssPx(canvas.style && canvas.style.height);
+    if (inline) return inline;
+    if (typeof getComputedStyle === "function") {
+      const computed = cssPx(getComputedStyle(canvas).height);
+      if (computed) return computed;
+    }
+    return 0;
+  }
+
+  /** canvas 的布局宽度：CSS 优先（`canvas{width:100%}`），退化到布局矩形。 */
+  function cssBoxWidth(canvas) {
+    if (typeof canvas.getBoundingClientRect === "function") {
+      const w = cssPx(canvas.getBoundingClientRect().width);
+      if (w) return w;
+    }
+    return 0;
+  }
+
   function fit(canvas, optH) {
     const dpr = readDpr();
-    const cssW = Math.max(1, Math.round(canvas.clientWidth || Number(canvas.getAttribute("width")) || 600));
-    const cssH = Math.max(1, Math.round(optH || Number(canvas.getAttribute("height")) || 180));
+    const cssW = Math.max(1, Math.round(canvas.clientWidth || cssBoxWidth(canvas) || 600));
+    const cssH = Math.max(1, Math.round(optH || cssBoxHeight(canvas) || 180));
     const w = Math.max(1, Math.round(cssW * dpr));
     const h = Math.max(1, Math.round(cssH * dpr));
     if (canvas.width !== w) canvas.width = w;
@@ -429,12 +470,18 @@
   }
 
   /* ---------------------------- sparkline ---------------------------- */
+  /**
+   * KPI 迷你图的 CSS 高度（px）。**必须**与 `style.css` 的 `canvas.kpi-spark`
+   * 保持一致——`test/unit/charts.test.ts` 里有断言钉住这一点。
+   */
+  const SPARK_H = 26;
   /** Tiny trend line for KPI tiles; no axes. cfg: { color?, area?, height? } */
   function sparkline(canvas, data, cfg) {
     const c = cfg || {};
     const nums = (data || []).map(Number).filter(function (v) { return isFinite(v); });
     mount(canvas, function () {
-      const g = fit(canvas, c.height || Number(canvas.getAttribute("height")) || 26);
+      // 显式常量：迷你图的高度是**设计常数**，不是"上次量到的值"。
+      const g = fit(canvas, c.height || SPARK_H);
       const ctx = g.ctx, W = g.w, H = g.h;
       if (nums.length < 2) return;
       const color = c.color || palette()[0];
@@ -482,7 +529,8 @@
   function stageMap(canvas, view) {
     const v = view || {};
     mount(canvas, function () {
-      const g = fit(canvas, Number(canvas.getAttribute("height")) || 140);
+      // 高度同样只从样式来（见 cssBoxHeight 的说明）：回读 `height` 属性 = 每帧乘 dpr。
+      const g = fit(canvas, 140);
       const ctx = g.ctx, W = g.w, H = g.h;
       const pad = 6;
       const side = Math.min(W, H) - pad * 2;

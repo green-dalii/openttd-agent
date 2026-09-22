@@ -40,13 +40,38 @@
     { id: "cost", label: "Cost", hint: "spend per turn" },
   ];
 
-  /** Colours for the token composition, matching the dashboard palette. */
+  /**
+   * Token composition series — **最大分离的四个色相**。
+   *
+   * 为什么改（2026-09-23 用户报告"图例选择差、颜色区分度低，看不清"）：
+   * 原来 `Input #5fb3ff`（蓝）与 `Cache read #56d4dd`（青）在深色底上几乎同色，
+   * 堆叠里根本分不清哪一层是哪一个。现在四色相在色环上互相远离：
+   * 蓝 / 绿 / 琥珀 / 紫。
+   */
   const TOKEN_SERIES = [
     { name: "Input", key: "input", color: "#5fb3ff" },
     { name: "Output", key: "output", color: "#7bc96f" },
     { name: "Reasoning", key: "reasoning", color: "#c3a6ff" },
-    { name: "Cache read", key: "cacheRead", color: "#56d4dd" },
+    { name: "Cache read", key: "cacheRead", color: "#e5c07b" },
   ];
+
+  /**
+   * 线路表的列（顺序 = 渲染顺序；`id` 同时是排序键）。
+   *
+   * 为什么这张表值得存在（用户："为什么没有交通线的统计"）：GS 早就在上报逐线路读数
+   * （`route-stats`），账本也知道每条线的两端城镇——数据一直有，只是**从来没被发到页面**。
+   */
+  const ROUTE_COLUMNS = [
+    { id: "job", label: "Route", align: "left" },
+    { id: "endpoints", label: "Endpoints", align: "left" },
+    { id: "vehicles", label: "Veh", align: "num" },
+    { id: "waiting", label: "Waiting", align: "num" },
+    { id: "income", label: "Income / day", align: "num" },
+    { id: "profit", label: "Profit YTD", align: "num" },
+  ];
+
+  /** 可排序的列（`endpoints` 是文本，排序无意义）。 */
+  const ROUTE_SORTABLE = ["job", "vehicles", "waiting", "income", "profit"];
 
   const num = (v) => {
     const n = Number(v);
@@ -136,6 +161,25 @@
       run: null,
       runControl: false,
       startedAt: null,
+      /**
+       * 线路事实（后端每个 snapshot 帧都带）。形状见 `toWireSnapshot` 的 extras：
+       * `{job, vehicles, waiting, profitYtd, incomePerDay|null, townA?, townB?}`。
+       */
+      routes: [],
+      /**
+       * 线路数据是否**可得**。false = 这个 run 没有 GS 通道（watch 模式）。
+       * 必须与 `routes: []` 区分开：**"不可得"不是"零条线路"**。
+       */
+      routesAvailable: false,
+      /** 线路表排序（默认按每日收益，null 排最后）。 */
+      routeSortKey: "income",
+      routeSortDir: "desc",
+      /**
+       * 详情抽屉：null（关）| "fleet" | "cash" | "income" | "routes"。
+       * 只呈现**确实存在**的数据；没有载荷的卡片不做成可点（假按钮 = bug）。
+       */
+      drawer: null,
+
       /** UI state (persisted prefs are applied by the page on init). */
       evSearch: "",
       evHidden: new Set(),
@@ -149,6 +193,8 @@
       /* ---------------------------- constants ---------------------------- */
       cashMetrics: CASH_METRICS,
       tokenMetrics: TOKEN_METRICS,
+      /** 线路表的列定义（模板迭代它，不硬编码列）。 */
+      routeColumns: ROUTE_COLUMNS,
 
       /**
        * 服务器快照里的 `recent` 与本地已有的那份**内容等价**吗？
@@ -217,6 +263,20 @@
       },
 
       /**
+       * 公司价值是否已经有意义。
+       *
+       * 为什么需要这条判定（2026-09-22 真机看截图发现）：管理协议 `ServerCompanyEconomy`
+       * **只发 `old_economy[]`**（两个历史财政年度），**不发当前值**。所以"公司价值"实际是
+       * **上一个财年结束时**的值；而在**第一个财年结束之前**，它是 OpenTTD 的初始占位值 **1**。
+       * 于是仪表盘长期显示 `£1`（同期现金 £226k、贷款 £300k）——这是**在说谎**：
+       * 把一个占位值当成当前价值。规则：**没测到的值不显示数字**（AGENTS §2 的精神）。
+       */
+      companyValueKnown(raw) {
+        const v = Number(raw);
+        return Number.isFinite(v) && v > 1;
+      },
+
+      /**
        * Outcome KPIs: "is the company winning?".
        *
        * Deliberately free of cost metrics — the old page mixed `Tokens used` into
@@ -232,11 +292,28 @@
         const income = seriesOf("income");
         const delta = (arr) => (arr.length > 1 ? arr[arr.length - 1] - arr[arr.length - 2] : undefined);
         return [
-          { k: "Cash", v: U.fmtMoney(e.money), delta: delta(money), deltaFmt: "money", spark: "money" },
-          { k: "Income / yr", v: U.fmtMoney(e.income), delta: delta(income), deltaFmt: "money", spark: "income" },
-          { k: "Company value", v: U.fmtMoney(e.companyValue) },
+          { k: "Cash", v: U.fmtMoney(e.money), delta: delta(money), deltaFmt: "money", spark: "money", drawerId: "cash" },
+          {
+            k: "Income / yr",
+            v: U.fmtMoney(e.income),
+            delta: delta(income),
+            deltaFmt: "money",
+            spark: "income",
+            drawerId: "income",
+          },
+          {
+            k: "Value (last yr)",
+            v: this.companyValueKnown(e.companyValue) ? U.fmtMoney(e.companyValue) : "—",
+            hint: this.companyValueKnown(e.companyValue) ? undefined : "not reported until the first year ends",
+          },
           { k: "Loan", v: U.fmtMoney(e.loan) },
-          { k: "Fleet", v: `${U.fmtInt(s.vehicles ?? 0)} veh`, hint: `${U.fmtInt(s.stations ?? 0)} stations` },
+          {
+            k: "Fleet",
+            v: `${U.fmtInt(s.vehicles ?? 0)} veh`,
+            hint: `${U.fmtInt(s.stations ?? 0)} stations`,
+            // 「车队在哪条线上」就是这里最该能展开的事实——数据已经有了（routes）。
+            drawerId: "fleet",
+          },
         ];
       },
 
@@ -282,7 +359,7 @@
             isAi: Boolean(i.isAi),
             neg: money < 0,
             money: U.fmtMoney(e.money),
-            value: `value ${U.fmtMoney(e.companyValue)} · loan ${U.fmtMoney(e.loan)}`,
+            value: `value ${this.companyValueKnown(e.companyValue) ? U.fmtMoney(e.companyValue) : "—"} · loan ${U.fmtMoney(e.loan)}`,
             fleet: `${U.fmtInt(st.vehicles ?? "—")} veh · ${U.fmtInt(st.stations ?? "—")} stn${
               i.manager ? ` · ${i.manager}` : ""
             }`,
@@ -318,12 +395,43 @@
         );
       },
 
+      /**
+       * 该画哪些 token 系列（下标）——**全零的系列不进图，也不占图例**。
+       *
+       * 为什么（2026-09-23 用户："图例选择差"）：真机长局里 `reasoning` **90 轮恒为 0**，
+       * 于是一个永远为零的系列永久占据图例与堆叠空间。零信息量的系列不是"完整"，
+       * 是噪声。隐藏后仍会**用一句话说明**（`tokenHiddenNote()`），不静默丢弃。
+       *
+       * 该下标列表是 `tokenSeries()` 与 `tokenItems()` 的**唯一对齐来源**——
+       * 两处各算一次就会漂移，而漂移的表现是"颜色和数值对不上"。
+       */
+      tokenLiveIndexes() {
+        if (this.tokenMetric === "cost") return [0];
+        const byTurn = (this.telemetry && this.telemetry.usage && this.telemetry.usage.byTurn) || [];
+        const idx = [];
+        for (let i = 0; i < TOKEN_SERIES.length; i++) {
+          const key = TOKEN_SERIES[i].key;
+          if (byTurn.some((r) => num((r.usage || {})[key]) > 0)) idx.push(i);
+        }
+        // 还没有任何用量 → 保留全部：那种情况该由"空状态"表达，
+        // 而不是靠删掉所有系列制造一张空图。
+        return idx.length ? idx : TOKEN_SERIES.map((t, i) => i);
+      },
+
+      /** 被隐藏的零值系列，用一句可读的话说明（隐藏 ≠ 静默）。 */
+      tokenHiddenNote() {
+        if (this.tokenMetric === "cost") return "";
+        const live = this.tokenLiveIndexes();
+        const hidden = TOKEN_SERIES.filter((t, i) => live.indexOf(i) === -1).map((t) => t.name);
+        return hidden.length ? `${hidden.join(", ")} = 0 in every turn — hidden` : "";
+      },
+
       /** Series for the per-turn chart. */
       tokenSeries() {
         if (this.tokenMetric === "cost") {
           return [{ name: "Cost", color: "#e5c07b" }];
         }
-        return TOKEN_SERIES.map((t) => ({ name: t.name, color: t.color }));
+        return this.tokenLiveIndexes().map((i) => ({ name: TOKEN_SERIES[i].name, color: TOKEN_SERIES[i].color }));
       },
 
       /**
@@ -335,18 +443,262 @@
       tokenItems() {
         const byTurn = (this.telemetry && this.telemetry.usage && this.telemetry.usage.byTurn) || [];
         const isCost = this.tokenMetric === "cost";
+        // **同一份**下标列表（见 tokenLiveIndexes）：两处各算一次就会漂移。
+        const idx = this.tokenLiveIndexes();
         return byTurn.map((r) => {
           const u = r.usage || {};
           return {
             label: `T${r.turn}`,
-            values: isCost
-              ? [num(u.costTotal)]
-              : TOKEN_SERIES.map((s) => num(u[s.key])),
+            values: isCost ? [num(u.costTotal)] : idx.map((i) => num(u[TOKEN_SERIES[i].key])),
             sub: isCost
               ? `${U.fmtInt(u.totalTokens)} tokens`
               : `${U.fmtInt(u.totalTokens)} tokens in ${U.fmtInt(r.steps)} step(s)`,
           };
         });
+      },
+
+      /* ------------------------------ routes ------------------------------ */
+
+      /**
+       * 线路表的一行（全部显示串在这里算完，模板只做声明式渲染）。
+       *
+       * 三条**诚实规则**（本仓库的底线，逐条对应真实事故）：
+       *   ① `incomePerDay === null` **不是 0**——它表示"还不可测"（这条线没有车，
+       *      或年内天数太少不足以除）。显示 0 会被读成"这条线不赚钱"，那是编造事实。
+       *   ② `profitYtd === -1` 表示 GS **读不到**该读数（`route-stats.ts`），显示 `—`，
+       *      绝不能显示成"亏损"。
+       *   ③ 账本不知道 job 时 `townA/townB` 缺失 → 两端显示 `—`，**不猜**一对城镇。
+       */
+      routeRows() {
+        const list = Array.isArray(this.routes) ? this.routes : [];
+        return list.map((r) => {
+          const job = num(r.job);
+          const vehicles = num(r.vehicles);
+          const waiting = num(r.waiting);
+          const profitRaw = r.profitYtd === undefined || r.profitYtd === null ? NaN : Number(r.profitYtd);
+          const profitKnown = Number.isFinite(profitRaw) && profitRaw !== -1;
+          const perDayRaw = r.incomePerDay === undefined || r.incomePerDay === null ? NaN : Number(r.incomePerDay);
+          const perDayKnown = Number.isFinite(perDayRaw);
+          const hasPair = Number.isFinite(Number(r.townA)) && Number.isFinite(Number(r.townB));
+          return {
+            key: String(job),
+            job,
+            endpoints: hasPair ? `#${num(r.townA)} → #${num(r.townB)}` : "—",
+            endpointsHint: hasPair ? undefined : "endpoints unknown (not in the route ledger)",
+            vehicles: U.fmtInt(vehicles),
+            waiting: U.fmtInt(waiting),
+            income: perDayKnown ? U.fmtMoney(perDayRaw) : "—",
+            incomeHint: perDayKnown
+              ? undefined
+              : vehicles === 0
+                ? "not measurable — no vehicles on this route"
+                : "not measurable yet — the year is too young to divide by",
+            profit: profitKnown ? U.fmtMoney(profitRaw) : "—",
+            profitHint: profitKnown ? undefined : "not readable (GS could not read it)",
+            /** 建好但没车：这是"已建未运营"状态，视觉上要能一眼分辨。 */
+            idle: vehicles === 0,
+            /* 排序用的原始数值（null = 无值）。模板不碰这些。 */
+            _job: job,
+            _vehicles: vehicles,
+            _waiting: waiting,
+            _income: perDayKnown ? perDayRaw : null,
+            _profit: profitKnown ? profitRaw : null,
+          };
+        });
+      },
+
+      /**
+       * 排好序的行。
+       *
+       * **null 永远排最后**，与升降序无关：`null` 不是"最小值"，它是"没有值"。
+       * 升序时把"不可测"排在榜首，会被读成"最差的线路排在前面"——那正好相反。
+       */
+      routesSorted() {
+        const field = { job: "_job", vehicles: "_vehicles", waiting: "_waiting", income: "_income", profit: "_profit" }[
+          this.routeSortKey
+        ];
+        const key = field || "_income";
+        const dir = this.routeSortDir === "asc" ? 1 : -1;
+        return this.routeRows()
+          .slice()
+          .sort((a, b) => {
+            const av = a[key];
+            const bv = b[key];
+            const an = av === null || av === undefined;
+            const bn = bv === null || bv === undefined;
+            if (an && bn) return a._job - b._job;
+            if (an) return 1;
+            if (bn) return -1;
+            if (av === bv) return a._job - b._job;
+            return (av < bv ? -1 : 1) * dir;
+          });
+      },
+
+      /** 点列表头：同一列反向，换列则用该列的默认方向。 */
+      sortRoutes(id) {
+        if (ROUTE_SORTABLE.indexOf(id) === -1) return;
+        if (this.routeSortKey === id) {
+          this.routeSortDir = this.routeSortDir === "desc" ? "asc" : "desc";
+          return;
+        }
+        this.routeSortKey = id;
+        this.routeSortDir = id === "job" ? "asc" : "desc";
+      },
+
+      /** 列头上的排序指示（空串 = 当前未按此列排序）。 */
+      routeSortMark(id) {
+        if (this.routeSortKey !== id) return "";
+        return this.routeSortDir === "desc" ? "▼" : "▲";
+      },
+
+      /** 列表头是否可点（`endpoints` 是文本，不排）。 */
+      routeColumnSortable(id) {
+        return ROUTE_SORTABLE.indexOf(id) !== -1;
+      },
+
+      /** 汇总条：几条线、几辆在跑、多少人在等。 */
+      /**
+       * **为什么没有进展**——暂停归因与停滞告警。
+       *
+       * 为什么需要（2026-09-23 真机事故）：一个长跑的最后一次决策就是 agent 自己的
+       * `set_pause`；游戏冻结、循环 5 小时没动。页面上只有 `paused` 两个字，owner 点
+       * Pause 时状态早已是 paused——**"谁让它停的、为什么不动了"完全无从判断**。
+       * 只报"停/跑"两种状态，等于把"agent 自己停的"和"人按的"混为一谈。
+       */
+      controlNote() {
+        const r = this.run || {};
+        const t = this.telemetry || {};
+        if (r.state === "paused") {
+          const by =
+            r.pausedBy === "agent"
+              ? "the agent itself (set_pause)"
+              : r.pausedBy === "dashboard"
+                ? "the dashboard"
+                : "unknown cause";
+          const ago = r.pausedAt ? ` · ${U.fmtAgo(r.pausedAt)} ago` : "";
+          return `Paused by ${by}${ago}. While the world is paused the decision loop cannot fire: no new game events, and game-day progress stalls, so no trigger can open.`;
+        }
+        if (r.state === "running" && this.stalled()) {
+          const ago = t.lastActivityAt ? U.fmtAgo(t.lastActivityAt) : "a while";
+          return `No decision for ${ago}, and the run is not stopped. The process is alive but nothing is progressing — treat this as stalled, not as "still working".`;
+        }
+        return "";
+      },
+
+      /**
+       * 运行中但长时间没有决策 = 停滞（不是"还在忙"）。
+       *
+       * 阈值取 10 分钟：正常间隔是游戏日尺度（月/季），10 分钟墙钟远超任何正常节奏。
+       * `nowMs` 可注入，便于单测（纯函数不给测试留后门就得靠等时间）。
+       */
+      stalled(nowMs) {
+        const t = this.telemetry || {};
+        const r = this.run || {};
+        if (r.state !== "running") return false;
+        const last = Number(t.lastActivityAt);
+        if (!Number.isFinite(last) || last <= 0) return false;
+        const now = Number.isFinite(nowMs) ? Number(nowMs) : Date.now();
+        return now - last > 10 * 60 * 1000;
+      },
+
+      routesSummary() {
+        const rows = this.routeRows();
+        return {
+          available: this.routesAvailable === true,
+          count: rows.length,
+          running: rows.filter((r) => !r.idle).length,
+          vehicles: rows.reduce((a, r) => a + r._vehicles, 0),
+          waiting: rows.reduce((a, r) => a + r._waiting, 0),
+        };
+      },
+
+      /**
+       * 这一块为什么是空的 / 为什么没有数据。
+       *
+       * `routesAvailable === false` **不是** "0 条线路"：watch 模式没有 GS 通道，
+       * 这个事实根本没有被采集。写成"0 routes"是在编造关于世界的事实。
+       */
+      routesNote() {
+        if (this.routesAvailable !== true) {
+          return "Route data unavailable — this run has no GS channel (observe-only mode), so routes are not collected.";
+        }
+        if (this.routeRows().length === 0) {
+          return "No routes yet — the agent has not built one in this game.";
+        }
+        return "";
+      },
+
+      /**
+       * 线路**类型**：今天只有一种建造工具（`build_bus_route`），所以每条线路都是公路。
+       *
+       * 这是**可推断的**事实，不是线路自带的字段——GS 目前不上报类型。所以如实标注，
+       * 而不是做一个看起来权威的 "Rail/Air" 列（那会是编造）。
+       */
+      routeTypeNote() {
+        return "road only — build_bus_route is the only route builder implemented (no rail/air yet)";
+      },
+
+      /* ----------------------------- drill-down ----------------------------- */
+
+      /** 卡片 → 详情载荷 id；`null` = 没有载荷，**不做成可点**（假按钮 = bug）。 */
+      kpiDrawer(kind) {
+        return { cash: 1, income: 1, fleet: 1, routes: 1 }[String(kind || "")] ? String(kind) : null;
+      },
+
+      /** 抽屉是否开着。 */
+      drawerOpen() {
+        return this.drawer !== null;
+      },
+
+      openDrawer(id) {
+        this.drawer = this.kpiDrawer(id);
+      },
+
+      closeDrawer() {
+        this.drawer = null;
+      },
+
+      drawerTitle() {
+        return {
+          fleet: "Fleet — which routes the vehicles are on",
+          cash: "Cash history",
+          income: "Income history",
+          routes: "Routes",
+        }[this.drawer] || "";
+      },
+
+      /** 抽屉是否渲染"线路表"分支（另一个分支是历史时间序列）。 */
+      drawerShowsRoutes() {
+        return this.drawer === "fleet" || this.drawer === "routes";
+      },
+
+      /** 抽屉里的线路行：Fleet 只看**有车**的线（"车都在哪"）。 */
+      drawerRouteRows() {
+        const rows = this.routesSorted();
+        return this.drawer === "fleet" ? rows.filter((r) => r._vehicles > 0) : rows;
+      },
+
+      /** 抽屉里的历史行（现金 / 收入）：最近 N 个采样点，最新在上。 */
+      drawerHistoryRows() {
+        if (this.drawerShowsRoutes() || this.drawer === null) return [];
+        const metric = this.drawer === "cash" ? "money" : "income";
+        const win = this.primaryHistory().slice(-30);
+        return win
+          .map((h, i) => {
+            const v = Number(h[metric]);
+            // 变化量取自**同一窗口内的前一个点**（窗口外的点不在表里，Δ 会指向看不见的行）。
+            const prev = i > 0 ? Number(win[i - 1][metric]) : NaN;
+            const delta = Number.isFinite(v) && Number.isFinite(prev) ? v - prev : null;
+            return {
+              key: `${h.at}-${i}`,
+              date: h.year == null ? "—" : `${h.year}-${String(h.month ?? 1).padStart(2, "0")}`,
+              value: Number.isFinite(v) ? U.fmtMoney(v) : "—",
+              delta: delta === null ? "" : (delta > 0 ? "+" : "") + U.fmtMoney(delta),
+              deltaCls: delta === null ? "dim" : delta > 0 ? "pos" : delta < 0 ? "neg" : "dim",
+              loan: U.fmtMoney(h.loan),
+            };
+          })
+          .reverse();
       },
 
       /** Agent steps, filtered by the segmented control. */
@@ -639,26 +991,17 @@
       },
 
       /**
-       * 图表高度：**跟随视口高度**，而不是写死一个像素。
+       * 图表高度：**固定常数**，与视口、宽度、内容都无关。
        *
-       * 为什么（用户实测："Result 图表子图过长（纵向）"）：写死 260px 在 720p 的窗口上
-       * 等于半屏，而图表本身没有那么多信息要展示。改成按视口高度取比例并夹在
-       * 160–260px 之间：矮窗口自动变矮、高窗口不超过 260。
-       *
-       * **刻意不按宽度算**：高度若依赖宽度，就会与"滚动条是否占宽度"形成闭环
-       *（宽度变→高度变→文档高变→滚动条状态变），看起来就是页面反复伸缩。
-       * 视口高度与滚动条无关，所以这条路是安全的。
+       * 为什么改成固定（2026-09-23，用户第三次报告"纵向反复伸缩"之后）：
+       * 曾经写成"取视口高度的 30%"，理由是"矮窗口别把图压扁"。但**图表高度一旦参与
+       * 任何按需计算，就多了一条反馈通道**：高度 → 文档高 → 滚动条 → 宽度 → 布局 → 高度。
+       * 用户的原话是"难道不应该是固定高度吗"——对，固定高度让这条通道**在结构上不存在**。
+       * 上限仍是 `preferred`（默认 260），只做夹取，不读环境。
        */
-      chartHeight(preferred, viewportH) {
-        // 视口高**作为参数**（不传才读真实浏览器）：这样它是纯函数、可单测，
-        // 也和本文件其余视图模型函数一样不依赖 DOM。
-        const vh = Number.isFinite(viewportH)
-          ? Number(viewportH)
-          : typeof window !== "undefined" && window.innerHeight
-            ? window.innerHeight
-            : 900;
-        const byViewport = Math.round(vh * 0.30); // 720p → 216(+图例) ≈ 视口 1/3，不再是半屏
-        return Math.max(160, Math.min(preferred || 260, byViewport));
+      chartHeight(preferred) {
+        const want = Number(preferred) || 260;
+        return Math.max(160, Math.min(260, want));
       },
 
       /**
@@ -751,6 +1094,7 @@
     CASH_METRICS: CASH_METRICS,
     TOKEN_METRICS: TOKEN_METRICS,
     TOKEN_SERIES: TOKEN_SERIES,
+    ROUTE_COLUMNS: ROUTE_COLUMNS,
     MAX_EVENTS_SHOWN: MAX_EVENTS_SHOWN,
     MAX_STEPS_SHOWN: MAX_STEPS_SHOWN,
   };

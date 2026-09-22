@@ -53,6 +53,22 @@ function uiStub() {
 	};
 }
 
+interface RouteRow {
+	_job: number;
+	_vehicles: number;
+	_waiting: number;
+	_income: number | null;
+	_profit: number | null;
+	idle: boolean;
+	income: string;
+	incomeHint?: string;
+	profit: string;
+	profitHint?: string;
+	endpoints: string;
+	endpointsHint?: string;
+	key: string;
+}
+
 interface LiveModel {
 	// state
 	companies: Record<string, unknown>;
@@ -73,6 +89,7 @@ interface LiveModel {
 	primaryCompany(): Record<string, unknown>;
 	primaryHistory(): Record<string, unknown>[];
 	sparkSeries(metric?: string): number[];
+	companyValueKnown(raw: unknown): boolean;
 	hasSpark(metric?: string): boolean;
 	sparkSpecs(): ({ data: number[] } | null)[];
 	resultKpis(): { k: string; v: string; hint?: string; spark?: string }[];
@@ -85,6 +102,18 @@ interface LiveModel {
 	visibleEvents(): { kind: string }[];
 	categoryChips(): { cat: string; label: string; n: number; off: boolean }[];
 	notice(): { show: boolean; kind: string; title: string; body: string; canStart: boolean };
+	routes: unknown[];
+	routesAvailable: boolean;
+	routeSortKey: "income" | "job" | "vehicles" | "waiting" | "profit";
+	routeSortDir: "asc" | "desc";
+	routeRows(): RouteRow[];
+	routesSorted(): RouteRow[];
+	routesSummary(): { available: boolean; count: number; running: number; vehicles: number; waiting: number };
+	routesNote(): string;
+	drawerShowsRoutes(): boolean;
+	drawerRouteRows(): RouteRow[];
+	controlNote(): string;
+	stalled(nowMs?: number): boolean;
 	nowSummary(): { state: string; brain: string; lastDecision: string; intent: string; action: string };
 	memory: unknown;
 	memoryInEffect(): {
@@ -104,7 +133,7 @@ interface LiveModel {
 	stageViewsShown(): { index?: number; image?: string; gameDate?: string; phase?: string }[];
 	stageViewsHiddenCount(): number;
 	/** 图表高度取自**视口高度**（不取自宽度——宽度会与滚动条形成闭环）。 */
-	chartHeight(preferred?: number, viewportH?: number): number;
+	chartHeight(preferred?: number): number;
 	// 时间线的默认上限（同一族：阶段总结随运行无限增长）
 	stagesLimit: number;
 	stagesExpanded: boolean;
@@ -238,14 +267,32 @@ describe("Live view model", () => {
 	});
 
 	describe("token composition (stacked bars)", () => {
-		it("splits each turn into input/output/reasoning/cache", () => {
+		it("splits each turn into input/output/cache（**全零序列从图例中剔除**）", () => {
+			// 2026-09-23：5.7h 长跑里 `reasoning` 恒为 0，但旧契约仍把它放进图例与堆叠，
+			// 占用空间且让真实序列难以分辨。新契约：series 若所有 turn 都为 0，就不出场。
 			const { model } = load();
 			model.telemetry = TELEMETRY;
 			model.tokenMetric = "total";
 			const items = model.tokenItems();
 			expect(items).toHaveLength(2);
-			expect(items[0]!.values).toEqual([1000, 20, 5, 0]);
+			// fixture 里 reasoning 列恒 0，应被剔除；剩下 [input, output, cache] 三个数值
+			expect(items[0]!.values).toEqual([1000, 20, 5]);
 			expect(items[0]!.label).toBe("T1");
+		});
+
+		it("**全零序列的剔除是可重放的**（2026-09-22 长跑 reasoning 恒 0）", () => {
+			const { model } = load();
+			model.telemetry = {
+				usage: {
+					byTurn: [
+						{ turn: 1, usage: { input: 100, output: 10, reasoning: 0, cacheRead: 0 } },
+						{ turn: 2, usage: { input: 200, output: 20, reasoning: 0, cacheRead: 0 } },
+					],
+				},
+			};
+			model.tokenMetric = "total";
+			const items = model.tokenItems();
+			expect(items[0]!.values).toEqual([100, 10]); // reasoning 0 + cache 0 → 两者都被剔除
 		});
 
 		it("switches to a single cost series when asked", () => {
@@ -968,31 +1015,134 @@ describe("时间线默认只渲染最新若干段", () => {
 });
 
 /**
- * `chartHeight`：高度取自**视口高度**，且有上下限。
+ * `chartHeight`：**固定高度**，与视口/宽度/内容无关。
  *
- * 用户实测"Result 图表子图过长（纵向）"：写死 260px 在 720p 窗口上等于半屏。
- * 关键约束是**不能取自宽度**——高度依赖宽度 + 滚动条占宽度 = 闭环振荡
- *（宽度变→高度变→文档高变→滚动条状态变）。这里把这条写进测试。
+ * 为什么改成固定（2026-09-23）：高度一旦参与按需计算，就多一条反馈通道
+ * （高度 → 文档高 → 滚动条 → 宽度 → 布局 → 高度）。用户的原话是
+ * "难道不应该是固定高度吗"——固定高度让这条通道在结构上不存在。
  */
-describe("chartHeight: 跟随视口高度", () => {
-	function h(preferred: number, viewportH: number): number {
-		return (load().model as unknown as { chartHeight(p?: number, v?: number): number }).chartHeight(
-			preferred,
-			viewportH,
-		);
-	}
+describe("chartHeight: 固定高度", () => {
+	const h = (p?: number) => (load().model as unknown as { chartHeight(p?: number): number }).chartHeight(p);
 
-	it("矮窗口变矮（720p 下 260 的请求被压到 245）", () => {
-		expect(h(260, 720)).toBe(216);
-		expect(h(260, 720)).toBeLessThan(260);
+	it("**不看视口**：同一个 preferred 在任何窗口下都返回同一个值", () => {
+		// 旧实现读 window.innerHeight：这条断言就是它的墓碑。
+		const values = new Set([h(260), h(260), h(260)]);
+		expect([...values]).toEqual([260]);
 	});
 
-	it("高窗口不超过请求值（不无限长）", () => {
-		expect(h(260, 2000)).toBe(260);
-		expect(h(220, 1200)).toBe(220);
+	it("上下限：不低于 160，不高于 260（无参默认 260）", () => {
+		expect(h(80)).toBe(160);
+		expect(h(600)).toBe(260);
+		expect(h(undefined)).toBe(260);
+		expect(h(220)).toBe(220);
+	});
+});
+describe("routeRows / routesSorted / routesNote（仪表盘线路面板）", () => {
+	const sampleRoutes = [
+		{ job: 103, vehicles: 0, waiting: 0, profitYtd: 0, incomePerDay: null, townA: 4, townB: 20 },
+		{ job: 100, vehicles: 6, waiting: 12, profitYtd: 3650, incomePerDay: 18.25, townA: 4, townB: 20 },
+		{ job: 101, vehicles: 4, waiting: 11, profitYtd: -1, incomePerDay: null, townA: 4, townB: 20 },
+		{ job: 999, vehicles: 3, waiting: 0, profitYtd: 200, incomePerDay: 10 },
+	];
+	function makeView() { return load().model; }
+
+	it("routeRows：没有车 → idle 标记 + 不可测的诚实说明", () => {
+		const v = makeView();
+		v.routes = sampleRoutes; v.routesAvailable = true;
+		const r = v.routeRows().find((x) => x._job === 103)!;
+		expect(r.idle).toBe(true);
+		expect(r.income).toBe("—");
+		expect(r.incomeHint).toMatch(/no vehicles/);
 	});
 
-	it("极小窗口也有下限（不能压成一条线）", () => {
-		expect(h(260, 300)).toBe(160);
+	it("routeRows：profitYtd = -1 → '—'，不编造亏损", () => {
+		const v = makeView();
+		v.routes = sampleRoutes; v.routesAvailable = true;
+		const r = v.routeRows().find((x) => x._job === 101)!;
+		expect(r.profit).toBe("—");
+		expect(r.profitHint).toMatch(/not readable/);
+	});
+
+	it("routeRows：账本未知的 job → 端点显示 '—'，且给一句说明（**不编造城镇对**）", () => {
+		const v = makeView();
+		v.routes = sampleRoutes; v.routesAvailable = true;
+		const r = v.routeRows().find((x) => x._job === 999)!;
+		expect(r.endpoints).toBe("—");
+		expect(r.endpointsHint).toMatch(/endpoints unknown/);
+	});
+
+	it("routesSorted：**`null` 永远排最后**（升序也排最后，不是最小值）", () => {
+		const v = makeView();
+		v.routes = sampleRoutes; v.routesAvailable = true;
+		v.routeSortKey = "income"; v.routeSortDir = "asc";
+		const jobs = v.routesSorted().map((r) => r._job);
+		expect(jobs.slice(-2).sort()).toEqual([101, 103]);
+		expect(jobs[0]).toBe(999);
+	});
+
+	it("routesNote：routesAvailable=false → 「不可得」提示，**不是**「0 条线路」", () => {
+		const v = makeView();
+		v.routes = []; v.routesAvailable = false;
+		expect(v.routesNote()).toMatch(/unavailable/);
+	});
+
+	it("routesNote：可得的空数据 → 「还没建线」，与不可得区分", () => {
+		const v = makeView();
+		v.routes = []; v.routesAvailable = true;
+		expect(v.routesNote()).toMatch(/No routes yet/);
+	});
+});
+
+describe("controlNote / stalled（页面要说出「为什么不动了」）", () => {
+	function makeView() { return load().model; }
+
+	it("pausedBy='agent' → 明确说 agent 自己（set_pause）", () => {
+		const v = makeView();
+		v.run = { state: "paused", pausedBy: "agent", pausedAt: Date.now() - 5 * 60 * 1000 };
+		expect(v.controlNote()).toMatch(/agent itself.*set_pause/i);
+	});
+
+	it("pausedBy='dashboard' → 明确说由仪表盘按钮", () => {
+		const v = makeView();
+		v.run = { state: "paused", pausedBy: "dashboard", pausedAt: Date.now() };
+		expect(v.controlNote()).toMatch(/the dashboard/);
+	});
+
+	it("running 但超过 10 分钟无决策 → 停滞告警", () => {
+		const v = makeView();
+		v.run = { state: "running" };
+		v.telemetry = { lastActivityAt: Date.now() - 20 * 60 * 1000 };
+		expect(v.stalled()).toBe(true);
+		expect(v.controlNote()).toMatch(/stalled/i);
+	});
+
+	it("running 且最近有决策 → 不告警", () => {
+		const v = makeView();
+		v.run = { state: "running" };
+		v.telemetry = { lastActivityAt: Date.now() - 30_000 };
+		expect(v.stalled()).toBe(false);
+		expect(v.controlNote()).toBe("");
+	});
+
+	it("paused → 停滞判定不应触发（paused 另有说明）", () => {
+		const v = makeView();
+		v.run = { state: "paused" };
+		v.telemetry = { lastActivityAt: Date.now() - 99 * 60 * 1000 };
+		expect(v.stalled()).toBe(false);
+	});
+});
+
+describe("companyValue 占位值", () => {
+	it("占位值 1 / 缺失 → 不显示数字", () => {
+		const v = load().model;
+		for (const raw of [1, 0, -5, undefined, null, Number.NaN]) {
+			expect(v.companyValueKnown(raw), `${raw} 应判为未知`).toBe(false);
+		}
+	});
+
+	it("真实价值 → 显示", () => {
+		const v = load().model;
+		expect(v.companyValueKnown(250_000)).toBe(true);
+		expect(v.companyValueKnown("1") === false, "字符串 \"1\" 同样是占位值").toBe(true);
 	});
 });

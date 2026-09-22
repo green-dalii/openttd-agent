@@ -21,6 +21,16 @@ export interface RunStatus {
 	sessionId: string | null;
 	startedAt: number | null;
 	error: string | null;
+	/**
+	 * 暂停的**来源**：`"dashboard"`（页面按钮）或 `"agent"`（agent 自己调用了 `set_pause`）。
+	 *
+	 * 为什么必须区分（2026-09-23 真实事故）：一个长跑在 **turn 90 被 agent 自己暂停**，
+	 * 之后 5 小时没有任何进展。页面上只显示 `paused`，owner 点 Pause 时状态早已是 paused，
+	 * 于是"为什么还在跑/停了"无从判断。**"谁让它停的"是一个独立事实**，必须显式呈现。
+	 */
+	pausedBy?: "dashboard" | "agent" | null;
+	/** 暂停发生的时刻（ms epoch）。 */
+	pausedAt?: number | null;
 }
 
 /** Controls a running run must expose to the supervisor. */
@@ -100,11 +110,14 @@ export class RunSupervisor {
 	}
 
 	/** Pause the game + the decision cadence. Idempotent. */
-	async pause(): Promise<void> {
+	async pause(by: "dashboard" | "agent" = "dashboard"): Promise<void> {
 		if (!this.canControl()) throw new Error("no run to pause");
-		if (this.cur.state === "paused") return;
+		if (this.cur.state === "paused") {
+			// 已经停了：**不要**改写来源——第一个让它停的人才是原因。
+			return;
+		}
 		this.hooks.pause?.();
-		this.set({ state: "paused" });
+		this.set({ state: "paused", pausedBy: by, pausedAt: Date.now() });
 	}
 
 	/** Resume. Idempotent. */
@@ -112,7 +125,7 @@ export class RunSupervisor {
 		if (!this.canControl()) throw new Error("no run to resume");
 		if (this.cur.state === "running") return;
 		this.hooks.resume?.();
-		this.set({ state: "running" });
+		this.set({ state: "running", pausedBy: null, pausedAt: null });
 	}
 
 	/** The run reports its session id once known (for the dashboard link). */

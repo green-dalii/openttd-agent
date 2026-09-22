@@ -271,7 +271,7 @@ fmtAgo(t)        → Intl.RelativeTimeFormat("en",{numeric:"auto"}).format(-5,"m
 ### 阶段 2：uPlot 替换 line/bars（成本 ~2 天，收益 ~420 行 + DPR/resize/十字光标/图例 的维护让出）
 - `scripts/sync-vendor.ts` 从 `node_modules/uplot` 同步 IIFE+CSS 到
   `src/web/public/assets/vendor/uplot/`
-- `tsconfig.frontend.json` 加 `vendor/uplot/uplot.d.ts`（手写，因为 dist 里的
+- `tsconfig.frontend.json` 加 `vendor/uplot/uPlot.d.ts`（手写，因为 dist 里的
   d.ts 是给 node 用的；或者 vendor 时转换）
 - `src/web/public/assets/js/charts.js` 删 line()/bars()/坐标轴/DPR/tooltip
   工具；保留 donut()/sparkline()/stageMap()
@@ -291,6 +291,12 @@ fmtAgo(t)        → Intl.RelativeTimeFormat("en",{numeric:"auto"}).format(-5,"m
   - `live-stages.js`（阶段视图）
 - 公共部分（state、connectWs）抽到 `live-state.js`
 - 用现有 `live-run-controls.test.ts` 验证拆完后行为不变
+
+> **实际结局（2026-09-22 补）**：没有按上面 4 个文件拆，而是拆成 **`live.js`（IO/Alpine 装配）
+> + `live-view.js`（纯视图模型）**——理由是"业务规则"要能被单测（`test/unit/live-view.test.ts`），
+> 而 Alpine 指令的渲染只能靠真实浏览器验证（`AGENTS.md` §5.2）。
+> 上面列出的 `live-telemetry.js` / `live-events.js` / `live-stages.js` / `live-state.js`
+> **从未创建**；本节是当时的设计提案，不是现状。
 
 ## 5. 不建议的项（说清楚为什么）
 

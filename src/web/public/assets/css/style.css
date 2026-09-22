@@ -201,6 +201,15 @@ html { overflow-anchor: none; }
  * 而真实浏览器在"始终显示滚动条"或旧版 macOS 设置下会占宽度。
  * `scrollbar-gutter: stable` 让宽度永不抖动，`overflow-y: scroll` 是老浏览器的兜底。 */
 html { scrollbar-gutter: stable; overflow-y: scroll; }
+/* "为什么没有进展"的提示条（暂停归因 / 停滞告警）。 */
+.now-note { display: flex; gap: var(--sp-2); align-items: flex-start; margin: var(--sp-3) var(--sp-4) 0;
+  padding: 9px 12px; border-radius: var(--r-sm); background: var(--panel-2);
+  border: 1px solid var(--line-strong); border-left: 3px solid var(--warn); font-size: 12.5px;
+  line-height: 1.5; color: var(--ink-dim); }
+.now-note-tag { flex: none; font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em;
+  padding: 2px 6px; border-radius: var(--r-sm); background: #3a3220; color: var(--warn); }
+.now-note-tag.danger { background: #3a2020; color: #e06c75; }
+
 /* 空状态：**说清楚"还没有数据"**，而不是一块没有轴的空盒子（那看起来像坏了）。 */
 .chart-empty { margin: 0; height: 100%; display: flex; align-items: center; justify-content: center;
   color: var(--muted); font-size: 12.5px; }
@@ -208,7 +217,7 @@ html { scrollbar-gutter: stable; overflow-y: scroll; }
 /* 图表宿主的高度由 `ucharts.js` 按**调用方给的 height** 预留（见那里的 min-height），
  *  CSS 里不再写第二遍——两份高度必然会在某次改动后不一致。 */
 
-/* uPlot 的图例是 `<table>`（见 vendor/uplot/uplot.min.css 的 `.u-inline tr`），
+/* uPlot 的图例是 `<table>`（见 vendor/uplot/uPlot.min.css 的 `.u-inline tr`），
  * **不是 flex 容器**——上一轮我写的 `flex-wrap: nowrap` 对它完全无效（好在无害）。
  * 真正让"图例换行改变宿主高度"不可能发生的，是 ucharts.js 里给宿主**预留一行图例高度**
  * （LEGEND_RESERVE_PX）。这里只让单元格内的文字不换行，视觉上保持一行。 */

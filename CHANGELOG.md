@@ -40,6 +40,142 @@
   判定优先用它、**两臂同源**（`ArmComparison.deliveredSource`），旧行回落原始值并标注为不可比。
 - 澄清 `rc=1` 的含义（=施工未达成 DONE，不是崩溃）并在输出中明示。
 
+### Changed（文档大清理：SPEC 4035 → 634 行；职责归位，错误信息纠正，2026-09-23）
+
+用户质询：「所有文档都如此膨胀（SPEC 塞了几千行），有没有做正交性检查、内容修订、清除冗余/过时/错误信息？」
+先做**只读审计**（48 条发现、每条带两侧定位）再动手。结论是膨胀有**三个机械成因**：
+
+1. **SPEC 承担了变更日志的职责**：§10 占 3639 行 = 全文件 90%，其中逐轮实验叙事 3101 行，
+   与 `CHANGELOG.md` 的重合短语 179 条；
+2. **SPEC 同时承担了 MEMORY 的职责**：与 `MEMORY.md` 重合 120 条；
+3. **已失效的证据指针**：`SPEC.md` 69 处 + `ROADMAP.md` 41 处 `/tmp/...`。
+
+**做法不是"去重"，而是按职责搬迁**（逐字相同的其实只有 11 组，7 组是 README 的语言镜像，合法）：
+
+- **`SPEC.md` 4035 → 634 行（−84%）**：§10 从 3780 行压到 330 行。
+  **编号全部保留**（外部文档有 123 处 `§10.x` 指针，71 个不同编号），
+  但每节只留「今天仍为真的事实」+ 依据（代码/测试/上游源码），过程叙事指向 CHANGELOG/MEMORY。
+- **纠正 6 处**会误导下一个 session 的**错误事实**：
+  · §4.1 说工具集是 **6 个**且 `reflection` **未实现** → 实为 **9 个**、reflection 早已实现（§10.77/§10.78）；
+  · §4.3 的 `add_vehicles` → 实际是 **`set_route_vehicles`**（且语义是"应有 N 辆"）；
+  · §4.1 声称 `AgentHarness` 支持"一局 = 一个 session 分支" → `grep -rn AgentHarness src/` = **0**；
+  · §3.3 目录树列了 4 个**不存在**的文件 → 删除副本，指向 `CONTRIBUTING.md` §3（目录树唯一事实源）；
+  · §1.2/§2.5 的 `commands.nut` 是**别人项目**的文件名（本仓库没有）→ 加注说明，避免下次被"修掉"；
+  · `uplot.d.ts` / `uplot.min.css` 大小写错（Linux/CI 会失效）→ 改为 `uPlot.*`。
+- **删除** `CHANGELOG.md` 里第二个（过时的）`## [Unreleased]` 规划块——它给早已发版的 v0.1–v0.4
+  写着"规划中"，且与 `ROADMAP.md` 重复。
+- **`docs/FRONTEND-DEPENDENCIES-AUDIT.md`**：阶段 4 是**提案**却读起来像现状（4 个从未创建的文件名）
+  → 补记实际结局（拆成 `live.js` + `live-view.js`）。
+- **`ROADMAP.md`**：把已消失的 `/tmp/s0-v*` 从"仍可查"清单里去掉，并注明 `/tmp` 是临时证据目录。
+- **新增 `AGENTS.md` §5.2-6**：症状是"变化/闪烁/往复"时**断言必须是时间序列**，
+  且探针必须复现用户的 **`devicePixelRatio`**（Retina=2）——见同日"图表纵向爆炸"条目。
+
+**文档职责的单一权威仍是 `AGENTS.md` §9**；本次只是让它第一次真的成立。
+
+### Changed（**Dashboard 全面重构**：线路面板 + 暂停归因 + 图表交互，2026-09-23）
+
+用户的 5 个要求逐项落地为代码 + 测试：
+
+1. **板块按语义整合**：仪表盘改成 6 个问题驱动的分区（Run / Result / Routes / Cash history /
+   Cost / Agent activity），KPI 卡片宽度统一；不会再出现"卡片只占部分宽度却占整行"的割裂。
+2. **线路信息从零到齐**：快照新增 `routes[]` 与 `routesAvailable`（前后端 6 条新测试），
+   仪表盘显示**逐线路**事实表（端点 / 车辆 / 等待 / 每日收益 / 年累计利润）—— 可点列头排序、null 永远排最后、
+   没有车时 idle 标记。「没有车 ≠ 不赚钱」「profitYtd=-1 ≠ 亏损」「不可用 ≠ 0 条线路」**三种
+   容易混的状态现在各有明显字号或区分**。
+3. **图表可交互 + 配色区分**：`uPlot` 启用 `drag.x`（拖拽缩放）+ 双击 / "reset zoom" 重置；
+   全零值系列从图例与堆叠中剔除（5.7h 长跑里 `reasoning` 恒为 0 占图例的旧契约作废）；
+   配色上 Input / Output / Cache read / Reasoning 用最大色距，Input 与 Cache read 之前两个蓝/青
+   现在肉眼可分。
+4. **点卡片下钻**：Cash / Income / Fleet 卡片带 "details" 入口；**没载荷的卡片不做成可点击**
+   （假按钮比没按钮更糟）。
+5. **诚实性贯穿全程**：所有空态都说清原因，"不可用"≠"零"，`null` ≠ `0`，`-1` ≠ 亏损。
+
+用 4 个守卫断言钉住这些契约（其中一道重放证明非空守卫：改回旧措辞 → 立刻挂）。
+
+### Fixed（**Pause 真接线了，但投递不可观测**：失败也是事实）
+
+你问："是不是没接线？"—— 验证一下：
+- `/api/run` → `state: paused`、页面已变 `Resume`、`LAST DECISION: 5 hours ago`、游戏日期/事件数冻结 ✓
+  **控制是通的**。
+- 但**真因**是：agent 的最后一次决策（turn 90）**自己调了** `set_pause`，游戏从此冻结、
+  循环再没跑过。你点 Pause 时状态**早已是** paused，所以看不出"为什么"。
+- 还有一个**真缺陷**（之前漏的）：Pause 是 `try { client?.rcon("pause") } catch {}` —— 不 await、
+  空 catch 不能抓异步失败——**投递是否成功都没记录**。已修：用 `rconAwait` 等到回执再 print（专用服务器首次
+  `pause` 无回显是正常的，由源码 `console_cmds.cpp` 证实：`if (!_networking)` 才会打印）。
+- **暂停归因**：`pausedBy: "dashboard"|"agent"` + `pausedAt`，**第一个让它停的人才是原因**（后到不覆盖）；
+  agent 通过 `onPauseChanged` 回调上报；快照新增 `control` 字段。
+- **页面显示归因 + 陈旧告警**：
+  - `Paused by the agent itself (set_pause) · 5 hours ago. While the world is paused the decision loop cannot fire.`
+  - running 但 10 分钟无决策 → "No decision for X. 视为停滞而不是还在忙"。
+
+新增测试：`set_pause` 的投递/效果分述（2 条 + 重放证明）、`pausedBy` 不被覆盖（4 条）、
+`sendControlCommand`（5 条）。
+
+### Added（**长跑实测**：5.7 小时 / 90 决策 / 3.26M tokens）
+
+在同一局上量到的事实都已记录到 `SPEC.md` §10.96（保留**与 §2–§5 不重复**的系统事实）+ `MEMORY.md` D52。
+其中三项**改变后续结论**：
+- **agent 用 `set_pause` 能亲手结束自己的 episode**——必须让"谁让它停的"成为可查事实。
+- **写工具只报请求会诱发空转**：线路 100 被调车队 32 次，同一线路被重复退役 5–7 次——
+  与 D39/D40（动作执行了、汇报丢了）是同一类病的两个方向。
+- **长跑上下文增长 ~4×**：峰值请求 24,624 tokens（turn 38），**短跑结论不可外推**（G6 的"不需要上下文压缩"
+  是 60 游戏日上量的）。
+
+### Fixed（**图表纵向爆炸的真正根因**：sparkline 每帧把高度乘以 `devicePixelRatio`，2026-09-23）
+
+用户第四次报告同一现象："Result 栏五个图表规律的从很小的高度骤然爆炸到几千像素，然后又恢复，
+如此往复。"**前三次的判断全部不成立**——它们描述的都是 uPlot 侧的问题，而爆炸发生在**KPI 迷你图**上：
+
+```js
+// 修复前（charts.js）
+function fit(canvas, optH) {
+  const cssH = Math.max(1, Math.round(optH || Number(canvas.getAttribute("height")) || 26));
+  canvas.height = Math.round(cssH * dpr);   // ← backing store（属性 = cssH × dpr）
+  canvas.style.height = cssH + "px";        // ← 布局高度
+}
+// 调用方没传高度 → 回读**自己刚写进去的**属性：
+// 26 → 52 → 104 → 208 → … 每帧翻倍；元素重建时复位，于是"往复"
+```
+
+- **为什么四轮都测不出来**：所有 headless 探针都跑在 **dpr=1**，增益恰好为 1 → 高度恒定 26px →
+  每次都"验证通过"。用户机器是 **Retina（dpr=2）**，增益 2 → 指数增长。
+  **探针没有复现用户的条件，就等于没验证**（MEMORY D48）；这次缺失的条件不是窗口大小或数据量，
+  而是**设备像素比**。
+- **为什么"看图"也漏了**：截图同样是在 dpr=1 的浏览器里采的；而且**缺陷是随时间振荡的**，
+  而我每轮采的都是**单帧**——单帧断言对振荡天然免疫。
+
+**修法（结构性，不只是"这次对了"）**：
+
+1. **尺寸只从样式/布局来**：新增 `cssBoxHeight`/`cssBoxWidth`，**永不回读 `width`/`height` 属性**；
+   同一个错误在 `stageMap` 里也有，一并消除。
+2. **迷你图高度是设计常数**（`SPARK_H = 26`，与 `style.css` 的 `canvas.kpi-spark` 一致，
+   有守卫断言两者相等）。
+3. **图表高度改为固定值**（用户："难道不应该是固定高度吗"）：删掉"取视口 30%"的
+   `onViewportResize` 与 resize 监听——高度一旦参与按需计算，就多一条
+   高度→文档高→滚动条→宽度→布局→高度的反馈通道。固定高度让这条通道**在结构上不存在**。
+4. **冒烟检查升级为"dpr=2 + 时间序列"**（`pnpm run dashboard:smoke`）：
+   `Emulation.setDeviceMetricsOverride({deviceScaleFactor: 2})` 复现 Retina，并在 10 秒内采样 20 次，
+   断言迷你图高度**极差 ≤ 1px 且 ≤ 60px**、图表宿主高度极差 ≤ 4px。
+   **重放证明它不是空守卫**：在真机（dpr=2）页面上注入旧逻辑，同一画布得到
+   `52 → 104 → 208 → 416 → 832 → 1664`，该断言必然失败。
+
+真机验收（对局运行中、dpr=2、20 次采样 / 10 秒）：迷你图 **26px 恒定（极差 0）**、
+图表宿主 **294 / 254px 恒定（极差 0）**、KPI 卡片极差 0、文档高度极差 0、控制台 0 条。
+
+### Fixed（"Company value £1"：仪表盘在说谎，2026-09-23）
+
+顺着同一张截图发现：`Company value` 长期显示 **£1**（同期现金 £226k、贷款 £300k）。
+根因是协议语义——`ServerCompanyEconomy` **只发 `old_economy[]`**（两个历史财政年度），
+**不发当前公司价值**；而在**第一个财年结束之前**，`old_economy[0]` 是 OpenTTD 的初始占位值 **1**。
+所以那不是"当前公司价值"，把它当当前值显示就是**把占位值当事实**。
+改为：标签写成 `Value (last yr)`，占位/缺失时显示 `—` 并注明
+"not reported until the first year ends"（公司卡片同理）。
+
+> 本节**取代**同一天早先三段关于图表/页面伸缩的结论（`width=0` 构造、`LEGEND_RESERVE_PX`
+> 未声明、宽度→高度闭环、高度取自视口）。其中**独立成立的真缺陷**保留：构造时必须给宽度、
+> 空状态要有退场、轴宽按标签测量、快照必须正方形；但**它们都不是"纵向爆炸"的原因**，
+> 当时的"真凶"表述已被本节推翻。
+
 ### Fixed（图表：标签被裁 / 空盒子 / 幽灵占位；快照：标记与地图错位，2026-09-22）
 
 用户复查："图表内容、比例错乱"。**逐条用真实浏览器看图定位**（截图 = 用户唯一能看到的东西）：
@@ -1196,14 +1332,6 @@ uPlot DOM**、宿主高度在 **140–420px**、宽度 ≥ 120px；不满足即�
 ### Verified (真机)
 - `rcon start_ai "CPU"` → company_new → company_info(isAi) → company_economy(poll 即时返回, money=100000 loan=100000)
 - `--watch` 端到端: dashboard HTTP 200; WS snapshot + 增量 economy/date 事件（seq 单调递增）; SIGINT 优雅关闭无残留
-
-## [Unreleased]
-
-### 规划中 (见 ROADMAP.md)
-- v0.1.0: 观测闭环（Web 仪表盘 + GS rich state）
-- v0.2.0: 最小决策闭环（Executor AI + Pi Agent）
-- v0.3.0: 进化闭环（lessons/策略库/metrics）
-- v0.4.0: 打磨与广度
 
 ## [0.0.1] - 2026-09-07
 

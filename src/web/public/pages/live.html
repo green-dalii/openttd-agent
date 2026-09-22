@@ -12,15 +12,26 @@
 <!--
   Live page — information architecture, ordered by the question the user asks.
 
-  第一性原理（docs/DASHBOARD-UI.md §5.1）: 页面必须按**用户实际会问的顺序**回答：
-    ① Now       它在做什么？（还活着吗、在想什么、卡住了吗）
-    ② Result    公司赢了吗？（结果）
-    ③ Progress  它做成了什么？（唯一的视觉证据：阶段性总结 + 画面）
-    ④ Thinking  它真的在推理吗？（智能的证据）
-    ⑤ Cost      花了多少？（成本，不是结果）
-    ⑥ Detail    原始日志（调试用，默认收起）
-  旧版把「Agent 域」与「Economy 域」分成两块，于是"在赚钱吗"和"花了多少 token"
-  混在同一条 KPI 里，而唯一能判断智能的步骤流被埋在中间，阶段图在页面最底部。
+  第一性原理（docs/DASHBOARD-UI.md §9）: 页面 = **六个问题**，每节只回答一个；
+  节里的每张卡片都是**回答那个问题的一个事实**。同一节里的卡片等宽——
+  卡片的宽度表达的是"它是同类事实"，不是"它有多重要"。
+
+    ① Run            它在跑吗？（run 状态、脑是真是假、最近活动、当前意图）
+    ② Result         公司赢了吗？（现金/收入/价值/贷款/车队/车站 —— 不含成本）
+    ③ Routes         它建了什么？（线路清单：车辆、等待、收益；**可下钻**）
+    ④ Progress       它做成了什么？（阶段总结 + 阶段画面）
+    ⑤ Cost           它花了多少？（token/成本，与 Result 严格分开）
+    ⑥ Agent activity 它真的在推理吗？（动作面、注入的记忆、步骤、思考）
+    ⑦ Detail         原始日志（调试用，默认收起）
+
+  2026-09-23 的两次改版动机（用户实测反馈）：
+  ① 版面破碎：`repeat(auto-fit, …)` 让最后一行剩下的卡片**撑满整行**，
+     而内容只有一小块 → 看着像布局坏了。现在每节用**固定列数**（`--cols`）。
+  ② 信息不全：GS 一直在上报逐线路读数，**却从没发到页面** —— 于是"有几条线、每条线
+     几辆车、多少人在等、赚不赚钱"全部不可见。现在有 Routes 节，且与后端
+     `snapshot.routes` 一一对应。
+  ③ 图表不可交互：uPlot 的拖拽缩放没有复位退路 → 现在带"reset zoom"（见 ucharts.js）。
+  ④ 卡片不可展开：KPI 是结论，结论后面要有明细 → 点卡片打开抽屉（无载荷的卡片不可点）。
 
   呈现层由 Alpine.js 声明式驱动；所有判断都在 live-view.js 的可测纯函数里。
 -->
@@ -72,9 +83,12 @@
       </div>
     </section>
 
-    <!-- ============================ ① NOW ============================ -->
-    <div class="group"><h2>Now</h2><div class="rule"></div>
-      <span class="dim">what the agent is doing right now</span></div>
+    <!-- ============================= ① RUN =============================
+         "它在跑吗"：脑是真是假、最近一次活动、当前意图、上一动作。
+         Memory in effect 与 Action surface 属"这一局被给了什么 / 能做什么"，
+         放在 ⑥ Agent activity（那里的问题是"它真的在推理吗"）。 -->
+    <div class="group"><h2>Run</h2><div class="rule"></div>
+      <span class="dim">is it running, and what is it doing right now</span></div>
     <section class="panel">
       <div class="now-grid">
         <div class="now-cell">
@@ -94,74 +108,34 @@
           <span class="now-v" x-text="latestPhase()"></span>
         </div>
       </div>
+
+      <!-- 为什么没有进展：暂停归因 / 停滞告警（2026-09-23 事故）。
+           没有这句话时，页面在"agent 自己暂停了游戏"与"循环死了"两种情况下
+           都只显示 paused，owner 无从判断。 -->
+      <div class="now-note" x-show="controlNote()" x-cloak>
+        <span class="now-note-tag" :class="(run && run.state === 'paused') ? 'warn' : 'danger'">attention</span>
+        <span x-text="controlNote()"></span>
+      </div>
       <div class="now-intent">
         <h3>Current intent</h3>
         <p class="now-text" x-text="nowSummary().intent"></p>
         <h3>Last action</h3>
         <p class="now-text" x-text="nowSummary().action"></p>
       </div>
-      <!-- What this game was TOLD. Kept on the Live page (not just the Evolution
-           page) because it is per-game context: without it, the agent's decisions
-           are not explainable, and `lessonsInjected: 1` in the ledger is an
-           unverifiable count. -->
-      <!-- Shown whenever the server has told us what this game was given, INCLUDING
-           the zero case: "nothing" is the control arm of the experiment and is a
-           statement worth reading, not a blank. Hidden only before any snapshot
-           arrives (no game context yet). -->
-      <div class="now-intent memory-note" x-show="memory !== null">
-        <h3>Memory in effect <span class="dim">跨局记忆注入</span></h3>
-        <p class="now-text" x-text="memoryInEffect().summary"></p>
-        <ul class="mem-list">
-          <template x-for="l in memoryLessons()" :key="l.text">
-            <li>
-              <!-- R2: 徽标从 do/avoid（那是指令）换成**实测读数**。
-                   绑定一个不存在的属性会渲染空白且零报错——见下面的交叉守卫测试。 -->
-              <span class="mem-kind" x-text="l.outcome"></span>
-              <span x-text="l.text"></span>
-            </li>
-          </template>
-          <template x-for="s in memoryStrategies()" :key="s.label">
-            <li class="mem-strat"><span class="mem-kind">worked</span><span x-text="s.label"></span></li>
-          </template>
-        </ul>
-      </div>
     </section>
 
-    <!-- Action surface (AB-1 dashboard mirror).
-         目的：让运营者一眼看到 agent 当前能做什么、有几个会改游戏状态、几个有门控。
-         数据来自 /api/capabilities（来自 tools/catalog.ts 的 actionCatalog()）。
-         服务端不提供 capabilities hook 时整块隐藏；列表为空时也隐藏——一句话：
-         "不知道" 比 "说没有" 更诚实。
-    -->
-    <section class="panel" id="action-surface" x-show="actionSurface()" x-cloak>
-      <div class="panel-head">
-        <h2>Action surface <span class="dim">agent 能做的动作</span></h2>
-        <span class="dim" x-text="actionSurface() ? actionSurface().summary : ''"></span>
-      </div>
-      <ul class="acts">
-        <!-- `actionRows()` 而不是 `actionSurface().actions`：后者在目录加载前是 null 解引用，
-             会每次页面加载都抛 Alpine 表达式错误（真实浏览器 CDP 探针抓到，见 test/unit/alpine-templates.test.ts 的 x-for 守卫）。 -->
-        <template x-for="a in actionRows()" :key="a.key">
-          <li class="act-row">
-            <span class="act-name" x-text="a.name"></span>
-            <span class="tag" :class="a.badgeClass" x-text="a.effectLabel"></span>
-            <template x-if="a.gateKey">
-              <span class="act-gate">
-                <span class="tag tag-gate" x-text="a.gateKey"></span>
-                <span class="act-why" x-text="a.gateReason"></span>
-              </span>
-            </template>
-          </li>
-        </template>
-      </ul>
-    </section>
-
-    <!-- ========================== ② RESULT ========================== -->
+    <!-- =========================== ② RESULT ===========================
+         "公司赢了吗"：结果口径，**严格不含成本**（成本在 ⑤）。
+         可下钻的卡片带 `.clickable` 与键盘可达（Enter/Space）——没有载荷的卡片不做成可点。 -->
     <div class="group"><h2>Result</h2><div class="rule"></div>
       <span class="dim">is the company winning — outcome, not cost</span></div>
-    <section class="kpis" x-ref="kpiBox" x-effect="drawSparks()">
+    <section class="kpis cols-6" x-ref="kpiBox" x-effect="drawSparks()">
       <template x-for="k in resultKpis()" :key="k.k">
-        <div class="kpi">
+        <div class="kpi" :class="k.drawerId ? 'clickable' : ''"
+             :role="k.drawerId ? 'button' : null" :tabindex="k.drawerId ? 0 : null"
+             @click="k.drawerId ? openDrawer(k.drawerId) : null"
+             @keydown.enter="k.drawerId ? openDrawer(k.drawerId) : null"
+             @keydown.space.prevent="k.drawerId ? openDrawer(k.drawerId) : null">
           <div class="kpi-k" x-text="k.k"></div>
           <div class="kpi-v" x-text="k.v"></div>
           <div class="kpi-hint" x-show="k.hint" x-text="k.hint"></div>
@@ -172,6 +146,7 @@
                aligned to resultKpis()). No x-ref here: a ref inside x-for only
                keeps the last element, so it cannot address each canvas. -->
           <canvas class="kpi-spark" x-show="hasHistory(k.spark)" :data-metric="k.spark"></canvas>
+          <span class="kpi-more" x-show="k.drawerId" x-text="'details ▸'"></span>
         </div>
       </template>
     </section>
@@ -183,9 +158,12 @@
       <!-- A <div>, never a <canvas>: uPlot injects its chart as DOM children, and
            a canvas host would make them fallback content nobody renders. -->
       <div class="chart-box"><div id="chart" x-ref="cashChart" x-effect="drawCash()"></div></div>
-      <div class="legend"><span class="lg dim" x-text="'showing ' + cashMetric"></span></div>
+      <div class="legend">
+        <span class="lg dim" x-text="'showing ' + cashMetric"></span>
+        <span class="lg dim">drag to zoom on the time axis · double-click or “reset zoom” to go back</span>
+      </div>
     </section>
-    <section class="kpis" x-show="!companiesEmpty()">
+    <section class="kpis cols-4" x-show="!companiesEmpty()">
       <template x-for="c in companyCards()" :key="c.id">
         <div class="kpi">
           <div class="kpi-k ccard-head">
@@ -202,7 +180,75 @@
       <p class="empty">No company yet — the observer starts an AI and watches its economy.</p>
     </section>
 
-    <!-- ========================= ③ PROGRESS ========================= -->
+    <!-- =========================== ③ ROUTES ===========================
+         "它建了什么"。数据和后端 `snapshot.routes` 一一对应（GS 读数 × 路线账本）。
+         三条诚实规则（live-view.js routeRows 的注释）：incomePerDay=null 不是 0；
+         profitYtd=-1 显示 —；账本不知道 job 时两端显示 —（不猜城镇）。 -->
+    <div class="group"><h2>Routes</h2><div class="rule"></div>
+      <span class="dim">what it has built — and how each line is doing</span></div>
+    <section class="kpis cols-4">
+      <div class="kpi">
+        <div class="kpi-k">Routes</div>
+        <div class="kpi-v" x-text="$fmt.int(routesSummary().count)"></div>
+        <div class="kpi-hint" x-text="routesSummary().running + ' running · ' + (routesSummary().count - routesSummary().running) + ' built but idle'"></div>
+      </div>
+      <div class="kpi clickable" role="button" tabindex="0" @click="openDrawer('fleet')"
+           @keydown.enter="openDrawer('fleet')" @keydown.space.prevent="openDrawer('fleet')">
+        <div class="kpi-k">Vehicles on routes</div>
+        <div class="kpi-v" x-text="$fmt.int(routesSummary().vehicles)"></div>
+        <div class="kpi-hint">from the GS route readout</div>
+        <span class="kpi-more">details ▸</span>
+      </div>
+      <div class="kpi">
+        <div class="kpi-k">Waiting passengers</div>
+        <div class="kpi-v" x-text="$fmt.int(routesSummary().waiting)"></div>
+        <div class="kpi-hint">at both ends of every line</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-k">Type</div>
+        <div class="kpi-v">road</div>
+        <div class="kpi-hint" x-text="routeTypeNote()"></div>
+      </div>
+    </section>
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Route detail</h2>
+        <span class="dim">click a column to sort · — means “not measurable”, not “zero”</span>
+      </div>
+      <p class="empty" x-show="routesNote()" x-text="routesNote()"></p>
+      <div class="scroll-y" x-show="!routesNote()">
+        <table class="routes">
+          <thead>
+            <tr>
+              <template x-for="col in routeColumns" :key="col.id">
+                <th :class="col.align + (routeColumnSortable(col.id) ? ' sortable' : '')"
+                    @click="routeColumnSortable(col.id) ? sortRoutes(col.id) : null">
+                  <span x-text="col.label"></span>
+                  <span class="sort-mark" x-text="routeSortMark(col.id)"></span>
+                </th>
+              </template>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="r in routesSorted()" :key="r.key">
+              <tr :class="r.idle ? 'route-idle' : ''">
+                <td x-text="'#' + r.job"></td>
+                <td x-text="r.endpoints" :title="r.endpointsHint || ''"></td>
+                <td class="num" x-text="r.vehicles"></td>
+                <td class="num" x-text="r.waiting"></td>
+                <td class="num" :class="r.incomeHint ? 'dim' : ''" :title="r.incomeHint || 'income per game day (year to date ÷ days)'"
+                    x-text="r.income"></td>
+                <td class="num" :class="r.profitHint ? 'dim' : ''" :title="r.profitHint || 'profit since the game year began'"
+                    x-text="r.profit"></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+      <p class="hint" x-show="!routesNote()">Idle rows are built but have no vehicles on them yet.</p>
+    </section>
+
+    <!-- ========================== ④ PROGRESS ========================== -->
     <div class="group"><h2>Progress</h2><div class="rule"></div>
       <span class="dim">what it has actually accomplished</span></div>
     <section class="grid two">
@@ -271,9 +317,9 @@
                会把页面撑到不可读。这里是"默认视图"，不是删数据：展开即全给。 -->
           <div class="snap-more" x-show="stageViewsHiddenCount() > 0 || stageViewsExpanded">
             <button type="button" class="btn" @click="stageViewsExpanded = !stageViewsExpanded"
-                    x-text="stageViewsExpanded
-                      ? '收起（只看最新 ' + stageViewsLimit + ' 张）'
-                      : '展开其余 ' + stageViewsHiddenCount() + ' 张'"></button>
+                  x-text="stageViewsExpanded
+                    ? '收起（只看最新 ' + stageViewsLimit + ' 张）'
+                    : '展开其余 ' + stageViewsHiddenCount() + ' 张'"></button>
             <span class="dim" x-text="stageViews.length + ' captured'"></span>
           </div>
           <div class="snap-legend">
@@ -294,9 +340,136 @@
       </div>
     </section>
 
-    <!-- ========================= ④ THINKING ========================= -->
-    <div class="group"><h2>Thinking</h2><div class="rule"></div>
-      <span class="dim">the evidence that it is reasoning, not just acting</span></div>
+    <!-- ============================ ⑤ COST ============================ -->
+    <div class="group"><h2>Cost</h2><div class="rule"></div>
+      <span class="dim">what this run is spending — not the outcome</span></div>
+    <section class="kpis cols-3">
+      <template x-for="k in costKpis()" :key="k.k">
+        <div class="kpi">
+          <div class="kpi-k" x-text="k.k"></div>
+          <div class="kpi-v" x-text="k.v"></div>
+          <div class="kpi-hint" x-show="k.hint" x-text="k.hint"></div>
+        </div>
+      </template>
+    </section>
+    <section class="grid split-21">
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Token usage</h2>
+          <div class="actions">
+            <div x-ref="tokenMetric"></div>
+            <span class="dim" x-text="tokenSummary()"></span>
+          </div>
+        </div>
+        <div class="chart-box"><div id="t-chart" x-ref="tokenChart" x-effect="drawTokens()"></div></div>
+        <!-- 零值系列不进图，但**必须说明**：静默隐藏会被读成"这个指标不存在"。 -->
+        <div class="legend">
+          <span class="lg dim" x-text="tokenHiddenNote()"></span>
+          <span class="lg dim">drag to zoom · double-click / “reset zoom” to go back</span>
+        </div>
+        <h3>Per-turn detail</h3>
+        <div class="scroll-y">
+          <table class="kv">
+            <tr><th>Turn</th><th class="num">In</th><th class="num">Out</th><th class="num">Reason</th>
+              <th class="num">Cache</th><th class="num">Total</th><th class="num">Cost</th><th class="num">Steps</th></tr>
+            <template x-for="r in turnRows()" :key="r.turn">
+              <tr><td x-text="r.turn"></td><td class="num" x-text="r.input"></td><td class="num" x-text="r.output"></td>
+                <td class="num" x-text="r.reasoning"></td><td class="num" x-text="r.cache"></td>
+                <td class="num" x-text="r.total"></td><td class="num" x-text="r.cost"></td>
+                <td class="num" x-text="r.steps"></td></tr>
+            </template>
+          </table>
+          <p class="empty" x-show="!turnRows().length">
+            No LLM turns recorded yet — token usage appears after the first decision.
+          </p>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><h2>Runtime</h2></div>
+        <table class="kv">
+          <template x-for="[k, v] in runtimeRows()" :key="k">
+            <tr><td x-text="k"></td><td class="num" x-text="v"></td></tr>
+          </template>
+        </table>
+        <h3>Tool performance</h3>
+        <div class="scroll-y">
+          <table class="kv">
+            <tr><th>Tool</th><th class="num">Calls</th><th class="num">Failed</th><th class="num">Avg</th></tr>
+            <template x-for="r in toolRows()" :key="r.tool">
+              <tr><td x-text="r.tool"></td><td class="num" x-text="$fmt.int(r.calls)"></td>
+                <td class="num" :class="r.failures ? 'neg' : ''" x-text="$fmt.int(r.failures)"></td>
+                <td class="num" x-text="$fmt.duration(r.avgDurationMs)"></td></tr>
+            </template>
+          </table>
+          <p class="empty" x-show="!toolRows().length">No tool calls yet.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ======================== ⑥ AGENT ACTIVITY ========================
+         "它真的在推理吗"：先给"被给了什么"（记忆）与"能做什么"（动作面），
+         再给证据（步骤流、思考）。 -->
+    <div class="group"><h2>Agent activity</h2><div class="rule"></div>
+      <span class="dim">what it was told, what it can do, and the evidence that it is reasoning</span></div>
+
+    <!-- Action surface (AB-1 dashboard mirror).
+         目的：让运营者一眼看到 agent 当前能做什么、有几个会改游戏状态、几个有门控。
+         数据来自 /api/capabilities（来自 tools/catalog.ts 的 actionCatalog()）。
+         服务端不提供 capabilities hook 时整块隐藏；列表为空时也隐藏——一句话：
+         "不知道" 比 "说没有" 更诚实。
+    -->
+    <section class="panel" id="action-surface" x-show="actionSurface()" x-cloak>
+      <div class="panel-head">
+        <h2>Action surface <span class="dim">agent 能做的动作</span></h2>
+        <span class="dim" x-text="actionSurface() ? actionSurface().summary : ''"></span>
+      </div>
+      <ul class="acts">
+        <!-- `actionRows()` 而不是 `actionSurface().actions`：后者在目录加载前是 null 解引用，
+             会每次页面加载都抛 Alpine 表达式错误（真实浏览器 CDP 探针抓到，见 test/unit/alpine-templates.test.ts 的 x-for 守卫）。 -->
+        <template x-for="a in actionRows()" :key="a.key">
+          <li class="act-row">
+            <span class="act-name" x-text="a.name"></span>
+            <span class="tag" :class="a.badgeClass" x-text="a.effectLabel"></span>
+            <template x-if="a.gateKey">
+              <span class="act-gate">
+                <span class="tag tag-gate" x-text="a.gateKey"></span>
+                <span class="act-why" x-text="a.gateReason"></span>
+              </span>
+            </template>
+          </li>
+        </template>
+      </ul>
+    </section>
+
+    <!-- What this game was TOLD. Kept on the Live page (not just the Evolution
+         page) because it is per-game context: without it, the agent's decisions
+         are not explainable, and `lessonsInjected: 1` in the ledger is an
+         unverifiable count. -->
+    <!-- Shown whenever the server has told us what this game was given, INCLUDING
+         the zero case: "nothing" is the control arm of the experiment and is a
+         statement worth reading, not a blank. Hidden only before any snapshot
+         arrives (no game context yet). -->
+    <section class="panel memory-note" x-show="memory !== null">
+      <div class="panel-head">
+        <h2>Memory in effect <span class="dim">跨局记忆注入</span></h2>
+        <span class="dim">what the agent was given before this game started</span>
+      </div>
+      <p class="now-text" x-text="memoryInEffect().summary"></p>
+      <ul class="mem-list">
+        <template x-for="l in memoryLessons()" :key="l.text">
+          <li>
+            <!-- R2: 徽标从 do/avoid（那是指令）换成**实测读数**。
+                 绑定一个不存在的属性会渲染空白且零报错——见下面的交叉守卫测试。 -->
+            <span class="mem-kind" x-text="l.outcome"></span>
+            <span x-text="l.text"></span>
+          </li>
+        </template>
+        <template x-for="s in memoryStrategies()" :key="s.label">
+          <li class="mem-strat"><span class="mem-kind">worked</span><span x-text="s.label"></span></li>
+        </template>
+      </ul>
+    </section>
+
     <section class="grid two">
       <div class="panel">
         <div class="panel-head"><h2>Agent steps
@@ -357,68 +530,7 @@
       </div>
     </section>
 
-    <!-- =========================== ⑤ COST =========================== -->
-    <div class="group"><h2>Cost</h2><div class="rule"></div>
-      <span class="dim">what this run is spending</span></div>
-    <section class="kpis">
-      <template x-for="k in costKpis()" :key="k.k">
-        <div class="kpi">
-          <div class="kpi-k" x-text="k.k"></div>
-          <div class="kpi-v" x-text="k.v"></div>
-          <div class="kpi-hint" x-show="k.hint" x-text="k.hint"></div>
-        </div>
-      </template>
-    </section>
-    <section class="grid split-21">
-      <div class="panel">
-        <div class="panel-head">
-          <h2>Token usage</h2>
-          <div class="actions">
-            <div x-ref="tokenMetric"></div>
-            <span class="dim" x-text="tokenSummary()"></span>
-          </div>
-        </div>
-        <div class="chart-box"><div id="t-chart" x-ref="tokenChart" x-effect="drawTokens()"></div></div>
-        <h3>Per-turn detail</h3>
-        <div class="scroll-y">
-          <table class="kv">
-            <tr><th>Turn</th><th class="num">In</th><th class="num">Out</th><th class="num">Reason</th>
-              <th class="num">Cache</th><th class="num">Total</th><th class="num">Cost</th><th class="num">Steps</th></tr>
-            <template x-for="r in turnRows()" :key="r.turn">
-              <tr><td x-text="r.turn"></td><td class="num" x-text="r.input"></td><td class="num" x-text="r.output"></td>
-                <td class="num" x-text="r.reasoning"></td><td class="num" x-text="r.cache"></td>
-                <td class="num" x-text="r.total"></td><td class="num" x-text="r.cost"></td>
-                <td class="num" x-text="r.steps"></td></tr>
-            </template>
-          </table>
-          <p class="empty" x-show="!turnRows().length">
-            No LLM turns recorded yet — token usage appears after the first decision.
-          </p>
-        </div>
-      </div>
-      <div class="panel">
-        <div class="panel-head"><h2>Runtime</h2></div>
-        <table class="kv">
-          <template x-for="[k, v] in runtimeRows()" :key="k">
-            <tr><td x-text="k"></td><td class="num" x-text="v"></td></tr>
-          </template>
-        </table>
-        <h3>Tool performance</h3>
-        <div class="scroll-y">
-          <table class="kv">
-            <tr><th>Tool</th><th class="num">Calls</th><th class="num">Failed</th><th class="num">Avg</th></tr>
-            <template x-for="r in toolRows()" :key="r.tool">
-              <tr><td x-text="r.tool"></td><td class="num" x-text="$fmt.int(r.calls)"></td>
-                <td class="num" :class="r.failures ? 'neg' : ''" x-text="$fmt.int(r.failures)"></td>
-                <td class="num" x-text="$fmt.duration(r.avgDurationMs)"></td></tr>
-            </template>
-          </table>
-          <p class="empty" x-show="!toolRows().length">No tool calls yet.</p>
-        </div>
-      </div>
-    </section>
-
-    <!-- =========================== ⑥ DETAIL =========================== -->
+    <!-- =========================== ⑦ DETAIL =========================== -->
     <div class="group"><h2>Detail</h2><div class="rule"></div>
       <span class="dim">raw log for debugging — collapsed by default so it does not bury the answers</span></div>
     <section class="panel">
@@ -460,6 +572,67 @@
       </details>
     </section>
   </main>
+
+  <!-- ========================= DRILL-DOWN DRAWER =========================
+       点卡片看明细（用户："比如点击车辆卡片具体展示详细信息"）。
+       一条载荷两个分支：线路表（Fleet / Routes）与历史时间序列（Cash / Income）。
+       `x-for` 只迭代**保证返回数组**的函数（drawerRouteRows / drawerHistoryRows），
+       `x-show` 挡不住 `x-for` 的独立求值（见 alpine-templates.test.ts 的守卫）。 -->
+  <div class="drawer-wrap" x-show="drawerOpen()" x-cloak @click.self="closeDrawer()">
+    <aside class="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
+      <div class="drawer-head">
+        <h2 id="drawer-title" x-text="drawerTitle()"></h2>
+        <button type="button" class="btn sm" @click="closeDrawer()">close (Esc)</button>
+      </div>
+      <div class="drawer-body">
+        <template x-if="drawerShowsRoutes()">
+          <div>
+            <table class="routes">
+              <thead>
+                <tr><th>Route</th><th>Endpoints</th><th class="num">Veh</th><th class="num">Waiting</th>
+                  <th class="num">Income / day</th><th class="num">Profit YTD</th></tr>
+              </thead>
+              <tbody>
+                <template x-for="r in drawerRouteRows()" :key="r.key">
+                  <tr :class="r.idle ? 'route-idle' : ''">
+                    <td x-text="'#' + r.job"></td>
+                    <td x-text="r.endpoints"></td>
+                    <td class="num" x-text="r.vehicles"></td>
+                    <td class="num" x-text="r.waiting"></td>
+                    <td class="num" x-text="r.income"></td>
+                    <td class="num" x-text="r.profit"></td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+            <p class="empty" x-show="!drawerRouteRows().length">No route has vehicles on it.</p>
+          </div>
+        </template>
+        <template x-if="!drawerShowsRoutes()">
+          <div>
+            <table class="kv">
+              <thead>
+                <tr><th>Game date</th><th class="num">Value</th><th class="num">Change</th><th class="num">Loan</th></tr>
+              </thead>
+              <tbody>
+                <template x-for="h in drawerHistoryRows()" :key="h.key">
+                  <tr>
+                    <td x-text="h.date"></td>
+                    <td class="num" x-text="h.value"></td>
+                    <td class="num" :class="h.deltaCls" x-text="h.delta"></td>
+                    <td class="num" x-text="h.loan"></td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+            <p class="empty" x-show="!drawerHistoryRows().length">
+              No history points yet — the curve fills in as the game runs.
+            </p>
+          </div>
+        </template>
+      </div>
+    </aside>
+  </div>
 </div>
 
 <script src="/assets/js/common.js"></script>

@@ -156,6 +156,16 @@ ws.addEventListener("message", (ev) => {
 await new Promise((r) => ws.addEventListener("open", r));
 await send("Runtime.enable");
 await send("Page.enable");
+// **设备像素比必须是 2**（Retina，用户机器的真实条件）。
+// 为什么（2026-09-22，四轮误报的根因）：KPI 迷你图的高度曾每帧乘一次 `devicePixelRatio`，
+// dpr=1 时增益恰好为 1 → 永远稳定 → 探针每次都报"修好了"；dpr=2 时 26→52→104→…
+// 几千像素。**探针不复制用户的条件，就等于没验证**（MEMORY D48/D51）。
+await send("Emulation.setDeviceMetricsOverride", {
+  width: 1440,
+  height: 900,
+  deviceScaleFactor: 2, // = Retina
+  mobile: false,
+});
 await send("Page.navigate", { url: URL });
 await sleep(4000); // Alpine boots + fetch /api/capabilities resolves
 
@@ -202,6 +212,69 @@ for (const c of runActive ? chartList : []) {
   if (c.w < 120) chartProblems.push(`${c.id}: 宽度异常 ${c.w}px`);
 }
 
+/* ======================================================================
+ * 稳定性采样：**尺寸随时间**是否恒定
+ * ======================================================================
+ * 用户报的是"规律的从很小骤然爆炸到几千像素、然后又恢复、如此往复"——
+ * 那是一个**振荡**。单帧快照对它天然免疫：任何一帧看起来都可以是"正常"的。
+ * 所以这里必须采**一段时间的高度轨迹**，并断言极差（max − min）足够小。
+ * 这就是前面四轮"测过了、是好的"却抓不到问题的原因。
+ */
+const SAMPLES = 20;
+const SAMPLE_MS = 500;
+const stability = [];
+for (let i = 0; i < SAMPLES; i++) {
+  const r = await send("Runtime.evaluate", {
+    expression: `(() => ({
+      dpr: window.devicePixelRatio,
+      sparks: [...document.querySelectorAll('canvas.kpi-spark')].map(c => Math.round(c.getBoundingClientRect().height)),
+      hosts: [...document.querySelectorAll('.chart-box > div[id]')].map(h => ({ id: h.id, h: Math.round(h.getBoundingClientRect().height) })),
+      tiles: [...document.querySelectorAll('.kpis .kpi')].map(t => Math.round(t.getBoundingClientRect().height)),
+      docH: document.documentElement.scrollHeight,
+    }))()`,
+    returnByValue: true,
+  });
+  if (r.result?.value) stability.push(r.result.value);
+  await sleep(SAMPLE_MS);
+}
+const dprSeen = stability[0]?.dpr ?? null;
+const spread = (vals) => (vals.length ? Math.max(...vals) - Math.min(...vals) : 0);
+const col = (pick) => stability.map(pick).filter((v) => v !== undefined);
+// 每个迷你图槽位的轨迹（按位置对齐；元素数量可能变化，取最大槽位数）
+const slotCount = Math.max(0, ...stability.map((s) => s.sparks.length));
+const sparkTraj = [];
+for (let k = 0; k < slotCount; k++) {
+  const vals = col((s) => s.sparks[k]).filter((v) => Number.isFinite(v));
+  sparkTraj.push({ slot: k, min: Math.min(...vals), max: Math.max(...vals), spread: spread(vals), samples: vals });
+}
+const hostTraj = {};
+for (const s of stability) {
+  for (const h of s.hosts) (hostTraj[h.id] ||= []).push(h.h);
+}
+const tileSpread = spread(col((s) => s.tiles.length ? Math.max(...s.tiles) : 0));
+const docSpread = spread(col((s) => s.docH));
+console.log("STABILITY:", JSON.stringify({
+  dpr: dprSeen,
+  samples: stability.length,
+  seconds: (stability.length * SAMPLE_MS) / 1000,
+  sparks: sparkTraj,
+  hosts: Object.fromEntries(Object.entries(hostTraj).map(([k, v]) => [k, { min: Math.min(...v), max: Math.max(...v), spread: spread(v) }])),
+  tileSpread,
+  docSpread,
+}, null, 2));
+
+const stabilityProblems = [];
+// 迷你图高度：必须**恒定**（设计值 26px）且远小于爆炸值
+for (const t of sparkTraj) {
+  if (t.spread > 1) stabilityProblems.push(`kpi-spark[${t.slot}]: 高度在 ${(SAMPLE_MS * SAMPLES) / 1000}s 内变化 ${t.spread}px（${t.min}–${t.max}）—— 高度必须恒定`);
+  if (t.max > 60) stabilityProblems.push(`kpi-spark[${t.slot}]: 高度 ${t.max}px 远超设计值 26px（纵向爆炸）`);
+}
+for (const [id, v] of Object.entries(hostTraj)) {
+  if (spread(v) > 4) stabilityProblems.push(`${id}: 宿主高度变化 ${spread(v)}px（${Math.min(...v)}–${Math.max(...v)}）`);
+}
+if (tileSpread > 30) stabilityProblems.push(`KPI 卡片高度极差 ${tileSpread}px（>30 说明网格在反复重排）`);
+if (dprSeen !== 2) stabilityProblems.push(`devicePixelRatio = ${dprSeen}，探针**没有**复现 Retina 条件（必须为 2）`);
+
 const probe = await send("Runtime.evaluate", {
   expression: `(() => {
     const el = document.getElementById('action-surface');
@@ -246,10 +319,15 @@ const ok =
   bad.length === 0 &&
   probe.result?.value?.visible === true &&
   probe.result?.value?.rowCount > 0 &&
-  chartProblems.length === 0;
+  chartProblems.length === 0 &&
+  stabilityProblems.length === 0;
 if (chartProblems.length) {
   console.error("FAIL（图表健康）:");
   for (const p of chartProblems) console.error("  -", p);
+}
+if (stabilityProblems.length) {
+  console.error("FAIL（尺寸稳定性 / Retina 条件）:");
+  for (const p of stabilityProblems) console.error("  -", p);
 }
 if (!ok) {
   console.error("FAIL: see PANEL / CHARTS / console output above.");

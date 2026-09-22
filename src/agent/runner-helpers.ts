@@ -111,3 +111,51 @@ export function savegameName(sessionId: string): string {
 	// 兜底不仅针对空串："---" 这类无字母数字的名字同样不可用（路径过滤后只剩分隔符）
 	return /[A-Za-z0-9]/.test(cleaned) ? cleaned : "game";
 }
+
+/**
+ * 控制通道（暂停/恢复）——**投递必须可观测**。
+ *
+ * 为什么单独抽出来（2026-09-23 真机）：dashboard 的 Pause 曾经是
+ * `try { client?.rcon("pause") } catch {}` —— 两个问题：
+ *   ① 不 `await`：异步失败根本不会进入 catch，**空 catch 什么都抓不到**；
+ *   ② 不记录结果：页面于是可以永远声称"已暂停"，而世界可能仍在运行。
+ *
+ * 事实依据（OpenTTD `src/console_cmds.cpp` 的 `ConPauseGame`/`ConUnpauseGame`）：
+ *   - `pause` / `unpause` 是**幂等**命令（不是 toggle）；重复 `pause` 打印 "Game is already paused."；
+ *   - **专用服务器（`_networking`）在首次 `pause` 时不打印任何东西** ——
+ *     所以 `reply === ""` 是**正常**的，表示命令往返完成（收到 `RCON_END`）；
+ *     而 `reply === null` 表示**超时**，即投递未获确认。
+ *
+ * 因此返回值把"投递"与"效果"分开：投递由回执证明，效果只能由世界证明
+ *（暂停时游戏日期停止前进）。
+ */
+export interface ControlChannel {
+	rconAwait?: (command: string, timeoutMs?: number) => Promise<string | null>;
+}
+
+export interface ControlOutcome {
+	/** 命令往返是否完成（收到 RCON_END）。 */
+	delivered: boolean;
+	/** 游戏回显的文本；`""` = 命令无输出（对 pause/unpause 是正常的）。 */
+	reply: string | null;
+	/** 通道不可用或抛错时的原因（此时 `delivered = false`）。 */
+	error?: string;
+}
+
+export async function sendControlCommand(
+	ch: ControlChannel | null | undefined,
+	cmd: "pause" | "unpause",
+): Promise<ControlOutcome> {
+	if (!ch || typeof ch.rconAwait !== "function") {
+		return { delivered: false, reply: null, error: "no rcon channel" };
+	}
+	try {
+		const reply = await ch.rconAwait(cmd);
+		// `null` = 超时（rconAwait 的实现），不是"空输出"。
+		return reply === null
+			? { delivered: false, reply: null, error: "no reply (timeout)" }
+			: { delivered: true, reply };
+	} catch (e) {
+		return { delivered: false, reply: null, error: e instanceof Error ? e.message : String(e) };
+	}
+}
