@@ -82,10 +82,16 @@ export function createLlmApi(deps: LlmApiDeps): LlmApi {
 				: [];
 		const credSource: "stored" | "env" | "none" = stored ? "stored" : envKeys.length ? "env" : "none";
 
-		const envOverrode = Boolean(
-			deps.envLlm &&
-				(deps.envLlm.baseUrl || deps.envLlm.model || deps.envLlm.providerId || deps.envLlm.apiKey),
-		);
+		// 来源以 `applyLlmSettingsFile` 写入的 `llmAppliedFrom` 为准（唯一知道真相的地方）。
+		// `envLlm` 仅作回退：给**未合并过的** cfg 用（例如直接 `loadConfig(env)` 的测试），
+		// 因为一旦合并过，`envLlm` 里已经掺了文件值，“env 是否覆盖了文件”就再也分不出来。
+		const envOverrode =
+			deps.cfg.llmAppliedFrom !== undefined
+				? deps.cfg.llmAppliedFrom === "env"
+				: Boolean(
+						deps.envLlm &&
+							(deps.envLlm.baseUrl || deps.envLlm.model || deps.envLlm.providerId || deps.envLlm.apiKey),
+					);
 		const fileExists = existsSync(settingsPath(deps.dataDir));
 
 		return {

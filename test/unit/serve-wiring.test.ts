@@ -15,12 +15,14 @@
  * 而任何"断言 preflight 看得到 offlineDemo"的测试都会通过，
  * 因为它测的正是没坏的那一半。所以这里的断言必须落在 **launcher 实际收到的 opts** 上。
  */
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { runServe } from "../../src/agent/serve.js";
 import { loadConfig, type Config } from "../../src/config.js";
 import { resolveRunOptions } from "../../src/agent/serve.js";
+import { saveLlmSettingsFile } from "../../src/agent/llm-settings.js";
 
 const ROOT = process.cwd();
 
@@ -119,6 +121,96 @@ describe("runner 的所有回调状态必须在 AdminClient 之前声明（TDZ �
 				`\`${name}\` must be declared ABOVE \`new AdminClient\` or it is in the ` +
 					`temporal dead zone when the boot-time event callback fires (MEMORY A5)`,
 			).toBeLessThan(adminIdx);
+		}
+	});
+});
+
+/**
+ * 回归（2026-09-22 用户实测）：**在 dashboard 里保存了 Provider，点 Start 仍报
+ * `llmConfigured: no provider/model configured`。**
+ *
+ * 根因是"同一个问题有两个事实源"：
+ *   - Providers 页每次 GET/save 都 `applyLlmSettingsFile(cfg)`（llm-api.ts）→ 页面看到**最新**文件；
+ *   - Start 走 `runPreflight(cfg)`，用的是 **`runServe` 启动时捕获的那份 cfg**（serve.ts）→ 门禁看到**旧的**。
+ * 于是页面说"已配置"、门禁说"没配置"。
+ *
+ * 为什么以前没被测到：历史 E2E 验证的是"dashboard 存 → **另一个进程** `--agent` 读"
+ * （跨进程，boot 时 cfg 天然是新的）。**同进程 serve** 从未被验证。
+ *
+ * 断言必须落在**门禁与 launcher 各看到了什么**，而不是"文件写成功了"——
+ * 后者在 bug 存在时也是真的（写文件那段从来没坏）。
+ */
+describe("serve: Start 必须用**当前**的 llm.json（同进程保存后立刻生效）", () => {
+	/** boot 时未配置、且 binary 用 node 自身（可移植）的 cfg。 */
+	function bootCfg(dir: string): Config {
+		return loadConfig({ OPENTTD_DATA_DIR: dir, OPENTTD_BINARY: process.execPath });
+	}
+
+	/** 模拟 Providers 页保存：写的就是它写的那份文件。 */
+	function saveProvider(dir: string, baseUrl: string): void {
+		saveLlmSettingsFile(dir, {
+			source: "custom",
+			providerId: "custom",
+			model: "saved-model",
+			api: "openai-completions",
+			baseUrl,
+			apiKey: "sk-test",
+			contextWindow: 8192,
+			maxTokens: 256,
+		} as never);
+	}
+
+	it("保存后 Start 时**门禁**看到的是新配置（不再是 llmConfigured 失败）", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "serve-llm-"));
+		const launcher = vi.fn(async () => 0);
+		const handle = await runServe(bootCfg(dir), {
+			webPort: 0,
+			// 不用 offlineDemo：那样 unconfigured 只是 warn，测不出这个 bug。
+			// 因此走真实 reachability——baseUrl 指向**关闭的端口**，失败要快且不发外部请求。
+			offlineDemo: false,
+			launcher: launcher as never,
+		});
+		try {
+			// 用户在浏览器里保存了 Provider（boot 之后）
+			saveProvider(dir, "http://127.0.0.1:9/v1");
+			let err = "";
+			try {
+				await handle.supervisor.start("agent");
+			} catch (e) {
+				err = e instanceof Error ? e.message : String(e);
+			}
+			// 关键：失败**只能**是"连不上"，不能是"没配置"。
+			expect(err).not.toMatch(/llmConfigured/);
+			expect(err).toMatch(/llmReachable/);
+		} finally {
+			await handle.stop();
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("保存后 Start 时 **launcher** 收到的是新配置（模型必须来自文件）", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "serve-llm-"));
+		const launched: Config[] = [];
+		const launcher = vi.fn(async (_mode: string, cfg: Config) => {
+			launched.push(cfg);
+			return 0;
+		});
+		const handle = await runServe(bootCfg(dir), {
+			webPort: 0,
+			// offlineDemo 让 reachability 跳过 → 门禁放行，从而能观察到 launcher 拿到的 cfg。
+			offlineDemo: true,
+			launcher: launcher as never,
+		});
+		try {
+			saveProvider(dir, "http://127.0.0.1:9/v1");
+			await handle.supervisor.start("agent");
+			for (let i = 0; i < 50 && launched.length === 0; i++) await new Promise((r) => setTimeout(r, 20));
+			expect(launched.length, "launcher 没有收到调用").toBeGreaterThan(0);
+			expect(launched[0]!.llm.model).toBe("saved-model");
+			expect(launched[0]!.llm.baseUrl).toBe("http://127.0.0.1:9/v1");
+		} finally {
+			await handle.stop();
+			rmSync(dir, { recursive: true, force: true });
 		}
 	});
 });

@@ -22,6 +22,7 @@ import { RunSupervisor, type RunMode } from "./supervisor.js";
 import { runAgent } from "./runner.js";
 import { runWatch } from "../game/runner.js";
 import { runPreflight, formatPreflight } from "./preflight.js";
+import { applyLlmSettingsFile } from "./llm-settings.js";
 import { APP_VERSION } from "../version.js";
 import { actionCatalog } from "./tools/catalog.js";
 
@@ -106,9 +107,20 @@ export async function runServe(cfg: Config, opts: ServeOptions = {}): Promise<Se
 		onStateChange: (s) => web?.publishRun(s),
 		start: async (mode, hooks) => {
 			if (!web) throw new Error("dashboard not ready");
+			// **每次 Start 都重新合并 `<dataDir>/llm.json`**（2026-09-22 的回归）。
+			//
+			// `--serve` 是长驻进程，而 Providers 页会在它运行期间写这份文件
+			// （llm-api 的 get/save 每次都 `applyLlmSettingsFile`）。启动时捕获的 `cfg`
+			// 因此可能比用户上次保存**旧**——于是出现“页面说已配置、门禁说没配置”：
+			// 同一个问题两个事实源，页面与门禁各答一半。
+			//
+			// 为什么安全（且本来就是设计意图）：`applyLlmSettingsFile` 是 env > 文件的合并，
+			// 幂等；且 `providerId` 故意**不带默认值回填**，所以重复合并不会把默认值烘进去
+			// 而遮住之后的文件更新（llm-settings.ts 里那段注释预见的正是“再次合并”）。
+			const runCfg = applyLlmSettingsFile(cfg);
 			// Same gate as the CLI: refuse to start when prerequisites are missing,
 			// and surface the reason verbatim to the page.
-			const pre = await runPreflight(cfg, {
+			const pre = await runPreflight(runCfg, {
 				mode,
 				// Same resolved value the runner will get. Reading opts.offlineDemo
 				// here directly was a second source of truth - see resolveRunOptions.
@@ -131,7 +143,8 @@ export async function runServe(cfg: Config, opts: ServeOptions = {}): Promise<Se
 			});
 			const launch = opts.launcher ?? defaultLauncher;
 			// Run in the background: the supervisor tracks completion via onStopped.
-			void launch(mode, cfg, runOpts)
+			// `runCfg`（已合并当前 llm.json）而不是启动时那份：否则门禁放行、运行却用旧配置。
+			void launch(mode, runCfg, runOpts)
 				.catch((e) => console.error(`[serve] run failed: ${e instanceof Error ? e.message : e}`))
 				.finally(() => hooks.onStopped?.());
 		},

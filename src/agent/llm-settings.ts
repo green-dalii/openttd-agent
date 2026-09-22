@@ -57,6 +57,10 @@ export function saveLlmSettingsFile(dataDir: string, s: LlmConfig): void {
  * providerId deliberately has **no fallback here**: the default is applied at
  * use time (buildProvider) so a merge never bakes a non-empty value that would
  * then shadow the file on a later re-merge (dashboard GET after Save).
+ *
+ * 同时记录 `llmAppliedFrom`：**只有这里知道**每一格来自 env 还是文件。
+ * 它刻意是	extbf{粘性}的——传入的 cfg 若已经合并过（llm-api 每次 GET 都会再合一次），
+ * 那时已经分不出 env 与文件，重算只会把“文件”又报成“env”（2026-09-22 的真 bug）。
  */
 export function applyLlmSettingsFile(cfg: Config): Config {
 	const file = loadLlmSettingsFile(cfg.dataDir);
@@ -70,7 +74,13 @@ export function applyLlmSettingsFile(cfg: Config): Config {
 		contextWindow: cfg.llm.contextWindow || file.contextWindow || 128_000,
 		maxTokens: cfg.llm.maxTokens || file.maxTokens || 4096,
 	};
-	return { ...cfg, llm: merged };
+	const envProvided = Boolean(
+		cfg.llm.providerId || cfg.llm.baseUrl || cfg.llm.model || cfg.llm.apiKey,
+	);
+	const fileProvided = Boolean(file.providerId || file.baseUrl || file.model || file.apiKey);
+	const appliedFrom =
+		cfg.llmAppliedFrom ?? (envProvided ? "env" : fileProvided ? "file" : "none");
+	return { ...cfg, llm: merged, llmAppliedFrom: appliedFrom };
 }
 
 /** Safe-for-UI view: never returns the raw key. */

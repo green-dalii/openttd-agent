@@ -40,6 +40,25 @@
   判定优先用它、**两臂同源**（`ArmComparison.deliveredSource`），旧行回落原始值并标注为不可比。
 - 澄清 `rc=1` 的含义（=施工未达成 DONE，不是崩溃）并在输出中明示。
 
+### Fixed（回归：`--serve` 里保存 Provider 后点 Start 仍报 `llmConfigured`，2026-09-22）
+
+- **根因是同一个问题有两个事实源**：Providers 页每次 GET/save 都重新合并 `<dataDir>/llm.json`
+  （所以页面看到新配置），而 Start 的门禁与运行用的是 `runServe` **启动时捕获的 cfg**
+  （所以门禁看到旧配置）。`--serve` 是长驻进程，页面会在它运行期间写这份文件。
+- **修复**：`runServe` 的 `start` 每次重新 `applyLlmSettingsFile(cfg)`，
+  门禁（`runPreflight`）与运行（`launch`）都用合并后的 `runCfg`。
+  安全性来自合并本身的幂等（env > 文件；`providerId` 故意不带默认值回填）。
+- **顺带修掉同族的第二个 bug**：三处调用点传的 `envLlm` 其实是**已合并**的 cfg，
+  于是"文件里存的值"被当成"env 提供"，`appliedFrom` 在只有文件时错报 `"env"`，
+  Providers 页据此显示"env 覆盖了文件"（假话）。现在来源由**唯一知道真相的地方**
+  （`applyLlmSettingsFile` → `cfg.llmAppliedFrom`，**粘性**）记录，`llm-api` 优先采用。
+- **为什么这条路径从未被发现**：历史 E2E 验证的是"dashboard 存 → **另一个进程** `--agent` 读"，
+  跨进程时新进程 boot 自然读到最新文件，所以那个测试**永远绿**；
+  **同进程 serve → 保存 → Start** 一次都没跑过。已补两条单测（门禁视角 + launcher 视角）。
+- **真机验收**（用户的确切顺序，`/tmp/llmfix`）：保存前点 Start 正确拒绝 → 保存 Provider
+  （`appliedFrom: file`）→ 再点 Start → `{"state":"running","mode":"agent"}`，
+  OpenTTD 起来、agent 开始决策（`decision 1 (start)` / `2 (event)` / `3 (event)`）。
+
 ### Added（Dashboard：动作面面板 + `/api/capabilities` + 首个真实浏览器冒烟检查，2026-09-19）
 
 - Live 页新增 **Action surface** 面板：一次看清 agent 能做哪些动作、几个会**改变游戏状态**、

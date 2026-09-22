@@ -31,6 +31,15 @@ export interface Config {
 	companyName: string;
 	/** LLM provider settings (SPEC §4 — brain wiring). */
 	llm: LlmConfig;
+	/**
+	 * 这份 `llm` 是从哪来的——由 `applyLlmSettingsFile`（唯一知道真相的地方）写入。
+	 *
+	 * 为什么不能让 UI 自己猜（2026-09-22 的真 bug）：生产里三个调用点都传
+	 * `envLlm: cfg.llm`，而那时 `cfg` **已经合并过文件**，所以“文件里存的值”会被当成
+	 * “env 提供”，Providers 页于是显示“env 覆盖了文件”——一句假话。
+	 * 合并处知道每一格从哪里来，别处猜不出来；猜出来的结论就会撒谎。
+	 */
+	llmAppliedFrom?: "env" | "file" | "none";
 }
 
 /** LLM provider configuration (OpenAI-compatible by default). */

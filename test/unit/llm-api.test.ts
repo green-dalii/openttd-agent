@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { applyLlmSettingsFile, saveLlmSettingsFile } from "../../src/agent/llm-settings.js";
 import { createLlmApi, credentialsPath } from "../../src/agent/llm-api.js";
 import { loadLlmSettingsFile, settingsPath } from "../../src/agent/llm-settings.js";
 import { loadConfig } from "../../src/config.js";
@@ -248,4 +249,44 @@ describe("llm dashboard api", () => {
 			rmSync(dir, { recursive: true, force: true });
 		}
 	});
+});
+
+/**
+ * 回归排查（2026-09-22）：生产里 `envLlm` 传的是**合并后**的 cfg。
+ *
+ * `cli/run.ts` 先 `applyLlmSettingsFile(loadConfig(...))` 再交给 serve/runner，
+ * 而三处调用点都写 `envLlm: cfg.llm`——于是"文件里存的值"被当成了"env 提供"，
+ * `appliedFrom` 在**只有文件**的情况下会错报成 `"env"`，
+ * Providers 页据此显示"env 覆盖了文件"（providers.js:123）——一句假的说明。
+ *
+ * 这条测试镜像生产：**没有任何 LLM_* env**，只有 llm.json。
+ */
+it("只有文件（无 env）时 appliedFrom 必须是 file，而不是 env", () => {
+	const dir = tmp();
+	try {
+		saveLlmSettingsFile(dir, {
+			source: "catalog",
+			providerId: "openai",
+			model: "gpt-4",
+			api: "openai-completions",
+			baseUrl: "",
+			apiKey: "",
+			contextWindow: 8192,
+			maxTokens: 256,
+		} as never);
+		// 生产的顺序：先合并文件，再建 llm-api（envLlm 因此是合并结果）
+		const merged = applyLlmSettingsFile(loadConfig({ OPENTTD_DATA_DIR: dir }));
+		const api = createLlmApi({ dataDir: dir, cfg: merged, envLlm: merged.llm });
+		const v = api.llm.get() as View;
+		expect(v.selection.model).toBe("gpt-4");
+		expect(v.status.appliedFrom).toBe("file");
+		// 粘性：llm-api 每次 GET 都会**再合并一次**（save 后 GET 是常态）。
+		// 若重算，"文件里的值"会被第二次误判成 env —— 这正是本 bug 的机制。
+		const twice = applyLlmSettingsFile(merged);
+		expect(twice.llmAppliedFrom).toBe("file");
+		const api2 = createLlmApi({ dataDir: dir, cfg: twice, envLlm: twice.llm });
+		expect((api2.llm.get() as View).status.appliedFrom).toBe("file");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
 });

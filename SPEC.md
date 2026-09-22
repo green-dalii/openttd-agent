@@ -3827,3 +3827,58 @@ GS-only 路线在**简单地形 + 短距离 + 双城**情况下**物理可行**�
 模板里被当成字面字符而不是正则转义；自测用正则字面量通过了，但守卫本体从未匹配过
 任何东西。**重放证明**抓到这一点并修复（取**真正最早**绑定位置 + 解析别名
 `local pr = this._pr;`）。详见 MEMORY D44 补充。
+
+## 10.93 `--serve` 的 Start 必须用**当前**的 `llm.json`（2026-09-22 回归）
+
+### 现象（用户实测）
+
+`pnpm run cli --serve --web-port 8187` → 在 Providers 页保存了 Provider → 点 Start：
+
+```
+Could not start
+llmConfigured: no provider/model configured — Configure one on the Providers page …
+```
+
+即"页面说已配置、门禁说没配置"。
+
+### 根因：同一个问题有两个事实源
+
+| 谁 | 读的是 | 结果 |
+|----|--------|------|
+| Providers 页（`llm-api.ts` 的 get/save） | **每次都** `applyLlmSettingsFile(cfg)` → 最新文件 | 看到新配置 ✓ |
+| Start 的门禁与运行（`serve.ts`） | `runServe` **启动时捕获的那份 `cfg`** | 看到旧配置 ✗ |
+
+`--serve` 是长驻进程，而 Providers 页会在它运行期间写 `<dataDir>/llm.json`；
+启动时的 cfg 天然可能比用户上次保存**旧**。
+
+**为什么以前没被发现**：历史 E2E 验证的是"dashboard 存 → **另一个进程** `--agent` 读"
+（跨进程；那个进程 boot 时读到的自然是最新文件）。**同进程 serve** 这条路径从未被验证。
+
+### 修复
+
+`runServe` 的 `start` 里**每次重新合并**：`const runCfg = applyLlmSettingsFile(cfg)`，
+门禁（`runPreflight`）与运行（`launch`）**都用它**。
+安全性来自 `applyLlmSettingsFile` 本身的设计：env > 文件的幂等合并，
+且 `providerId` 故意不带默认值回填（那段注释预见的正是"再次合并"）。
+
+### 顺带修掉的第二个同类 bug：`appliedFrom` 谎报来源
+
+三处调用点都写 `envLlm: cfg.llm`，而那时 cfg **已经合并过文件** → "文件里存的值"
+被当成"env 提供" → `appliedFrom` 在**只有文件**时错报 `"env"`，
+Providers 页据此显示"env 覆盖了文件"（`providers.js`）——一句假话。
+
+修法：**由唯一知道真相的地方记录**——`applyLlmSettingsFile` 写入 `cfg.llmAppliedFrom`
+（`"env" | "file" | "none"`，**粘性**：已经合并过的 cfg 再合并时保留原值，
+否则第二次会把"文件"又报成"env"，正是本 bug 的机制）。`llm-api` 优先用它，
+仅在 cfg 从未合并过时回退到 `envLlm` 启发式。
+
+### 真机验收（`/tmp/llmfix`，用户的确切顺序）
+
+```
+① 空 dataDir 起 --serve（无 llm.json）        → /api/llm: configured=False, appliedFrom=none
+② 保存前点 Start                             → 正确拒绝（llmConfigured）——**这是该有的行为**
+③ POST /api/llm 保存 Provider（=页面同一调用）→ configured=True, appliedFrom=**file**, model=MiniMax-M3
+④ 保存后点 Start                             → {"state":"running","mode":"agent"}；
+                                               OpenTTD 起来了，agent 开始决策
+                                               （decision 1 (start) / 2 (event) / 3 (event)）
+```
