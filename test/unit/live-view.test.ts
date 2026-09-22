@@ -100,6 +100,15 @@ interface LiveModel {
 	companiesEmpty(): boolean;
 	companyCards(): { id: string; name: string; isAi: boolean; neg: boolean; money: string; value: string; fleet: string }[];
 	toggleCategorySet(cat: string): Set<string>;
+	// New: action surface (AB-1 dashboard mirror)
+	actionCatalog: unknown;
+	actionSurface(): {
+		actions: { name: string; effect: string; effectLabel: string; badgeClass: string; gateKey: string | null; gateReason: string; key: string }[];
+		total: number;
+		writes: number;
+		conditional: number;
+		summary: string;
+	} | null;
 }
 
 /** The LiveView module itself (module-level pure helpers live on it). */
@@ -712,5 +721,108 @@ describe("live.html: 记忆面板绑定与视图模型一致", () => {
 		}
 		// 旧的 do/dont 语义不许再出现在模板里（它是指令，不是读数）
 		expect(block).not.toMatch(/l\.kind|mem-do|mem-dont/);
+	});
+});
+
+/**
+ * Action surface panel (AB-1 dashboard mirror) — 运营者要能**看到** agent 现在能做什么。
+ *
+ * 锁的事项：列表必须从 `/api/capabilities` 的形状派生（name/effect/gate），不能凭空写。
+ * 写动作、读动作、有门控的动作要分开计数；空目录也要可渲染（不崩）。
+ */
+describe("live-view: action surface panel", () => {
+	// Same shape as /api/capabilities: { actions: [{name, effect, gate}], generatedFrom }.
+	function withCatalog(payload: unknown) {
+		const { model } = load();
+		model.actionCatalog = payload;
+		return model;
+	}
+
+	it("derives counts from the catalog (read/write/conditional)", () => {
+		// Three reads + two writes + one gated tool = the kind of mixed surface a
+		// real run exposes (e.g. observe, capabilities, recall are read; build/set
+		// are write; recall is gated by memory).
+		const m = withCatalog({
+			actions: [
+				{ name: "observe", effect: "read", gate: null },
+				{ name: "estimate_route", effect: "read", gate: null },
+				{ name: "capabilities", effect: "read", gate: null },
+				{ name: "build_bus_route", effect: "write", gate: null },
+				{ name: "set_route_vehicles", effect: "write", gate: null },
+				{ name: "recall", effect: "read", gate: { key: "memory", reason: "no memory is available" } },
+			],
+		});
+		const out = m.actionSurface();
+		expect(out).not.toBeNull();
+		expect(out!.total).toBe(6);
+		expect(out!.writes).toBe(2);
+		expect(out!.conditional).toBe(1);
+		// The summary line is what the panel header renders; do not let it drift.
+		expect(out!.summary).toBe("6 action(s) · 2 change game state · 1 conditional");
+	});
+
+	it("shows the gate reason for conditional actions (operator must know why)", () => {
+		// 不说原因的门控就是隐藏状态——AB-1 的根本动机。
+		const m = withCatalog({
+			actions: [
+				{ name: "inspect_route", effect: "read", gate: { key: "gs_channel", reason: "route economics are not available" } },
+			],
+		});
+		const out = m.actionSurface();
+		expect(out!.actions[0]!.gateKey).toBe("gs_channel");
+		expect(out!.actions[0]!.gateReason).toMatch(/route economics/);
+	});
+
+	it("returns null (not {}) when the catalog is empty/absent so the panel stays hidden", () => {
+		// Page contract: server returns 404 when the hook is absent (no LLM brain
+		// wired). The panel must not render an empty list pretending to be the
+		// surface — that would be a UI lie about capability.
+		const m = withCatalog(null);
+		expect(m.actionSurface()).toBeNull();
+
+		const m2 = withCatalog({ actions: [] });
+		// Empty list is still a valid catalog but renders nothing useful; we
+		// surface it as null so the panel stays hidden rather than showing "0
+		// actions" (the panel's header line — "N action(s) ..." — would otherwise
+		// collide with this empty-list case).
+		expect(m2.actionSurface()).toBeNull();
+	});
+
+	it("keys items by name so Alpine's :key stays unique", () => {
+		// If two rows share a :key, the whole list renders zero nodes (live-view's
+		// own stage-view upsert test covers the same invariant for stages). The
+		// view model must not produce duplicate keys.
+		const m = withCatalog({
+			actions: [
+				{ name: "observe", effect: "read", gate: null },
+				{ name: "build_bus_route", effect: "write", gate: null },
+				{ name: "set_pause", effect: "write", gate: null },
+			],
+		});
+		const out = m.actionSurface();
+		const keys = out!.actions.map((a) => a.key);
+		expect(new Set(keys).size).toBe(keys.length);
+	});
+
+	it("labels every write action so the badge is human-readable", () => {
+		// The badge text is the only thing telling the operator "this changes the
+		// game state" — without it, the read/write split is invisible.
+		const m = withCatalog({
+			actions: [
+				{ name: "observe", effect: "read", gate: null },
+				{ name: "build_bus_route", effect: "write", gate: null },
+				{ name: "retire_route", effect: "write", gate: null },
+			],
+		});
+		const out = m.actionSurface();
+		for (const a of out!.actions) {
+			expect(a.effectLabel.length).toBeGreaterThan(0);
+			expect(a.badgeClass).toMatch(/^tag-(read|write)$/);
+		}
+		const writes = out!.actions.filter((a) => a.effect === "write");
+		for (const w of writes) {
+			expect(w.effectLabel).toBe("changes game state");
+			expect(w.badgeClass).toBe("tag-write");
+		}
 	});
 });

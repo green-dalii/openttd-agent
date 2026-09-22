@@ -40,6 +40,27 @@
   判定优先用它、**两臂同源**（`ArmComparison.deliveredSource`），旧行回落原始值并标注为不可比。
 - 澄清 `rc=1` 的含义（=施工未达成 DONE，不是崩溃）并在输出中明示。
 
+### Added（Dashboard：动作面面板 + `/api/capabilities` + 首个真实浏览器冒烟检查，2026-09-19）
+
+- Live 页新增 **Action surface** 面板：一次看清 agent 能做哪些动作、几个会**改变游戏状态**、
+  几个**有门控**（以及门控的原因文案）。数据来自新的只读端点 `GET /api/capabilities`，
+  由 `src/agent/tools/catalog.ts` 的 `actionCatalog()` 生成——与 agent 的工具面**同源**，
+  所以面板不可能与 agent 实际能做的事漂移（`test/unit/web-api.test.ts` 里有反漂移断言：
+  端点返回的名字必须等于 `createTools()` 的名字）。
+- 门控文案与工具自身的拒绝文案**同一个来源**（`TOOL_GATES`：原因 + 谓词绑在一起），
+  否则面板会替 harness 说谎。新增守卫：门控键必须已声明、不得滞留（重放证明非空）。
+- **`pnpm run dashboard:smoke`**（`scripts/dashboard-smoke.mjs`）：AGENTS §5.2 的**唯一自动化**
+  前端检查——真实 Chrome（CDP）打开运行中的 dashboard，断言用户可见元素真的渲染了、
+  且控制台**任何级别**没有 error/warning/exception；退出码区分"页面坏了"(1) 与
+  "环境不可用"(2)。它上线当天就抓到一个**每次页面加载都抛**的
+  `Alpine Expression Error: Cannot read properties of null (reading 'actions')`
+  （`x-for="a in actionSurface().actions"` 在目录加载前穿过 `x-show` 独立求值），
+  而当时所有单测都是绿的——因为前端脚手架禁止 jsdom/headless，**没有 Alpine 求值就没有错误**。
+- 新增机械守卫：`x-for` 不得穿过可空表达式（`test/unit/alpine-templates.test.ts`）。
+  它立刻又在仓库里找到 2 处同类形态（`memoryInEffect().lessons/strategies`，当时靠"函数恰好
+  总返回对象"才安全）——不放松守卫，而是统一形态：新增 `actionRows()` /
+  `memoryLessons()` / `memoryStrategies()` 这类**保证返回数组**的访问器。
+
 ### Partial（AB-4a：GS 自建 + 自运营线路——NEXT-4 部分验收，2026-09-19）
 
 - 新增 GS 命令 `probe_route_cm`：跨 tick 状态机（plan → stationA → stationB → road →
@@ -74,6 +95,27 @@
 - `inspect_route` / `recall` 的接线门控改由 `requireRouteStats` / `requireRecall` 提供，
   既共用谓词又完成类型窄化（不再需要 `!` 断言）。
 - 修事实漂移：`recall` 是第 8 个工具（此前 SPEC/CHANGELOG 写作第 9 个）。
+
+### Added（Dashboard：动作面面板 + `/api/capabilities` —— operator 视角下的动作面，2026-09-19）
+
+- 新增 **Live 页“Action surface”面板**与 **`GET /api/capabilities`** 端点。
+  服务端返回的列表与 `actionCatalog()` 同源（**不**手工重新声明），形状为
+  `{ actions: [{name, effect, gate}], generatedFrom: "actions" }`；客户端
+  只需一次 fetch，列表为空或 hook 缺席时面板隐藏。文档增补在
+  `docs/DASHBOARD-API.md §3.6` 与 `docs/DASHBOARD-UI.md §5.5`。
+- 面板**一句话总结**（header 渲染）：`9 actions · 4 change game state · 2 conditional`。
+  每行一个动作；`read` 动作一枚蓝色徽标，`write` 动作一枚橙色徽标；
+  门控动作额外显示门控 key + **与工具拒绝同源的原因文案**（如
+  `recall` 在 `--no-memory` 下拒绝时的原文）——不另写一份“页面说的话”。
+- 接线：监督模式在 `runServe()` 里装上 `capabilities: () => actionCatalog()`，
+  非监督模式（`src/agent/runner.ts`、`src/game/runner.ts`）同步装配，
+  三个入口共享同一份事实。
+- 新增测试：`web-api.test.ts` 加 2 条（返回目录 + 404 缺失 + 反漂移：返回的
+  名字必须在 `createTools()` 产物里）；`live-view.test.ts` 加 5 条
+  `actionSurface()` 单元覆盖（含 0 行隐藏）；新增
+  `test/unit/action-surface-panel.test.ts` 在**真实 fixture（按
+  `/tmp/ab1/sessions/.../agent-audit.jsonl` 中 capabilities 工具的返回生成）**
+  下验证视图模型 + 限制 0 控制台 error/warn；模板 ↔ 视图模型交叉守卫（AGENTS §5.2）。
 
 ### Added（事实探针：**Bridge GS 单机能跑完整巴士闭环**；ACTION-BUS 设计，2026-09-19）
 

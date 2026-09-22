@@ -3,7 +3,7 @@
  * 事实来源: SPEC §4.3; src/agent/tools/index.ts contracts.
  */
 import { describe, expect, it } from "vitest";
-import { ACTION_EFFECTS } from "../../src/agent/tools/catalog.js";
+import { ACTION_EFFECTS, TOOL_GATES, TOOL_WIRING, actionCatalog } from "../../src/agent/tools/catalog.js";
 import {
 	recallTool,
 	retireRouteTool,
@@ -652,5 +652,36 @@ describe("capabilities 目录的结构性守卫（AB-1）", () => {
 		const live = new Set(createTools({ sink, state: fakeState() } as AgentDeps).map((t) => t.name));
 		const stale = Object.keys(ACTION_EFFECTS).filter((n) => !live.has(n));
 		expect(stale, `ACTION_EFFECTS 里的滞留项：${stale}`).toEqual([]);
+	});
+});
+
+/**
+ * 门控声明守卫（AB-1 契约的机械约束）。
+ *
+ * `wiringRefusal` 里有一句 "gated but its gate is not declared"——它存在是因为
+ * 写错门控键（例如 `TOOL_WIRING` 指向一个不存在的 gate）会让工具**静默放行**，
+ * 而"放行一个本局不该有的动作"正是 D4 要防的事。所以错配必须**在测试期**就被抓住。
+ */
+describe("门控声明的一致性（AB-1 契约）", () => {
+	it("每个 TOOL_WIRING 的值都在 TOOL_GATES 里有定义", () => {
+		const missing = Object.entries(TOOL_WIRING)
+			.filter(([, key]) => TOOL_GATES[key] === undefined)
+			.map(([tool, key]) => `${tool}->${key}`);
+		expect(missing, `这些门控键没有定义：${missing}`).toEqual([]);
+	});
+
+	it("门控只挂在真实存在的工具上（滞留项 = 红）", () => {
+		const { sink } = fakeSink();
+		const live = new Set(createTools({ sink, state: fakeState() } as AgentDeps).map((t) => t.name));
+		const stale = Object.keys(TOOL_WIRING).filter((n) => !live.has(n));
+		expect(stale, `TOOL_WIRING 里的滞留项：${stale}`).toEqual([]);
+	});
+
+	it("目录快照里带门控的动作，其理由与工具的拒绝文案同源", () => {
+		const gated = actionCatalog().filter((a) => a.gate !== null);
+		expect(gated.length, "至少应有一个带门控的动作，否则这条断言是空的").toBeGreaterThan(0);
+		for (const a of gated) {
+			expect(a.gate!.reason.length).toBeGreaterThan(10);
+		}
 	});
 });

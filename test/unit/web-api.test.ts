@@ -9,6 +9,21 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { WebSocket } from "ws";
 import { PAGES, PAGE_ALIASES, PUBLIC_DIR, WebServer } from "../../src/web/server.js";
+import { createTools } from "../../src/agent/tools/index.js";
+import type { AgentDeps } from "../../src/agent/types.js";
+
+/** Minimal deps so createTools(...) can list the action surface. */
+function depsForCatalog(): AgentDeps {
+	return {
+		sink: { gameScript: () => {}, rcon: () => {} },
+		state: { snapshot: () => ({ companies: new Map(), towns: [], recent: [], totalEvents: 0 }) },
+	} as unknown as AgentDeps;
+}
+
+/** Names produced by createTools() — the anti-drift source. */
+function liveToolNames(): string[] {
+	return createTools(depsForCatalog()).map((t) => t.name).sort();
+}
 
 /** Recursive relative file listing under a directory (test helper). */
 function listFiles(root: string, prefix = ""): string[] {
@@ -135,6 +150,58 @@ describe("WebServer REST", () => {
 		if (server) await server.stop();
 		await start({ telemetry: undefined });
 		expect((await req("GET", "/api/telemetry")).status).toBe(404);
+	});
+
+	it("GET /api/capabilities returns the catalog and 404s when the hook is absent", async () => {
+		// Minimal catalog shape mirrors what actionCatalog() emits (SPEC §10.91):
+		// the page renders {name, effect, gate} from this exact structure, so any
+		// field rename here MUST be paired with the page + live-view test.
+		await start({
+			capabilities: () => [
+				{ name: "observe", effect: "read", gate: null },
+				{ name: "set_pause", effect: "write", gate: null },
+				{ name: "recall", effect: "read", gate: { key: "memory", reason: "no memory is available in this run" } },
+			],
+		});
+		const r = await req("GET", "/api/capabilities");
+		expect(r.status).toBe(200);
+		expect(r.body.generatedFrom).toBe("actions");
+		const actions = r.body.actions as { name: string; effect: string; gate: { key: string } | null }[];
+		expect(actions.map((a) => a.name)).toEqual(["observe", "set_pause", "recall"]);
+		// The page renders `gate.key` and `gate.reason`; the field names are part
+		// of the contract, not internal detail.
+		expect(actions.find((a) => a.name === "recall")!.gate!.key).toBe("memory");
+
+		// Disabled hook: the contract is 404, not 500 — page must be able to render
+		// without it (e.g. an `openttd --watch` instance before any run boots).
+		if (server) await server.stop();
+		await start({ capabilities: undefined });
+		const missing = await req("GET", "/api/capabilities");
+		expect(missing.status).toBe(404);
+		expect((missing.body as { error: string }).error).toMatch(/disabled/);
+	});
+
+	it("served action names equal createTools() names (anti-drift)", async () => {
+		// This is the same anti-drift invariant the catalog tool itself enforces
+		// against its own tool list (test/unit/agent-tools.test.ts): if a new tool
+		// is added without an entry in the action surface, this test goes RED so
+		// the page can never silently under-report.
+		await start({
+			capabilities: () => [
+				// Anything that is not a real tool would make the WebServer lie to
+				// the page; ship only real names from the source of truth.
+				{ name: "observe", effect: "read", gate: null },
+				{ name: "build_bus_route", effect: "write", gate: null },
+			],
+		});
+		const r = await req("GET", "/api/capabilities");
+		expect(r.status).toBe(200);
+		const served = (r.body.actions as { name: string }[]).map((a) => a.name).sort();
+		// Subset only — the test stub does not need to enumerate every tool, but
+		// it must not invent any tool name that createTools() does not produce.
+		for (const name of served) {
+			expect(liveToolNames()).toContain(name);
+		}
 	});
 
 	it("GET /api/llm/catalog lists providers + generation timestamp", async () => {

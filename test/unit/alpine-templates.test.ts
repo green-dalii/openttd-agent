@@ -21,6 +21,7 @@ import {
 	lintAlpineTemplates,
 	lintTemplatesInsideSvg,
 	lintXForKeys,
+	lintXForNullable,
 	topLevelElements,
 } from "./helpers/alpine-lint.js";
 import { PAGES } from "../../src/web/server.js";
@@ -161,5 +162,33 @@ describe("alpine-lint: 检查器自身的正确性", () => {
 	it("lintXForKeys 检出缺失的 :key,放过带 key 的", () => {
 		expect(lintXForKeys(`<template x-for="a in b"><li></li></template>`)).toHaveLength(1);
 		expect(lintXForKeys(`<template x-for="a in b" :key="a.id"><li></li></template>`)).toHaveLength(0);
+	});
+});
+
+/**
+ * `x-for` 不得穿过可空表达式（AGENTS §5.2 / D45）。
+ *
+ * 真实事故：`x-for="a in actionSurface().actions"` 在目录未加载时抛
+ * `Cannot read properties of null (reading 'actions')`。**单测看不到它**——前端测试
+ * 脚手架（test/unit/helpers/frontend-harness.ts）**明令禁止** jsdom/headless，
+ * 所以没有任何 Alpine 表达式会被求值。这道静态守卫补的正是那个缺口里**可机械判定**的部分。
+ */
+describe("alpine: x-for 不得穿过可空表达式", () => {
+	it("真实页面里没有 `x-for=\"x in fn().field\"` 形态", () => {
+		const offenders = allPageHtml().flatMap((p) =>
+			lintXForNullable(p.html).map((i) => `${p.name}: ${i.directive}`),
+		);
+		expect(
+			offenders,
+			"`x-for` 会独立求值；函数在数据加载前可能返回 null → Alpine 表达式错误（用视图模型里永不为 null 的数组，例如 actionRows()）",
+		).toEqual([]);
+	});
+
+	it("该守卫会失败（自测：危险形态必须被抓到，安全形态必须放行）", () => {
+		expect(lintXForNullable('<template x-for="a in surface().actions">').length).toBe(1);
+		expect(lintXForNullable('<template x-for="a in surface() ? surface().actions : []">').length).toBe(1);
+		expect(lintXForNullable('<template x-for="a in actionRows()">').length).toBe(0);
+		expect(lintXForNullable('<template x-for="s in steps">').length).toBe(0);
+		expect(lintXForNullable('<template x-for="(s, i) in steps">').length).toBe(0);
 	});
 });

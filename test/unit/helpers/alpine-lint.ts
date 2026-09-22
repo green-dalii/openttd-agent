@@ -230,3 +230,32 @@ export function lintXForKeys(html: string): XForIssue[] {
   }
   return out;
 }
+
+/**
+ * `x-for` 的迭代表达式**不得穿过可空表达式**——特别是"函数调用后取属性"。
+ *
+ * 为什么（2026-09-19 真实事故，AGENTS §5.2 的同一类）：`actionSurface()` 在数据加载前
+ * 返回 `null` 是**正确**设计（"没加载"不能渲染成"0 条"），但
+ * `<template x-for="a in actionSurface().actions">` 会**独立求值**——`x-show` 的 false
+ * 拦不住它——于是每次页面加载都抛
+ * `Alpine Expression Error: Cannot read properties of null (reading 'actions')`。
+ *
+ * `x-show` / `x-text` 容忍 null（返回 undefined，Alpine 只是不渲染），
+ * **`x-for` 不容忍**：它要真的迭代。所以规则收窄在 `x-for` 上：
+ * 迭代表达式里出现 `ident(...)` 后面紧跟 `.`（属性访问）就是危险形态，
+ * 应当改成"视图模型提供的、永不为 null 的数组"（例如 `actionRows()`）。
+ */
+export function lintXForNullable(html: string): XForIssue[] {
+  const out: XForIssue[] = [];
+  for (const t of tokenizeTags(html)) {
+    if (t.isClose || t.name !== "template") continue;
+    const m = /x-for\s*=\s*"([^"]+)"/.exec(t.attrs);
+    if (!m) continue;
+    const expr = m[1]!;
+    // `foo().bar` / `foo() . bar` → 危险；`foo?.bar` 与裸字段 `steps` → 安全
+    if (/[A-Za-z_$][\w$]*\(\)\s*\./.test(expr)) {
+      out.push({ directive: expr, at: t.start });
+    }
+  }
+  return out;
+}

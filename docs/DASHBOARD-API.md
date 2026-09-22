@@ -493,3 +493,38 @@ source?: "catalog" | "custom";   // 默认: baseUrl 为空 => "catalog"（若 pr
 **注意** `strategies` 返回的是**候选池**，不是"可注入集合"。
 可注入需要**两道独立的闸**同时通过：SPEC §5.3 的证据门槛（价值>阈值 且 已验证局≥2）
 与人工确认标志。见 `docs/EVOLUTION.md` §2.2。
+
+### 3.6 动作面（live）
+
+```
+GET /api/capabilities
+→ 200 {
+    generatedFrom: "actions",
+    actions: [
+      {
+        name: string,                 // "observe" | "build_bus_route" | …
+        effect: "read" | "write",     // 是否会改变游戏状态
+        gate: {                       // null = 本局可用；否则说明本局不可用及原因
+          key: string,                // "memory" | "gs_channel"（与 catalog.ts 的 TOOL_GATES 同源）
+          reason: string              // 给模型看的原因（与工具拒绝时返回的文案**同一句**）
+        } | null,
+      },
+      …
+    ]
+  }
+→ 404 { error: "capabilities disabled" }   // 服务端未装配 capabilities hook（详见下）
+```
+
+设计要点（也是 v0.6.x 已达成的“动作面是一份事实”的基本约束）：
+
+- **列表派生自活的工具数组**（`src/agent/tools/index.ts: createTools()`），
+  而**不是**另一份手工名单：名称不可能漂移、新工具不表态会被守卫拦截
+  （`test/unit/agent-tools.test.ts` 里 `ACTION_EFFECTS` 重放证明）。
+- **门控键与原因文案与工具拒绝同源**（共用 `wiringRefusal()`），面板不会
+  替 harness 说谎。
+- `gate.reason` 是**给模型看的那一句**（“no memory is available…”），
+  面板把它原样渲染给运营者，这样“动作为什么不工作”在 harness 与页面是同一句话。
+
+**缺失语义**：服务端可以在 `WebServer` 创建器里选择不传 `capabilities` hook，
+例如独立的 `--watch` 模式（无 agent）或纯静态 HTTP。与 `/api/telemetry` 一致：
+**返回 404**，不是 200 + 空对象—— 面板据此**隐藏**，避免假装“环境中一个动作都没有”。

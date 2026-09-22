@@ -121,6 +121,7 @@ window.Charts = {
 ```
 [sticky header]  brand + nav | link pill · session · mode/brain · elapsed
 [KPI strip]      Cash · Income/yr · Company value · Vehicles · Stations · Tokens
+[Action surface] agent 现在能做的事；读/写徽标 + 门控 + 原因（详见 §5.5）
 [Economy]        (2/3) 多序列折线（money/loan + 图例 + hover tooltip）
 [Agent]          (1/3) 运行状态 · token 环图 · 成本 · 失败率
 [Throughput]     每 turn token 柱状 + 工具调用/延迟表
@@ -245,3 +246,43 @@ window.Charts = {
 浏览器**不得**重算——否则同一规则会有两份实现并悄悄漂移
 （先例：`toWireSnapshot` 有两份，主模式现金曲线空了一整个版本，MEMORY C1）。
 页面只负责把服务端给出的结论排版出来，包括如实显示"样本不足"。
+
+### 5.5 动作面面板（`Action surface`，AB-1 dashboard mirror）
+
+**位置**：Live 页 **Now** 区之后、`Result` 区之前。放在这一位置
+不是因为它在回答“它在做什么”，而是因为**它与现在**接不上——运营者一进来
+就能看到 agent 当前能使用的动词集，不等决策反馈就知道“我的 agent
+能不能买车、能不能卖车、能不能 recall”。
+
+**为什么需要这块面板（为什么不能看日志）**：
+v0.6.x 前 agent 的“能做什么”**只散落在 6 处**（工具 schema / 命令类型 /
+GS `Dispatch` / 标牌语法 / Executor 解析 / 相位解码）。运营者要回答
+“在这个环境里我能不能用 X”只能看代码。现在三件动作可亲眼看到：
+
+1. **读 / 写 徽标**：每个动作一行 + 一枚 badge。
+   读 = “不会改世界”；写 = “会改变游戏状态”（颜色与 stroke 与 Now 区的
+   brain 状态一致，避免面板间颜色冲突）。
+2. **门控与原因**：若是 `gate` 存在（例如 `recall` 受 `--no-memory`
+   拒绝、`inspect_route` 需要 GS 通道），在行末多一段 “gate key · 原因”。
+   **原因文案与工具拒绝时返回的是同一句**（`wiringRefusal`）——
+   面板不会替 harness 说谎。
+3. **总计一行**：`N actions · M change game state · K conditional`。
+   任何读变更动词的人都会看到“2 个可写”是动作面的硬上限。
+
+**为什么不依据“模型知道什么”**：模型知道多少取决于上下文窗口、取决于
+本局被注入了什么——这是 **agent 视角**。面板要的是 **operator 视角**：
+这个 harness 现在、环境现在、这条 session 里能用来做什么。两者
+**必须是同一份事实**。
+
+**为什么 `404 == 隐藏`**：面板存在于 **live dashboard** 上，不在
+“无 logger 的部署”。`--watch` 与不带 `--serve` 的老模式不会装配
+`capabilities` hook——返回 404 时面板隐藏，而不是装作“环境中没有动作”。
+空列表同样隐藏：`[empty array]` 不能区分“有 0 个动作”与“endpoint 未返回”，
+面板依据**元数据语义**隐藏。
+
+**规则上在服务端**（与 §5.4 同样原则）：
+列表/门控/原因/详情的服务端钩子在 `src/agent/serve.ts: runServe()` 里调
+`actionCatalog()`（`src/agent/tools/catalog.ts`）。
+页面**不**重算列表与计数、**不**在模板里调用 `actionCatalog()`——只读
+视图模型 `LiveView.actionSurface()` 的输出。模板 ↔ 视图模型的交叉守卫在
+`test/unit/action-surface-panel.test.ts` 里锁住（AGENTS §5.2）。

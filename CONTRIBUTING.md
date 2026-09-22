@@ -9,6 +9,7 @@
 > 整个 `agent/` 节、测试数停留在 100+ 个 commit 之前）——收敛到一个地方，
 > README 只放指针。
 
+
 ## 1. 环境与前置
 
 - Node >= 22.19，pnpm。
@@ -31,6 +32,20 @@
 | — | **每局存档**：`<dataDir>/save/<sessionId>.sav`（OpenTTD 15 客户端可载入回看）|
 | ⚠️ | **真机实验运行期间不要跑 gate**（preflight 断言端口空闲 → 假红；见 MEMORY D5）|
 | `pnpm exec tsx scripts/m3-verdict.ts <dataDir>` | A/B 判定（含 confounded 守卫） |
+
+- **`pnpm run dashboard:smoke`** — §5.2 的**唯一自动化**前端检查：用真实 Chrome（CDP）
+  打开一个**正在运行**的 dashboard，断言用户可见元素真的渲染了、且控制台**任何级别**
+  都没有 error/warning/exception。前端单测脚手架禁止 jsdom/headless（见
+  `test/unit/helpers/frontend-harness.ts` 的文件头），所以**没有单测会求值 Alpine 表达式**
+  ——"0 控制台错误"在单测里是空真。
+
+  ```sh
+  OPENTTD_DATA_DIR=/tmp/dash pnpm run cli --serve --web-port 8899 &
+  pnpm run dashboard:smoke                      # 默认 http://127.0.0.1:8899/
+  ```
+  退出码：`0` 通过 · `1` 页面坏了（有控制台 error/warning/exception 或面板不可见）·
+  `2` 环境问题（没有 Chrome / dashboard 没起来）。**2 与 1 必须分开**，否则 CI 会把
+  环境失败误读成产品回归。改任何页面模板/视图模型后都应跑它。
 
 ## 3. 目录结构（单一事实源，改动目录时**必须**同步此树）
 
@@ -84,7 +99,8 @@ src/
     server.ts               # HTTP 路由表(PAGES) + REST + WS 扇出
     public/                 # 无构建链前端 (Alpine + 原生 JS)
   cli/run.ts                # CLI: --probe / --dry-run / --watch / --v02 / --agent
-scripts/                    # dev 辅助 (run-experiment / loop-health / m3-verdict …)
+scripts/                    # dev 辅助 (run-experiment / loop-health / m3-verdict)
+  dashboard-smoke.mjs       #   唯一的真实浏览器前端检查 (§5.2) —— pnpm run dashboard:smoke
 test/
   unit/                     # 纯单测 (vitest)
   live/                     # 真机集成 (@live 标记, LIVE_TESTS=1 才跑)

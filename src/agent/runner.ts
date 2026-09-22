@@ -58,6 +58,7 @@ import {
 import { routeFactsProviderFor } from "../evolution/route-facts.js";
 import { joinRoutesWithLedger } from "./route-stats.js";
 import { makeFreezeController } from "./freeze.js";
+import { actionCatalog } from "./tools/catalog.js";
 import { RouteLedger } from "./route-ledger.js";
 import { makeSignalHub, type SignalHub } from "./signal-hub.js";
 import { createDecisionLoop } from "./decision-loop.js";
@@ -424,6 +425,9 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 			},
 		}),
 		telemetry: () => telemetry.snapshot(),
+		// Static action surface for the dashboard (AB-1). Same shape across
+		// supervised and unsupervised runs — see docs/DASHBOARD-API.md §3.6.
+		capabilities: () => actionCatalog(),
 		sessions: {
 			list: () => listSessions(cfg.dataDir),
 			read: (id: string, limit?: number) => readSession(cfg.dataDir, id, limit ? { limit } : {}),

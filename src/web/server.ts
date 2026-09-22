@@ -107,6 +107,14 @@ export interface WebServerOptions {
 	};
 	/** Live agent telemetry snapshot. Absent => 404. */
 	telemetry?: () => unknown;
+	/**
+	 * Static action surface (AB-1, SPEC §10.91).
+	 *
+	 * Returns the catalog from `actionCatalog()` so the dashboard can render
+	 * what the agent can do right now without inventing a second source. Absent
+	 * => 404. Pure / sync — the list is already memoized inside the catalog.
+	 */
+	capabilities?: () => unknown;
 	/** Built-in provider directory. Absent => 404. */
 	catalog?: CatalogHooks;
 	/** Past sessions. Absent => 404. */
@@ -160,6 +168,7 @@ export class WebServer {
 	private onFirstClient?: () => void;
 	private llmHooks?: WebServerOptions["llm"];
 	private telemetryHook?: WebServerOptions["telemetry"];
+	private capabilitiesHook?: WebServerOptions["capabilities"];
 	private catalogHooks?: CatalogHooks;
 	private clients = new Set<WebSocket>();
 	private started = false;
@@ -175,6 +184,7 @@ export class WebServer {
 		this.evolutionHooks = opts.evolution;
 		this.llmHooks = opts.llm;
 		this.telemetryHook = opts.telemetry;
+		this.capabilitiesHook = opts.capabilities;
 		this.catalogHooks = opts.catalog;
 
 		this.httpServer = http.createServer((req, res) => this.serveStatic(req, res));
@@ -443,6 +453,18 @@ export class WebServer {
 			if (url.pathname === "/api/telemetry" && req.method === "GET") {
 				if (!this.telemetryHook) return json(404, { error: "telemetry disabled" });
 				return json(200, this.telemetryHook());
+			}
+
+			// GET /api/capabilities — static action surface (AB-1, SPEC §10.91).
+			// The hook returns the catalog (an array of {name, effect, gate} entries);
+			// we wrap it with `generatedFrom: "actions"` so the wire shape is
+			// self-describing for the dashboard. The hook is wired in
+			// src/agent/serve.ts and src/agent/runner.ts; the page-side contract
+			// lives in docs/DASHBOARD-API.md §3.6.
+			if (url.pathname === "/api/capabilities" && req.method === "GET") {
+				if (!this.capabilitiesHook) return json(404, { error: "capabilities disabled" });
+				const list = this.capabilitiesHook();
+				return json(200, { actions: list, generatedFrom: "actions" });
 			}
 
 			// /api/llm/catalog[...]

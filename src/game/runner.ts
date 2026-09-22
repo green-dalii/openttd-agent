@@ -17,6 +17,7 @@ import { AdminClient } from "../game/admin-client.js";
 import { WorldState } from "../game/world-state.js";
 import { WebServer } from "../web/server.js";
 import { createLlmApi } from "../agent/llm-api.js";
+import { actionCatalog } from "../agent/tools/catalog.js";
 import {
 	SessionStore,
 	buildStageSummary,
@@ -204,6 +205,11 @@ export async function runWatch(
 			// Backlog for late subscribers / reloads (docs/DASHBOARD-UI.md §7).
 			checkpoints: session.current().checkpoints,
 		}),
+		// Static action surface (AB-1). In watch mode there is no LLM brain, but
+		// the dashboard still wants to know what the environment exposes — the
+		// "now what?" question is the same one an operator asks before starting a
+		// run. Shape is identical to /api/capabilities in supervised mode.
+		capabilities: () => actionCatalog(),
 		sessions: {
 			list: () => listSessions(cfg.dataDir),
 			read: (id: string, limit?: number) =>

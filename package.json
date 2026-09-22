@@ -19,7 +19,8 @@
     "cli": "tsx src/cli/run.ts",
     "e2e": "bash scripts/e2e-agent.sh",
     "vendor": "tsx scripts/sync-vendor.ts",
-    "vendor:check": "tsx scripts/verify-vendor.ts"
+    "vendor:check": "tsx scripts/verify-vendor.ts",
+    "dashboard:smoke": "node scripts/dashboard-smoke.mjs"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "0.85.1",

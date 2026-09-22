@@ -23,6 +23,7 @@ import { runAgent } from "./runner.js";
 import { runWatch } from "../game/runner.js";
 import { runPreflight, formatPreflight } from "./preflight.js";
 import { APP_VERSION } from "../version.js";
+import { actionCatalog } from "./tools/catalog.js";
 
 export interface ServeOptions {
 	webPort?: number;
@@ -143,6 +144,10 @@ export async function runServe(cfg: Config, opts: ServeOptions = {}): Promise<Se
 		getSnapshot: () => ({ mode: "serve", run: supervisor.state(), appVersion: APP_VERSION }),
 		llm: llmApi.llm,
 		catalog: llmApi.catalog,
+		// Static action surface (AB-1, SPEC §10.91). The list is computed once at
+		// construction — the underlying catalog is a memoized view of the tool
+		// registry, so this hook is cheap and safe to call on every request.
+		capabilities: () => actionCatalog(),
 		sessions: {
 			list: () => listSessions(cfg.dataDir),
 			read: (id, limit) => readSession(cfg.dataDir, id, limit ? { limit } : {}),

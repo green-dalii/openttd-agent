@@ -27,19 +27,42 @@ export type ActionEffect = "read" | "write";
  * 工具在 `execute` 开头调用它并**原样**返回该原因——因此"目录说不可用、工具却不拒绝"
  * （或反过来）在结构上不可能发生。
  */
-export type WiringGate = (deps: AgentDeps) => string | null;
+/**
+ * 一条门控 = **原因文案 + 生效谓词**绑在一起。
+ *
+ * 为什么绑在一起（而不是各写一份）：UI（运营面板）需要在**没有 deps** 的情况下
+ * 说出"这个动作在本局有条件"，而工具需要在**有 deps** 的情况下说出"这次调用为什么被拒"。
+ * 如果两处各写一份文案，它们一定会在某次改动后不一致——那时面板会替 harness 说谎。
+ */
+export interface ToolGate {
+	/** 短标识，给 UI/日志用（`memory` / `gs_channel`）。 */
+	key: string;
+	/** 给模型与运营者看的**同一句**原因。 */
+	reason: string;
+	/** 本局是否满足条件。 */
+	active: (deps: AgentDeps) => boolean;
+}
 
-export const TOOL_WIRING: Record<string, WiringGate> = {
-	inspect_route: (deps) =>
-		deps.routeStats === undefined ? "route economics are not available in this mode (no GS channel reports them)" : null,
-	recall: (deps) =>
-		deps.recall === undefined ? "no memory is available in this run (it was disabled), so there is nothing to recall." : null,
+const NO_MEMORY_REASON = "no memory is available in this run (it was disabled), so there is nothing to recall.";
+const NO_GS_REASON = "route economics are not available in this mode (no GS channel reports them)";
+
+export const TOOL_WIRING: Record<string, string> = {
+	inspect_route: "gs_channel",
+	recall: "memory",
+};
+
+export const TOOL_GATES: Record<string, ToolGate> = {
+	memory: { key: "memory", reason: NO_MEMORY_REASON, active: (deps) => deps.recall !== undefined },
+	gs_channel: { key: "gs_channel", reason: NO_GS_REASON, active: (deps) => deps.routeStats !== undefined },
 };
 
 /** 查询某动作在本局是否可用（不可用则给出原因，与工具自身的拒绝文案同源）。 */
 export function wiringRefusal(deps: AgentDeps, toolName: string): string | null {
-	const gate = TOOL_WIRING[toolName];
-	return gate ? gate(deps) : null;
+	const gateKey = TOOL_WIRING[toolName];
+	if (gateKey === undefined) return null;
+	const gate = TOOL_GATES[gateKey];
+	if (gate === undefined) return "this action is gated but its gate is not declared"; // 声明错误必须可见，不能静默放行
+	return gate.active(deps) ? null : gate.reason;
 }
 
 /**
@@ -81,6 +104,32 @@ export function requireRouteStats(
 	const why = wiringRefusal(deps, "inspect_route");
 	if (deps.routeStats === undefined) return { ok: false, summary: why ?? "route economics are not available in this mode" };
 	return { ok: true, routeStats: deps.routeStats };
+}
+
+/**
+ * 给**运营面板**用的动作面快照（静态，不需要 deps）。
+ *
+ * 名字的权威仍是 `createTools()`（守卫在 `test/unit/agent-tools.test.ts` 里断言
+ * 两者一致），所以这个函数**不是**第二份清单，而是同一个登记表的只读视图。
+ * 门控只报"有条件"，不报"本局可不可用"——因为这里拿不到 deps，
+ * 而**报错比说谎好**：面板不该声称一个它无法知道的事实。
+ */
+export function actionCatalog(): {
+	name: string;
+	effect: ActionEffect;
+	gate: { key: string; reason: string } | null;
+}[] {
+	return Object.keys(ACTION_EFFECTS)
+		.sort()
+		.map((name) => {
+			const gateKey = TOOL_WIRING[name];
+			const gate = gateKey === undefined ? undefined : TOOL_GATES[gateKey];
+			return {
+				name,
+				effect: ACTION_EFFECTS[name] ?? "write",
+				gate: gate ? { key: gate.key, reason: gate.reason } : null,
+			};
+		});
 }
 
 const CapabilitiesSchema = Type.Object({});

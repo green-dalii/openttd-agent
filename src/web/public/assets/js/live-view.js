@@ -116,6 +116,13 @@
        * Null until the server reports it; the panel stays hidden in that case.
        */
       memory: null,
+      /**
+       * Static action surface (AB-1, SPEC §10.91). The page mirrors what
+       * /api/capabilities returns: `{ actions: [{name, effect, gate}], generatedFrom }`.
+       * Null until live.js fetches the endpoint and stores the payload here.
+       * The dashboard is honest about capability only when this is set.
+       */
+      actionCatalog: null,
       run: null,
       runControl: false,
       startedAt: null,
@@ -487,6 +494,87 @@
               ? "nothing — this game ran on the base prompt"
               : `${U.fmtInt(lessonsInjected)} lesson(s) + ${U.fmtInt(strategiesInjected)} strategy card(s)`,
         };
+      },
+
+      /**
+       * `x-for` 迭代用的**保证是数组**的访问器（D45）。
+       *
+       * `memoryInEffect()` 目前总是返回对象，所以 `memoryInEffect().lessons` 是安全的；
+       * 但"目前恰好安全"不是契约——一旦那个函数为"没数据"返回 null（`actionSurface()`
+       * 就是这么做的，而且是对的），模板就会抛 Alpine 表达式错误。
+       * 统一规则：**`x-for` 只迭代"保证是数组"的东西**，可空判断留在视图模型里。
+       */
+      memoryLessons() {
+        return this.memoryInEffect().lessons;
+      },
+
+      memoryStrategies() {
+        return this.memoryInEffect().strategies;
+      },
+
+      /**
+       * Action surface panel view (AB-1 dashboard mirror).
+       *
+       * Pure derivation over `this.actionCatalog`:
+       *   - Normalises each action into a row with a stable key (Alpine :key)
+       *     and a human-readable badge for the read/write split.
+       *   - Counts writes (changes game state) and conditional (gated) actions
+       *     so the header can summarize the shape at a glance.
+       *
+       * Returns null when no catalog is loaded: the panel must stay hidden,
+       * not render an empty list, because a UI that says "no actions exist"
+       * when the server has simply not been queried is a capability lie.
+       */
+      actionSurface() {
+        const c = this.actionCatalog;
+        if (!c || !Array.isArray(c.actions) || c.actions.length === 0) return null;
+        let writes = 0;
+        let conditional = 0;
+        const actions = c.actions.map((a) => {
+          const isWrite = a && a.effect === "write";
+          if (isWrite) writes++;
+          const gate = a && a.gate;
+          if (gate && typeof gate === "object") conditional++;
+          return {
+            name: a && a.name ? String(a.name) : "",
+            effect: isWrite ? "write" : "read",
+            // The badge text is the only thing telling the operator "this
+            // changes the game state" — without it, the read/write split is
+            // invisible. Keep the wording operator-facing, not agent-facing.
+            effectLabel: isWrite ? "changes game state" : "read-only",
+            badgeClass: isWrite ? "tag-write" : "tag-read",
+            gateKey: gate && typeof gate === "object" ? (gate.key || null) : null,
+            gateReason: gate && typeof gate === "object" ? String(gate.reason || "") : "",
+            // Unique-per-row key for Alpine's x-for :key. Using the action name
+            // (the catalog has no duplicates; actionCatalog() asserts this).
+            key: a && a.name ? String(a.name) : `a${Math.random()}`,
+          };
+        }).filter((row) => row.name);
+        if (actions.length === 0) return null;
+        return {
+          actions,
+          writes,
+          conditional,
+          total: actions.length,
+          summary: `${actions.length} action(s) · ${writes} change game state · ${conditional} conditional`,
+        };
+      },
+
+      /**
+       * The rows for `x-for` — **永不为 null**。
+       *
+       * 为什么需要这一个额外函数（真机 CDP 探针抓到的 bug）：`actionSurface()` 在目录
+       * 还没加载时返回 `null`（这是对的："没加载" 不能渲染成 "0 个动作"），
+       * 但 `<template x-for="a in actionSurface().actions">` 会**独立求值**——
+       * `x-show` 的 false 拦不住它——于是每次页面加载都抛
+       * `Cannot read properties of null (reading 'actions')`（Alpine 表达式错误 + TypeError）。
+       *
+       * 规则：**`x-for` 绝不能穿过可空表达式**。可见性用 `actionSurface()`，
+       * 迭代用这个永远返回数组的函数。
+       */
+      actionRows() {
+        const s = this.actionSurface();
+        return s ? s.actions : [];
       },
 
       /** Per-tool performance rows. */

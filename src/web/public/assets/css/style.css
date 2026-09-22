@@ -230,6 +230,23 @@ table.kv td.num, table.kv th.num { text-align: right; font-variant-numeric: tabu
 .tag-script      { background: #1b2f44; color: #9fd0ff; }
 .tag-protocol    { background: #2b2f36; color: #aebdca; }
 .tag-other       { background: #242a31; color: #9fb0bd; }
+/* Action surface panel (AB-1): badge classes for read/write/gate. */
+.tag-read        { background: #1f2f44; color: #84b8ff; }
+.tag-write       { background: #3a2a16; color: #ffba6e; }
+.tag-gate        { background: #2a2140; color: #c9b4ff; }
+
+/* Action surface panel rows: one row per tool, read/write badge right of the name,
+   gate (if any) further right with the same reason the tool itself returns. */
+.acts { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.act-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 10px; background: var(--panel-2); border: 1px solid var(--line);
+  border-radius: var(--r-sm); flex-wrap: wrap;
+}
+.act-name { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12.5px; }
+.act-gate { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
+.act-why { font-size: 11px; color: var(--muted); }
+[x-cloak] { display: none !important; }
 
 /* ------------------------------ buttons ------------------------------ */
 button { font-family: inherit; }

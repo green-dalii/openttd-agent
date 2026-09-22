@@ -76,6 +76,7 @@
 
           this.connect();
           this.loadRun();
+          this.loadCapabilities();
           // Elapsed time must tick without a busy repaint loop.
           this.elapsedTimer = setInterval(() => { if (this.startedAt) this.elapsed = U.fmtDuration(Date.now() - this.startedAt); }, 5000);
         },
@@ -90,6 +91,29 @@
             }
           } catch {
             /* run control disabled */
+          }
+        },
+
+        /**
+         * Fetch the static action surface once (AB-1, SPEC §10.91).
+         *
+         * 404 is expected and means the dashboard is not running in a mode that
+         * exposes actions (e.g. `--watch` before any agent). The panel stays
+         * hidden because `actionSurface()` returns null on null input; we never
+         * want a "0 actions" empty list pretending to be the truth.
+         */
+        async loadCapabilities() {
+          try {
+            const r = await fetch("/api/capabilities");
+            if (!r.ok) return; // 404 = capability hook absent, panel stays hidden
+            const body = await r.json();
+            // The endpoint serves `{ actions: [...], generatedFrom }` (docs §3.6).
+            // We carry the full payload so the page can render `generatedFrom`
+            // provenance if we ever need to; live-view.js's actionSurface() only
+            // reads `actions`.
+            this.actionCatalog = body;
+          } catch {
+            /* offline or hook disabled — leave actionCatalog null, panel hidden */
           }
         },
 

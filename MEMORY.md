@@ -150,6 +150,7 @@
 | D42 | 契约写对了不等于**在实践中有用**：真机一跑才发现"子串匹配"对自然提问几乎不可能命中 |
 | D43 | **未验证的架构假设**会以"事实"的身份统治整个设计——本项目的双 VM 架构就建立在"GS 不能买车"这条从未测过的推断上 |
 | D44 | 表键未初始化时整个 GS **静默死亡**（游戏继续，admin 通道活着，只有 GS 消失）；以及自测通过 ≠ 守卫工作（`\b`/`\s` 在 `new RegExp(\`…\`)` 里被当成字面字符） |
+| D45 | **前端的"0 控制台错误"在单测里永远是空真**——没有 Alpine 求值就没有错误；`x-for` 还会**穿过** `x-show` 独立求值可空表达式 |
 | D34 | 源码里有这个分支 ≠ 它在**可达状态**下会被调用：读完分支还要读**调用点的守卫** |
 
 **E 提交卫生** · **F 文档一致性**
@@ -599,6 +600,42 @@ R1 实测证明缓存本来就发生（37–44% 命中率，SPEC §10.75）。
   → 规则：**动 CLI 开关后第一步跑 `test/unit/cli-v02.test.ts`，不是 `tsc`。**
 - **第 6 次（Squirrel 侧）**：`probe_cm` 函数在 Bridge GS 里写了很久，
   但 `Dispatch` 里**从来没有它的分支** → 两次真机运行只得到 `unknown cmd`（白跑两局）。
+
+### D45. 前端"0 控制台错误"的结论，在单测里永远是**空真**（2026-09-19）
+
+**这是 §5.2 同一类事故的第 4 次**，但这次抓住了它，且抓法值得固化。
+
+**现象**：给 Live 页加了"动作面"面板（读 `/api/capabilities`）。单测全绿——包括一个
+"加载页面脚本、断言 0 错误 0 警告"的测试。真机 CDP 一开：
+
+```
+PANEL: found=true visible=true rowCount=9      ← 面板其实渲染对了
+!! warning  Alpine Expression Error: Cannot read properties of null (reading 'actions')
+           Expression: "actionSurface().actions"
+!! exception TypeError: ... at [Alpine] actionSurface().actions
+```
+
+**根因**：`actionSurface()` 在目录未加载时返回 `null`（**这是对的设计**："没加载"不能渲染成
+"0 个动作"）。`x-show="actionSurface()"` 容忍 null，但
+`<template x-for="a in actionSurface().actions">` 会**独立求值**——`x-show` 的假拦不住它——
+于是**每次页面加载**都抛错。
+
+**为什么单测看不到**：本仓库的前端脚手架 `test/unit/helpers/frontend-harness.ts`
+**明令禁止** jsdom/headless（"真机画面由 @live 覆盖"）。没有 DOM、没有 Alpine，
+**就没有任何表达式会被求值** → "0 错误"必然成立。这个结论**空真**。
+`node:vm` 里加载脚本再加个假 console，也改变不了这一点（脚本被加载 ≠ 表达式被求值）。
+
+**规则**：
+1. **前端改动的"没有报错"必须来自真实浏览器**。已把一次性 CDP 探针升级为
+   **`pnpm run dashboard:smoke`**（`scripts/dashboard-smoke.mjs`）：真实 Chrome +
+   全部级别控制台 + 断言"用户看得见的元素渲染了"。它是 §5.2 的唯一自动化落点。
+2. **`x-for` 不得穿过可空表达式**（机械守卫在 `test/unit/alpine-templates.test.ts`）。
+   新守卫上线时**立刻抓到仓库里另外 2 处**同类形态（`memoryInEffect().lessons/strategies`）——
+   那两处当时是安全的（函数恰好总返回对象），但"恰好安全"不是契约：
+   **不放宽守卫，而是把形态统一**（加 `memoryLessons()` / `memoryStrategies()` 这类
+   保证返回数组的访问器）。
+3. **环境失败 ≠ 产品失败**：冒烟脚本用退出码区分（2 = 没有 Chrome / dashboard 没起来，
+   1 = 页面真的坏了），否则 CI 里会把环境问题误读成回归。
 
 ### D44. 表键未初始化时，整个 GS **静默死亡**——且"自测通过"不等于"守卫工作"（2026-09-19）
 
