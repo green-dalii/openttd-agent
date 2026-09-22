@@ -11,9 +11,9 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import { PAGES, PAGE_ALIASES, PUBLIC_DIR } from "../../src/web/server.js";
 
 function listFiles(prefix = ""): string[] {
@@ -272,5 +272,36 @@ describe("front-end assets", () => {
 			);
 			expect(offenders.map((p) => p.name)).toEqual([]);
 		});
+	});
+});
+/**
+ * 快照盒子的**正方形不变量**（2026-09-22 真机事故）。
+ *
+ * 小地图的覆盖标记是 `<svg viewBox="0 0 100 100" preserveAspectRatio="none">`
+ * ——**拉伸填满盒子**；底图是 `background-size: N% auto`（按宽度缩放）。
+ * 两者都假定盒子是**正方形**。我为了断"宽度→高度"的闭环给它加了
+ * `max-height: 260px`，盒子变成长方形 → 底图被裁、标记被拉伸 → **标记与地图错位**，
+ * 用户看到的正是"图表内容、比例错乱"。
+ *
+ * 这条守卫锁住不变量本身：想要限制快照尺寸，请限制**列宽**（见 .stage-snaps），
+ * 不要给盒子加高度上限。
+ */
+describe("快照盒子必须保持正方形（小地图叠加依赖它）", () => {
+	const css = readFileSync(join(PUBLIC_DIR, "assets/css/style.css"), "utf8");
+	const rule = css.match(/\.snap-img\s*\{[^}]*\}/)?.[0] ?? "";
+
+	it("有 aspect-ratio: 1 / 1", () => {
+		expect(rule, ".snap-img 规则没找到（选择器改名了？）").not.toBe("");
+		expect(rule).toMatch(/aspect-ratio:\s*1\s*\/\s*1/);
+	});
+
+	it("**没有** height / max-height（有就不是正方形了）", () => {
+		expect(rule, "给 .snap-img 加高度上限会让标记与地图错位").not.toMatch(/(?:^|[;\s])max-height\s*:/);
+		expect(rule, "固定高度同样会破坏正方形").not.toMatch(/(?:^|[;\s])height\s*:/);
+	});
+
+	it("尺寸限制改在**列宽**上（列宽与视口无关，且不破坏正方形）", () => {
+		const grid = css.match(/\.stage-snaps\s*\{[^}]*\}/)?.[0] ?? "";
+		expect(grid, "列宽必须是固定区间（minmax(a, b)），不能是 1fr 自由伸展").toMatch(/minmax\(\s*\d+px\s*,\s*\d+px\s*\)/);
 	});
 });

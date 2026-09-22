@@ -26,11 +26,13 @@ interface UChartsApi {
 	line: (el: unknown, cfg: unknown) => unknown;
 	stackedBars: (el: unknown, cfg: unknown) => unknown;
 	destroy: (el: unknown) => void;
+	/** 轴宽规则（按格式化后的标签测量，2026-09-22）。 */
+	axisSizeFor: (labels?: unknown[], font?: string) => number;
 	/** Exposed for tests: the cfg translation, with no uPlot involved. */
-	toLineData: (cfg: unknown) => { data: unknown; opts: unknown };
-	toStackedData: (cfg: unknown) => { data: unknown; opts: unknown };
+	toLineData: (cfg: unknown) => { data: unknown; opts: unknown; empty?: boolean };
+	toStackedData: (cfg: unknown) => { data: unknown; opts: unknown; empty?: boolean };
 	stackedArea: (el: unknown, cfg: unknown) => unknown;
-	toStackedAreaData: (cfg: unknown) => { data: number[][]; opts: Record<string, unknown> };
+	toStackedAreaData: (cfg: unknown) => { data: number[][]; opts: Record<string, unknown>; empty?: boolean };
 	stackedLowerBounds: (items: unknown, si: number, i0: number, i1: number) => number[];
 	stackedUpperBounds: (items: unknown, si: number, i0: number, i1: number) => number[];
 }
@@ -149,7 +151,7 @@ describe("uPlot adapter", () => {
 
 		it("passes the height through so the layout keeps its size", () => {
 			const { api } = load();
-			const { opts } = api.toLineData({ series: [], labels: [], height: 260 });
+			const { opts } = api.toLineData({ series: [{ name: "s", data: [1] }], labels: ["a"], height: 260 });
 			expect((opts as { height?: number }).height).toBe(260);
 		});
 
@@ -174,11 +176,20 @@ describe("uPlot adapter", () => {
 			expect(axes[0]!.values!(null, [0, 1])).toEqual(["1950-01-01", "1950-02-01"]);
 		});
 
-		it("degrades safely with no series or no data", () => {
+		it("**零数据**标记为 empty（不再构造 uPlot，改成明确说明）", () => {
 			const { api } = load();
-			expect(() => api.toLineData({ series: [], labels: [] })).not.toThrow();
-			const { data } = api.toLineData({ series: [{ name: "s", data: [] }], labels: [] });
-			expect(Array.isArray(data)).toBe(true);
+			expect(api.toLineData({ series: [], labels: [] }).empty).toBe(true);
+			expect(api.toLineData({ series: [{ name: "s", data: [] }], labels: [] }).empty).toBe(true);
+			// 有数据时**不得**标成空
+			expect(api.toLineData({ series: [{ name: "s", data: [1] }], labels: ["a"] }).empty).toBeUndefined();
+		});
+
+		it("零数据时**不构造** uPlot，而是插入一句说明（空盒子看起来像坏了）", () => {
+			const { api, calls } = load();
+			const host = { nodeName: "DIV", replaceChildren: () => {}, querySelector: () => null, children: [] };
+			const r = api.line(host, { series: [], labels: [] });
+			expect(r).toBeNull();
+			expect(calls.filter((c) => c.el !== null)).toHaveLength(0); // 没建 uPlot
 		});
 	});
 
@@ -323,7 +334,13 @@ describe("uPlot adapter", () => {
 			api.line(el, { ...base, height: 200 });
 			api.line(el, { ...base, height: 320 }); // 高度变
 			api.line(el, { ...base, height: 320, key: "tokens:cost" }); // 指标变（format 都是函数，只能靠 key）
-			api.line(el, { ...base, height: 320, key: "tokens:cost", series: [{ name: "s" }, { name: "t" }] }); // 系列数变
+			api.line(el, {
+				...base,
+				height: 320,
+				key: "tokens:cost",
+				// 系列数变（必须给 data，否则会走"零数据"的空状态而不是重建）
+				series: [{ name: "s", data: [1] }, { name: "t", data: [2] }],
+			});
 			expect(calls.filter((c) => c.el !== null)).toHaveLength(3);
 		});
 
@@ -542,3 +559,70 @@ describe("ucharts: stacked AREA (大者先画,逐个覆盖成带)", () => {
 	});
 });
 
+
+/**
+ * Y 轴宽度必须由**实际标签文本**决定（2026-09-22 真机截图）。
+ *
+ * 事故：轴宽写死 52px，而格式化后的标签 `£300.00k` 约 65px → **被裁成 `00000`**。
+ * 用户看到的"图表内容、比例错乱"里，这一项就是"标签读不出来 + 轴与绘图区比例失衡"。
+ */
+describe("轴宽按标签测量（不再写死 52px）", () => {
+	it("宽标签得到更宽的轴，窄标签不会浪费空间", () => {
+		const { api } = load();
+		const narrow = api.axisSizeFor(["0", "5", "9"]);
+		const wide = api.axisSizeFor(["£300.00k", "-£1.20M"]);
+		expect(wide).toBeGreaterThan(narrow);
+		expect(narrow).toBeGreaterThanOrEqual(40); // 下限
+		expect(wide).toBeLessThanOrEqual(120); // 上限（不无限膨胀）
+	});
+
+	it("空样本不会算出 0（退化为下限）", () => {
+		const { api } = load();
+		expect(api.axisSizeFor([])).toBeGreaterThanOrEqual(40);
+		expect(api.axisSizeFor(undefined)).toBeGreaterThanOrEqual(40);
+	});
+});
+
+/**
+ * 空状态占位**必须**在数据回来后消失（2026-09-22 真机截图）。
+ *
+ * 我加了"还没有数据"的占位，但没有在绘图前清掉它——于是数据回来以后，
+ * 那句说明**永远压在图表上方**（真机截图里可见）。这是"加了一个状态却忘了退场"的典型。
+ */
+describe("空状态占位会退场", () => {
+	function fakeHost() {
+		const kids: { className: string; textContent: string; remove(): void }[] = [];
+		return {
+			nodeName: "DIV",
+			replaceChildren: (...n: unknown[]) => {
+				kids.length = 0;
+				for (const x of n) {
+					const node = x as { remove?: () => void };
+					// 真 DOM 的元素自带 remove()；假宿主也要有，否则"占位退场"根本没测到。
+					if (node && typeof node === "object") {
+						node.remove = () => {
+							const i = kids.indexOf(node as never);
+							if (i >= 0) kids.splice(i, 1);
+						};
+					}
+					kids.push(node as never);
+				}
+			},
+			querySelector: (sel: string) => (sel === ".chart-empty" ? kids.find((k) => k.className === "chart-empty") ?? null : null),
+			querySelectorAll: (sel: string) => (sel === ".chart-empty" ? kids.filter((k) => k.className === "chart-empty") : []),
+			kids,
+		};
+	}
+
+	it("零数据 → 插入占位；随后有数据 → 占位被清掉再绘图", () => {
+		const { api, calls } = load();
+		const el = fakeHost();
+		// 1) 零数据：插入占位
+		expect(api.line(el, { series: [], labels: [] })).toBeNull();
+		expect(el.kids.some((k: { className: string }) => k.className === "chart-empty")).toBe(true);
+		// 2) 数据回来：占位必须消失，且真的画了图
+		api.line(el, { series: [{ name: "s", data: [1, 2] }], labels: ["a", "b"] });
+		expect(el.kids.some((k: { className: string }) => k.className === "chart-empty")).toBe(false);
+		expect(calls.filter((c) => c.el !== null).length).toBeGreaterThan(0);
+	});
+});

@@ -106,7 +106,9 @@ main { padding: var(--sp-4) var(--sp-5) 64px; max-width: 1360px; margin: 0 auto;
 .notice .notice-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
 
 /* stage snapshot (data-rendered map diagram) */
-.stage-snaps { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: var(--sp-3); }
+/* 列宽被**夹在固定区间**（而不是 1fr 自由伸展）：这样快照正方形的高度有界，
+ * 而列宽不随视口宽度变化 → 不会与"滚动条是否占宽"形成闭环。 */
+.stage-snaps { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 380px)); gap: var(--sp-3); justify-content: start; }
 .snap { background: var(--bg-sunken); border: 1px solid var(--line); border-radius: var(--r-sm); padding: 8px; }
 .snap canvas { background: none; }
 .snap .snap-meta { font-size: 10.5px; color: var(--muted); margin-top: 4px; display: flex;
@@ -116,9 +118,12 @@ main { padding: var(--sp-4) var(--sp-5) 64px; max-width: 1360px; margin: 0 auto;
  * the construction window: at 1 px per tile an unscaled 256x256 map changes by
  * only a pixel or two per stage. `pixelated` keeps tile edges honest when zoomed. */
 .snap-map { position: relative; }
-/* max-height 是**上限**：宽度超过 260px 后高度不再随宽度增长，
- * 于是"文档高度"不会再随窗口/滚动条宽度变化而变（防御上面那个闭环的第二层）。 */
-.snap-img { display: block; width: 100%; aspect-ratio: 1 / 1; max-height: 260px; border-radius: var(--r-sm);
+/* ⚠️ **必须保持正方形**：覆盖标记用 `viewBox="0 0 100 100" preserveAspectRatio="none"`
+ * 拉伸填满盒子，而底图用 `background-size: N% auto`（按宽度缩放）。
+ * 盒子一旦不是正方形，底图被裁、标记被拉伸 —— **标记与地图错位**（"内容/比例错乱"）。
+ * 2026-09-22：我曾用 `max-height: 260px` 来断"宽度→高度"闭环，正是这么坏的。
+ * 正确的断法在下面：**限制列宽**（列宽与视口无关），盒子仍是正方形。 */
+.snap-img { display: block; width: 100%; aspect-ratio: 1 / 1; border-radius: var(--r-sm);
   background-color: var(--bg-sunken); background-repeat: no-repeat;
   image-rendering: pixelated; }
 .snap-map canvas { width: 100%; border-radius: var(--r-sm); }
@@ -196,6 +201,10 @@ html { overflow-anchor: none; }
  * 而真实浏览器在"始终显示滚动条"或旧版 macOS 设置下会占宽度。
  * `scrollbar-gutter: stable` 让宽度永不抖动，`overflow-y: scroll` 是老浏览器的兜底。 */
 html { scrollbar-gutter: stable; overflow-y: scroll; }
+/* 空状态：**说清楚"还没有数据"**，而不是一块没有轴的空盒子（那看起来像坏了）。 */
+.chart-empty { margin: 0; height: 100%; display: flex; align-items: center; justify-content: center;
+  color: var(--muted); font-size: 12.5px; }
+
 /* 图表宿主的高度由 `ucharts.js` 按**调用方给的 height** 预留（见那里的 min-height），
  *  CSS 里不再写第二遍——两份高度必然会在某次改动后不一致。 */
 

@@ -33,16 +33,20 @@
 | ⚠️ | **真机实验运行期间不要跑 gate**（preflight 断言端口空闲 → 假红；见 MEMORY D5）|
 | `pnpm exec tsx scripts/m3-verdict.ts <dataDir>` | A/B 判定（含 confounded 守卫） |
 
-- **`pnpm run dashboard:smoke`** — §5.2 的**唯一自动化**前端检查：用真实 Chrome（CDP）
-  打开一个**正在运行**的 dashboard，断言用户可见元素真的渲染了、且控制台**任何级别**
-  都没有 error/warning/exception。前端单测脚手架禁止 jsdom/headless（见
-  `test/unit/helpers/frontend-harness.ts` 的文件头），所以**没有单测会求值 Alpine 表达式**
-  ——"0 控制台错误"在单测里是空真。
+- **`pnpm run dashboard:smoke`** — §5.2 的**唯一自动化**前端检查：真实 Chrome（CDP）
+  断言①用户可见元素真的渲染了 ②控制台**任何级别**都没有 error/warning/exception
+  ③**图表健康**（每个图表宿主里真的有 `.uplot`、高度在合理区间）。
+  前端单测脚手架禁止 jsdom/headless（见 `test/unit/helpers/frontend-harness.ts` 文件头），
+  所以**没有单测会求值 Alpine 表达式**——"0 控制台错误"在单测里是空真。
+
+  它会**自带一个 dashboard**（`--serve`，不启动对局、不拉 OpenTTD）并在结束时收尾，
+  所以通常直接跑即可；想查一个**正在跑对局**的页面时给它 URL：
 
   ```sh
-  OPENTTD_DATA_DIR=/tmp/dash pnpm run cli --serve --web-port 8899 &
-  pnpm run dashboard:smoke                      # 默认 http://127.0.0.1:8899/
+  pnpm run dashboard:smoke                                   # 自带服务
+  DASHBOARD_URL=http://127.0.0.1:8187/ pnpm run dashboard:smoke   # 检查在跑的那一个
   ```
+  图表断言只在**对局正在运行**时强制（空 dashboard 本来就没有图表数据）。
   退出码：`0` 通过 · `1` 页面坏了（有控制台 error/warning/exception 或面板不可见）·
   `2` 环境问题（没有 Chrome / dashboard 没起来）。**2 与 1 必须分开**，否则 CI 会把
   环境失败误读成产品回归。改任何页面模板/视图模型后都应跑它。
@@ -120,6 +124,10 @@ docs/                       # 单主题深入说明 (指针从 AGENTS §9 表进
    注入格式测试要断言这一点（见 `route-facts.test.ts`）。
 
 ## 5. 每阶段（每个 commit）收尾清单
+
+- [ ] **改了前端**（模板 / CSS / `assets/js/*`）→ 额外跑 `pnpm run gate` **和**
+      `pnpm run dashboard:smoke`（自带服务、真实浏览器、含图表健康断言），
+      并**看一眼截图**。理由见 `AGENTS.md` §5.2 与 `MEMORY.md` D45/D49。
 
 > 教训 MEMORY E1：把每个 commit 当一次收尾，别攒到"阶段结束"。
 

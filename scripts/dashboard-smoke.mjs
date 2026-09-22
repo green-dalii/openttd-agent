@@ -28,6 +28,68 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { setTimeout as sleep } from "node:timers/promises";
 
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+/**
+ * 没给 `DASHBOARD_URL` 就**自己起一个** dashboard（并自己收尾）。
+ *
+ * 为什么（2026-09-22）：检查写得再好，如果"需要先手动起服务"它就不会被跑——
+ * 而这一轮的事故恰恰是"守卫存在但我没跑"。自带服务后它就是一条命令，
+ * 也就能进收尾清单/CI。
+ *
+ * 只起 `--serve`（**不** `POST /api/run/start`），所以不会拉起 OpenTTD、不需要游戏二进制。
+ */
+let spawned = null;
+let spawnTmpDir = null;
+async function ensureDashboard() {
+  if (process.env.DASHBOARD_URL) return process.env.DASHBOARD_URL;
+  const port = Number(process.env.SMOKE_PORT || 8899);
+  spawnTmpDir = mkdtempSync(join(tmpdir(), "dashboard-smoke-"));
+  const { spawn: spawnProc } = await import("node:child_process");
+  spawned = spawnProc("pnpm", ["run", "cli", "--serve", "--web-port", String(port)], {
+    env: { ...process.env, OPENTTD_DATA_DIR: spawnTmpDir },
+    stdio: "ignore",
+    detached: true,
+  });
+  const url = `http://127.0.0.1:${port}/`;
+  for (let i = 0; i < 60; i++) {
+    try {
+      const r = await fetch(url, { signal: AbortSignal.timeout(2000) });
+      if (r.ok) {
+        console.log(`[smoke] started a dashboard for this check: ${url}`);
+        return url;
+      }
+    } catch {
+      /* still booting */
+    }
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  throw new Error(`the dashboard this script started never came up on ${url}`);
+}
+function stopSpawned() {
+  if (spawned && spawned.pid) {
+    try {
+      process.kill(-spawned.pid, "SIGTERM"); // 整个进程组：pnpm → tsx → node
+    } catch {
+      /* already gone */
+    }
+  }
+  if (spawnTmpDir) {
+    try {
+      rmSync(spawnTmpDir, { recursive: true, force: true });
+    } catch {
+      /* best effort */
+    }
+  }
+}
+process.on("exit", stopSpawned);
+process.on("SIGINT", () => {
+  stopSpawned();
+  process.exit(130);
+});
+
 const CHROME_CANDIDATES = [
   process.env.CHROME_PATH,
   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
@@ -37,7 +99,7 @@ const CHROME_CANDIDATES = [
 ].filter(Boolean);
 const CHROME = CHROME_CANDIDATES.find((p) => existsSync(p));
 const PORT = Number(process.env.CDP_PORT || 9333);
-const URL = process.env.DASHBOARD_URL || "http://127.0.0.1:8899/";
+const URL = await ensureDashboard();
 
 if (!CHROME) {
   console.error("SKIP: no Chrome/Chromium found. Set CHROME_PATH to run this check.");
@@ -118,10 +180,23 @@ const charts = await send("Runtime.evaluate", {
   })()`,
   returnByValue: true,
 });
-const chartList = charts.result?.value ?? [];
-console.log("CHARTS:", JSON.stringify(chartList, null, 2));
+// 空 dashboard（没有跑对局）本来就没有图表数据，不能算失败；
+// 但**正在跑**的时候图表必须健康——那才是用户会看的时刻。
+let runActive = false;
+try {
+  const r = await fetch(new global.URL("/api/run", URL), { signal: AbortSignal.timeout(3000) });
+  if (r.ok) runActive = (await r.json())?.state === "running";
+} catch {
+  /* older servers may not expose /api/run; then assert nothing about charts */
+}
 const chartProblems = [];
-for (const c of chartList) {
+const chartList = charts.result?.value ?? [];
+console.log(
+  "CHARTS:",
+  runActive ? JSON.stringify(chartList, null, 2) : `${chartList.length} host(s) — no active run, chart health not asserted`,
+);
+
+for (const c of runActive ? chartList : []) {
   if (!c.hasUplot) chartProblems.push(`${c.id}: 没有渲染出 uPlot（图表未挂载）`);
   else if (c.h < 140 || c.h > 420) chartProblems.push(`${c.id}: 高度异常 ${c.h}px（预期 140–420）`);
   if (c.w < 120) chartProblems.push(`${c.id}: 宽度异常 ${c.w}px`);

@@ -108,6 +108,57 @@
   }
 
   /** Wrap a caller formatter so a missing one never breaks the axis. */
+  /**
+   * 量一段文本在图表字体下的像素宽度（**测量，不猜**）。
+   *
+   * 为什么需要（2026-09-22 真机截图）：Y 轴宽度写死 52px，而格式化后的标签是
+   * `£300.00k`（≈65px）→ **标签被裁成 `00000`**：既读不出数值，又让人以为比例错乱。
+   * 轴宽必须由**实际标签文本**决定，而不是一个魔数。
+   *
+   * 用离屏 canvas 的 `measureText`（不碰 DOM 布局）；拿不到 canvas 时退回按字符数估算。
+   */
+  let measureCtx = null;
+  function textWidth(text, font) {
+    const t = String(text == null ? "" : text);
+    if (!t) return 0;
+    try {
+      if (measureCtx === null && typeof document !== "undefined" && document.createElement) {
+        measureCtx = document.createElement("canvas").getContext("2d");
+        if (measureCtx) measureCtx.font = font;
+      }
+      if (measureCtx) return measureCtx.measureText(t).width;
+    } catch {
+      measureCtx = null;
+    }
+    // 保守估算：14px 字体下平均每字符约 7.5px
+    return t.length * 7.5;
+  }
+
+  /**
+   * 用来量轴宽的样本标签。
+   *
+   * 不能只看当前数据：数值会随运行增长（`£9k` → `£300k`），轴宽必须按**可能的最宽**
+   * 预留，否则图表跑一会儿又开始裁标签。用"最长可能"的样本 + 当前最大值一起量。
+   */
+  function sampleAxisLabels(fmt) {
+    const probes = [0, 999, -999, 999999, -999999, 12345678, -12345678, 999999999];
+    const out = probes.map((v) => {
+      try {
+        return fmt(v);
+      } catch {
+        return String(v);
+      }
+    });
+    return out.filter((x) => typeof x === "string" && x.length);
+  }
+
+  /** Y 轴宽度：由标签里最宽的那个决定（加内边距与下限/上限）。 */
+  function axisSizeFor(labels, font) {
+    let max = 0;
+    for (const l of labels || []) max = Math.max(max, textWidth(l, font));
+    return Math.max(40, Math.min(120, Math.ceil(max) + 12));
+  }
+
   function fmtOf(fn, fallback) {
     return typeof fn === "function"
       ? fn
@@ -141,6 +192,8 @@
       }
       rows.push(row);
     }
+    const hasAny = series.some((s) => (s && s.data ? s.data.length : 0) > 0);
+    if (!hasAny) return { kind: "line", empty: true, emptyText: "no history yet — points appear as the run progresses" };
     return { kind: "line", data: rows, opts: lineOpts(c, series, labels) };
   }
 
@@ -177,7 +230,12 @@
             });
           },
         },
-        { ...axis, size: 52, values: (_u, vals) => vals.map((v) => fmt(v)) },
+        {
+          ...axis,
+          // 轴宽按**实际标签文本**算（原来写死 52px → `£300.00k` 被裁成 `00000`）。
+          size: axisSizeFor(sampleAxisLabels(fmt), axis.font),
+          values: (_u, vals) => vals.map((v) => fmt(v)),
+        },
       ],
       series: [
         { label: "x" },
@@ -321,6 +379,9 @@
         points: { show: false },
       });
     }
+    if (!items || items.length === 0) {
+      return { kind: "stackedArea", empty: true, emptyText: "no turns recorded yet" };
+    }
     return { kind: "stackedArea", data: rows, opts: stackedAreaOpts(c, seriesOpts, items) };
   }
 
@@ -451,6 +512,8 @@
       (o.series || []).length,
       String(o.key === undefined ? "" : o.key),
       o.area ? 1 : 0,
+      // 轴宽也算"形状"：数值长大到需要更宽的轴时必须重建，否则标签继续被裁。
+      (o.axes && o.axes[1] && o.axes[1].size) || 0,
     ]);
   }
 
@@ -470,6 +533,38 @@
     } catch {
       return String(Math.random()); // 形状意外时宁可重画，不静默不画
     }
+  }
+
+  /**
+   * 空状态：**说清楚"还没有数据"**，而不是留一个没有轴的空盒子。
+   *
+   * 为什么（2026-09-22 真机排查）：一局没跑起来时 Cash 图是**完全空白**（uPlot 没有数据
+   * 就不画轴），看起来像图表坏了——我自己就先误判了一轮。空白不等于"没有数据"这个事实。
+   */
+  /** 移除空状态占位（`clickEmpty`/`showEmpty` 的逆操作）。 */
+  function clearEmpty(el) {
+    if (!el || typeof el.querySelectorAll !== "function") return;
+    for (const p of el.querySelectorAll(".chart-empty")) {
+      if (p && typeof p.remove === "function") p.remove();
+      else if (p && p.parentNode && p.parentNode.removeChild) p.parentNode.removeChild(p);
+    }
+  }
+
+  function showEmpty(el, text) {
+    destroy(el);
+    if (!el || typeof el.replaceChildren !== "function") return;
+    const existing = el.querySelector && el.querySelector(".chart-empty");
+    if (existing) {
+      if (existing.textContent !== text) existing.textContent = text;
+      return; // 幂等：每帧都调也不会反复重建 DOM
+    }
+    const p = (typeof document !== "undefined" && document.createElement
+      ? document.createElement("p")
+      : null);
+    if (!p) return;
+    p.className = "chart-empty";
+    p.textContent = text;
+    el.replaceChildren(p);
   }
 
   /** Mount `build()`'s uPlot instance, destroying whatever was there before. */
@@ -494,6 +589,11 @@
       if (typeof console !== "undefined" && console.warn) console.warn("chart build failed:", e);
       return null;
     }
+    // 翻译层判定"没有可画的数据" → 空状态（并且不再构造 uPlot）。
+    if (built.empty) {
+      showEmpty(el, built.emptyText || "no data yet — this chart fills in as the run progresses");
+      return null;
+    }
     // **复用路径**：形状没变就不重建，只 `setData`（数据也没变则完全不动）。
     //
     // `shapeSignature` 是**纯函数**（只读几个原始字段），不会抛——所以这里不需要
@@ -512,6 +612,9 @@
         return prev;
       }
     }
+    // 清掉空状态占位：数据回来以后那句"还没有数据"必须消失，
+    // 否则它会**永远压在图上**（真机截图里就是一条幽灵文字）。
+    clearEmpty(el);
     destroy(el); // 形状变了 → 重建（而不是每帧重建）
     try {
       // **必须在构造时就给宽度**（2026-09-22 用户实测"闪烁/载入失败/成功但很长"的真因）：
@@ -593,6 +696,8 @@
     stackedBars: (el, cfg) => mount(el, () => toStackedData(cfg)),
     stackedArea: (el, cfg) => mount(el, () => toStackedAreaData(cfg)),
     destroy: destroy,
+    // Exposed for tests: the axis-width rule (measured from the formatted labels).
+    axisSizeFor: axisSizeFor,
     // Exposed for tests: pure translations with no DOM/uPlot involvement.
     toLineData: toLineData,
     toStackedData: toStackedData,
