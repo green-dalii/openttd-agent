@@ -639,6 +639,29 @@
       },
 
       /**
+       * 图表高度：**跟随视口高度**，而不是写死一个像素。
+       *
+       * 为什么（用户实测："Result 图表子图过长（纵向）"）：写死 260px 在 720p 的窗口上
+       * 等于半屏，而图表本身没有那么多信息要展示。改成按视口高度取比例并夹在
+       * 160–260px 之间：矮窗口自动变矮、高窗口不超过 260。
+       *
+       * **刻意不按宽度算**：高度若依赖宽度，就会与"滚动条是否占宽度"形成闭环
+       *（宽度变→高度变→文档高变→滚动条状态变），看起来就是页面反复伸缩。
+       * 视口高度与滚动条无关，所以这条路是安全的。
+       */
+      chartHeight(preferred, viewportH) {
+        // 视口高**作为参数**（不传才读真实浏览器）：这样它是纯函数、可单测，
+        // 也和本文件其余视图模型函数一样不依赖 DOM。
+        const vh = Number.isFinite(viewportH)
+          ? Number(viewportH)
+          : typeof window !== "undefined" && window.innerHeight
+            ? window.innerHeight
+            : 900;
+        const byViewport = Math.round(vh * 0.30); // 720p → 216(+图例) ≈ 视口 1/3，不再是半屏
+        return Math.max(160, Math.min(preferred || 260, byViewport));
+      },
+
+      /**
        * The rows for `x-for` — **永不为 null**。
        *
        * 为什么需要这一个额外函数（真机 CDP 探针抓到的 bug）：`actionSurface()` 在目录

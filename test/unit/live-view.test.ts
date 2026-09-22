@@ -103,6 +103,8 @@ interface LiveModel {
 	stageViewsExpanded: boolean;
 	stageViewsShown(): { index?: number; image?: string; gameDate?: string; phase?: string }[];
 	stageViewsHiddenCount(): number;
+	/** 图表高度取自**视口高度**（不取自宽度——宽度会与滚动条形成闭环）。 */
+	chartHeight(preferred?: number, viewportH?: number): number;
 	// 时间线的默认上限（同一族：阶段总结随运行无限增长）
 	stagesLimit: number;
 	stagesExpanded: boolean;
@@ -962,5 +964,35 @@ describe("时间线默认只渲染最新若干段", () => {
 	it("无数据时给空数组（x-for 不得穿过可空表达式）", () => {
 		const { model } = load();
 		expect(model.stagesShown()).toEqual([]);
+	});
+});
+
+/**
+ * `chartHeight`：高度取自**视口高度**，且有上下限。
+ *
+ * 用户实测"Result 图表子图过长（纵向）"：写死 260px 在 720p 窗口上等于半屏。
+ * 关键约束是**不能取自宽度**——高度依赖宽度 + 滚动条占宽度 = 闭环振荡
+ *（宽度变→高度变→文档高变→滚动条状态变）。这里把这条写进测试。
+ */
+describe("chartHeight: 跟随视口高度", () => {
+	function h(preferred: number, viewportH: number): number {
+		return (load().model as unknown as { chartHeight(p?: number, v?: number): number }).chartHeight(
+			preferred,
+			viewportH,
+		);
+	}
+
+	it("矮窗口变矮（720p 下 260 的请求被压到 245）", () => {
+		expect(h(260, 720)).toBe(216);
+		expect(h(260, 720)).toBeLessThan(260);
+	});
+
+	it("高窗口不超过请求值（不无限长）", () => {
+		expect(h(260, 2000)).toBe(260);
+		expect(h(220, 1200)).toBe(220);
+	});
+
+	it("极小窗口也有下限（不能压成一条线）", () => {
+		expect(h(260, 300)).toBe(160);
 	});
 });

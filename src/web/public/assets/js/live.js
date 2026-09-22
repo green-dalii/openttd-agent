@@ -44,6 +44,15 @@
           this.follow = U.getPref("steps.follow", true);
           this.evHidden = new Set(U.getPref("ev.hidden", []));
 
+          // 视口高度变了 → 图表高度要跟着变（图表高度取自视口，见 chartHeight）。
+          // 只认**高度**变化：宽度由 ucharts 的 ResizeObserver 处理，重复响应会自找抖动。
+          this._vh = window.innerHeight;
+          let resizeTimer = null;
+          window.addEventListener("resize", () => {
+            if (resizeTimer) clearTimeout(resizeTimer);
+            resizeTimer = setTimeout(() => this.onViewportResize(), 200);
+          });
+
           this.$nextTick(() => {
             // Segmented controls are created imperatively (shared with other pages).
             if (this.$refs.cashMetric) {
@@ -263,6 +272,19 @@
           });
         },
 
+        /**
+         * 视口高度变了就重画图表（高度取自视口）。
+         *
+         * 防抖 200ms：`resize` 在拖窗口时会连发几十次，每次都重画等于自找抖动。
+         * 只在**高度**真的变了才重画——宽度由 ucharts 的 ResizeObserver 自己处理。
+         */
+        onViewportResize() {
+          if (this._vh === window.innerHeight) return;
+          this._vh = window.innerHeight;
+          this.drawCash();
+          this.drawTokens();
+        },
+
         /* ---------------------------- widgets ---------------------------- */
         /**
          * Draw the cash curve.
@@ -279,7 +301,7 @@
           this.$nextTick(() => {
             if (!this.$refs.cashChart) return;
             C.line(el, {
-              series, labels, area: series.length === 1, height: 260,
+              series, labels, area: series.length === 1, height: this.chartHeight(260),
               // `key` 标识"这张图画的是什么"：切换指标时 format 都是函数，
               // ucharts 的复用判断只能靠这个键，否则会把 cost 画成 money。
               key: "cash:" + this.cashMetric,
@@ -302,7 +324,7 @@
               items,
               series,
               format: this.tokenMetric === "cost" ? U.fmtCost : U.fmtTok,
-              height: 220,
+              height: this.chartHeight(220),
               maxBars: 24,
               key: "tokens:" + this.tokenMetric,
             });
