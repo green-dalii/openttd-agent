@@ -38,6 +38,8 @@ interface UChartsApi {
 /** A uPlot stand-in that records the arguments it is constructed with. */
 function fakeUPlot() {
 	const calls: { data: unknown; opts: unknown; el: unknown }[] = [];
+	/** setData 调用记录：复用路径必须真的把新数据推进去（而不是什么都不做）。 */
+	const setDataCalls: unknown[] = [];
 	class Fake {
 		height = 220;
 		__lastWidth = 0;
@@ -45,7 +47,9 @@ function fakeUPlot() {
 			calls.push({ opts, data, el });
 		}
 		destroy() {}
-		setData() {}
+		setData(d: unknown) {
+			setDataCalls.push(d);
+		}
 		// The adapter sizes the instance after construction (uPlot cannot measure
 		// a fresh element itself) and on container resize.
 		setSize(size: { width: number; height: number }) {
@@ -56,14 +60,15 @@ function fakeUPlot() {
 	(Fake as unknown as { paths: unknown }).paths = {
 		bars: (o: unknown) => ({ __bars: o }),
 	};
-	return { Fake, calls };
+	return { Fake, calls, setDataCalls };
 }
 
 function load(opts: { withUplot?: boolean } = {}): {
 	api: UChartsApi;
 	calls: { data: unknown; opts: unknown; el: unknown }[];
+	setDataCalls: unknown[];
 } {
-	const { Fake, calls } = fakeUPlot();
+	const { Fake, calls, setDataCalls } = fakeUPlot();
 	const sandbox: Record<string, unknown> = {
 		document: {
 			getElementById: () => null,
@@ -96,7 +101,7 @@ function load(opts: { withUplot?: boolean } = {}): {
 	sandbox.globalThis = sandbox;
 	vm.createContext(sandbox);
 	vm.runInContext(SRC, sandbox);
-	return { api: (sandbox.window as { UCharts: UChartsApi }).UCharts, calls };
+	return { api: (sandbox.window as { UCharts: UChartsApi }).UCharts, calls, setDataCalls };
 }
 
 describe("uPlot adapter", () => {
@@ -271,18 +276,55 @@ describe("uPlot adapter", () => {
 			).not.toThrow();
 		});
 
-		it("replaces the previous instance instead of stacking canvases", () => {
-			// live.js re-renders on every telemetry frame; leaking uPlot instances
-			// would grow the DOM without bound.
+		it("同一形状重复绘制时**复用实例**（不再每帧重建）", () => {
+			// 为什么这是契约而不是优化（2026-09-22 用户实测）：`x-effect="drawCash()"`
+			// 每个遥测帧都重跑，而它内部是 destroy + new uPlot。真机量到 40 秒内 **58 个
+			// uPlot DOM 节点**、**30 万次 DOM 变更**（≈7500 次/秒）：图表每帧被拆掉重建，
+			// 宿主盒子随之塌陷再撑开，页面高度持续抖动，浏览器的**滚动锚定**把用户的
+			// 滚动位置扯来扯去（“页面自己在滚、控制不住”）。
 			const { api, calls } = load();
 			const el = { nodeName: "DIV" };
 			const cfg = { series: [{ name: "s", data: [1, 2] }], labels: ["a", "b"] };
 			api.line(el, cfg);
 			api.line(el, cfg);
 			api.line(el, cfg);
-			expect(calls.length).toBe(3); // a new one is built each time...
-			// ...and the previous must have been destroyed (asserted via destroy count).
-			expect((el as unknown as { __destroyed?: number }).__destroyed ?? 0).toBeGreaterThanOrEqual(0);
+			// 只构建一次；后两次走 setData（构造次数 = 1，且没有堆叠 canvas）。
+			expect(calls.filter((c) => c.el !== null)).toHaveLength(1);
+		});
+
+		it("**数据变了**要更新，但**仍不重建**", () => {
+			const { api, calls, setDataCalls } = load();
+			const el = { nodeName: "DIV" };
+			api.line(el, { series: [{ name: "s", data: [1, 2] }], labels: ["a", "b"] });
+			api.line(el, { series: [{ name: "s", data: [1, 2, 3] }], labels: ["a", "b", "c"] });
+			expect(calls.filter((c) => c.el !== null)).toHaveLength(1); // 没重建
+			expect(setDataCalls.length).toBeGreaterThan(0); // 但数据确实更新了
+		});
+
+		it("**只改系列显示名**不得重建（真机里名字每帧都变）", () => {
+			// 这就是 2026-09-22 的真事故：series 的 name 是**公司名**，而执行器把相位
+			// 写进公司名（`EX rd s4 r27 …`）→ 名字每帧变 → 形状签名每帧变 → 图表每帧重建
+			//（40 秒 23 个实例、34 万次 DOM 变更 → 页面高度抖动 → 滚动锚定扯用户的滚动）。
+			// 显示名是**数据**，不是形状。
+			const { api, calls } = load();
+			const el = { nodeName: "DIV" };
+			api.line(el, { series: [{ name: "EX rd s1", data: [1, 2] }], labels: ["a", "b"] });
+			api.line(el, { series: [{ name: "EX rd s2", data: [1, 2] }], labels: ["a", "b"] });
+			api.line(el, { series: [{ name: "EX stA_ok", data: [1, 2] }], labels: ["a", "b"] });
+			expect(calls.filter((c) => c.el !== null)).toHaveLength(1);
+		});
+
+		it("**形状变了**（高度 / key / 系列数）必须重建，不能只改数据", () => {
+			// 反风险：把复用做得太粗，会把“换指标”变成“图不动了”——
+			// 用户切到 cost 视图却还看着 token 的图，比抖动更坏。
+			const { api, calls } = load();
+			const el = { nodeName: "DIV" };
+			const base = { series: [{ name: "s", data: [1, 2] }], labels: ["a", "b"] };
+			api.line(el, { ...base, height: 200 });
+			api.line(el, { ...base, height: 320 }); // 高度变
+			api.line(el, { ...base, height: 320, key: "tokens:cost" }); // 指标变（format 都是函数，只能靠 key）
+			api.line(el, { ...base, height: 320, key: "tokens:cost", series: [{ name: "s" }, { name: "t" }] }); // 系列数变
+			expect(calls.filter((c) => c.el !== null)).toHaveLength(3);
 		});
 
 		it("destroy() is safe on an element that was never used", () => {

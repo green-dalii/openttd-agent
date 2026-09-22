@@ -153,7 +153,12 @@
             onSnapshot: (s) => {
               this.date = s.date;
               this.companies = s.companies || {};
-              this.recent = s.recent || [];
+              // 内容没变就**保持同一个数组引用**：换引用会让 Alpine 每帧重渲染整张表
+              // （实测 13k DOM 变更/秒），而由此产生的 docH 抖动会被滚动锚定
+              // 原样转嫁到用户的滚动位置上。见 LiveView.sameEventList 的注释。
+              if (!this.sameEventList(s.recent, this.recent)) {
+                this.recent = s.recent || [];
+              }
               this.totalEvents = s.totalEvents;
               // These three were sent by the server all along but never consumed,
               // so a page loaded mid-run saw no stages and no memory (MEMORY.md A1:
@@ -273,7 +278,12 @@
           if (!el) return;
           this.$nextTick(() => {
             if (!this.$refs.cashChart) return;
-            C.line(el, { series, labels, format: U.fmtMoney, area: series.length === 1, height: 260 });
+            C.line(el, {
+              series, labels, area: series.length === 1, height: 260,
+              // `key` 标识"这张图画的是什么"：切换指标时 format 都是函数，
+              // ucharts 的复用判断只能靠这个键，否则会把 cost 画成 money。
+              key: "cash:" + this.cashMetric,
+            });
           });
         },
 
@@ -294,6 +304,7 @@
               format: this.tokenMetric === "cost" ? U.fmtCost : U.fmtTok,
               height: 220,
               maxBars: 24,
+              key: "tokens:" + this.tokenMetric,
             });
           });
         },

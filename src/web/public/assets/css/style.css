@@ -106,7 +106,7 @@ main { padding: var(--sp-4) var(--sp-5) 64px; max-width: 1360px; margin: 0 auto;
 .notice .notice-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
 
 /* stage snapshot (data-rendered map diagram) */
-.stage-snaps { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--sp-3); }
+.stage-snaps { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: var(--sp-3); }
 .snap { background: var(--bg-sunken); border: 1px solid var(--line); border-radius: var(--r-sm); padding: 8px; }
 .snap canvas { background: none; }
 .snap .snap-meta { font-size: 10.5px; color: var(--muted); margin-top: 4px; display: flex;
@@ -133,6 +133,9 @@ main { padding: var(--sp-4) var(--sp-5) 64px; max-width: 1360px; margin: 0 auto;
 .snap-zoom { position: absolute; right: 4px; top: 4px; font-size: 10px; padding: 1px 4px;
   border-radius: 3px; background: rgba(0,0,0,.55); color: #dfe3ea; font-family: var(--mono); }
 /* Legend: overlay vs. the game's own base map, kept apart on purpose. */
+/* "展开其余 N 张"：跨整行，避免自己占一格把网格撑歪。 */
+.snap-more { grid-column: 1 / -1; display: flex; align-items: center; gap: var(--sp-3); }
+.snap-more .dim { font-size: 11px; }
 .snap-legend { grid-column: 1 / -1; display: grid; gap: 3px; margin-top: 6px;
   padding-top: 6px; border-top: 1px solid var(--line); }
 .snap-legend-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
@@ -168,11 +171,23 @@ main { padding: var(--sp-4) var(--sp-5) 64px; max-width: 1360px; margin: 0 auto;
 .grid.two { grid-template-columns: 1fr 1fr; }
 .grid.split-21 { grid-template-columns: 2fr 1fr; }
 .grid.split-12 { grid-template-columns: 1fr 2fr; }
+/* 跨整行的面板（阶段快照是重内容，半宽放不下） */
+.grid .span-all { grid-column: 1 / -1; }
 @media (max-width: 1000px) { .grid.two, .grid.split-21, .grid.split-12 { grid-template-columns: 1fr; } }
 
 canvas { width: 100%; display: block; background: var(--bg-sunken); border-radius: var(--r-sm); }
 canvas.kpi-spark { background: none; height: 26px; margin-top: 4px; }
 .chart-box { position: relative; }
+/* 滚动锚定必须关掉：图表/快照在运行期会不断增高变矮，而浏览器的 scroll anchoring
+ * 会为了"保持你看到的那一行不动"而**代替用户滚动页面**——表现就是"页面自己在滚、
+ * 我控制不住"。让内容长它的，别动用户的滚动位置。（2026-09-22 用户实测） */
+.chart-box, .stage-snaps, .timeline, .steps, .events, .now-intent { overflow-anchor: none; }
+/* 文档级也要关：实时页面每帧都在长内容，浏览器"保持你看到的那一行不动"的好意
+ * 在这里必然表现为**跟用户抢滚动**（实测 131px 漂移 = 131px 的文档高度波动）。
+ * 滚动位置属于用户，不属于浏览器对锚点的猜测。 */
+html { overflow-anchor: none; }
+/* 图表宿主的高度由 `ucharts.js` 按**调用方给的 height** 预留（见那里的 min-height），
+ *  CSS 里不再写第二遍——两份高度必然会在某次改动后不一致。 */
 /*
  * uPlot renders into its host element, so chart hosts must be plain <div>s.
  * A <canvas> host would (a) put uPlot's DOM into canvas *fallback* content that
@@ -184,7 +199,7 @@ canvas.kpi-spark { background: none; height: 26px; margin-top: 4px; }
 .chart-box .uplot { width: 100%; }
 
 /* ------------------------------- KPIs ------------------------------- */
-.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: var(--sp-3); }
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--sp-3); }
 .kpi { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-md);
   padding: var(--sp-3) var(--sp-4); display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .kpi.clickable { cursor: pointer; }

@@ -123,6 +123,16 @@
        * The dashboard is honest about capability only when this is set.
        */
       actionCatalog: null,
+      /**
+       * 快照面板一次渲染多少张。默认 6：够看清最近几个施工阶段，
+       * 又不会让这一块占掉整页的一半以上（实测每张 ~283px 高）。
+       */
+      stageViewsLimit: 6,
+      /** 时间线默认渲染几段（实测 46 段 = 2254px）。 */
+      stagesLimit: 8,
+      stagesExpanded: false,
+      /** 用户点了"展开"就全显示——限制是默认视图，不是删除数据。 */
+      stageViewsExpanded: false,
       run: null,
       runControl: false,
       startedAt: null,
@@ -139,6 +149,28 @@
       /* ---------------------------- constants ---------------------------- */
       cashMetrics: CASH_METRICS,
       tokenMetrics: TOKEN_METRICS,
+
+      /**
+       * 服务器快照里的 `recent` 与本地已有的那份**内容等价**吗？
+       *
+       * 为什么需要（2026-09-22 实测）：`onSnapshot` 每帧执行 `this.recent = s.recent || []`，
+       * 即**每帧换一个新数组**。Alpine 的 `x-for` 看到新数组就把整张表重渲染一遍——
+       * 真机量到 **13,000+ 次 DOM 变更/秒**（`ol.events` 一项就 66k/25s），
+       * 而 `docH` 随之在 131px 幅度上抖动，浏览器的滚动锚定把这 131px
+       * 原样传给用户的滚动位置（"页面自己在滚"）。
+       *
+       * 事件是**追加**的，所以"长度 + 末尾序号"相同就等价；等价时保持**同一个数组引用**，
+       * Alpine 就不会重渲染。
+       */
+      sameEventList(a, b) {
+        const x = Array.isArray(a) ? a : [];
+        const y = Array.isArray(b) ? b : [];
+        if (x.length !== y.length) return false;
+        if (x.length === 0) return true;
+        const lx = x[x.length - 1] || {};
+        const ly = y[y.length - 1] || {};
+        return lx.seq === ly.seq && lx.kind === ly.kind && String(lx.text || "").length === String(ly.text || "").length;
+      },
 
       /* --------------------------- derivations --------------------------- */
       /** The agent plays company 0; fall back to the first company seen. */
@@ -264,8 +296,13 @@
         return ids
           .map((id, idx) => {
             const c = this.companies[id] || {};
+            // 图例必须是**稳定**的字符串。执行器把相位写进公司名（`EX rd s4 r27 …`），
+            // 于是"公司名"每秒变好几次——把它当图例，图例就在闪，还会让图表每帧重建
+            //（ucharts 的形状签名曾包含系列名）。相位本身在别处已经可见（Now / 公司卡）。
+            const rawName = (c.info && c.info.name) || "";
+            const stableName = /^EX\b/.test(rawName.trim()) ? "" : rawName.trim();
             return {
-              name: (c.info && c.info.name) || `Company ${id}`,
+              name: stableName || `Company ${id}`,
               color: U.pickColor ? U.pickColor(idx) : "#5ac8fa",
               data: (c.history || []).map((h) => num(h[this.cashMetric])),
             };
@@ -439,9 +476,50 @@
         return (this.stages || []).slice().reverse();
       },
 
+      /**
+       * 时间线实际渲染的条目——默认只给最新几段。
+       *
+       * 与 Stage views 同一个理由（2026-09-22 实测）：阶段总结随运行**无限增长**，
+       * 真机量到 46 条时该面板 2254px（占整页三分之一），而它只是"已经做了什么"的清单。
+       * 默认视图给最新若干段；展开后全给（上限是默认视图，不是丢数据）。
+       */
+      stagesShown() {
+        const all = this.stageList();
+        if (this.stagesExpanded) return all;
+        return all.slice(0, this.stagesLimit);
+      },
+
+      /** 还有多少段没显示。 */
+      stagesHiddenCount() {
+        const all = (this.stages || []).length;
+        return Math.max(0, all - this.stagesShown().length);
+      },
+
       /** Stage snapshots, newest first (the visual record of progress). */
       stageViewsNewestFirst() {
         return (this.stageViews || []).slice().reverse();
+      },
+
+      /**
+       * 面板实际渲染的快照列表——**默认只给最新几张**。
+       *
+       * 为什么（2026-09-22 用户实测）：快照每到一个施工相位就多一张，真机量到
+       * 24 张时代该面板已经 **4317px**，占整页高度 **57%**（整页 7639px ≈ 8.5 屏），
+       * 而每张缩略图只有 ~310px 宽（"每个图表过窄"）。快照数量随运行时长增长，
+       * 不设上限的话长局会把页面撑到无法阅读。
+       *
+       * 默认取最新 `stageViewsLimit` 张；用户点"展开"后全给。
+       */
+      stageViewsShown() {
+        const all = this.stageViewsNewestFirst();
+        if (this.stageViewsExpanded) return all;
+        return all.slice(0, this.stageViewsLimit);
+      },
+
+      /** 还有多少张没显示（0 表示没有可展开的）。 */
+      stageViewsHiddenCount() {
+        const all = (this.stageViews || []).length;
+        return Math.max(0, all - this.stageViewsShown().length);
       },
 
       /**

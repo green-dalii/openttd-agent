@@ -97,6 +97,17 @@ interface LiveModel {
 	};
 	stageList(): unknown[];
 	stageViewsNewestFirst(): { index?: number; image?: string }[];
+	// 快照面板的默认上限（2026-09-22 实测：24 张时占整页 57%）
+	stageViews: { index?: number; image?: string; gameDate?: string; phase?: string }[];
+	stageViewsLimit: number;
+	stageViewsExpanded: boolean;
+	stageViewsShown(): { index?: number; image?: string; gameDate?: string; phase?: string }[];
+	stageViewsHiddenCount(): number;
+	// 时间线的默认上限（同一族：阶段总结随运行无限增长）
+	stagesLimit: number;
+	stagesExpanded: boolean;
+	stagesShown(): unknown[];
+	stagesHiddenCount(): number;
 	companiesEmpty(): boolean;
 	companyCards(): { id: string; name: string; isAi: boolean; neg: boolean; money: string; value: string; fleet: string }[];
 	toggleCategorySet(cat: string): Set<string>;
@@ -824,5 +835,132 @@ describe("live-view: action surface panel", () => {
 			expect(w.effectLabel).toBe("changes game state");
 			expect(w.badgeClass).toBe("tag-write");
 		}
+	});
+});
+
+/**
+ * Stage views 的**渲染上限**（2026-09-22 用户实测）。
+ *
+ * 快照每到一个施工相位就多一张，真机量到 24 张时该面板 **4317px**、占整页 **57%**
+ * （整页 7639px ≈ 8.5 屏），而每张缩略图只有 ~310px 宽。数量随运行时长无限增长，
+ * 所以默认视图必须有上限——但**上限不是删数据**：展开后必须全给。
+ */
+describe("stage views 默认只渲染最新若干张", () => {
+	function withViews(n: number) {
+		const { model } = load();
+		model.stageViews = Array.from({ length: n }, (_, i) => ({
+			index: i,
+			gameDate: "1950-0" + (i + 1),
+			phase: "st" + i,
+		}));
+		return model;
+	}
+
+	it("默认只给最新 N 张，且是**最新**的（顺序不能反）", () => {
+		const m = withViews(24);
+		const shown = m.stageViewsShown();
+		expect(shown.length).toBe(m.stageViewsLimit);
+		// 最新在前：索引最大的那个必须在第一位
+		expect(shown[0]!.index).toBe(23);
+		expect(shown.map((v) => v.index)).toEqual([23, 22, 21, 20, 19, 18]);
+	});
+
+	it("未显示的张数可被读出（按钮文案要用它）", () => {
+		expect(withViews(24).stageViewsHiddenCount()).toBe(24 - 6);
+		expect(withViews(3).stageViewsHiddenCount()).toBe(0);
+	});
+
+	it("展开后**全部**都给（上限是默认视图，不是删数据）", () => {
+		const m = withViews(24);
+		m.stageViewsExpanded = true;
+		expect(m.stageViewsShown().length).toBe(24);
+		expect(m.stageViewsHiddenCount()).toBe(0);
+	});
+
+	it("没有快照时返回空数组而不是 null（x-for 不得穿过可空表达式）", () => {
+		const { model } = load();
+		expect(model.stageViewsShown()).toEqual([]);
+	});
+});
+
+/**
+ * 事件列表的**引用稳定性**（2026-09-22 实测 13,000+ 次 DOM 变更/秒的根因）。
+ *
+ * `onSnapshot` 每帧赋一个新数组 → Alpine 的 x-for 整表重渲染 → docH 抖动 131px →
+ * 滚动锚定把这 131px 原样转嫁成用户的滚动漂移（"页面自己在滚"）。
+ * 事件是追加的，所以"长度 + 末尾序号相同"就等价，此时必须**保持同一个引用**。
+ */
+describe("sameEventList: 等价就不换引用", () => {
+	function model() {
+		return load().model as unknown as { sameEventList: (a: unknown, b: unknown) => boolean };
+	}
+	function make(n: number) {
+		return Array.from({ length: n }, (_, i) => ({ seq: i + 1, kind: "date", text: "e" + i }));
+	}
+
+	it("同样的内容（不同数组实例）判为等价", () => {
+		const a = make(3);
+		const b = make(3); // 内容一样、实例不同
+		expect(a === b).toBe(false);
+		expect(model().sameEventList(a, b)).toBe(true);
+	});
+
+	it("长度不同就不同", () => {
+		expect(model().sameEventList(make(3), make(4))).toBe(false);
+	});
+
+	it("末尾事件变了就不同", () => {
+		const a = make(3);
+		const b = make(3);
+		b[2]!.seq = 99;
+		expect(model().sameEventList(a, b)).toBe(false);
+	});
+
+	it("末尾文本长大了就不同（同一事件在流式增长）", () => {
+		const a = make(2);
+		const b = make(2);
+		b[1]!.text = "e1 plus more";
+		expect(model().sameEventList(a, b)).toBe(false);
+	});
+
+	it("空数组/非数组不抛错（快照字段缺失是常态）", () => {
+		expect(model().sameEventList([], [])).toBe(true);
+		expect(model().sameEventList(undefined, [])).toBe(true);
+		expect(model().sameEventList(null, make(1))).toBe(false);
+	});
+});
+
+/**
+ * 阶段总结时间线的默认上限（与 Stage views 同一族问题）。
+ * 真机量到 46 段 = 2254px，占整页三分之一，而它只是"已经做了什么"的清单。
+ */
+describe("时间线默认只渲染最新若干段", () => {
+	function withStages(n: number) {
+		const { model } = load();
+		model.stages = Array.from({ length: n }, (_, i) => ({ gameDate: "1950-0" + (i + 1), turn: i, note: "n" + i }));
+		return model;
+	}
+
+	it("默认给最新 N 段，且最新在前", () => {
+		const m = withStages(46);
+		const shown = m.stagesShown() as { turn: number }[];
+		expect(shown.length).toBe(m.stagesLimit);
+		expect(shown[0]!.turn).toBe(45);
+	});
+
+	it("未显示段数可读（按钮文案要用）", () => {
+		expect(withStages(46).stagesHiddenCount()).toBe(46 - 8);
+		expect(withStages(2).stagesHiddenCount()).toBe(0);
+	});
+
+	it("展开后全部给（上限不是丢数据）", () => {
+		const m = withStages(46);
+		m.stagesExpanded = true;
+		expect(m.stagesShown().length).toBe(46);
+	});
+
+	it("无数据时给空数组（x-for 不得穿过可空表达式）", () => {
+		const { model } = load();
+		expect(model.stagesShown()).toEqual([]);
 	});
 });

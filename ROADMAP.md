@@ -392,6 +392,14 @@ pgrep -fl "run-experiment|cli/run.ts|OpenTTD.app"     # 无输出 = 没有（202
 5. 穿插：`NEXT-3` 地图大小旋钮 · `NEXT-6` 卫生（删 `v02-runner` 死代码、
    裸 `catch {}` 分诊、process-manager 抖动测试）。
 
+### 6c. Dashboard 残余性能项（已量，未修；2026-09-22）
+
+**残余 DOM 变更 ~17k/s**：`td.num` / `ol.events` / `span.tag` / `span.badge` 来自
+**每帧重算的 200 行步骤表与事件列表**（Alpine 在每个遥测帧上重算全部绑定）。
+用户可见症状（滚动失控）**已修**（漂移 0），所以这是纯性能项：
+修法需要"遥测帧 → 增量渲染"的独立改造（分帧提交 / 按 key 比较后只改变化项），
+不应与布局修复混在一起做。
+
 ### 6b. **ACTION-BUS**：把"不断加动词"改成"造通道"（设计见 `docs/ACTION-BUS-CODESIGN.md`）
 
 起因（用户）：动作面一直是**打补丁**式扩张。根因不是动词少，而是**一个动词的表示散落在 6 处**

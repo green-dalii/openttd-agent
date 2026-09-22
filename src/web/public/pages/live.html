@@ -210,7 +210,7 @@
         <div class="panel-head"><h2>Staged summaries <span class="dim">阶段性总结</span></h2>
           <span class="dim" x-text="stages.length ? stages.length + ' recorded' : ''"></span></div>
         <ol class="timeline">
-          <template x-for="c in stageList()" :key="c.gameDate + '-' + c.turn">
+          <template x-for="c in stagesShown()" :key="c.gameDate + '-' + c.turn">
             <li>
               <span class="t-meta" x-text="c.gameDate + ' · turn ' + c.turn + ' · ' + $fmt.clock(c.at)"></span>
               <span x-text="c.note"></span>
@@ -218,12 +218,24 @@
           </template>
           <li class="empty" x-show="!stages.length">No staged summary yet — one is recorded as the run progresses.</li>
         </ol>
+        <!-- 阶段总结随运行无限增长（实测 46 段 = 2254px，占整页三分之一）。
+             默认只显示最新几段；展开即全给——上限是默认视图，不是丢数据。 -->
+        <div class="snap-more" x-show="stagesHiddenCount() > 0 || stagesExpanded">
+          <button type="button" class="btn" @click="stagesExpanded = !stagesExpanded"
+                  x-text="stagesExpanded
+                    ? '收起（只看最新 ' + stagesLimit + ' 段）'
+                    : '展开其余 ' + stagesHiddenCount() + ' 段'"></button>
+          <span class="dim" x-text="stages.length + ' recorded'"></span>
+        </div>
       </div>
-      <div class="panel">
+      <!-- 快照面板跨整行：它是这一组里**视觉信息最重**的一块，挤在半宽里只能放 2 列、
+           每格 ~310px（用户实测反馈"每个图表过窄"）。跨行后 4 列 × ~320px：格子更大、
+           行数更少，整页也更短。 -->
+      <div class="panel span-all">
         <div class="panel-head"><h2>Stage views <span class="dim">阶段性画面</span></h2>
           <span class="dim">real minimap, zoomed to the work</span></div>
         <div class="stage-snaps">
-          <template x-for="v in stageViewsNewestFirst()" :key="v.index ?? (v.gameDate + '-' + (v.phase || ''))">
+          <template x-for="v in stageViewsShown()" :key="v.index ?? (v.gameDate + '-' + (v.phase || ''))">
             <div class="snap">
               <div class="snap-map">
                 <template x-if="stageImageUrl(v)">
@@ -254,6 +266,16 @@
           <p class="empty" x-show="!stageViews.length">
             No stage view yet — one is captured at each construction phase.
           </p>
+          <!-- 快照数量随运行时长无限增长；默认只显示最新几张。
+               实测 24 张时这一块占整页 57%（4317px / 7639px）——不设上限的长局
+               会把页面撑到不可读。这里是"默认视图"，不是删数据：展开即全给。 -->
+          <div class="snap-more" x-show="stageViewsHiddenCount() > 0 || stageViewsExpanded">
+            <button type="button" class="btn" @click="stageViewsExpanded = !stageViewsExpanded"
+                    x-text="stageViewsExpanded
+                      ? '收起（只看最新 ' + stageViewsLimit + ' 张）'
+                      : '展开其余 ' + stageViewsHiddenCount() + ' 张'"></button>
+            <span class="dim" x-text="stageViews.length + ' captured'"></span>
+          </div>
           <div class="snap-legend">
             <div class="snap-legend-row">
               <span class="lg-lead">overlay (drawn by us)</span>

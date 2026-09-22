@@ -165,6 +165,10 @@ describe("serve: Start 必须用**当前**的 llm.json（同进程保存后立�
 		const launcher = vi.fn(async () => 0);
 		const handle = await runServe(bootCfg(dir), {
 			webPort: 0,
+			// 端口检查必须跳过：本测试关心的是 LLM 那一行，而**机器上可能正跑着真机局**
+			// （D5）。`skipPreflight` 只跳过 ports，binary/dataDir/LLM 三行照跑——
+			// 否则这条测试会变成"环境有没有空端口"的测试。
+			skipPreflight: true,
 			// 不用 offlineDemo：那样 unconfigured 只是 warn，测不出这个 bug。
 			// 因此走真实 reachability——baseUrl 指向**关闭的端口**，失败要快且不发外部请求。
 			offlineDemo: false,
@@ -197,6 +201,7 @@ describe("serve: Start 必须用**当前**的 llm.json（同进程保存后立�
 		});
 		const handle = await runServe(bootCfg(dir), {
 			webPort: 0,
+			skipPreflight: true, // 同上：不依赖端口空闲
 			// offlineDemo 让 reachability 跳过 → 门禁放行，从而能观察到 launcher 拿到的 cfg。
 			offlineDemo: true,
 			launcher: launcher as never,

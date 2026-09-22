@@ -127,7 +127,7 @@
       }
       rows.push(row);
     }
-    return { data: rows, opts: lineOpts(c, series, labels) };
+    return { kind: "line", data: rows, opts: lineOpts(c, series, labels) };
   }
 
   function lineOpts(c, series, labels) {
@@ -150,7 +150,18 @@
         {
           ...axis,
           // x ticks read as the caller's labels (game dates), not indices.
-          values: (_u, vals) => vals.map((v) => labels[v] === undefined ? "" : String(labels[v])),
+          // 相邻重复的标签留空白：服务端每几秒推一个点，而游戏日期只按**月**变，
+          // 于是同一根月标签会连着出现两三次（真机截图：`1950-07, 1950-07, 1950-08, …`）。
+          // 重复的刻度不提供任何信息，只是噪声。
+          values: (_u, vals) => {
+            let prev = null;
+            return vals.map((v) => {
+              const s = labels[v] === undefined ? "" : String(labels[v]);
+              if (s === prev) return "";
+              prev = s;
+              return s;
+            });
+          },
         },
         { ...axis, size: 52, values: (_u, vals) => vals.map((v) => fmt(v)) },
       ],
@@ -201,7 +212,7 @@
       }
       rows.push(row);
     }
-    return { data: rows, opts: stackedOpts(c, series, items) };
+    return { kind: "stackedBars", data: rows, opts: stackedOpts(c, series, items) };
   }
 
   /**
@@ -296,7 +307,7 @@
         points: { show: false },
       });
     }
-    return { data: rows, opts: stackedAreaOpts(c, seriesOpts, items) };
+    return { kind: "stackedArea", data: rows, opts: stackedAreaOpts(c, seriesOpts, items) };
   }
 
   function stackedAreaOpts(c, seriesOpts, items) {
@@ -395,6 +406,58 @@
     return tag === "CANVAS" || tag === "IMG" || tag === "INPUT" || tag === "SVG";
   }
 
+  /**
+   * 图表的"形状签名"——只有它变了才需要重建实例。
+   *
+   * 为什么需要（2026-09-22 用户实测：页面自己在滚、图表高度忽长忽短）：
+   * 调用侧是 `x-effect="drawCash()"`，**每次遥测帧**都会重跑，而每一跑都
+   * `destroy` + `new uPlot`。真机量到 40 秒内 **58 个 uPlot DOM 节点**、
+   * **30 万次 DOM 变更**（≈7500 次/秒）——图表每帧被拆掉重建，
+   * 宿主盒子随之塔陷再撑开，页面高度持续抖动，
+   * **浏览器的滚动锚定（scroll anchoring）就把用户的滚动位置扯来扯去**。
+   *
+   * 数据变了只需 `setData`（uPlot 的正常用法），形状变了才重建。
+   */
+  function shapeSignature(kind, opts) {
+    const o = opts || {};
+    // **结构性**字段：系列数量、高度、堆叠/填充、以及调用方给的 `key`
+    //（"这张图画的是什么"——例如 cashMetric / tokenMetric）。
+    //
+    // 刻意**不含系列显示名**：真机实测里 series 的 name 是**公司名**，而执行器把相位
+    // 写进公司名（`EX rd s4 r27 d24 p0 j101`），于是"名字"每帧都在变，
+    // 签名每帧都不同 → 图表每帧重建（40 秒 23 个实例、34 万次 DOM 变更）。
+    // 显示名是数据（可以随帧变），不是形状（形状变了才需要重建）。
+    //
+    // `key` 取代了 `typeof format === "function" ? "fn"` 那个写法：
+    // 切换指标时 format 都是函数，靠类型判断根本分不出来（会把 cost 画成 money）。
+    return JSON.stringify([
+      kind,
+      o.height || 0,
+      o.maxBars || 0,
+      (o.series || []).length,
+      String(o.key === undefined ? "" : o.key),
+      o.area ? 1 : 0,
+    ]);
+  }
+
+  /** 数据签名：数据没变就不重画（遥测帧远比数据变化频繁）。 */
+  function dataSignature(data) {
+    try {
+      const d = data || [];
+      let acc = "";
+      for (const col of d) {
+        if (!col || !col.length) {
+          acc += "e;";
+          continue;
+        }
+        acc += col.length + ":" + String(col[col.length - 1]) + ";";
+      }
+      return acc;
+    } catch {
+      return String(Math.random()); // 形状意外时宁可重画，不静默不画
+    }
+  }
+
   /** Mount `build()`'s uPlot instance, destroying whatever was there before. */
   function mount(el, build) {
     if (!el || !uplotAvailable()) return null;
@@ -409,16 +472,53 @@
       }
       return null;
     }
-    destroy(el); // live pages re-render per frame; never leak instances
+    // 先构一次：复用与重建两条路都它。
+    let built;
     try {
-      const built = build();
+      built = build();
+    } catch (e) {
+      if (typeof console !== "undefined" && console.warn) console.warn("chart build failed:", e);
+      return null;
+    }
+    // **复用路径**：形状没变就不重建，只 `setData`（数据也没变则完全不动）。
+    // 这是本轮修复的核心——见 `shapeSignature` 的注释（每帧重建图表 = 页面抖动）。
+    const prev = instances.get(el);
+    if (prev) {
+      try {
+        if (prev.__shape === shapeSignature(built.kind || "line", built.opts)) {
+          const data = dataSignature(built.data);
+          if (prev.__data !== data) {
+            prev.__data = data;
+            prev.setData(built.data);
+          }
+          prev.__lastWidth = el.clientWidth || prev.__lastWidth;
+          return prev;
+        }
+      } catch {
+        /* 形状算不出来 → 走重建路，至少图表是对的 */
+      }
+    }
+    destroy(el); // 形状变了 → 重建（而不是每帧重建）
+    try {
       const instance = new window.uPlot(built.opts, built.data, el);
+      // 形状/数据签名存下来，供下一次复用判断
+      try {
+        instance.__shape = shapeSignature(built.kind || "line", built.opts);
+        instance.__data = dataSignature(built.data);
+      } catch {
+        instance.__shape = null;
+        instance.__data = null;
+      }
       // uPlot cannot measure a fresh element, so size it from the container.
       // Fall back to the parent (the panel) when this element is still 0-wide,
       // which happens on the first paint before layout settles.
       const w = Math.max(el.clientWidth || 0, (el.parentElement && el.parentElement.clientWidth) || 0);
       instance.__lastWidth = w;
       if (w > 0) instance.setSize({ width: w, height: built.opts.height });
+      // 按调用方给的高度**预留宿主盒子**：图表被销毁/重建（形状变化）时，
+      // 盒子不会先塌陷再撑开——否则页面高度抖动，而滚动锚定会把它转嫁给用户的滚动位置。
+      // 这里写 min-height 而不是写死在 CSS：高度只有一个来源（调用方的 height）。
+      if (built.opts && built.opts.height && el.style) el.style.minHeight = built.opts.height + "px";
       instances.set(el, instance);
       const obs = ensureResizeObserver();
       if (obs) obs.observe(el);
