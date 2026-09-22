@@ -199,14 +199,11 @@ html { scrollbar-gutter: stable; overflow-y: scroll; }
 /* 图表宿主的高度由 `ucharts.js` 按**调用方给的 height** 预留（见那里的 min-height），
  *  CSS 里不再写第二遍——两份高度必然会在某次改动后不一致。 */
 
-/* uPlot 的图例**必须不换行**。
- * 为什么（2026-09-22 排查中的第二条闭环）：legend 是图表宿主内的 DOM，
- * 一旦文本变长换到第二行，图表盒就长高 ~20px → 文档高度变化 →
- * 滚动条出现/消失 → 宿主宽度变化 → 图例再换行……**图表反复伸缩**。
- * 图例文本又恰好曾包含"公司名"（执行器把相位写进公司名，每帧都变），
- * 这条闭环因此每帧都在触发。 */
-.chart-box .u-legend { flex-wrap: nowrap; overflow: hidden; }
-.chart-box .u-legend .u-series, .chart-box .u-legend .u-marker { white-space: nowrap; flex: 0 0 auto; }
+/* uPlot 的图例是 `<table>`（见 vendor/uplot/uplot.min.css 的 `.u-inline tr`），
+ * **不是 flex 容器**——上一轮我写的 `flex-wrap: nowrap` 对它完全无效（好在无害）。
+ * 真正让"图例换行改变宿主高度"不可能发生的，是 ucharts.js 里给宿主**预留一行图例高度**
+ * （LEGEND_RESERVE_PX）。这里只让单元格内的文字不换行，视觉上保持一行。 */
+.chart-box .u-legend, .chart-box .u-legend .u-series, .chart-box .u-legend .u-value { white-space: nowrap; }
 /*
  * uPlot renders into its host element, so chart hosts must be plain <div>s.
  * A <canvas> host would (a) put uPlot's DOM into canvas *fallback* content that

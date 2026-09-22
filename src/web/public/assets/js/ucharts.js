@@ -20,6 +20,20 @@
  */
 "use strict";
 (function () {
+  /**
+   * uPlot 的图例占的那一行（像素）。
+   *
+   * 为什么是**常量预留**而不是“让它自己撑”：legend 是图表宿主内部的 `<table>`，
+   * 高度随内容变化（系列多/容器窄时会换行）→ 宿主高度变 → 文档高度变 →
+   * 滚动条出现/消失 → 宿主宽度变 → 图例再换行……**闭环**。
+   * 预留固定高度后，宿主高度与图例内容无关。
+   *
+   * ⚠️ 这个常量曾经被“写了但没真的插进去”（一次没断言的批量替换），于是每次 mount 抛
+   * `ReferenceError: LEGEND_RESERVE_PX is not defined` —— 真机 74 次报错，
+   * 图表表现为“闪烁 → 载入失败 → 成功但很长”反复循环。
+   * 教训：**批量替换后必须断言锚点存在**，否则“没报错”只是“没改动”。
+   */
+  const LEGEND_RESERVE_PX = 34;
   /** Live uPlot instances, keyed by the mount element. */
   const instances = new WeakMap();
   /** One observer for every chart: re-fits width when the layout changes. */
@@ -481,26 +495,36 @@
       return null;
     }
     // **复用路径**：形状没变就不重建，只 `setData`（数据也没变则完全不动）。
-    // 这是本轮修复的核心——见 `shapeSignature` 的注释（每帧重建图表 = 页面抖动）。
+    //
+    // `shapeSignature` 是**纯函数**（只读几个原始字段），不会抛——所以这里不需要
+    // try/catch 包着它（曾经包过，而空 catch 块又瞒下了真正的错误）。
+    // 表面越小越不容易坏：这是本文件被反复修的原因之一。
     const prev = instances.get(el);
     if (prev) {
-      try {
-        if (prev.__shape === shapeSignature(built.kind || "line", built.opts)) {
-          const data = dataSignature(built.data);
-          if (prev.__data !== data) {
-            prev.__data = data;
-            prev.setData(built.data);
-          }
-          prev.__lastWidth = el.clientWidth || prev.__lastWidth;
-          return prev;
+      const sig = shapeSignature(built.kind || "line", built.opts);
+      if (prev.__shape === sig) {
+        const data = dataSignature(built.data);
+        if (prev.__data !== data) {
+          prev.__data = data;
+          prev.setData(built.data);
         }
-      } catch {
-        /* 形状算不出来 → 走重建路，至少图表是对的 */
+        prev.__lastWidth = el.clientWidth || prev.__lastWidth;
+        return prev;
       }
     }
     destroy(el); // 形状变了 → 重建（而不是每帧重建）
     try {
-      const instance = new window.uPlot(built.opts, built.data, el);
+      // **必须在构造时就给宽度**（2026-09-22 用户实测"闪烁/载入失败/成功但很长"的真因）：
+      // uPlot 的样式是 `.uplot { width: min-content }`，`opts.width = 0` 时它按最小内容宽
+      // 布局 —— 于是**图例被挤成一列**，宿主先从 120px 暴涨到 622px，等 `setSize` 之后
+      // 才收回 271px。用户看到的就是"闪一下 → 很长 → 变回来"，而且每次重建都来一遍。
+      const mountW =
+        Math.max(el.clientWidth || 0, (el.parentElement && el.parentElement.clientWidth) || 0) || 600;
+      const mountOpts = Object.assign({}, built.opts, {
+        width: mountW,
+        height: built.opts.height,
+      });
+      const instance = new window.uPlot(mountOpts, built.data, el);
       // 形状/数据签名存下来，供下一次复用判断
       try {
         instance.__shape = shapeSignature(built.kind || "line", built.opts);
@@ -518,7 +542,12 @@
       // 按调用方给的高度**预留宿主盒子**：图表被销毁/重建（形状变化）时，
       // 盒子不会先塌陷再撑开——否则页面高度抖动，而滚动锚定会把它转嫁给用户的滚动位置。
       // 这里写 min-height 而不是写死在 CSS：高度只有一个来源（调用方的 height）。
-      if (built.opts && built.opts.height && el.style) el.style.minHeight = built.opts.height + "px";
+      if (built.opts && built.opts.height && el.style) {
+        // 预留图例那一行（uPlot 的 legend 是 `<table>`，在宿主内部，其高度随内容变化）。
+        // 固定预留后，宿主高度**与图例内容无关** → 文档高度不会因图例换行而变化
+        // → 不会再出现"文档高度变 → 滚动条 → 宽度变"的闭环。
+        el.style.minHeight = built.opts.height + LEGEND_RESERVE_PX + "px";
+      }
       instances.set(el, instance);
       const obs = ensureResizeObserver();
       if (obs) obs.observe(el);

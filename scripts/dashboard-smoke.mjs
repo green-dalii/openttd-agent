@@ -7,8 +7,13 @@
  * 永远是**空真**——2026-09-19 就是这样漏掉了一个每次页面加载都抛的
  * `Alpine Expression Error: Cannot read properties of null (reading 'actions')`。
  *
- * 这个脚本用真实 Chrome（CDP）打开一个**正在运行的** dashboard，
- * 断言①用户可见的元素真的渲染了 ②控制台**任何级别**都没有 error/warning/exception。
+ * 这个脚本用真实 Chrome（CDP）打开一个**正在运行的** dashboard，断言：
+ *   ①用户可见的元素真的渲染了；②控制台**任何级别**都没有 error/warning/exception；
+ *   ③**图表健康**：每个图表宿主里真的有 uPlot DOM、且尺寸在合理区间。
+ *
+ * ③ 是 2026-09-22 加的：图表渲染失败时页面不会明显报错——
+ * `.uplot` 不存在或宿主高度塌成 120px/涨到 600px，而面板看起来还在。
+ * 用户当时看到的就是"闪烁 → 载入失败 → 成功但很长"反复循环。
  *
  * 用法：
  *   OPENTTD_DATA_DIR=/tmp/dash pnpm run cli --serve --web-port 8899 &
@@ -92,6 +97,36 @@ await send("Page.enable");
 await send("Page.navigate", { url: URL });
 await sleep(4000); // Alpine boots + fetch /api/capabilities resolves
 
+// 图表健康：每个宿主里必须真的有 uPlot 的 DOM，且尺寸合理。
+// 为什么单独查（2026-09-22 血泪）：图表渲染失败时**页面不报错就不明显**——
+// `.uplot` 不存在、宿主高度塌成 120px（CSS min-height）或暴涨（图例挤成高列），
+// 而面板本身还在。这正是用户报的"闪烁/载入失败/成功但很长"。
+const charts = await send("Runtime.evaluate", {
+  expression: `(() => {
+    const hosts = [...document.querySelectorAll('.chart-box > div[id]')];
+    return hosts.map((h) => {
+      const box = h.getBoundingClientRect();
+      const up = h.querySelector('.uplot');
+      return {
+        id: h.id,
+        hasUplot: !!up,
+        w: Math.round(box.width),
+        h: Math.round(box.height),
+        uplotH: up ? Math.round(up.getBoundingClientRect().height) : null,
+      };
+    });
+  })()`,
+  returnByValue: true,
+});
+const chartList = charts.result?.value ?? [];
+console.log("CHARTS:", JSON.stringify(chartList, null, 2));
+const chartProblems = [];
+for (const c of chartList) {
+  if (!c.hasUplot) chartProblems.push(`${c.id}: 没有渲染出 uPlot（图表未挂载）`);
+  else if (c.h < 140 || c.h > 420) chartProblems.push(`${c.id}: 高度异常 ${c.h}px（预期 140–420）`);
+  if (c.w < 120) chartProblems.push(`${c.id}: 宽度异常 ${c.w}px`);
+}
+
 const probe = await send("Runtime.evaluate", {
   expression: `(() => {
     const el = document.getElementById('action-surface');
@@ -132,8 +167,16 @@ console.log("console entries:", logs.length, "| errors/warnings/exceptions:", ba
 for (const b of bad.slice(0, 8)) console.log("  !!", b.level, b.text.slice(0, 200));
 ws.close();
 chrome.kill();
-const ok = bad.length === 0 && probe.result?.value?.visible === true && probe.result?.value?.rowCount > 0;
+const ok =
+  bad.length === 0 &&
+  probe.result?.value?.visible === true &&
+  probe.result?.value?.rowCount > 0 &&
+  chartProblems.length === 0;
+if (chartProblems.length) {
+  console.error("FAIL（图表健康）:");
+  for (const p of chartProblems) console.error("  -", p);
+}
 if (!ok) {
-  console.error("FAIL: see PANEL / console output above.");
+  console.error("FAIL: see PANEL / CHARTS / console output above.");
 }
 process.exit(ok ? 0 : 1);

@@ -3975,3 +3975,45 @@ X 轴标签相邻重复（`1950-07, 1950-07, 1950-08, 1950-08, 1950-08 …`）�
 - `pnpm run dashboard:smoke`（真实 Chrome + 全部级别控制台）→ **exit 0、0 条记录**；
   它在本轮**当场抓到**我引入的 `window.LiveView.sameEventList is not a function`（2 条异常）。
 - 真机探针（`.scratch/`，用完即删）：页面高度、滚动漂移、uPlot 实例数、DOM 变更归属、面板占比。
+
+## 10.95 图表渲染路径：三个真因与"图表健康"断言（2026-09-22）
+
+用户实测："图表闪烁 → 载入失败 → 成功（但很长）反复循环，纵向大范围规律伸缩"。
+**这不是布局问题，是 `mount()` 每次抛异常 + 构造时宽度为 0。**
+
+### 三个真因（都有真机证据）
+
+| # | 真因 | 证据 |
+|---|------|------|
+| 1 | **构造时 `opts.width = 0`**：uPlot 的样式是 `.uplot { width: min-content }`，宽度 0 时它按最小内容宽布局 → **图例被挤成一列** → 宿主从 120px 暴涨到 **622px**，`setSize` 之后才收回 271px | 探针记录到 `mount-first hostH=120` → `built hostH=622` |
+| 2 | **`LEGEND_RESERVE_PX` 声明根本没插进去**（一次未断言的批量替换静默无效）→ 每次 `mount` 抛 `ReferenceError` → 图表"失败→重试→失败"循环 | 真机 **74 次** `chart render failed: ReferenceError`；宿主高度轨迹 4061 → 5145（单跳 1084px） |
+| 3 | 上一轮加的 `.u-legend { flex-wrap: nowrap }` **对 uPlot 无效**——uPlot 的图例是 `<table>`（`.u-inline tr`），不是 flex 容器 | `vendor/uplot/uplot.min.css` |
+
+### 修法
+
+- **构造前就算好宽度**并写进 `opts`（`width: mountW`），永不出现宽度 0 → 图表一次到位；
+- 宿主**预留一行图例高度**（`LEGEND_RESERVE_PX = 34`，且**声明后立即断言存在**），
+  宿主高度与图例内容无关 → 文档高度不再随图例变化；
+- 删掉不生效的 flex CSS，改成对 `<table>` 真正有意义的 `white-space: nowrap`；
+- 把复用判断里的空 `catch` 块删掉（`shapeSignature` 是纯函数，不会抛）——
+  **空 catch 会瞒下真错误**，本轮它就瞒过一次。
+
+### 新增守卫：`dashboard:smoke` 的**图表健康**断言
+
+图表渲染失败时页面**不会明显报错**：`.uplot` 不存在、或宿主塌成 120px / 涨到 600px，
+而面板看起来还在。所以冒烟检查现在额外断言：
+
+- 每个 `.chart-box > div[id]` 里**真的有 `.uplot` DOM**；
+- 宿主高度在 **140–420px** 区间、宽度 ≥ 120px。
+
+否则 `dashboard:smoke` 失败（exit 1）。**"图表坏了"从此是红灯，不用靠眼睛。**
+
+### ⚠️ 过程事实（最重要的那条）
+
+`no-undef` **早就在 eslint 里对前端脚本开启**（`eslint.config.mjs` 的 FRONTEND_GLOBALS 段，
+起因是 2026-09-11 的 TDZ 事故）。重放证明：删掉 `LEGEND_RESERVE_PX` 的声明后
+`pnpm exec eslint src/web/public/assets/js/ucharts.js` 立刻报
+`550:50 'LEGEND_RESERVE_PX' is not defined`。
+
+**本轮我把它发到真机，是因为我整轮只跑了 `vitest` + 探针，没跑 `lint`/`gate`。**
+守卫存在 ≠ 守卫在循环里（D49）。
