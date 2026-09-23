@@ -15,14 +15,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-interface AuditRecord {
-	type: string;
-	ts: number;
-	turn?: number;
-	trigger?: string;
-	state?: { companies?: { money?: string; vehicles?: number | null; stations?: number | null }[] };
-	message?: string;
-}
+import { type AuditRecord } from "../src/agent/audit.js";
 
 const dataDir = process.argv[2];
 if (!dataDir) {
@@ -31,13 +24,20 @@ if (!dataDir) {
 }
 
 const records = (JSON.parse(`[${readFileSync(join(dataDir, "agent-audit.jsonl"), "utf8").trim().replace(/\n/g, ",")}]`) as AuditRecord[]);
-const decisions = records.filter((r) => r.type === "decision");
-const actions = records.filter((r) => r.type === "action_result");
-const plans = records.filter((r) => r.type === "note" && (r.message ?? "").startsWith("plan:"));
+const decisions = records.filter(
+	(r): r is Extract<AuditRecord, { type: "decision" }> => r.type === "decision",
+);
+const actions = records.filter(
+	(r): r is Extract<AuditRecord, { type: "action_result" }> => r.type === "action_result",
+);
+const plans = records.filter(
+	(r): r is Extract<AuditRecord, { type: "note" }> => r.type === "note" && (r.message ?? "").startsWith("plan:"),
+);
 
 // Split into games (turn resets to 1).
-const games: AuditRecord[][] = [];
-let cur: AuditRecord[] = [];
+type Decision = Extract<AuditRecord, { type: "decision" }>;
+const games: Decision[][] = [];
+let cur: Decision[] = [];
 for (const d of decisions) {
 	if (d.turn === 1 && cur.length) {
 		// 必须重新赋值而不是继续复用：games 里存的是引用，
@@ -51,8 +51,17 @@ for (const d of decisions) {
 }
 if (cur.length) games.push(cur);
 
-const sig = (r: AuditRecord): string => {
-	const c = r.state?.companies?.[0];
+/**
+ * 决策审计里的 state 是当时的**世界快照**，类型未稳定——脚本只用到 cash/vehicles/stations
+ * 三个字段，所以这里用一个最小本地类型（不取代 AuditRecord）。
+ */
+interface CompanySnapshot { money?: string; vehicles?: number | null; stations?: number | null }
+/** 决策审计里的 state 是当时的**世界快照**，类型未稳定。 */
+interface DecisionSnapshot { companies?: CompanySnapshot[] }
+const sig = (r: Decision): string => {
+	// 两步 cast：先让 state 拿到 snapshot 形状，再读 companies[0]。
+	const snap = r.state as DecisionSnapshot | undefined;
+	const c = snap?.companies?.[0];
 	return `${c?.money ?? "?"}|${c?.stations ?? "?"}|${c?.vehicles ?? "?"}`;
 };
 
