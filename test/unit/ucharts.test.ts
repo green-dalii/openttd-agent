@@ -34,6 +34,11 @@ interface UChartsApi {
 	stackedArea: (el: unknown, cfg: unknown) => unknown;
 	toStackedAreaData: (cfg: unknown) => { data: number[][]; opts: Record<string, unknown>; empty?: boolean };
 	stackedLowerBounds: (items: unknown, si: number, i0: number, i1: number) => number[];
+	/** 纯视野计算（无 DOM/uPlot）——缩放的**唯一**数学来源。 */
+	zoomRange: (xs: number[], lo: number, hi: number, factor: number, anchorValue?: number) => { min: number; max: number } | null;
+	panRange: (xs: number[], lo: number, hi: number, dxPixels: number, width: number) => { min: number; max: number } | null;
+	/** 应用视野（写 scales + redraw），并同步"已缩放"标记与复位按钮状态。 */
+	applyXRange: (el: unknown, inst: unknown, min: number, max: number) => boolean;
 	stackedUpperBounds: (items: unknown, si: number, i0: number, i1: number) => number[];
 }
 
@@ -624,5 +629,124 @@ describe("空状态占位会退场", () => {
 		api.line(el, { series: [{ name: "s", data: [1, 2] }], labels: ["a", "b"] });
 		expect(el.kids.some((k: { className: string }) => k.className === "chart-empty")).toBe(false);
 		expect(calls.filter((c) => c.el !== null).length).toBeGreaterThan(0);
+	});
+});
+
+/**
+ * 缩放的核心机制 —— 2026-09-23 真机实测的缺陷回放。
+ *
+ * 现象: 点 `＋` 没有任何变化（画面像素完全不变），复位按钮却变成可用
+ *   （说明 `setScale` 确实被记录了）。
+ * 根因: uPlot 1.6.32 的 `setScale(key, limits)` 只是把极值放进 `pendScales` 并
+ *   `commit()` 到微任务；`setScales()` 跑完就把 `pendScales` 清掉，而在后续
+ *   `commit/redraw` 里 x 轴又按数据回贴 → 视觉上"点了没反应"。
+ *   对照实验: 同一函数由 `wheel` 路径调用（uPlot 传进来的活实例）能改变画面，
+ *   由按钮路径调用则完全不能 —— 两者差异只是调用时机，说明**不能依赖 setScale**。
+ * 规则: 视野只走 `scales.x.min/max = …` + `redraw(false)`（实测有效），
+ *   并且**必须断言没有调用 `setScale`**——否则这个 bug 会静默复活。
+ */
+describe("uPlot 缩放机制（缩放范围计算 + 应用）", () => {
+	const xs = Array.from({ length: 40 }, (_, i) => i);
+
+	it("zoomRange: 按系数收缩跨度，锚点（默认视野中心）保持不动", () => {
+		const api = load().api;
+		// 中心锚:跨度 39 → 23.4,中心 19.5 不动
+		const r = api.zoomRange(xs, 0, 39, 0.6)!;
+		expect(r.min).toBeCloseTo(7.8, 9);
+		expect(r.max).toBeCloseTo(31.2, 9);
+	});
+
+	it("zoomRange: 指定锚点时，锚点处的数据坐标保持不动", () => {
+		const api = load().api;
+		// 锚在 10:跨度 23.4,ratio = 10/39 → min = 10 - 23.4*ratio
+		const r = api.zoomRange(xs, 0, 39, 0.6, 10)!;
+		expect(r.min).toBeCloseTo(4, 6);
+		expect(r.max).toBeCloseTo(27.4, 6);
+	});
+
+	it("zoomRange: 锚点超出视野时夹到边界；跨度不得小于 4 或大于数据跨度的 4 倍", () => {
+		const api = load().api;
+		const edge = api.zoomRange(xs, 0, 39, 0.6, 999)!;
+		expect(edge.min).toBeCloseTo(15.6, 9);
+		expect(edge.max).toBeCloseTo(39, 9);
+		const tiny = api.zoomRange(xs, 0, 39, 0.00001)!;
+		expect(tiny.max - tiny.min).toBe(4);
+		const huge = api.zoomRange(xs, 0, 39, 99)!;
+		expect(huge.max - huge.min).toBe(156);
+	});
+
+	it("zoomRange: 数据不足或极值不可用时返回 null（调用方不得据此缩放）", () => {
+		const api = load().api;
+		expect(api.zoomRange([1], 0, 1, 0.6)).toBeNull();
+		expect(api.zoomRange(xs, Number.NaN, 39, 0.6)).toBeNull();
+	});
+
+	it("panRange: 平移保持跨度，且不把视野拖出数据范围（否则看起来像数据丢了）", () => {
+		const api = load().api;
+		// 右移 10% 宽度 → 数据位移 -1
+		expect(api.panRange(xs, 10, 20, 100, 1000)).toEqual({ min: 9, max: 19 });
+		expect(api.panRange(xs, 10, 20, 1e6, 1000)).toEqual({ min: 0, max: 10 });
+		expect(api.panRange(xs, 30, 39, -1e6, 1000)).toEqual({ min: 30, max: 39 });
+		expect(api.panRange(xs, 10, 20, 100, 0)).toBeNull();
+	});
+
+	it("applyXRange: 写 scales + redraw()，并同步'已缩放'标记", () => {
+		const api = load().api;
+		const redraws: unknown[] = [];
+		const inst: Record<string, unknown> = {
+			data: [xs],
+			scales: { x: { min: 0, max: 39 } },
+			__zoomedByUser: false,
+			redraw: (rebuildPaths?: boolean) => redraws.push(rebuildPaths),
+		};
+		const el = { parentElement: { classList: { toggle: () => {} } } };
+		expect(api.applyXRange(el, inst, 10, 20)).toBe(true);
+		expect((inst.scales as { x: { min: number; max: number } }).x).toMatchObject({ min: 10, max: 20 });
+		// 必须是 `redraw()`（无参 → rebuildPaths !== false → 会用刚写入的极值重画）。
+		// `redraw(false)` 只 commit、没有 setScales 标志时是 no-op：状态改了、画面没变
+		// （实测像素哈希不变，2026-09-23）。
+		expect(redraws).toEqual([undefined]);
+		expect(inst.__zoomedByUser).toBe(true);
+		// 回到全量 → 标记清掉（否则下一帧数据到达时用户会莫名其妙"卡在缩放里"）
+		expect(api.applyXRange(el, inst, 0, 39)).toBe(true);
+		expect(inst.__zoomedByUser).toBe(false);
+	});
+
+	it("applyXRange: 不得调用 setScale —— 缺陷回放（setScale 会被后续 commit 回退）", () => {
+		const api = load().api;
+		let setScaleCalls = 0;
+		const inst: Record<string, unknown> = {
+			data: [xs],
+			scales: { x: { min: 0, max: 39 } },
+			setScale: () => {
+				setScaleCalls++;
+			},
+			redraw: () => {},
+		};
+		const el = { parentElement: { classList: { toggle: () => {} } } };
+		api.applyXRange(el, inst, 10, 20);
+		expect(setScaleCalls).toBe(0);
+		expect((inst.scales as { x: { min: number } }).x.min).toBe(10);
+	});
+
+	it("zoomBy: scales 还没提交时（min/max 为 null）也能缩放 —— 回放'点＋没反应'", () => {
+		const api = load().api;
+		// 真机表现: 图表刚挂载、uPlot 尚未 commit 时点＋ → 没有任何变化。
+		// 根因: 范围计算直接依赖已提交的极值，取不到就静默放弃。
+		// 规则: 取不到就用**数据边界**当起点（视野=全量，中心锚）。
+		const inst: Record<string, unknown> = {
+			data: [xs],
+			scales: { x: { min: null, max: null } },
+			redraw: () => {},
+		};
+		const el = { parentElement: { classList: { toggle: () => {} } } };
+		expect(api.applyXRange(el, inst, 7.8, 31.2)).toBe(true);
+		expect((inst.scales as { x: { min: number } }).x.min).toBeCloseTo(7.8, 9);
+	});
+
+	it("applyXRange: 实例不可用时返回 false 且不抛（图表可能已被销毁）", () => {
+		const api = load().api;
+		expect(api.applyXRange({ parentElement: null }, {}, 1, 2)).toBe(false);
+		expect(api.applyXRange({ parentElement: null }, null, 1, 2)).toBe(false);
 	});
 });

@@ -527,3 +527,43 @@ dialog.modal p { color: var(--ink-dim); font-size: 13px; margin: 0 0 var(--sp-4)
 button:disabled,
 button[disabled] { opacity: .45; cursor: not-allowed; }
 .actions .save-why { font-size: .82rem; color: var(--warn, #e5c07b); align-self: center; }
+
+/* ==========================================================================
+   DRILL-DOWN DRAWER（右侧抽屉）
+   ==========================================================================
+   为什么必须有这一段（2026-09-23 用户实测）：抽屉的 HTML 一直在，但**没有任何
+   `.drawer*` 样式**，于是它就是一个普通块级元素，被排在**文档最末尾**——用户点卡片
+   后要滚到页面底部才能看到内容，观感极差。抽屉是"覆盖层 + 侧板"，它的定位、
+   层级、滚动与背景锁定**全都是样式问题**，不是模板问题。 */
+.drawer-wrap { position: fixed; inset: 0; z-index: 60; display: flex; justify-content: flex-end;
+  background: rgba(8, 10, 14, .58); }
+.drawer { display: flex; flex-direction: column; width: min(620px, 94vw); height: 100%;
+  background: var(--panel); border-left: 1px solid var(--line-strong);
+  box-shadow: -18px 0 40px rgba(0, 0, 0, .45); animation: drawer-in .16s ease-out; }
+@keyframes drawer-in { from { transform: translateX(28px); opacity: .5; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .drawer { animation: none; } }
+.drawer-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3);
+  padding: 14px 18px; border-bottom: 1px solid var(--line); flex: none; }
+.drawer-head h2 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: .01em; }
+.drawer-body { overflow: auto; padding: 14px 18px 28px; -webkit-overflow-scrolling: touch; }
+.drawer-body table { width: 100%; }
+.drawer-body .empty { margin: var(--sp-3) 0 0; }
+
+/* ==========================================================================
+   CHART CONTROLS（缩放 / 平移 / 复位）
+   ==========================================================================
+   为什么是图标簇而不是一个"reset zoom"文字按钮（2026-09-23 用户："为什么图表没有
+   控件…用的丑陋按钮"）：uPlot **刻意**只给"拖拽选择缩放 + 双击复位"，滚轮缩放与拖拽
+   平移都要自己接（维护者在 issue #298 里明说这一点反直觉）。所以控件必须由我们提供，
+   且要用**通用图标**表达，而不是一句英文。 */
+.chart-box { position: relative; }
+.chart-ctrl { position: absolute; top: 8px; right: 10px; z-index: 5; display: flex; gap: 4px;
+  opacity: .55; transition: opacity .12s ease; }
+.chart-box:hover .chart-ctrl, .chart-box.chart-zoomed .chart-ctrl { opacity: 1; }
+.chart-ctrl button { width: 26px; height: 26px; padding: 0; display: inline-flex;
+  align-items: center; justify-content: center; cursor: pointer; font-size: 14px; line-height: 1;
+  color: var(--ink-dim); background: var(--panel-2); border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm); }
+.chart-ctrl button:hover { color: var(--ink); border-color: var(--ink-dim); }
+.chart-ctrl button:disabled { opacity: .35; cursor: default; }
+.chart-hint { margin: 6px 2px 0; font-size: 11.5px; color: var(--muted); }

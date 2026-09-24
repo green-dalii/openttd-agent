@@ -36,6 +36,8 @@
   const LEGEND_RESERVE_PX = 34;
   /** Live uPlot instances, keyed by the mount element. */
   const instances = new WeakMap();
+  /** 复位按钮（按宿主记录）：未缩放时置灰，有意义的禁用胜过点了没反应。 */
+  const ctrlReset = new Map();
   /** One observer for every chart: re-fits width when the layout changes. */
   let ro = null;
 
@@ -222,13 +224,19 @@
    *
    * `setScale: true` 是 uPlot 的按需缩放：拖动后它会自己 `setScale('x')`。
    * **缩放状态由 uPlot 持有**，我们只在"重建图表"时才会丢掉它（形状变化），
-   * 数据帧走的是 `setData` 路径，所以用户缩放的视野在长局里不会被每秒重置。
+   * **注意**：`setData` 默认会重置 scales —— 用户缩放后必须显式传 `false` 才保得住视野
+   *（2026-09-23 实测：不传就等于"每次数据帧把缩放擦掉"）。
    */
   function cursorOpts() {
     return {
       show: true,
       points: { show: false },
-      drag: { x: true, y: false, setScale: true, uni: 1 },
+      // `setSelect: false` 关掉"框选即缩放"，改由我们自己在 pointer 层做**拖拽平移**。
+      // 为什么改（2026-09-23 用户："图表没有控件（放大、缩小、移动、复位）"）：
+      // uPlot 只给"框选缩放 + 双击复位"，**滚轮缩放与拖拽平移都要自己接**
+      // （维护者在 issue #298 里明说这一点反直觉）。时间序列上"拖着看前后"是最常用的动作，
+      // 所以把它放在最自然的裸拖拽上；选区缩放退到 Shift+拖拽。
+      drag: { x: true, y: false, setScale: false, setSelect: false, uni: 1 },
     };
   }
 
@@ -633,16 +641,123 @@
     if (host && host.classList && host.classList.toggle) host.classList.toggle("chart-zoomed", Boolean(on));
   }
 
-  /** 复位到全量视野（uPlot 的 `null` 极值 = 重新贴合数据）。 */
+  /**
+   * 把 x 轴缩放一个系数（围绕某个"数据坐标"锚点，默认视野中心）。
+   *
+   * 为什么锚点重要：滚轮缩放若总以中心为锚，指针底下的那个点会跑掉，用户就会觉得
+   * "缩放不听话"。以指针所在的数据位置为锚，才是所有主流图表的做法。
+   */
+  /**
+   * 缩放后的视野（**纯函数**，无 DOM/uPlot）。返回 null 表示"不可缩放"。
+   *
+   * 锚点为什么要参数化：滚轮缩放若总以视野中心为锚，指针底下的那个点会跑掉，
+   * 用户就会觉得"缩放不听话"。以指针所在的数据位置为锚才是主流做法。
+   */
+  function zoomRange(xs, lo, hi, factor, anchorValue) {
+    if (!xs || xs.length < 2) return null;
+    if (!Number.isFinite(lo) || !Number.isFinite(hi)) return null;
+    const span = hi - lo;
+    const dataSpan = xs[xs.length - 1] - xs[0];
+    const next = Math.min(Math.max(span * factor, 4), dataSpan * 4);
+    const anchor = Number.isFinite(anchorValue) ? Math.min(Math.max(anchorValue, lo), hi) : (lo + hi) / 2;
+    const ratio = span > 0 ? (anchor - lo) / span : 0.5;
+    const min = anchor - next * ratio;
+    return { min, max: min + next };
+  }
+
+  /** 平移后的视野（纯函数）：跨度不变，且不把视野拖出数据范围（否则像数据丢了）。 */
+  function panRange(xs, lo, hi, dxPixels, width) {
+    if (!xs || xs.length < 2) return null;
+    if (!Number.isFinite(lo) || !Number.isFinite(hi)) return null;
+    if (!Number.isFinite(width) || width <= 0) return null;
+    const span = hi - lo;
+    const shift = (-dxPixels / width) * span;
+    const min = Math.max(xs[0], Math.min(lo + shift, xs[xs.length - 1] - span));
+    return { min, max: min + span };
+  }
+
+  /**
+   * 应用 x 轴视野 —— **所有缩放/平移/复位的唯一入口**。
+   *
+   * 为什么不能走 uPlot 的 `setScale()`（2026-09-23 实测，代价一轮调试）：
+   * `setScale(key, limits)` 只把极值塞进 `pendScales` 并 `commit()` 到微任务；
+   * 微任务里 `setScales()` 应用后即清空 `pendScales`，随后的重画又把 x 轴按数据回贴。
+   * 真机表现是**点 `＋` 画面像素完全不变**（复位按钮却变可用，因为钩子确实接到了
+   * 一次 setScale）。同一函数由滚轮路径调用能改变画面、由按钮路径调用不能，
+   * 说明"能不能生效"取决于 uPlot 内部时序 —— 这种依赖必须消掉。
+   *
+   * 现在改为**直接写极值 + `redraw()`**：先写入的值就是 `redraw()` 内部
+   * `_setScale(x, scales.x.min, scales.x.max)` 会用到的那一份，所以"写进去的
+   * 视野 = 画出来的视野"。注意**不能**用 `redraw(false)`：那条路只 `commit()`，
+   * 在没有 setScales 标志时是 no-op —— 状态改了、画面没变（实测像素哈希不变）。
+   *
+   * 同时同步派生状态（"已缩放"标记 + 复位按钮可用性），否则会出现"缩放了但
+   * 按钮还是灰的"这种假按钮。
+   */
+  function applyXRange(el, inst, min, max) {
+    const xs = inst && inst.data && inst.data[0];
+    if (!inst || !inst.scales || !inst.scales.x || !xs || xs.length < 2) return false;
+    if (!Number.isFinite(min) || !Number.isFinite(max) || max <= min) return false;
+    const zoomed = min > xs[0] + 1e-9 || max < xs[xs.length - 1] - 1e-9;
+    try {
+      inst.scales.x.min = min;
+      inst.scales.x.max = max;
+      // `__zoomedByUser` 让数据帧知道"用户在缩放里"，从而不重置 scales
+      // （`setData` 的第二个参数默认 true = 重置，会把用户视野擦掉）。
+      inst.__zoomedByUser = zoomed;
+      if (typeof inst.redraw === "function") inst.redraw();
+    } catch (e) {
+      // 不静默：空 catch 会瞒下"缩放根本没生效"这类缺陷（2026-09-23 实测遇到）。
+      if (typeof console !== "undefined") console.warn("chart zoom failed:", String(e && e.message ? e.message : e));
+      return false;
+    }
+    setZoomed(el, zoomed);
+    const btn = ctrlReset.get(el);
+    if (btn) btn.disabled = !zoomed;
+    return true;
+  }
+
+  /**
+   * 当前视野起点：优先用已提交的极值，**取不到就退回数据边界**。
+   *
+   * 为什么需要回退（2026-09-23 实测）：图表刚挂载、uPlot 还没 commit 时
+   * `scales.x.min/max` 仍是 null —— 此时点 `＋` 会"没有任何反应"（静默 no-op）。
+   * 旧实现里有这个回退，被抽成纯函数时弄丢了一次，所以现在有测试盯着。
+   */
+  function viewBounds(inst, xs) {
+    const sc = inst.scales && inst.scales.x ? inst.scales.x : {};
+    const lo = Number.isFinite(sc.min) ? sc.min : xs[0];
+    const hi = Number.isFinite(sc.max) ? sc.max : xs[xs.length - 1];
+    return { lo, hi };
+  }
+
+  /** 缩放一个系数（围绕数据坐标锚点，默认视野中心）。 */
+  function zoomBy(el, factor, anchorValue) {
+    const inst = instances.get(el);
+    if (!inst) return false;
+    const xs = (inst.data && inst.data[0]) || [];
+    const { lo, hi } = viewBounds(inst, xs);
+    const r = zoomRange(xs, lo, hi, factor, anchorValue);
+    return r ? applyXRange(el, inst, r.min, r.max) : false;
+  }
+
+  /** 拖拽平移：按像素位移换算成数据位移（不改缩放级别）。 */
+  function panBy(el, dxPixels) {
+    const inst = instances.get(el);
+    if (!inst) return false;
+    const xs = (inst.data && inst.data[0]) || [];
+    const { lo, hi } = viewBounds(inst, xs);
+    const width = (inst.over && inst.over.clientWidth) || 0;
+    const r = panRange(xs, lo, hi, dxPixels, width);
+    return r ? applyXRange(el, inst, r.min, r.max) : false;
+  }
+
+  /** 复位到全量视野（显式传数据边界，不依赖 uPlot 的 `null` 语义）。 */
   function resetZoom(el) {
     const inst = instances.get(el);
-    if (!inst) return;
-    try {
-      inst.setScale("x", { min: null, max: null });
-    } catch {
-      /* chart already gone */
-    }
-    setZoomed(el, false);
+    if (!inst || !inst.data || !inst.data[0] || inst.data[0].length < 2) return false;
+    const xs = inst.data[0];
+    return applyXRange(el, inst, xs[0], xs[xs.length - 1]);
   }
 
   /**
@@ -653,30 +768,91 @@
   function ensureZoomUi(el, instance) {
     const host = el && el.parentElement;
     if (!host || !host.appendChild || typeof document === "undefined" || !document.createElement) return;
-    if (!host.__chartReset) {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "chart-reset";
-      btn.textContent = "reset zoom";
-      btn.addEventListener("click", function () {
+    if (!host.__chartCtrl) {
+      // 图标簇（＋ / − / ⟲）而不是一句英文按钮：见 style.css 里 `.chart-ctrl` 的说明。
+      const bar = document.createElement("div");
+      bar.className = "chart-ctrl";
+      const mk = function (label, title, fn) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.textContent = label;
+        b.title = title;
+        b.setAttribute("aria-label", title);
+        b.addEventListener("click", fn);
+        bar.appendChild(b);
+        return b;
+      };
+      mk("＋", "Zoom in", function () {
+        zoomBy(el, 0.6);
+      });
+      mk("−", "Zoom out", function () {
+        zoomBy(el, 1.7);
+      });
+      const reset = mk("⟲", "Reset zoom (double-click the chart)", function () {
         resetZoom(el);
       });
-      host.appendChild(btn);
-      host.__chartReset = btn;
+      ctrlReset.set(el, reset);
+      host.appendChild(bar);
+      host.__chartCtrl = bar;
       host.addEventListener("dblclick", function () {
         resetZoom(el);
       });
+
+      // 滚轮缩放（以指针所在的数据位置为锚）+ 拖拽平移。
+      // uPlot 两者都不提供（issue #298），所以由我们在 pointer 层实现。
+      const over = instance && instance.over;
+      if (over) {
+        over.addEventListener(
+          "wheel",
+          function (ev) {
+            if (!ev.deltaY) return;
+            ev.preventDefault();
+            const rect = over.getBoundingClientRect();
+            const frac = rect.width > 0 ? (ev.offsetX !== undefined ? ev.offsetX : ev.clientX - rect.left) / rect.width : 0.5;
+            const cur = instances.get(el);
+            if (!cur) return;
+            const lo = cur.scales.x.min;
+            const hi = cur.scales.x.max;
+            const anchor = Number.isFinite(lo) && Number.isFinite(hi) ? lo + (hi - lo) * frac : undefined;
+            zoomBy(el, ev.deltaY > 0 ? 1.15 : 0.87, anchor);
+          },
+          { passive: false },
+        );
+        let dragging = false;
+        let lastX = 0;
+        over.addEventListener("pointerdown", function (ev) {
+          if (ev.button !== 0 || ev.shiftKey) return; // Shift+拖拽 = uPlot 的选区缩放
+          dragging = true;
+          lastX = ev.clientX;
+          over.setPointerCapture?.(ev.pointerId);
+        });
+        over.addEventListener("pointermove", function (ev) {
+          if (!dragging) return;
+          const dx = ev.clientX - lastX;
+          lastX = ev.clientX;
+          panBy(el, dx);
+        });
+        const stop = function () {
+          dragging = false;
+        };
+        over.addEventListener("pointerup", stop);
+        over.addEventListener("pointercancel", stop);
+        over.addEventListener("pointerleave", stop);
+      }
+    }
+    const rt = ctrlReset.get(el);
+    if (rt && rt.disabled !== undefined) {
+      // 未缩放时"复位"没有意义 → 置灰（有意义的禁用胜过点了没反应的按钮）。
+      const z = instance ? isZoomed(instance) : false;
+      if (rt.disabled === z) rt.disabled = !z;
     }
     // uPlot 在每次 `setScale` 之后调用 `hooks.setScale`（拖拽缩放会走这里）。
     // 钩子数组按调用时读取，所以在构造之后挂也生效。
     if (instance) {
       instance.hooks = instance.hooks || {};
-      const prev = instance.hooks.setScale || [];
-      instance.hooks.setScale = prev.concat([
-        function () {
-          setZoomed(el, isZoomed(instance));
-        },
-      ]);
+      // 视野变化**不再**靠 `hooks.setScale`：那条路径只在 uPlot 自己重算 scales 时
+      // 触发，而我们现在直接写极值（见 applyXRange）。派生状态（类名/按钮）由
+      // applyXRange 统一同步，避免"两个地方各同步一半"。
     }
     setZoomed(el, isZoomed(instance));
   }
@@ -720,7 +896,11 @@
         const data = dataSignature(built.data);
         if (prev.__data !== data) {
           prev.__data = data;
-          prev.setData(built.data);
+          // `setData` 的第二个参数默认是 **true（重置 scales）**——那会把用户刚拖出来的
+          // 视野在下一帧数据到达时立刻擦掉（2026-09-23 真机实测：缩放"点了没反应"，
+          // 其实是被 1 帧/秒的数据重置了）。用户缩放后必须**保留**视野，否则缩放功能
+          // 等于不存在。未缩放时才让 uPlot 自己贴合新数据。
+          prev.setData(built.data, prev.__zoomedByUser === true ? false : true);
         }
         prev.__lastWidth = el.clientWidth || prev.__lastWidth;
         return prev;
@@ -812,11 +992,21 @@
     stackedBars: (el, cfg) => mount(el, () => toStackedData(cfg)),
     stackedArea: (el, cfg) => mount(el, () => toStackedAreaData(cfg)),
     destroy: destroy,
-    // 缩放：复位由页面/按钮共用（`isZoomed` 供探针与测试判断"要不要显示复位按钮"）。
+    // 缩放 API **统一收宿主元素**（el），与 resetZoom/zoomBy 一致。
+    // 曾经导出的是收实例的内部版 `isZoomed(inst)`，而调用方按元素传 → 永远返回
+    // false（探针与冒烟测试因此得到过假的"没有缩放"结论）。
     resetZoom: resetZoom,
-    isZoomed: isZoomed,
+    zoomBy: zoomBy,
+    panBy: panBy,
+    isZoomed: function (el) {
+      return isZoomed(instances.get(el));
+    },
     // Exposed for tests: the axis-width rule (measured from the formatted labels).
     axisSizeFor: axisSizeFor,
+    // Exposed for tests: the zoom/pan range math + the apply path (no setScale).
+    zoomRange: zoomRange,
+    panRange: panRange,
+    applyXRange: applyXRange,
     // Exposed for tests: pure translations with no DOM/uPlot involvement.
     toLineData: toLineData,
     toStackedData: toStackedData,

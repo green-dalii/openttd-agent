@@ -647,3 +647,36 @@ OpenTTD 有**两个动作面**，能力完全不同：
 | **车辆/站点类型分布早就在快照里** | `stats.breakdown {bus:9,…}`、`stationBreakdown {bus:8,…}` | 仪表盘"没有线路类型"不是数据缺失，是**没显示** |
 | **本次长跑**没有**跨局记忆** | `lessonsInjected: 0`，`recall` 两次命中 0 | 0 命中是**正确**行为（库为空），不是匹配缺陷；跨局学习需要**多局**（M4b/M5 的前提） |
 | 6 个文件、3 名参与者的运行时小样本 | — | — |
+
+### 10.97 uPlot 1.6.32 的交互事实：`setScale` 不可依赖，视野必须直接写（2026-09-23 实测）
+
+图表加缩放/平移/复位时，连续四轮"修好了"都是假的。逐条量下来，**uPlot 在这条路径上有
+三个反直觉行为**，而它们合起来会让"点了没反应"看起来像玄学。事实以 vendored
+`uPlot.iife.min.js`（1.6.32，与 npm 字节一致）与 `node_modules/uplot/dist/uPlot.esm.js`
+源码为准，结论用**像素哈希**验证（同一张静态图，600 ms 后比对 canvas 数据）：
+
+| 事实 | 依据（源码行） | 真机表现 |
+|------|----------------|----------|
+| **`setScale(key,{min,max})` 不保证生效** | 它只做 `pendScales[key]=opts; shouldSetScales=true; commit()`；微任务里 `setScales()` 应用后**清空 `pendScales`**，随后的重画又按数据回贴 | 点 `＋` **画面像素完全不变**（而状态曾短暂显示"已缩放"） |
+| **`setData(data)` 默认重置 scales** | `uPlot.d.ts`：`setData(data, resetScales = true)`；实现里 `_resetScales !== false` 时 `_setScale(xScaleKey, …)` | 用户缩放后，**每一帧数据到达都会把视野擦掉** → 缩放等于不存在 |
+| **`redraw(false)` 是 no-op** | `redraw(rebuildPaths)`: `rebuildPaths !== false` 才 `_setScale(x, scales.x.min, scales.x.max)`，否则只 `commit()`；没有 setScales 标志时 `commit()` 不重画 | 状态改了（`isZoomed` 为 true）但**画面没变** —— 比第一种更难发现 |
+
+**有效配方**（像素级验证通过）：
+```js
+inst.scales.x.min = min;          // 直接写，绕开 pendScales 的生命周期
+inst.scales.x.max = max;
+inst.redraw();                    // 无参 → 用刚写入的极值重画（不能传 false）
+inst.__zoomedByUser = true;       // 让数据帧走 setData(data, false)，视野才保得住
+```
+四条交互的实测结果（静态图 + 像素哈希）：`＋` 缩放后 **1.5 s 内每帧都稳定**、
+`⟲` 还原到**与初始像素完全一致**、滚轮按指针位置为锚缩放、拖拽平移（需先缩进去——
+全量视野本来就无处可平移，那是正确行为不是缺陷）。
+
+**另一条必须记住的渲染事实**：uPlot 的**轴刻度与标签不在 DOM 里**。
+`.uplot` 只有两个子元素（`.u-wrap`、`.u-legend`），`.u-axis` 容器**没有子节点**，
+全库也没有 `.u-tick` 这个类名（`uPlot.min.css` / `uPlot.iife.min.js` 里都不存在）。
+⇒ 任何"有没有刻度"的断言**不能靠 DOM 计数**，只能看截图或像素。
+
+**公开 API 的一致性要求**：图表适配层的缩放 API 必须统一收**宿主元素**（`resetZoom(el)`、
+`zoomBy(el, …)`、`isZoomed(el)`）。曾导出过收**实例**的 `isZoomed(inst)`，而调用方按元素
+传入 → **恒返回 false**，探针与冒烟测试据此得到过"没有缩放"的假结论。
