@@ -18,10 +18,7 @@
 -->
 <div x-data="providers" x-init="init()">
 <header>
-  <div class="brand">
-    <h1>openttd-agent <span class="dim">providers</span></h1>
-    <div id="nav"></div>
-  </div>
+  <div class="brand" data-brand="providers"></div>
   <div class="runbar">
     <div class="item"><span class="lbl">Catalog</span>
       <span class="val" x-text="providerCount() || '…'"></span></div>

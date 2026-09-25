@@ -37,7 +37,7 @@
 
         /* ------------------------------- init ------------------------------- */
         init() {
-          U.renderNavInto("nav", "/");
+          U.renderChrome();
           // Persisted view preferences.
           this.cashMetric = U.getPref("cash.metric", "money");
           this.tokenMetric = U.getPref("token.metric", "total");
@@ -166,6 +166,15 @@
               // 页面要显示"不可得"而不是"0 条线路"（编造事实）。
               if (Array.isArray(s.routes)) this.routes = s.routes;
               this.routesAvailable = s.routesAvailable === true;
+              // 城镇：GS 一直在发 `town_list`，但后端快照此前**从没带上它**
+              // （`toWireSnapshot` 丢字段），所以页面永远是空的（2026-09-25 修复）。
+              if (Array.isArray(s.towns)) this.towns = s.towns;
+              // 同样要防 `Number(null) === 0`：未知总数保持 null（显示「—」）。
+              this.townsTotal =
+                s.townsTotal === null || s.townsTotal === undefined || !Number.isFinite(Number(s.townsTotal))
+                  ? null
+                  : Number(s.townsTotal);
+              this.townsAvailable = s.townsAvailable === true;
               // These three were sent by the server all along but never consumed,
               // so a page loaded mid-run saw no stages and no memory (MEMORY.md A1:
               // "no error" only holds if the code actually ran).

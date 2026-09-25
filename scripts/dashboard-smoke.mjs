@@ -310,6 +310,40 @@ const mem = await send("Runtime.evaluate", {
   returnByValue: true,
 });
 console.log("MEMORY:", JSON.stringify(mem.result?.value, null, 2));
+
+// 城镇面板：**诚实态**必须在循环里被检查（D49：守卫存在 ≠ 守卫在循环里）。
+// 这个 smoke 自带 dashboard（没有 GS 通道）→ townsAvailable=false → 正确行为是
+// 显示"读不到"，**绝不能**显示"0 个城镇"（那是编造事实，2026-09-25 修过同类问题）。
+const towns = await send("Runtime.evaluate", {
+  expression: `(() => {
+    const d = window.Alpine && document.querySelector('[x-data]') ? window.Alpine.$data(document.querySelector('[x-data]')) : null;
+    const kpi = [...document.querySelectorAll('section.kpis .kpi')].find(k => /Towns on map/.test(k.textContent));
+    const sec = [...document.querySelectorAll('section')].find(s => /Towns on map/.test(s.textContent));
+    const rows = sec ? [...sec.querySelectorAll('tbody tr')].length : 0;
+    return {
+      found: !!sec,
+      available: d && d.townsAvailable === true,
+      total: d ? d.townsSummary().total : null,
+      note: d ? d.townsNote() : null,
+      sampleNote: d ? d.townsSampleNote() : null,
+      kpiText: kpi ? kpi.textContent.replace(/\\s+/g, ' ').trim().slice(0, 90) : null,
+      rows,
+    };
+  })()`,
+  returnByValue: true,
+});
+console.log("TOWNS:", JSON.stringify(towns.result?.value, null, 2));
+const tv = towns.result?.value || {};
+if (!tv.found) stabilityProblems.push("Towns 面板不存在（城镇链断了）");
+if (tv.available === false) {
+  // 没有 GS 通道时：必须有说明文字，且 KPI 不能是 0
+  if (!tv.note) stabilityProblems.push("Towns 面板没有 GS 通道却没有说明文字（会读成「没有城镇」）");
+  if (tv.total !== null) stabilityProblems.push(`Towns 在无通道时 total=${tv.total}（必须是 null → 显示「—」）`);
+  if (/\b0\b/.test(tv.kpiText || "")) stabilityProblems.push(`Towns KPI 在无通道时显示 0：${tv.kpiText}`);
+} else if (tv.available === true && tv.sampleNote) {
+  // 有通道时必须说明这是取样，不是全图
+  if (!/not the whole map/.test(tv.sampleNote)) stabilityProblems.push("Towns 有数据但没说明「这是取样、不是全图」");
+}
 const bad = logs.filter((l) => l.level === "error" || l.level === "warning" || l.level === "exception");
 console.log("console entries:", logs.length, "| errors/warnings/exceptions:", bad.length);
 for (const b of bad.slice(0, 8)) console.log("  !!", b.level, b.text.slice(0, 200));

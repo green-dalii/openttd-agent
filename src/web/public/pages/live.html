@@ -37,10 +37,7 @@
 -->
 <div x-data="live" x-init="init()">
   <header>
-    <div class="brand">
-      <h1>openttd-agent <span class="dim">live</span></h1>
-      <div id="nav"></div>
-    </div>
+    <div class="brand" data-brand="live"></div>
     <div class="runbar">
       <div class="item"><span class="lbl">Connection</span>
         <span class="pill" :class="linkOk ? 'ok' : link === 'waiting for server…' ? 'idle' : 'bad'"
@@ -246,6 +243,59 @@
         </table>
       </div>
       <p class="hint" x-show="!routesNote()">Idle rows are built but have no vehicles on them yet.</p>
+    </section>
+
+    <!-- =========================== ③b TOWNS ===========================
+         "它能服务谁"。数据来自 Bridge GS 的取样（**人口最多的前 10 个**）——
+         **取样不是全图**，所以汇总里同时给出样本量与地图总数（live-view.js
+         townsSummary 的注释）。watch 模式没有 GS 通道 → 显示"读不到"而不是"没有城镇"。 -->
+    <div class="group"><h2>Towns</h2><div class="rule"></div>
+      <span class="dim">the demand the company could serve — where the people are</span></div>
+    <section class="kpis cols-4">
+      <div class="kpi">
+        <div class="kpi-k">Towns on map</div>
+        <div class="kpi-v" x-text="townsSummary().total === null ? '—' : $fmt.int(townsSummary().total)"></div>
+        <div class="kpi-hint">GS town-list count</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-k">In sample</div>
+        <div class="kpi-v" x-text="$fmt.int(townsSummary().shown)"></div>
+        <div class="kpi-hint">largest by population</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-k">People (sample)</div>
+        <div class="kpi-v" x-text="$fmt.int(townsSummary().shownPopulation)"></div>
+        <div class="kpi-hint">this sample only — not the whole map</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-k">Largest</div>
+        <div class="kpi-v" x-text="townsRows().length ? townsRows()[0].population : '—'"></div>
+        <div class="kpi-hint" x-text="townsRows().length ? ('town #' + townsRows()[0].id) : 'no town report yet'"></div>
+      </div>
+    </section>
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Town detail</h2>
+        <span class="dim" x-text="townsSampleNote()"></span>
+      </div>
+      <p class="empty" x-show="townsNote()" x-text="townsNote()"></p>
+      <div x-show="!townsNote()">
+        <table>
+          <thead>
+            <tr><th>Town</th><th class="num">Population</th><th class="num">Location</th></tr>
+          </thead>
+          <tbody>
+            <template x-for="t in townsRows()" :key="t.key">
+              <tr>
+                <td x-text="'#' + t.id"></td>
+                <td class="num" x-text="t.population"></td>
+                <td class="num dim" x-text="t.at"></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+        <p class="empty" x-show="!townsRows().length" x-text="townsEmpty()"></p>
+      </div>
     </section>
 
     <!-- ========================== ④ PROGRESS ========================== -->
@@ -587,7 +637,11 @@
       <div class="drawer-body">
         <template x-if="drawerShowsRoutes()">
           <div>
-            <table class="routes">
+            <!-- 诚实态：没有 GS 通道时**不能**说"没有线路"（2026-09-25，用户实测）——
+                 watch 模式下线路列表天然为空，而世界里有线路。 -->
+            <p class="empty" x-show="!routesAvailable"
+               x-text="'Routes are not readable in this run — the route readout comes from the Bridge GS, which only runs in agent mode (this run is ' + ((run && run.state) || 'idle') + ').'"></p>
+            <table class="routes" x-show="routesAvailable">
               <thead>
                 <tr><th>Route</th><th>Endpoints</th><th class="num">Veh</th><th class="num">Waiting</th>
                   <th class="num">Income / day</th><th class="num">Profit YTD</th></tr>
@@ -605,7 +659,7 @@
                 </template>
               </tbody>
             </table>
-            <p class="empty" x-show="!drawerRouteRows().length">No route has vehicles on it.</p>
+            <p class="empty" x-show="routesAvailable && !drawerRouteRows().length" x-text="drawerEmptyText()"></p>
           </div>
         </template>
         <template x-if="!drawerShowsRoutes()">

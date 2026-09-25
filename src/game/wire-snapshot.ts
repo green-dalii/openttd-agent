@@ -42,6 +42,11 @@ export interface WireSnapshotExtras {
 	 * ——那是编造事实。**"不可用"与"零"是两种世界状态。**
 	 */
 	routesAvailable?: boolean;
+	/**
+	 * 城镇数据是否**可得**（同样只有 agent 模式有 GS 通道）。
+	 * 与 `routesAvailable` 同理：**"不可得"不是"地图上没有城镇"**。
+	 */
+	townsAvailable?: boolean;
 }
 
 export function toWireSnapshot(world: WorldState, extras: WireSnapshotExtras = {}): unknown {
@@ -63,5 +68,10 @@ export function toWireSnapshot(world: WorldState, extras: WireSnapshotExtras = {
 		recent: snap.recent.slice(-MAX_WIRE_RECENT),
 		routes: extras.routes ?? [],
 		routesAvailable: extras.routesAvailable === true,
+		// 城镇：GS 一直在发（`bridge-gs/main.nut` 的 `town_list`），但此前**从没进过
+		// 这个快照** —— `world.towns` 于是永远到不了页面（2026-09-25）。
+		towns: snap.towns ?? [],
+		townsTotal: snap.townsTotal ?? null,
+		townsAvailable: extras.townsAvailable === true,
 	};
 }

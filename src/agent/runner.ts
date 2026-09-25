@@ -416,6 +416,7 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 				// 仪表盘此前**完全没有**线路信息——数据一直存在，只是没被发出去。
 				routes: routeWireFacts(hub.getRouteStats(), routeLedger.all()),
 				routesAvailable: true,
+				townsAvailable: true,
 			}) as Record<string, unknown>),
 			telemetry: telemetry.snapshot(),
 			sessionId: session.id,

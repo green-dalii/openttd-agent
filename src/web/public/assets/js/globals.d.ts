@@ -73,7 +73,7 @@ interface UiModule {
 	 * Added later by alpine-bridge.js, so it is optional: common.js defines the
 	 * object without it and pages that load the bridge get it.
 	 */
-	renderNavInto?(id: string, active: string): void;
+	renderChrome?(): void;
 }
 
 interface ChartsUtil {

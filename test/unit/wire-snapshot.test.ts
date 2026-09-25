@@ -136,3 +136,31 @@ describe("快照里的线路数据", () => {
 		expect(snap.routesAvailable).toBe(true);
 	});
 });
+
+describe("wire snapshot: towns（GS 一直有数据，此前从没发到页面）", () => {
+	it("把城镇列表与总数发给页面（排序是事实，不是建议）", () => {
+		const w = new WorldState();
+		w.setTowns(
+			[
+				{ id: 2, population: 500, x: 10, y: 20 },
+				{ id: 7, population: 900, x: 30, y: 40 },
+			],
+			42,
+		);
+		const snap = toWireSnapshot(w, { townsAvailable: true }) as Record<string, unknown>;
+		expect(snap.towns).toEqual([
+			{ id: 7, population: 900, x: 30, y: 40 },
+			{ id: 2, population: 500, x: 10, y: 20 },
+		]);
+		expect(snap.townsTotal).toBe(42);
+		expect(snap.townsAvailable).toBe(true);
+	});
+
+	it("townsAvailable=false 是「没有这条通道」，不是「地图上没有城镇」", () => {
+		const snap = toWireSnapshot(new WorldState(), { townsAvailable: false }) as Record<string, unknown>;
+		expect(snap.towns).toEqual([]);
+		expect(snap.townsAvailable).toBe(false);
+		// 总数未知必须是 null（页面显示「—」）；0 会被读成「一个城镇都没有」。
+		expect(snap.townsTotal).toBeNull();
+	});
+});

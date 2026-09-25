@@ -36,16 +36,18 @@
         /* ------------------------------ state ------------------------------ */
         selected: null,
         loadingDetail: false,
+        /** “刚复制过”的短暂反馈（'' = 无）。 */
+        copied: "",
         detailError: "",
         compareOpen: false,
         evSearch: "",
 
         /* ------------------------------- init ------------------------------- */
         async init() {
-          // Optional: added by alpine-bridge.js. Fall back to plain renderNav
-          // so a failed bridge cannot leave the page without navigation.
-          if (U.renderNavInto) U.renderNavInto("nav", "/sessions");
-          else U.$("nav").innerHTML = U.renderNav("/sessions");
+          // 页头（标题+导航）只有这一个来源：common.js 的 renderChrome()。
+          // 它由 common.js 定义，所以不需要"桥没加载"的回退分支（那会让 #nav
+          // 以一个 HTML 里已不存在的元素为依赖，被 web-assets 守卫抓住）。
+          U.renderChrome();
           await this.load();
           // The segmented control is created imperatively (it predates Alpine and
           // is shared with the Live page), so it is mounted once here.
@@ -139,6 +141,59 @@
             (s) => s.status === "completed" && (s.outcome || {}).constructionDone === true,
           ).length;
           return `${built} of ${t.done} completed runs reached construction-done`;
+        },
+
+        /** 存档信息（服务端给：路径 + 是否已落盘）；null = 服务端没给这条信息。 */
+        savegameInfo() { return (this.data && this.data.savegame) || null; },
+        savegamePath() { const sg = this.savegameInfo(); return sg && sg.path ? sg.path : "—"; },
+        /**
+         * 存档状态一句话。**"还没写"不等于"路径不存在"**：
+         * 路径照给（用户可以先去看目录），只是文件还没落盘。
+         */
+        savegameLine() {
+          const sg = this.savegameInfo();
+          if (!sg) return "the server did not report a savegame for this run";
+          if (!sg.exists) return "not written yet — the run saves when it ends (or from the live page's controls)";
+          return `${U.fmtInt(sg.bytes)} bytes · written ${U.fmtAgo(sg.mtimeMs)}`;
+        },
+        async copySavegame() {
+          const sg = this.savegameInfo();
+          if (!sg || !sg.path) return;
+          try {
+            await navigator.clipboard.writeText(sg.path);
+            this.copied = "savegame";
+            setTimeout(() => { if (this.copied === "savegame") this.copied = ""; }, 1500);
+          } catch {
+            U.toast("Could not copy — select the path and copy manually.", "warn", 3000);
+          }
+        },
+
+        /**
+         * 结局/条件的**诚实表**：只列这一局真记下来的字段，缺的显示 "—"。
+         * 为什么集中在这里：这些字段（delivered/gsErrors/horizon/freeze…）
+         * 曾经只散落在离线脚本里，页面上看不到 —— 于是"人工审核一局"必须打开 JSONL。
+         */
+        outcomeRows() {
+          const o = this.metaOutcome();
+          const m = this.meta();
+          const f = m.freeze || null;
+          const num = (v) => (v === null || v === undefined || v === "" ? "—" : U.fmtInt(v));
+          const money = (v) => (v === null || v === undefined ? "—" : U.fmtMoney(v));
+          const rows = [
+            { k: "Construction done", v: o.constructionDone === true ? "yes" : o.constructionDone === false ? "no" : "—" },
+            { k: "Delivered cargo (all time)", v: num(o.delivered) },
+            { k: "Delivered in run", v: num(o.deliveredRun) + (o.deliveredRunComplete === true ? " (settled)" : o.deliveredRunComplete === false ? " (not settled)" : "") },
+            { k: "Income (last year)", v: money(o.income) },
+            { k: "Last phase", v: o.phase || "—" },
+            { k: "Road only?", v: o.scenario ? `${o.scenario}${o.scenarioReason ? ` · ${o.scenarioReason}` : ""}` : "—" },
+            { k: "Horizon", v: o.simulatedDays === undefined || o.simulatedDays === null ? "—" : `${U.fmtInt(o.simulatedDays)} game days${o.horizonDays ? ` of ${U.fmtInt(o.horizonDays)}` : ""}${o.reachedHorizon === false ? " · NOT reached" : ""}` },
+            { k: "GS errors", v: num(o.gsErrors) },
+            { k: "Tool-budget blocks", v: num(o.toolBudgetBlocks) },
+            { k: "Arm", v: m.arm || "—" },
+            { k: "Freeze (verified)", v: f ? `${U.fmtInt(f.confirmed)} confirmed · ${U.fmtInt(f.unconfirmed)} unconfirmed · ${U.fmtInt(f.failures)} failed` : "—" },
+          ];
+          // 全部为 "—" 的行没有信息量，删掉（页面不该用一排破折号假装有内容）。
+          return rows.filter((r) => r.v !== "—" && r.v !== " (not settled)" && r.v !== " (settled)");
         },
 
         brainText() {

@@ -143,6 +143,8 @@ export function makeSignalHub(refs: SignalHubRefs): SignalHub {
 								x: Number(t.x),
 								y: Number(t.y),
 							})),
+							// `towns` 是 GS 报的**总数**（`town_list` 只是人口前 10 的取样）。
+							typeof p.towns === "number" ? (p.towns as number) : undefined,
 						);
 					}
 					// Sample the GS's own clock. This is the only way to tell

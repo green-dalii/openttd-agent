@@ -773,10 +773,24 @@ function connectWs(handlers) {
 }
 
 /* --------------------------- chrome / nav --------------------------- */
-/** Render the nav into an element by id. Shared by every page. */
-function renderNavInto(id, active) {
-  const el = document.getElementById(id);
-  if (el) el.innerHTML = renderNav(active);
+/**
+ * 页头品牌块：标题 + 导航，**一处生成**。
+ *
+ * 为什么必须集中（2026-09-25 真实缺陷）：四个页面各手写了一份页头，evolution 那份
+ * 把 `<nav>` 写成 `.brand` 的**兄弟**——而 `header` 是 `justify-content: space-between`，
+ * 于是导航被推到最右边，与其他页面不一致。这不是"样式没调好"，是**同一结构有 4 份副本**。
+ * 现在页面只声明 `<div class="brand" data-brand="live"></div>`，内容由本函数填充；
+ * `test/unit/web-assets.test.ts` 会守住"没有页面再手写 h1/nav"，防止副本重新长出来。
+ */
+function renderChrome() {
+  const el = document.querySelector("[data-brand]");
+  if (!el) return;
+  const page = el.getAttribute("data-brand") || "";
+  const active = { live: "/", providers: "/providers", sessions: "/sessions", evolution: "/evolution" }[page];
+  // 注意：原先 evolution 页的 `.brand` 里有个 `#app-version` 元素，而
+  // `window.APP_VERSION` **从来没有任何地方赋值** —— 那段是死代码（版本永远不显示）。
+  // 统一页头时删掉，而不是把它复制到另外三页。
+  el.innerHTML = `<h1>openttd-agent <span class="dim">${esc(page)}</span></h1>` + renderNav(active);
 }
 
 function renderNav(active) {
@@ -851,5 +865,5 @@ window.UI = {
   utilTotals: (items) => (items || []).reduce(
     (a, it) => a + (it.values || []).reduce((x, v) => x + (Number(v) || 0), 0), 0),
   // infra
-  connectWs, renderNav, renderNavInto,
+  connectWs, renderNav, renderChrome,
 };

@@ -125,7 +125,7 @@ function load(
 			esc: (v: unknown) => String(v),
 			toast: (msg: string, kind?: string) => toasts.push({ msg: String(msg), ...(kind ? { kind } : {}) }),
 			renderNav: () => "",
-			renderNavInto: () => {},
+			renderChrome: () => {},
 			segmented: () => {},
 			combobox: () => null,
 			confirmDialog: () => Promise.resolve(true),

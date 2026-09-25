@@ -98,6 +98,14 @@ export interface WorldSnapshot {
 	 * helps, so the options had to become visible before anything else could work.
 	 */
 	towns: TownInfo[];
+	/**
+	 * 地图上的城镇**总数**（GS 的 `tlist.Count()`）。
+	 *
+	 * 必须与 `towns.length` 分开：GS 只发**人口最多的前 10 个**（`bridge-gs/main.nut`
+	 * 的取样），所以 `towns.length` 是"已知候选"而不是"地图全部"。
+	 * null = 未收到（页面显示"—"），**不是 0**。
+	 */
+	townsTotal: number | null;
 }
 
 /** One town as the agent sees it - enough to make a real choice. */
@@ -127,6 +135,7 @@ export class WorldState {
 	private meters = new Map<number, ReturnType<typeof createDeliveryMeter>>();
 	private recent: GameEvent[] = [];
 	private towns: TownInfo[] = [];
+	private townsTotal: number | null = null;
 	private totalEvents = 0;
 	private recentLimit: number;
 
@@ -236,6 +245,7 @@ export class WorldState {
 			recent: [...this.recent],
 			totalEvents: this.totalEvents,
 			towns: [...this.towns],
+			townsTotal: this.townsTotal,
 		};
 	}
 
@@ -245,7 +255,10 @@ export class WorldState {
 	 * Sorted by population descending so the most promising candidates come first;
 	 * the ORDER is a fact about the world, not advice about what to pick.
 	 */
-	setTowns(towns: TownInfo[]): void {
+	setTowns(towns: TownInfo[], total?: number | null): void {
+		// 总数只在**明确给出**时更新：取样列表每帧都到，总数偶尔才带 ——
+		// 用 undefined 覆盖会把已知总数抹成 null（页面从"共 42 个"退回"—"）。
+		if (total !== undefined) this.townsTotal = Number.isFinite(Number(total)) ? Number(total) : null;
 		this.towns = (Array.isArray(towns) ? towns : [])
 			.filter((t) => t && Number.isFinite(t.id))
 			.map((t) => ({ id: Number(t.id), population: Number(t.population) || 0, x: Number(t.x) || 0, y: Number(t.y) || 0 }))

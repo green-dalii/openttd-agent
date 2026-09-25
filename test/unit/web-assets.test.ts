@@ -336,3 +336,31 @@ describe("图表尺寸回读守卫", () => {
 		expect(Number(cssH?.[1] ?? NaN)).toBe(Number(jsH?.[1] ?? NaN));
 	});
 });
+
+/**
+ * 页头只有**一个**来源。
+ *
+ * 为什么需要这条守卫（2026-09-25 真实缺陷）：四个页面各手写了一份页头，
+ * evolution 那份把 `<nav>` 写成 `.brand` 的**兄弟** —— 而 `header` 是
+ * `justify-content: space-between`，于是导航被推到最右边，与其他页面不一致。
+ * 修法不是"把那个 nav 挪一下"，而是**删掉四份副本**：页面只留
+ * `<div class="brand" data-brand="…"></div>`，内容由 `common.js` 的 `renderChrome()` 填充。
+ * 本测试守住这个结构（往任何页面重新手写 h1/nav 都会红）。
+ */
+describe("页头结构：单一来源", () => {
+	const pages = ["live", "providers", "sessions", "evolution"];
+	for (const page of pages) {
+		it(`pages/${page}.html 只声明 brand 占位符，不手写标题/导航`, () => {
+			const html = readFileSync(join(PUBLIC_DIR, "pages", `${page}.html`), "utf8");
+			expect(html).toContain(`data-brand="${page}"`);
+			expect(html).not.toMatch(/<h1>\s*openttd-agent/);
+			expect(html).not.toMatch(/<nav[\s>]/);
+		});
+	}
+
+	it("common.js 的 renderChrome 是标题+导航的唯一生成点", () => {
+		const js = readFileSync(join(PUBLIC_DIR, "assets/js/common.js"), "utf8");
+		expect(js).toMatch(/function renderChrome\(/);
+		expect(js).toMatch(/data-brand/);
+	});
+});

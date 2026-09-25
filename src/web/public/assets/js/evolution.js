@@ -20,9 +20,7 @@
         ...model,
 
         init() {
-          U.renderNavInto("nav", "/evolution");
-          const ver = document.getElementById("app-version");
-          if (ver) ver.textContent = window.APP_VERSION ? ` v${window.APP_VERSION}` : "";
+          U.renderChrome();
           this.load();
         },
 

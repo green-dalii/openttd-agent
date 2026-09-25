@@ -171,6 +171,18 @@
        * 必须与 `routes: []` 区分开：**"不可得"不是"零条线路"**。
        */
       routesAvailable: false,
+      /**
+       * 候选城镇（Bridge GS 取样：**人口最多的前 10 个**，`town_list`）。
+       * 形状：`[{id, population, x, y}]`，已按人口降序。
+       */
+      towns: [],
+      /**
+       * 地图上的城镇**总数**（GS 的 `tlist.Count()`）。null = 未收到。
+       * 与 `towns.length` 分开：前者是地图事实，后者只是样本量。
+       */
+      townsTotal: null,
+      /** 城镇数据是否**可得**。false = 这个 run 没有 GS 通道（watch 模式）。 */
+      townsAvailable: false,
       /** 线路表排序（默认按每日收益，null 排最后）。 */
       routeSortKey: "income",
       routeSortDir: "desc",
@@ -601,6 +613,68 @@
         return now - last > 10 * 60 * 1000;
       },
 
+      /**
+       * 城镇行（人口降序）。位置/人口都是世界事实，**不含任何建议**
+       * （harness 边界：给事实与因果，不给策略）。
+       */
+      townsRows() {
+        const list = Array.isArray(this.towns) ? this.towns : [];
+        return list
+          .map((t, i) => {
+            const pop = Number(t.population);
+            return {
+              key: String(t.id ?? i),
+              id: t.id,
+              _population: Number.isFinite(pop) ? pop : 0,
+              population: U.fmtInt(Number.isFinite(pop) ? pop : null),
+              x: Number.isFinite(Number(t.x)) ? Number(t.x) : null,
+              y: Number.isFinite(Number(t.y)) ? Number(t.y) : null,
+              at: Number.isFinite(Number(t.x)) && Number.isFinite(Number(t.y)) ? `${t.x}, ${t.y}` : "—",
+            };
+          })
+          .sort((a, b) => b._population - a._population);
+      },
+
+      /**
+       * 城镇汇总。`total` 是地图总数（null = 未知），`shownPopulation` 只对
+       * **这一个样本**求和 —— 把"前 10 大的人口"说成"全图人口"就是编造事实。
+       */
+      townsSummary() {
+        const rows = this.townsRows();
+        return {
+          available: this.townsAvailable === true,
+          shown: rows.length,
+          // 注意 `Number(null) === 0`：必须先判 null/undefined，否则"未知总数"
+          // 会被渲染成 0 —— 那是在说"地图上一个城镇都没有"（编造事实）。
+          total:
+            this.townsTotal === null || this.townsTotal === undefined || !Number.isFinite(Number(this.townsTotal))
+              ? null
+              : Number(this.townsTotal),
+          shownPopulation: rows.reduce((a, r) => a + r._population, 0),
+        };
+      },
+
+      /** 与 `routesNote()` 同约定：空串 = 数据可用（显示表）；非空 = 为什么没有。 */
+      townsNote() {
+        if (this.townsAvailable !== true) {
+          return "not readable in this run — towns come from the Bridge GS, which only runs in agent mode (this run is watch)";
+        }
+        return "";
+      },
+
+      /** 有通道但还没有样本时的说明。 */
+      townsEmpty() {
+        return "no town report yet — the GS publishes its sample every 200 ticks";
+      },
+
+      /** 表头右侧的取样说明（诚实：这是取样，不是全图）。 */
+      townsSampleNote() {
+        const s = this.townsSummary();
+        if (s.available !== true || !s.shown) return "";
+        const total = s.total === null ? "unknown" : U.fmtInt(s.total);
+        return `largest ${s.shown} of ${total} towns · ${U.fmtInt(s.shownPopulation)} people in this sample (not the whole map)`;
+      },
+
       routesSummary() {
         const rows = this.routeRows();
         return {
@@ -665,6 +739,14 @@
           income: "Income history",
           routes: "Routes",
         }[this.drawer] || "";
+      },
+
+      /**
+       * 抽屉空态文案：`fleet` 与 `routes` 是两个不同的问题，
+       * 共用一句 "No route has vehicles on it." 会让"线路表"分支说出错的事实。
+       */
+      drawerEmptyText() {
+        return this.drawer === "fleet" ? "No route has vehicles on it." : "No routes reported yet.";
       },
 
       /** 抽屉是否渲染"线路表"分支（另一个分支是历史时间序列）。 */

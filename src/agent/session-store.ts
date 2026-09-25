@@ -9,7 +9,9 @@
  * 禁止: 任何写入失败抛穿到 agent 循环（审计同款语义：失败即忽略）；越出 dataDir。
  */
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync, appendFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync, appendFileSync, statSync } from "node:fs";
+// 存档文件名规则只有一处实现（`savegameName`）：这里复用它，避免两套命名分叉。
+import { savegameName } from "./runner-helpers.js";
 import { appendMetric } from "../evolution/store.js";
 import path from "node:path";
 import type { TelemetrySnapshot } from "./telemetry.js";
@@ -156,6 +158,42 @@ export interface SessionCheckpoint {
 	turn: number;
 	note: string;
 	totals: { events: number; decisions: number; toolCalls: number; usage: SessionTotals["usage"] };
+}
+
+/**
+ * 本局存档文件的位置与状态。
+ *
+ * 事实依据（真机验证 2026-09-25）：`runner.ts` 收尾时执行
+ * `rcon save ${savegameName(session.id)}`，而 OpenTTD 的默认 `save_dir` 是
+ * `<data_dir>/save` —— `/tmp/openttd-agent-data/save/<sessionId>.sav` 确实存在。
+ * 页面需要这个路径，用户才能把存档载入游戏**人工审核**。
+ *
+ * `exists: false` 时**仍然返回路径**：路径本身是有用信息（用户可以先去看目录），
+ * 而"还没存"与"路径未知"是两件事。
+ */
+export interface SavegameInfo {
+	path: string;
+	exists: boolean;
+	bytes?: number;
+	mtimeMs?: number;
+}
+
+/** 存档文件的预期路径：`<dataDir>/save/<sessionId>.sav`。 */
+export function savegameFile(dataDir: string, id: string): string {
+	return path.join(dataDir, "save", `${savegameName(id)}.sav`);
+}
+
+/** 存档信息；id 不安全（路径穿越）时返回 null。 */
+export function savegameInfo(dataDir: string, id: string): SavegameInfo | null {
+	if (!id || id.includes("/") || id.includes("..")) return null;
+	const file = savegameFile(dataDir, id);
+	try {
+		const st = statSync(file);
+		return { path: file, exists: true, bytes: st.size, mtimeMs: st.mtimeMs };
+	} catch {
+		// 还没写过档（或已被移走）：路径照给，exists=false 由页面解释。
+		return { path: file, exists: false };
+	}
 }
 
 export interface SessionReadResult {

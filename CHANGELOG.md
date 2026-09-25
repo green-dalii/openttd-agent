@@ -9,6 +9,24 @@
 
 ## [Unreleased]
 
+### Added（2026-09-25：仪表盘的数据深度）
+- **Towns 面板**（Live 页）：城镇人口与坐标。数据来自 Bridge GS 的取样
+  （**人口最多的 10 个**），同时给出**地图上的城镇总数**——页面明确写着
+  "largest N of M towns … not the whole map"（取样 ≠ 全图）。
+- **Sessions 页**：每局的**存档文件路径**（含一键复制）与是否存在（"84,112 bytes ·
+  written 2 days ago" / "not written yet"），以及新的 **Outcome 表**
+  （Construction done / Delivered cargo / Delivered in run / Horizon / GS errors /
+  Tool-budget blocks / Arm / Freeze），缺的字段显示 `—` 而不是 0。
+
+### Fixed（2026-09-25）
+- **`/evolution` 顶部导航跑到最右边**，与其他页面不一致：根因是四个页面各手写了一份页头，
+  其中 evolution 把 `<nav>` 写成 `.brand` 的**兄弟**（`header` 是 `space-between`）。
+  现在页头只有**一个来源**（`common.js` 的 `renderChrome()`），并有守卫测试防止副本重新出现。
+- **线路抽屉在 watch 模式下说"没有线路"**：watch 模式没有 GS 通道，线路列表天然为空，
+  但世界里有线路 —— 现在显示"该模式下读不到"，而不是"零条线路"。
+- **城镇/线路为空时可能显示 0**：`Number(null) === 0` 让"未知总数"变成"0 个城镇"，
+  已修（单测 + smoke 断言，回放证明会红）。
+
 ### Added（图表交互：滚轮/拖拽/按钮/双击，2026-09-23）
 - **Cash history / Token 图可直接操作**：滚轮按指针位置为锚缩放、拖拽平移（不是选区）、
   右上角图标簇 `＋ / − / ⟲`、双击复位。复位按钮在未缩放时置灰（不再是"点了没反应"的假按钮）。

@@ -62,3 +62,32 @@ describe("WorldState", () => {
 		expect(ws.lastEvent("company_remove")).toBeNull();
 	});
 });
+
+describe("world state: towns（Bridge GS 上报的候选城镇）", () => {
+	it("按人口降序保存，并记住 GS 报的总数", () => {
+		const w = new WorldState();
+		w.setTowns(
+			[
+				{ id: 1, population: 100, x: 1, y: 1 },
+				{ id: 2, population: 300, x: 2, y: 2 },
+			],
+			17,
+		);
+		const snap = w.snapshot();
+		expect(snap.towns.map((t) => t.id)).toEqual([2, 1]);
+		expect(snap.townsTotal).toBe(17);
+	});
+
+	it("没收到总数时是 null（而不是 0）", () => {
+		const w = new WorldState();
+		w.setTowns([{ id: 3, population: 5, x: 0, y: 0 }]);
+		expect(w.snapshot().townsTotal).toBeNull();
+	});
+
+	it("后续只带取样列表、不带总数的帧，不会把已知总数抹掉", () => {
+		const w = new WorldState();
+		w.setTowns([{ id: 1, population: 1, x: 0, y: 0 }], 9);
+		w.setTowns([{ id: 2, population: 2, x: 0, y: 0 }]);
+		expect(w.snapshot().townsTotal).toBe(9);
+	});
+});

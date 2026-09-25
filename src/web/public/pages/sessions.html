@@ -19,10 +19,7 @@
 -->
 <div x-data="sessions" x-init="init()">
   <header>
-    <div class="brand">
-      <h1>openttd-agent <span class="dim">sessions</span></h1>
-      <div id="nav"></div>
-    </div>
+    <div class="brand" data-brand="sessions"></div>
     <div class="runbar">
       <div class="item"><span class="lbl">Runs</span><span class="val" x-text="totals().count">…</span></div>
       <div class="item"><span class="lbl">Completed</span><span class="val" x-text="totals().done">…</span></div>
@@ -127,7 +124,27 @@
                 <tr><td>Started</td><td x-text="`${$fmt.clock(meta().startedAt)} · ${$fmt.ago(meta().startedAt)}`"></td></tr>
                 <tr><td>Duration</td><td x-text="meta().endedAt ? $fmt.duration(meta().endedAt - meta().startedAt) : 'running'"></td></tr>
                 <tr><td>Events</td><td x-text="`${$fmt.int(metaTotals().events)} recorded · ${archiveEvents().length} in archive`"></td></tr>
+                <!-- 存档位置：用户要拿它把这一局载入游戏**人工审核**（2026-09-25 需求）。
+                     路径永远给出；文件还没落盘时说明原因，而不是把路径藏起来。 -->
+                <tr><td>Savegame</td><td>
+                  <code class="path" x-text="savegamePath()"></code>
+                  <button type="button" class="btn sm" x-show="savegameInfo()"
+                          @click="copySavegame()" x-text="copied === 'savegame' ? 'copied' : 'copy path'"></button>
+                  <div class="hint" x-text="savegameLine()"></div>
+                </td></tr>
               </table>
+
+              <h3>Outcome <span class="dim">what was measured for this run</span></h3>
+              <table class="kv">
+                <tbody>
+                  <template x-for="r in outcomeRows()" :key="r.k">
+                    <tr><td x-text="r.k"></td><td x-text="r.v"></td></tr>
+                  </template>
+                </tbody>
+              </table>
+              <p class="hint" x-show="!outcomeRows().length">
+                This run recorded no outcome fields — nothing to show (not "all zeros").
+              </p>
 
               <h3>Token breakdown</h3>
               <div class="chart-box" x-show="tokenSlices().length">

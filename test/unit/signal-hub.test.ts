@@ -74,10 +74,29 @@ describe("signal-hub —— B-3 单元契约（golden from /tmp/calA3.log）", (
 				],
 			},
 		} as unknown as GameEvent);
-		expect(w.setTowns).toHaveBeenCalledWith([
-			{ id: 9, population: 1500, x: 100, y: 200 },
-			{ id: 12, population: 800, x: 150, y: 180 },
-		]);
+		// 第二个实参是 GS 报的**总数**（`towns: 20`）：取样列表只是前 10，
+		// 页面要能说"最大的 10 个 / 共 20 个"（2026-09-25）。
+		expect(w.setTowns).toHaveBeenCalledWith(
+			[
+				{ id: 9, population: 1500, x: 100, y: 200 },
+				{ id: 12, population: 800, x: 150, y: 180 },
+			],
+			20,
+		);
+	});
+
+	it_("GS state 不带总数时传 undefined（不覆盖已已知的总数）", () => {
+		const w = fakeWorld();
+		const hub = makeSignalHub({
+			world: w as never, getWeb: () => null, getSession: () => null,
+			routeLedger: fakeLedger() as never, getDecisionCount: () => 0,
+			onPhaseChange: () => {}, onNotableEvent: () => {},
+		});
+		hub.onEvent({
+			kind: "gamescript",
+			payload: { cmd: "state", date: 1, town_list: [{ id: 1, pop: 2, x: 3, y: 4 }] },
+		} as unknown as GameEvent);
+		expect(w.setTowns).toHaveBeenCalledWith([{ id: 1, population: 2, x: 3, y: 4 }], undefined);
 	});
 
 	it_("GS exec 事件：stage 变化唤醒 onPhaseChange；hb=true 不唤醒", () => {

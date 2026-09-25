@@ -31,7 +31,7 @@
 
         /* ------------------------------- init ------------------------------- */
         async init() {
-          U.renderNavInto("nav", "/providers");
+          U.renderChrome();
           await this.loadCatalog();
           await this.loadSettings();
           this.$nextTick(() => {

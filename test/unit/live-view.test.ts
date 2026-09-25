@@ -110,6 +110,14 @@ interface LiveModel {
 	routesSorted(): RouteRow[];
 	routesSummary(): { available: boolean; count: number; running: number; vehicles: number; waiting: number };
 	routesNote(): string;
+	/** 城镇（Bridge GS 取样：人口前 10） */
+	townsRows(): { key: string; id: unknown; population: string; at: string; _population: number }[];
+	townsSummary(): { available: boolean; shown: number; total: number | null; shownPopulation: number };
+	townsNote(): string;
+	townsEmpty(): string;
+	townsSampleNote(): string;
+	/** 抽屉空态文案（fleet 与 routes 是两个不同的问题） */
+	drawerEmptyText(): string;
 	drawerShowsRoutes(): boolean;
 	drawerRouteRows(): RouteRow[];
 	controlNote(): string;
@@ -151,6 +159,10 @@ interface LiveModel {
 		conditional: number;
 		summary: string;
 	} | null;
+	/** 城镇样本（Bridge GS：人口前 10） */
+	towns: { id?: unknown; population?: unknown; x?: unknown; y?: unknown }[];
+	townsTotal: unknown;
+	townsAvailable: boolean;
 }
 
 /** The LiveView module itself (module-level pure helpers live on it). */
@@ -1144,5 +1156,62 @@ describe("companyValue 占位值", () => {
 		const v = load().model;
 		expect(v.companyValueKnown(250_000)).toBe(true);
 		expect(v.companyValueKnown("1") === false, "字符串 \"1\" 同样是占位值").toBe(true);
+	});
+});
+
+/**
+ * 城镇面板（Bridge GS 取样）。
+ *
+ * 为什么单独立项（2026-09-25 用户实测）：后端**一直在采**城镇
+ * （`bridge-gs/main.nut` 的 `town_list`，`world-state.ts` 的 `TownInfo`），
+ * 但 `toWireSnapshot` 从没把它发出去 —— 页面因此永远是空的。
+ * 这里锁定"发出来之后怎么显示"，以及两条诚实规则：
+ * ① 取样 ≠ 全图（样本量与地图总数分开）；② "读不到" ≠ "零个城镇"。
+ */
+describe("live-view: towns", () => {
+	it("按人口降序渲染，并把样本与全图分开（不说'这些就是全图'）", () => {
+		const { model } = load();
+		model.townsAvailable = true;
+		model.townsTotal = 40;
+		model.towns = [
+			{ id: 4, population: 700, x: 10, y: 20 },
+			{ id: 9, population: 2400, x: 30, y: 40 },
+		];
+		const rows = model.townsRows();
+		expect(rows.map((r) => r.id)).toEqual([9, 4]);
+		expect(rows[0]!.at).toBe("30, 40");
+		const s = model.townsSummary();
+		expect(s.total).toBe(40); // 地图总数
+		expect(s.shown).toBe(2); // 只是样本
+		expect(s.shownPopulation).toBe(3100);
+		expect(model.townsSampleNote()).toContain("largest 2 of 40");
+		expect(model.townsSampleNote()).toContain("not the whole map");
+	});
+
+	it("townsAvailable=false 是'这个 run 读不到'，不是'地图上没有城镇'", () => {
+		const { model } = load();
+		model.townsAvailable = false;
+		const note = model.townsNote();
+		expect(note).not.toBe(""); // 非空 = 面板显示说明而不是空表
+		expect(note).toMatch(/Bridge GS|agent mode/);
+		// 没有通道时不能把未知总数说成 0
+		expect(model.townsSummary().total).toBeNull();
+	});
+
+	it("有通道但还没样本时：说明会来，而不是留一张空白表", () => {
+		const { model } = load();
+		model.townsAvailable = true;
+		model.towns = [];
+		expect(model.townsNote()).toBe(""); // 表要显示
+		expect(model.townsRows()).toEqual([]);
+		expect(model.townsSampleNote()).toBe(""); // 半句话不留
+		expect(model.townsEmpty()).toMatch(/GS publishes/);
+	});
+
+	it("人口缺失时显示 —（而不是 0 —— 那会变成一个假的数字）", () => {
+		const { model } = load();
+		model.townsAvailable = true;
+		model.towns = [{ id: 1, population: undefined, x: 1, y: 2 }];
+		expect(model.townsRows()[0]!.population).toBe("—");
 	});
 });

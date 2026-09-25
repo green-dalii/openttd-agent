@@ -42,6 +42,7 @@ function fakeState(snap: Partial<WorldSnapshot> = {}): StateReader {
 			recent: [],
 			totalEvents: 0,
 			towns: [],
+			townsTotal: null,
 			...snap,
 		}),
 	};
@@ -60,6 +61,7 @@ describe("summarizeState", () => {
 			recent: [],
 			totalEvents: 0,
 		towns: [],
+		townsTotal: null,
 		});
 		expect(out.date).toBe("1950-03-01");
 		expect(out.companies).toEqual([]);
@@ -94,6 +96,7 @@ describe("summarizeState", () => {
 			recent: [],
 			totalEvents: 0,
 		towns: [],
+		townsTotal: null,
 		});
 		const c = (out.companies as Array<Record<string, unknown>>)[0]!;
 		expect(c.income).toBe("-21583");

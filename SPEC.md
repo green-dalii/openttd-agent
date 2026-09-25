@@ -680,3 +680,16 @@ inst.__zoomedByUser = true;       // 让数据帧走 setData(data, false)，视�
 **公开 API 的一致性要求**：图表适配层的缩放 API 必须统一收**宿主元素**（`resetZoom(el)`、
 `zoomBy(el, …)`、`isZoomed(el)`）。曾导出过收**实例**的 `isZoomed(inst)`，而调用方按元素
 传入 → **恒返回 false**，探针与冒烟测试据此得到过"没有缩放"的假结论。
+
+### 10.98 城镇与存档：两条"数据一直在、只是没送到页面"的通道（2026-09-25 实测）
+
+| 事实 | 依据 | 含义 |
+|------|------|------|
+| **Bridge GS 的状态上报同时带"总数"与"取样"** | `bridge-gs/main.nut`：`GSAdmin.Send({cmd="state", towns = tlist.Count(), town_list = <人口前 10, 按人口降序>})` | 页面可以说"largest 10 of N towns"；**取样 ≠ 全图**，两者必须分开显示 |
+| **`world-state.ts` 早就有 `TownInfo[]`，但快照从不带它** | `toWireSnapshot()` 只发 `{date, companies, totalEvents, recent, routes, routesAvailable}`；`snap.towns` 被丢掉 | 城镇面板此前**永远为空**，而 agent 自己能看到城镇（它从 `world` 读）——页面与 agent 看到的世界**不一致** |
+| **真人验证（本轮）** | 自建 agent 运行（隔离端口/数据目录）：GS 报 `towns=24–25`，快照 `towns: 10 / townsTotal: 25 / townsAvailable: true`，面板渲染 10 行、0 控制台条目 | 通道端到端可用 |
+| **存档路径约定：`<dataDir>/save/<sessionId>.sav`** | `runner.ts` 收尾执行 `rcon save ${savegameName(session.id)}`；真机日志 `Map successfully saved to '20260925-100825-seed1392029491.sav'`；磁盘上 `/tmp/openttd-agent-data/save/20260923-163902-seed1973692307.sav`（84,112 B）确实存在 | 页面据此显示"可载入审核"的路径；**存在性**单独报告（"还没写档"≠"路径未知"） |
+| **本仓库协议层没有产业/城镇的 admin 包解析** | `admin-protocol.ts` 中没有 `INDUSTRY_*` / `CARGO_ACCEPTANCE` / `TOWN`；产业数据目前无处可取 | 想加 "物资/产业"面板必须**先开一条通道**（GS 侧或 admin 解析），见 `ROADMAP.md` §6d |
+
+**样本量与总量必须分开渲染**（本节的通用规则）：GS 出于载荷只发前 10 个城镇；
+把 `towns.length` 当作"地图城镇数"、或把样本人口求和当作"全图人口"，都是编造事实。
