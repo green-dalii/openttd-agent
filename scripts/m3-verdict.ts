@@ -28,7 +28,10 @@ const view: EvolutionView = evolutionView(dataDir);
 const { arms, metrics } = view;
 
 console.log(`dataDir : ${dataDir}`);
-console.log(`runs    : ${metrics.length} recorded`);
+// 被 agent 自己按停在世界里的局**不参与 A/B**（SPEC §10.101），但必须报出来：
+// 一个实验里悄悄少了几局、而报告没写，是最容易被误读成"结果更干净"的情况。
+const blocked = metrics.filter((m) => m.blockedByPause === true);
+console.log(`runs    : ${metrics.length} recorded${blocked.length ? ` (${blocked.length} ended while paused — excluded from A/B)` : ""}`);
 console.log("");
 console.log(`verdict : ${arms.conclusive ? "CONCLUSIVE" : "not enough data"}`);
 console.log(`note    : ${arms.note || "(none)"}`);

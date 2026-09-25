@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createFauxCore, fauxAssistantMessage } from "@earendil-works/pi-ai";
-import { mkdtempSync, existsSync, readFileSync } from "node:fs";
+import { mkdtempSync, existsSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RouteLedger } from "../../src/agent/route-ledger.js";
@@ -70,7 +70,13 @@ function reflectLlmStub() {
 	};
 }
 
-async function runFinalize(dir: string, ledger: RouteLedger, decisions: number, session = fakeSession()) {
+async function runFinalize(
+	dir: string,
+	ledger: RouteLedger,
+	decisions: number,
+	session = fakeSession(),
+	agentPause?: { paused: boolean; at: number } | null,
+) {
 	return runFinalizeAndReflect({
 		cfg: { dataDir: dir, seed: 7 } as never,
 		world: fakeWorld(),
@@ -84,6 +90,7 @@ async function runFinalize(dir: string, ledger: RouteLedger, decisions: number, 
 		getRouteStats: () => [],
 		gsErrors: 0,
 		toolBudgetBlocks: 3,
+		agentPause,
 		scenario: "freeform",
 		episode: { simulatedDays: 0, horizonDays: null, reachedHorizon: false, stopReason: null },
 		arm: "control" as const,
@@ -222,5 +229,35 @@ describe("M4a：recall 的接线与开关", () => {
 
 	it("每次检索都记账（落到审计：'记忆有没有被用'必须可查）", () => {
 		expect(src).toMatch(/deps\.onRecall = \(r\) =>[\s\S]{0,200}?appendAudit\(\{ type: "recall"/);
+	});
+});
+
+/**
+ * W1（SPEC §10.101）：局在**暂停中**结束时，outcome 必须带上 `blockedByPause`
+ * （以及谁按的 / 什么时候），否则统计无法把它从"没学会"里剔除。
+ */
+describe("W1: 暂停收场的局写进 outcome", () => {
+	it("agentPause.paused=true → outcome.blockedByPause=true + pausedBy=agent + pausedAt", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "w1-"));
+		const session = fakeSession();
+		await runFinalize(dir, new RouteLedger(), 3, session, { paused: true, at: 1_700_000_000_000 });
+		// finalize 是 mock：结论在它的调用参数里（session.current() 是伪造的读形状）
+		const fin = (session as unknown as { finalize: { mock: { calls: unknown[][] } } }).finalize;
+		const outcome = (fin.mock.calls[0]?.[0] as { outcome?: Record<string, unknown> }).outcome ?? {};
+		expect(outcome.blockedByPause).toBe(true);
+		expect(outcome.pausedBy).toBe("agent");
+		expect(outcome.pausedAt).toBe(1_700_000_000_000);
+		rmSync(dir, { recursive: true, force: true });
+	});
+
+	it("没有暂停时是 undefined（不是 false）—— 区分“没发生”与“没记录”", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "w1-"));
+		const session = fakeSession();
+		await runFinalize(dir, new RouteLedger(), 3, session, null);
+		const fin = (session as unknown as { finalize: { mock: { calls: unknown[][] } } }).finalize;
+		const outcome = (fin.mock.calls[0]?.[0] as { outcome?: Record<string, unknown> }).outcome ?? {};
+		expect(outcome.blockedByPause).toBeUndefined();
+		expect(outcome.pausedBy).toBeUndefined();
+		rmSync(dir, { recursive: true, force: true });
 	});
 });

@@ -762,3 +762,10 @@ inst.__zoomedByUser = true;       // 让数据帧走 setData(data, false)，视�
 （`scheduler.pause/resume` + rcon），并通过 `control.onAgentPause` 把归因交给 supervisor
 （serve 模式下 supervisor 是 run 状态的**唯一写者**）；页面另外直接读快照的 `control` 事实
 （即使 supervisor 尚未同步也能说清"谁让它停的"）。
+
+**W1 落地（同一修复内）**：让"这局是在暂停中结束的"成为**可查事实**，而不只是页面提示：
+`session.finalize` 的 outcome 新增 `blockedByPause`（只在为真时写 true）+ `pausedBy` + `pausedAt`；
+`toGameMetric` 把两个字段带进进化账本；`compareArms`/`comparableMetrics` 在**比较入口**统一剔除
+这类局（`m3-verdict.ts` 同时报出被剔除的局数，"悄悄少几局"不能被读成"结果更干净"）；
+`/sessions` 审核页把它排在 Outcome 表**第一行**并写明"不要当学习结果"。
+只写 true、不写 false：把"没发生"与"没记录"混成 false 就会在统计里变成另一种噪声。

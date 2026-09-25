@@ -176,6 +176,15 @@
         outcomeRows() {
           const o = this.metaOutcome();
           const m = this.meta();
+          // 暂停收场优先显示：这类局不是"没学会"，而是**被自己按停的**（SPEC §10.101），
+          // 人工审核与离线统计都必须能一眼把它挑出来。
+          if (o.blockedByPause === true) {
+            return [
+              { k: "Ended while paused", v: `yes — paused by the ${o.pausedBy === "agent" ? "agent itself (set_pause)" : o.pausedBy || "someone"}${o.pausedAt ? " at " + new Date(o.pausedAt).toISOString().slice(0, 16).replace("T", " ") : ""}` },
+              { k: "Status", v: String(m.status || "—") },
+              { k: "Treat as", v: "NOT a learning result — filter it out of averages" },
+            ];
+          }
           const f = m.freeze || null;
           const num = (v) => (v === null || v === undefined || v === "" ? "—" : U.fmtInt(v));
           const money = (v) => (v === null || v === undefined ? "—" : U.fmtMoney(v));

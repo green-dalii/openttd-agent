@@ -89,6 +89,19 @@ export interface SessionMeta {
 		 * next to the outcome it silently affected.
 		 */
 		gsErrors?: number;
+		/**
+		 * 局是被"谁按的暂停"结束的（2026-09-25 真机：agent 在 turn 22 自己 `set_pause`，
+		 * 世界冻结、决策循环再无动作，进程却"活着" 1 小时 —— `SPEC.md` §10.101）。
+		 *
+		 * 为什么必须是**可查事实**而不是页面提示：这类局会以 `status: "aborted"`（甚至
+		 * 长时间 `running`）混进实验统计，把"被停掉的局"当成"没学会的局"来比较。
+		 * true = 局在暂停中结束；false/undefined = 不是这个原因。
+		 */
+		blockedByPause?: boolean;
+		/** 暂停归因：谁让它停的（agent = agent 自己用 set_pause；dashboard = 人按了按钮）。 */
+		pausedBy?: "agent" | "dashboard" | null;
+		/** 暂停发生时刻（墙钟 ms）；用于复盘"停在哪一刻"。 */
+		pausedAt?: number | null;
 		/** Tool calls refused by the per-decision budget (R1; absent = not reported). */
 		toolBudgetBlocks?: number;
 		/** Oracle probe (M3-1): fleet size requested downward, and what was observed. */

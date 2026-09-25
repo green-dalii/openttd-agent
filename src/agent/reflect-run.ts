@@ -46,6 +46,11 @@ export interface FinalizeAndReflectArgs {
 	/** R1: per-decision tool budget refusals (reported so a capped run is visible). */
 	toolBudgetBlocks?: number;
 	/**
+	 * 局结束时的暂停状态（2026-09-25）：agent 把自己按停在世界里收场，是**一类必须能被
+	 * 过滤掉的局**，不能混进"完成/中止"的平均里（SPEC §10.101）。
+	 */
+	agentPause?: { paused: boolean; at: number } | null;
+	/**
 	 * EPISODE CLOCK (G1, SPEC §10.68). Recorded so a run that never reached its
 	 * simulated horizon cannot be averaged with one that did: the wall-clock cap
 	 * makes it a stopper, never a result.
@@ -144,6 +149,12 @@ export async function runFinalizeAndReflect(args: FinalizeAndReflectArgs): Promi
 			deliveredRun: c0?.deliveredRun && c0.deliveredRun.total !== null ? c0.deliveredRun.total : undefined,
 			deliveredRunComplete: c0?.deliveredRun ? c0.deliveredRun.complete : undefined,
 			gsErrors: args.gsErrors,
+			// 暂停收场：记成 outcome 的两个独立事实（是否被暂停结束 / 谁按的），
+			// 缺省是 undefined（"不是这个原因"），不是 false（"确实没暂停过"）——
+			// 区分"没发生"与"没记录"。
+			blockedByPause: args.agentPause?.paused ? true : undefined,
+			pausedBy: args.agentPause?.paused ? "agent" : undefined,
+			pausedAt: args.agentPause?.paused ? args.agentPause.at : undefined,
 			toolBudgetBlocks: args.toolBudgetBlocks,
 			scenario: args.scenario,
 			scenarioReason: args.scenarioReason ?? null,

@@ -18,6 +18,14 @@
 - **Performance**：OpenTTD 公司评分（0–255）与去年前年对比（条形）。
 - **Cargo 表的运走比例条**：把 `0%` 与 `67%` 变成一眼可分的长度。
 
+### Changed（2026-09-25：被暂停结束的局不再混进统计）
+- 局在**暂停中**结束时，outcome 会带上 `blockedByPause`（以及 `pausedBy` / `pausedAt`），
+  并进入进化账本；**A/B 比较在入口统一剔除这类局**（它们不是"没学会"，而是被自己按停的）。
+- `pnpm exec tsx scripts/m3-verdict.ts <dataDir>` 现在会报出被剔除的局数，
+  避免"悄悄少了几局"被读成"结果更干净"。
+- `/sessions` 的 Outcome 表对这类局把 "Ended while paused — paused by the agent itself"
+  排在第一行，并写明 **"Treat as: NOT a learning result"**。
+
 ### Fixed（2026-09-25：暂停归因 + 告警可行动）
 - **agent 自己的 `set_pause` 没有停决策节奏，也没有把归因写进 supervisor**（只写了快照）：
   结果是"进程活着、心跳正常、事件照收，但决策永远不再发生"，而页面只会说

@@ -399,3 +399,22 @@ describe("sessions component: donut drawing contract", () => {
 		vm.runInContext(src, vm.createContext(sandbox));
 	}
 });
+
+/**
+ * W1：局在暂停中结束时，审核页必须**第一眼**标出来（SPEC §10.101）。
+ *
+ * `outcomeRows` 属于页面脚本的**呈现**层（`sessions.js`，与仓库其余页面脚本一样
+ * 由源码守卫 + 集成/E2E 覆盖），所以这里锁它必须包含的事实与措辞。
+ */
+describe("sessions: 暂停收场的局要能被一眼挑出（W1 源码守卫）", () => {
+	const src = readFileSync(join(PUBLIC_DIR, "assets/js/sessions.js"), "utf8");
+
+	it("outcomeRows 在 blockedByPause 时优先返回被自己按停 + 不要当学习结果", () => {
+		expect(src).toMatch(/blockedByPause === true/);
+		expect(src).toMatch(/pausedBy === "agent"/);
+		expect(src).toMatch(/NOT a learning result/);
+		// 必须**优先**返回（早于其它测量项），否则审核者要在一堆数字里找它
+		const fn = src.slice(src.indexOf("outcomeRows()"), src.indexOf("brainText()"));
+		expect(fn.indexOf("blockedByPause")).toBeLessThan(fn.indexOf("Construction done"));
+	});
+});

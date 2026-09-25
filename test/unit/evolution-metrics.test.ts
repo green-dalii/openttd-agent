@@ -28,6 +28,7 @@ import {
 	horizonIsComparable,
 	MIN_COMPARABLE_HORIZON_DAYS,
 	metricStat,
+	comparableMetrics,
 	type GameMetric,
 } from "../../src/evolution/metrics.js";
 import type { SessionMeta } from "../../src/agent/session-store.js";
@@ -847,5 +848,51 @@ describe("G7: 退化守卫必须在所有会下结论的路径上", () => {
 		const src = readFileSync("scripts/run-experiment.ts", "utf8");
 		expect(src).toContain("horizonIsComparable(hz)");
 		expect(src).toContain("MIN_COMPARABLE_HORIZON_DAYS");
+	});
+});
+
+/**
+ * W1（SPEC §10.101）：**被暂停结束**的局不是"没学会"，必须从比较里剔除。
+ *
+ * 真机事故：agent 在 turn 22 自己 `set_pause` → 世界冻结、循环停摆、进程"活着"。
+ * 这类局会带着 `aborted`/`running` 混进平均值，把"被停掉"读成"没学会"。
+ */
+describe("W1: blockedByPause —— 暂停收场的局可被统计剔除", () => {
+	function meta(over: Record<string, unknown> = {}) {
+		return {
+			id: "s1", mode: "agent", status: "aborted", startedAt: 1_000, seed: 1,
+			llm: { providerId: "p", model: "m", kind: "real" },
+			outcome: { constructionDone: false, money: "100000", income: -500, delivered: 0, stations: 2 },
+			...over,
+		};
+	}
+
+	it("toGameMetric 带上 blockedByPause / pausedBy", () => {
+		const m = toGameMetric(meta({ outcome: { constructionDone: false, blockedByPause: true, pausedBy: "agent" } }));
+		expect(m.blockedByPause).toBe(true);
+		expect(m.pausedBy).toBe("agent");
+	});
+
+	it("没暂停过时是 undefined（不是 false —— 区分“没发生”与“没记录”）", () => {
+		const m = toGameMetric(meta());
+		expect(m.blockedByPause).toBeUndefined();
+		expect(m.pausedBy).toBeUndefined();
+	});
+
+	it("comparableMetrics 剔除被暂停结束的局，其余原样保留", () => {
+		const list = [
+			toGameMetric(meta({ id: "a" })),
+			toGameMetric(meta({ id: "b", outcome: { constructionDone: false, blockedByPause: true, pausedBy: "agent" } })),
+			toGameMetric(meta({ id: "c" })),
+		];
+		expect(list.map((m) => m.id)).toEqual(["a", "b", "c"]);
+		expect(comparableMetrics(list).map((m) => m.id)).toEqual(["a", "c"]);
+	});
+
+	it("compareArms 默认就过滤（所以所有消费者拿到同一集合）", () => {
+		const normal = [toGameMetric(meta({ id: "n1" })), toGameMetric(meta({ id: "n2" }))];
+		const withZombie = [...normal, toGameMetric(meta({ id: "z", outcome: { constructionDone: false, blockedByPause: true, pausedBy: "agent" } }))];
+		const countOf = (c: ReturnType<typeof compareArms>) => c.withLessons.count + c.withoutLessons.count;
+		expect(countOf(compareArms(withZombie, "memory"))).toBe(countOf(compareArms(normal, "memory")));
 	});
 });

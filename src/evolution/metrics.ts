@@ -39,6 +39,9 @@ export interface SessionMetaLike {
 	outcome?: {
 		constructionDone?: boolean;
 		money?: string | number;
+		/** 局是在暂停中结束的（SPEC §10.101）；true = 不可用于比较。 */
+		blockedByPause?: boolean;
+		pausedBy?: "agent" | "dashboard" | null;
 		/** Company income (N2-4); absent when the packet never arrived. */
 		income?: number;
 		/**
@@ -120,6 +123,14 @@ export interface GameMetric {
 	gsErrors: number | null;
 	/** Tool calls refused by the per-decision budget; null when not reported. */
 	toolBudgetBlocks: number | null;
+	/**
+	 * The run ENDED while the world was paused (the agent's own `set_pause`,
+	 * SPEC §10.101). Such a run did not "fail to learn" - it was stopped, so it
+	 * must be excluded from every comparison (`comparableMetrics`).
+	 */
+	blockedByPause?: boolean;
+	/** Who paused it; only meaningful together with `blockedByPause`. */
+	pausedBy?: "agent" | "dashboard" | null;
 	/** Simulated days this run covered; null when not reported (legacy rows). */
 	simulatedDays: number | null;
 	/** Episode horizon in simulated days; null when not reported or none set. */
@@ -369,6 +380,10 @@ export function toGameMetric(
 		deliveredRunComplete: o && typeof o.deliveredRunComplete === "boolean" ? o.deliveredRunComplete : null,
 		gsErrors: num(o && o.gsErrors),
 		toolBudgetBlocks: num(o && o.toolBudgetBlocks),
+		// 暂停收场（SPEC §10.101）：只记 true（"确实是被暂停结束的"），
+		// undefined = 不是这个原因（不写 false，避免"没记录"与"没发生"混同）。
+		blockedByPause: o && o.blockedByPause === true ? true : undefined,
+		pausedBy: (o && (o.pausedBy === "agent" || o.pausedBy === "dashboard") ? o.pausedBy : undefined),
 		simulatedDays: num(o && o.simulatedDays),
 		horizonDays: o && typeof o.horizonDays === "number" ? o.horizonDays : null,
 		reachedHorizon: o && typeof o.reachedHorizon === "boolean" ? o.reachedHorizon : null,
@@ -688,7 +703,21 @@ export function degradationStats(rows: GameMetric[]): {
 	};
 }
 
-export function compareArms(metrics: GameMetric[], by: CompareBy = "memory"): ArmComparison {
+/**
+ * 可比较的局集合：剔除**被暂停结束**的局（SPEC §10.101）。
+ *
+ * 为什么必须在**比较入口**统一剔除，而不是在每个统计里各写一次：这类局（agent 自己
+ * `set_pause` 后世界冻结、循环停摆）会以 `aborted`/`running` 混进平均值，把
+ * "被停掉的局"读成"没学会的局"（MEMORY D56）。留在这里 = 每个消费者拿到同一集合。
+ * 原始 `metrics` 仍可从 ledger 读到（`readMetrics`），便于审计。
+ */
+export function comparableMetrics(metrics: GameMetric[]): GameMetric[] {
+	return (Array.isArray(metrics) ? metrics : []).filter((m) => m && m.blockedByPause !== true);
+}
+
+export function compareArms(rawMetrics: GameMetric[], by: CompareBy = "memory"): ArmComparison {
+	// 被暂停结束的局不是"没学会"，一律不参与 A/B（SPEC §10.101）。
+	const metrics = comparableMetrics(rawMetrics);
 	// Two exclusions, for two different reasons.
 	//
 	// 1. `faux` (scripted) runs execute a fixed plan, so they say nothing about

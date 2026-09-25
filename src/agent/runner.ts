@@ -855,6 +855,9 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 		getRouteStats: () => hub.getRouteStats(),
 		gsErrors: hub.getGsErrors(),
 		toolBudgetBlocks: runtime.getBudgetBlocks(),
+		// 局是在**暂停中**结束的吗（agent 自己按的）？这是 outcome 的独立事实，
+		// 让统计能把这局从"完成/中止"里剔除（SPEC §10.101）。
+		agentPause,
 		scenario,
 		scenarioReason: prebuiltReason,
 		deliveredAtReady,
