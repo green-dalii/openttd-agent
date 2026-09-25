@@ -121,6 +121,13 @@
     return arr.slice(-24);
   }
 
+  /** 合并两段"类型 → 数量"（多公司时求和），保持按数量降序。 */
+  function mergeParts(a, b) {
+    const by = new Map();
+    for (const x of [...(a || []), ...(b || [])]) by.set(x.label, (by.get(x.label) || 0) + x.n);
+    return [...by.entries()].map(([label, n]) => ({ label, n })).sort((x, y) => y.n - x.n);
+  }
+
   function create() {
     return {
       /* ------------------------------ state ------------------------------ */
@@ -130,6 +137,15 @@
       companies: {},
       recent: [],
       telemetry: null,
+      /**
+       * 暂停归因（来自 snapshot.control）：`{pausedByAgent, agentPausedAt}`。
+       *
+       * 为什么页面要读它而不只看 `run.pausedBy`（2026-09-25 真机事故）：agent 调
+       * `set_pause` 时，supervisor 的 `run.state` 可能还没被更新（CLI 单跑没有
+       * supervisor；serve 也要靠新接线才同步）。**"谁让它停的"是后端记录的事实**，
+       * 页面必须以它为准，否则用户只会看到"进程活着但没进展"这种无法行动的结论。
+       */
+      control: null,
       steps: [],
       thinking: [],
       stages: [],
@@ -587,9 +603,12 @@
        * Pause 时状态早已是 paused——**"谁让它停的、为什么不动了"完全无从判断**。
        * 只报"停/跑"两种状态，等于把"agent 自己停的"和"人按的"混为一谈。
        */
-      controlNote() {
+      controlNote(nowMs) {
         const r = this.run || {};
-        const t = this.telemetry || {};
+        const c = this.control || {};
+        const now = Number.isFinite(nowMs) ? nowMs : Date.now();
+
+        // ① supervisor 明确知道暂停（页面按的，或已归因给 agent）
         if (r.state === "paused") {
           const by =
             r.pausedBy === "agent"
@@ -600,11 +619,293 @@
           const ago = r.pausedAt ? ` · ${U.fmtAgo(r.pausedAt)} ago` : "";
           return `Paused by ${by}${ago}. While the world is paused the decision loop cannot fire: no new game events, and game-day progress stalls, so no trigger can open.`;
         }
-        if (r.state === "running" && this.stalled()) {
-          const ago = t.lastActivityAt ? U.fmtAgo(t.lastActivityAt) : "a while";
-          return `No decision for ${ago}, and the run is not stopped. The process is alive but nothing is progressing — treat this as stalled, not as "still working".`;
+
+        // ② **世界事实**：agent 自己按了暂停（快照记录，不依赖 run.state）
+        if (c.pausedByAgent === true) {
+          const at = Number(c.agentPausedAt);
+          const ago = Number.isFinite(at) && at > 0 ? ` · ${U.fmtAgo(at)} ago` : "";
+          return (
+            `Blocked — the agent paused the world itself (set_pause${ago}). ` +
+            "A frozen world produces no game-day progress, so no decision can be triggered: " +
+            "the process is alive but idle **by that pause**, not by thinking. " +
+            "Next: press Resume (or wait for the agent to unpause)."
+          );
         }
-        return "";
+
+        // ③ 通道静默（连事件都没有）——这不是"世界停了"，是**数据没到**：多半进程/通道没了。
+        if (!this.channelAlive(now)) {
+          return (
+            "No run data is arriving (no events for over a minute and no recent activity) — " +
+            "the run's process or its channel looks gone. Next: check whether the run is still " +
+            "alive in the terminal, then Restart it from the dashboard."
+          );
+        }
+
+        const lastAgent = this.lastAgentActivityAt();
+        const agentIdleMin = Number.isFinite(lastAgent) ? (now - lastAgent) / 60000 : Infinity;
+        // 有没有 date 证据：`worldAdvancing()` 在**没有证据**时也返回 true（不猜），
+        // 所以判定"世界停了"必须显式要求"见过 date、且它已经旧了"。
+        const hasDateEvidence = this.lastDateEventAt() !== null;
+
+        // ④ 世界还在推进（**有 date 证据**）→ 正常在跑；agent 长时间不动则提示在等决策窗口
+        if (hasDateEvidence && this.worldAdvancing(now)) {
+          if (agentIdleMin > 10) {
+            return (
+              `The world is still advancing, but the agent has not acted for ${Math.round(agentIdleMin)} min — ` +
+              "it is waiting for the next decision window (or a model call is hung). " +
+              "Next: give it a few more minutes, then Stop if it stays silent."
+            );
+          }
+          return "";
+        }
+
+        // 没有 date 证据（刚重载 / 缓冲空）→ 不下结论
+        if (!hasDateEvidence) return "";
+
+        // ⑤ 世界不推进，但 agent 刚有活动 → 它还在这一轮里（模型调用/工具），**不是停滞**
+        if (agentIdleMin <= 10) {
+          return (
+            `The game date has not advanced, but the agent was active ${U.fmtAgo(lastAgent)} ago — ` +
+            "it is still inside a turn (model call or tool), not stalled. No action needed yet."
+          );
+        }
+
+        // ⑥ 世界不推进 + agent 久无活动 + 通道仍在收数据 + 未暂停 → 真的停滞
+        const since = Number.isFinite(lastAgent) ? U.fmtAgo(lastAgent) : "a long while";
+        return (
+          `The world has not advanced and the agent has been idle for ${since}, with no recorded pause — ` +
+          'this is stalled, not "still working". Next: check the run log, then Resume (if the game is frozen) ' +
+          "or Stop and start a new run."
+        );
+      },
+
+      /**
+       * 通道是否还在收数据（**最近**有没有任何事件）。
+       *
+       * 与 `worldAdvancing` 分开：事件是 company/gs 也在发的，所以"有事件但没有 date"
+       * 才是世界停了；"连事件都没有"是**通道/进程**的问题 —— 两者的下一步动作不同。
+       * 刚重载、缓冲为空时返回 true（没有证据就不下结论）。
+       */
+      channelAlive(nowMs) {
+        const list = Array.isArray(this.recent) ? this.recent : [];
+        if (!list.length) return true;
+        let newest = null;
+        for (const e of list) {
+          const ts = e ? Number(e.ts) : NaN;
+          if (Number.isFinite(ts) && (newest === null || ts > newest)) newest = ts;
+        }
+        if (newest === null) return true;
+        const now = Number.isFinite(nowMs) ? nowMs : Date.now();
+        return now - newest <= 90 * 1000;
+      },
+
+      /** 最近一次 `date` 事件的墙钟时间（世界是否还在推进的直接证据）。 */
+      lastDateEventAt() {
+        const list = Array.isArray(this.recent) ? this.recent : [];
+        for (let i = list.length - 1; i >= 0; i--) {
+          const e = list[i];
+          if (e && e.kind === "date" && Number.isFinite(Number(e.ts))) return Number(e.ts);
+        }
+        return null;
+      },
+
+      /**
+       * 世界是否还在推进（最近 90 s 内有 `date` 事件）。
+       *
+       * 没有 `date` 证据时（缓冲空/刚重载）返回 true —— **"没看见"不等于"没推进"**，
+       * 否则页面会在每次重载时闪一条假告警。有非 date 事件但很旧 ⇒ 世界确实停了。
+       */
+      worldAdvancing(nowMs) {
+        const at = this.lastDateEventAt();
+        if (at === null) return true;
+        const now = Number.isFinite(nowMs) ? nowMs : Date.now();
+        return now - at <= 90 * 1000;
+      },
+
+      /**
+       * 世界推进速率（游戏日 / 墙钟分钟）+ 是否在推进。
+       *
+       * 为什么值得单独可视化：用户看到"日期不动"时，第一反应是"卡住了"，但真实速率
+       * 可能是**正常偏慢**。用 `date` 事件的墙钟间隔算速率，就把"冻结"与"慢"分开。
+       * 只有一个样本时速率是 **null**（不是 0）—— 0 会说成"一天都没走"。
+       */
+      worldRate(nowMs) {
+        const now = Number.isFinite(nowMs) ? nowMs : Date.now();
+        const list = (Array.isArray(this.recent) ? this.recent : []).filter(
+          (e) => e && e.kind === "date" && Number.isFinite(Number(e.ts)),
+        );
+        if (!list.length) return { advancing: false, daysPerMin: null, lastAt: null, samples: 0 };
+        const lastAt = Number(list[list.length - 1].ts);
+        // 只用最近 5 分钟的样本算速率：更早的样本会让"刚恢复推进"看起来仍然很慢。
+        const recent = list.filter((e) => now - Number(e.ts) <= 5 * 60 * 1000);
+        let daysPerMin = null;
+        if (recent.length >= 2) {
+          const first = Number(recent[0].ts);
+          const rawOf = (e) => {
+            const p = e.payload || {};
+            const raw = Number(p.raw);
+            if (Number.isFinite(raw)) return raw;
+            // 没有 raw 就用 年/月/日 折算（OpenTTD 的日期从 1920-01-01 连续计数）
+            const y = Number(p.year), m = Number(p.month), d = Number(p.day);
+            if (Number.isFinite(y) && Number.isFinite(m) && Number.isFinite(d)) return (y - 1920) * 372 + (m - 1) * 31 + d;
+            return null;
+          };
+          const r0 = rawOf(recent[0]);
+          const r1 = rawOf(recent[recent.length - 1]);
+          const span = (Number(recent[recent.length - 1].ts) - first) / 60000;
+          if (r0 !== null && r1 !== null && span > 0) daysPerMin = Math.round(((r1 - r0) / span) * 10) / 10;
+        }
+        return { advancing: now - lastAt <= 90 * 1000, daysPerMin, lastAt, samples: recent.length };
+      },
+
+      /**
+       * 车队 / 车站的**类型构成**（数据一直在 `stats.breakdown`，此前从未显示）。
+       *
+       * 只列非零类型：把 0 也画进堆叠条会让人以为"有一辆火车"。没有 breakdown 时
+       * `parts` 为空而不是猜（总数仍如实显示）。
+       */
+      fleetMix() {
+        const ids = Object.keys(this.companies || {});
+        const labels = { train: "Train", truck: "Truck", bus: "Bus", aircraft: "Air", ship: "Ship" };
+        const sum = (breakdown) => {
+          const src = breakdown && typeof breakdown === "object" ? breakdown : {};
+          const parts = Object.keys(labels)
+            .map((k) => ({ label: labels[k], n: Number(src[k]) || 0 }))
+            .filter((p) => p.n > 0)
+            .sort((a, b) => b.n - a.n);
+          const total = parts.reduce((a, p) => a + p.n, 0);
+          return { parts: parts.map((p) => ({ ...p, pct: total > 0 ? Math.round((p.n / total) * 100) : null })), total };
+        };
+        let vehicles = { parts: [], total: 0 };
+        let stations = { parts: [], total: 0 };
+        for (const id of ids) {
+          const c = this.companies[id] || {};
+          const st = c.stats || {};
+          const v = sum(st.breakdown);
+          const s = sum(st.stationBreakdown);
+          vehicles = {
+            total: vehicles.total + (Number(st.vehicles) || v.total),
+            parts: mergeParts(vehicles.parts, v.parts),
+          };
+          stations = {
+            total: stations.total + (Number(st.stations) || s.total),
+            parts: mergeParts(stations.parts, s.parts),
+          };
+        }
+        const withPct = (x) => ({ ...x, parts: x.parts.map((p) => ({ ...p, pct: x.total > 0 ? Math.round((p.n / x.total) * 100) : null })) });
+        return { vehicles: withPct(vehicles), stations: withPct(stations), companies: ids.length };
+      },
+
+      /**
+       * 公司绩效（OpenTTD 的 0–255 评分）：去年 vs 去年前年。
+       * 字段缺失 → null（不是 0 分）。
+       */
+      performance() {
+        const ids = Object.keys(this.companies || {});
+        let last = null;
+        let prev = null;
+        for (const id of ids) {
+          const e = (this.companies[id] || {}).economy || {};
+          const l = Number(e.performanceLastYear);
+          const p = Number(e.performancePrevYear);
+          if (Number.isFinite(l)) last = l;
+          if (Number.isFinite(p)) prev = p;
+        }
+        // 首个财年结束前，游戏报的是**占位值**（companyValue 是 1，已记在 SPEC §10.95；
+        // performance 在真机实测里先是 0、随后 1，同属占位族）—— 那是"尚无评分"，
+        // 不是"0 分"也不是"1 分"。画成 0/255 是在编造事实。
+        const placeholder = (v) => v !== null && v <= 1;
+        if ((last === null || placeholder(last)) && (prev === null || placeholder(prev))) {
+          return { last: null, prev: null, delta: null, max: 255, known: false };
+        }
+        const delta = last !== null && prev !== null ? last - prev : null;
+        return { last, prev, delta, max: 255, known: true };
+      },
+
+      /**
+       * 健康条瓦片（**永远返回数组**）。
+       *
+       * 为什么单独一个函数：`x-for="t in runHealth().tiles"` 会被 Alpine 守卫判为
+       * "x-for 穿过可空表达式"（D45：x-for 独立求值，`runHealth()` 在数据到达前
+       * 可能没有 tiles → 表达式错误）。所以模板只迭代这个永不为 null 的数组。
+       */
+      healthTiles() {
+        const h = this.runHealth();
+        return Array.isArray(h.tiles) ? h.tiles : [];
+      },
+
+      /** 构成行（带颜色，供堆叠条使用）。颜色取自 ucharts 的调色板，保持一致。 */
+      mixRows() {
+        const m = this.fleetMix();
+        const colors = ["#f2a33c", "#5fb3ff", "#9adf7b", "#c39bff", "#ff8f8f"];
+        const withColor = (x) => ({
+          total: x.total,
+          parts: x.parts.map((p, i) => ({ ...p, color: (U.pickColor ? U.pickColor(i) : colors[i % colors.length]) })),
+        });
+        return [
+          { k: "Vehicles", ...withColor(m.vehicles) },
+          { k: "Stations", ...withColor(m.stations) },
+        ];
+      },
+
+      /**
+       * 运行健康条：4 个瓦片（世界 / agent / 游戏日期 / 决策）+ 状态 + 下一步。
+       *
+       * 为什么是"条"而不是一句告警：2026-09-25 的教训是**一句通用文字无法行动**
+       * （"进程活着但没进展"既可能是 agent 自己停了，也可能是模型慢、通道死）。
+       * 瓦片让状态一眼可读，`action` 给出该做什么。
+       */
+      runHealth(nowMs) {
+        const now = Number.isFinite(nowMs) ? nowMs : Date.now();
+        const r = this.run || {};
+        const c = this.control || {};
+        const rate = this.worldRate(now);
+        const lastAgent = this.lastAgentActivityAt();
+        const agentIdleMin = Number.isFinite(lastAgent) ? Math.max(0, Math.round((now - lastAgent) / 60000)) : null;
+        const turns = (this.telemetry && this.telemetry.turns) || 0;
+        const date = this.date;
+        const dateText = date ? `${date.year}-${String(date.month || 1).padStart(2, "0")}-${String(date.day || 1).padStart(2, "0")}` : "—";
+        const tiles = [
+          {
+            k: "World",
+            v: rate.advancing ? (rate.daysPerMin === null ? "moving" : `${rate.daysPerMin}/min`) : "frozen",
+            state: rate.advancing ? (rate.daysPerMin !== null && rate.daysPerMin < 0.5 ? "warn" : "ok") : "bad",
+            hint: rate.advancing ? "game days per wall-clock minute (from date events)" : "no new game date in the last 90s",
+          },
+          {
+            k: "Agent",
+            v: agentIdleMin === null ? "—" : agentIdleMin < 1 ? "active" : `${agentIdleMin}m ago`,
+            state: agentIdleMin === null ? "warn" : agentIdleMin <= 10 ? "ok" : "warn",
+            hint: "time since the last assistant message or tool call",
+          },
+          { k: "Game date", v: dateText, state: rate.advancing ? "ok" : "bad", hint: "world calendar" },
+          {
+            k: "Decision",
+            v: `${turns}`,
+            state: rate.advancing && (agentIdleMin === null || agentIdleMin <= 10) ? "ok" : "warn",
+            hint: "decisions made in this run",
+          },
+        ];
+        // 状态与"下一步"复用 controlNote 的分因（同一判据，不写两套）。
+        const note = this.controlNote(now);
+        let state = "ok";
+        if (r.state === "paused" || c.pausedByAgent === true) state = "blocked";
+        else if (!this.channelAlive(now)) state = "bad";
+        else if (!rate.advancing) state = agentIdleMin !== null && agentIdleMin <= 10 ? "warn" : "bad";
+        else if (agentIdleMin !== null && agentIdleMin > 10) state = "warn";
+        return { state, tiles, action: note, rate };
+      },
+
+      /** agent 最近一次活动（telemetry 的权威值；缺失时退回 step 时间戳）。 */
+      lastAgentActivityAt() {
+        const t = this.telemetry || {};
+        if (Number.isFinite(Number(t.lastActivityAt)) && Number(t.lastActivityAt) > 0) return Number(t.lastActivityAt);
+        const steps = Array.isArray(this.steps) ? this.steps : [];
+        for (let i = steps.length - 1; i >= 0; i--) {
+          const s = steps[i];
+          if (s && Number.isFinite(Number(s.ts))) return Number(s.ts);
+        }
+        return null;
       },
 
       /**
@@ -730,6 +1031,7 @@
             produced: U.fmtInt(c.produced),
             transported: U.fmtInt(c.transported),
             share: pct === null ? "—" : `${pct}%`,
+            sharePct: pct,
             shareHint: "share of the industry's last-month production that was transported — all companies, not just this one",
           };
         });

@@ -84,6 +84,17 @@
          "它在跑吗"：脑是真是假、最近一次活动、当前意图、上一动作。
          Memory in effect 与 Action surface 属"这一局被给了什么 / 能做什么"，
          放在 ⑥ Agent activity（那里的问题是"它真的在推理吗"）。 -->
+    <!-- 运行健康条：4 个证据瓦片 + 下一步（把"没进展"从一句废话变成可行动的状态） -->
+    <section class="health" :aria-label="'run health: ' + runHealth().state">
+      <template x-for="t in healthTiles()" :key="t.k">
+        <div class="health-tile" :class="t.state" :title="t.hint">
+          <span class="health-k" x-text="t.k"></span>
+          <span class="health-v" x-text="t.v"></span>
+          <span class="health-h" x-text="t.hint"></span>
+        </div>
+      </template>
+      <div class="health-action" x-show="runHealth().action" x-text="runHealth().action"></div>
+    </section>
     <div class="group"><h2>Run</h2><div class="rule"></div>
       <span class="dim">is it running, and what is it doing right now</span></div>
     <section class="panel">
@@ -158,6 +169,42 @@
       <div class="legend">
         <span class="lg dim" x-text="'showing ' + cashMetric"></span>
         <span class="lg dim">drag to zoom on the time axis · double-click or “reset zoom” to go back</span>
+      </div>
+    </section>
+    <!-- 构成（车队/车站按类型 + 绩效）：`stats.breakdown` 一直在快照里，
+         此前只显示了总数，于是"17 辆车"看不出是 15 公交 + 2 卡车。堆叠条一眼给出构成。 -->
+    <section class="grid two" x-show="!companiesEmpty()">
+      <div class="panel">
+        <div class="panel-head"><h2>Fleet &amp; station mix</h2>
+          <span class="dim">by type · zero types are not drawn</span></div>
+        <template x-for="m in mixRows()" :key="m.k">
+          <div>
+            <div class="kpi-k" x-text="m.k + ' · ' + m.total"></div>
+            <div class="mix" x-show="m.parts.length">
+              <template x-for="p in m.parts" :key="p.label">
+                <i :style="`width:${p.pct}%;background:${p.color}`" :title="p.label + ' ' + p.n + ' (' + p.pct + '%)'"></i>
+              </template>
+            </div>
+            <div class="mix-legend" x-show="m.parts.length">
+              <template x-for="p in m.parts" :key="p.label">
+                <span><i :style="`background:${p.color}`"></i><span x-text="p.label + ' ' + p.n"></span></span>
+              </template>
+            </div>
+            <p class="hint" x-show="!m.parts.length">type breakdown not reported for this run.</p>
+          </div>
+        </template>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><h2>Performance</h2>
+          <span class="dim">OpenTTD company rating · 0–255</span></div>
+        <div class="kpi-v"><span x-text="performance().last ?? '—'"></span>
+          <span class="dim" x-text="performance().prev === null ? '' : ('vs ' + performance().prev + ' last year')"></span></div>
+        <div class="perf" x-show="performance().last !== null">
+          <i class="prev" :style="'width:' + (performance().prev ?? 0) / performance().max * 100 + '%'"></i>
+          <i :style="'width:' + (performance().last ?? 0) / performance().max * 100 + '%'"></i>
+        </div>
+        <p class="hint" x-text="performance().delta === null ? 'rating is reported after the first year ends' :
+          (performance().delta >= 0 ? '+' : '') + performance().delta + ' vs the year before'"></p>
       </div>
     </section>
     <section class="kpis cols-4" x-show="!companiesEmpty()">
@@ -292,7 +339,9 @@
                 <td x-text="c.name"></td>
                 <td class="num" x-text="c.produced"></td>
                 <td class="num" x-text="c.transported"></td>
-                <td class="num" :title="c.shareHint" x-text="c.share"></td>
+                <td class="num" :title="c.shareHint">
+                  <span class="share-bar" x-show="c.sharePct !== null"><i :style="'width:' + c.sharePct + '%'"></i></span><span x-text="c.share"></span>
+                </td>
               </tr>
             </template>
           </tbody>

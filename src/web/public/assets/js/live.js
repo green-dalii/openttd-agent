@@ -183,6 +183,9 @@
               // 公司口径（P2）；null = 未收到（不是零运量）。
               this.companyCargo = s.companyCargo || null;
               this.companyCargoAvailable = s.companyCargoAvailable === true;
+              // 暂停归因（后端记录的事实）："谁让它停的"必须以它为准，
+              // 不能只看 run.state（agent 自己停时它可能还是 running）。
+              this.control = s.control || null;
               // These three were sent by the server all along but never consumed,
               // so a page loaded mid-run saw no stages and no memory (MEMORY.md A1:
               // "no error" only holds if the code actually ran).

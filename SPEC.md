@@ -737,3 +737,28 @@ inst.__zoomedByUser = true;       // 让数据帧走 setData(data, false)，视�
 
 **注意**：本节的读数来自 offline-demo（脚本化演示）——`own_delivered` 因此恒为 0
 （演示里没有真实交付）。真实交付量需要带 LLM 的 agent 运行，属 P2 的后续验收项。
+
+### 10.101 僵尸局取证（2026-09-25）：用户看到的那句告警，**不是真相的描述，而是真相的遮蔽**
+
+用户报告页面提示：
+`attention — No decision for 1 hour ago, and the run is not stopped. The process is alive but nothing is progressing…`
+
+**先取证，再改代码**（session `20260925-145039-seed1000516367`）：
+
+| 证据 | 读数 | 含义 |
+|------|------|------|
+| `audit.jsonl` 最后几条 | `turn 22: set_pause ok=true "rcon pause delivered…"`；`turn 23: 模型 input 12564 → observe: date=1950-12-01`（与上轮相同）；`turn 24: input=0 output=0` → `plan`；**此后 audit 无记录** | agent 在 turn 22 **自己按了暂停**（D52 第二次）；世界冻结后它又跑了两轮（turn 23 的 `observe` 看到日期不动），然后决策循环**再无动作** |
+| `meta.json` | `status: "running"`、`endedAt: null`、`heartbeatAt` 一直在更新到 16:17 | 进程活着、心跳正常 —— 所以"进程活着"这句**是对的** |
+| `events.jsonl` | 15:02→16:17 仍在收 `company_info` / `company_stats`（~4/s） | 通道活着、公司读数在收 —— 所以"数据在流"也是对的 |
+| 世界日期 | 停在 `1950-12-01` | **世界不推进** ⇒ 决策触发器（游戏日推进 / 显著事件）永远不打开 |
+| 公司名 | `EX exc:can't execute over an un…`、`vehicles: 0`、`stations: 2` | 第二个独立问题：执行器也卡住了（0 辆车） |
+
+**根因（结构性）**：`set_pause` 的归因只写在了**快照**（`control.pausedByAgent`），没有写进
+**supervisor**（`run.state`/`pausedBy`）—— 两个写者，页面只读后者。于是：
+① 页面看不到"是 agent 自己停的"，只能给出通用告警；② 决策节奏（`scheduler`）**没有**跟着停，
+它仍在按"日期推进"找触发，而日期永不推进 ⇒ 空转。
+
+**修法**（本次已落地）：agent 的 `set_pause` 现在**走与页面按钮同一条路径**
+（`scheduler.pause/resume` + rcon），并通过 `control.onAgentPause` 把归因交给 supervisor
+（serve 模式下 supervisor 是 run 状态的**唯一写者**）；页面另外直接读快照的 `control` 事实
+（即使 supervisor 尚未同步也能说清"谁让它停的"）。

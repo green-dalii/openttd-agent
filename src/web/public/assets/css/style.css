@@ -513,6 +513,37 @@ dialog.modal p { color: var(--ink-dim); font-size: 13px; margin: 0 0 var(--sp-4)
 .verdict.ok { color: #7bc96f; }
 .arm-card { margin: 0; }
 .arm-label { font-weight: 600; margin-bottom: 8px; }
+/* ---- run health strip（把"为什么不动"变成可读状态）----
+   一次真实事故的产物：一句通用告警（"进程活着但没进展"）无法行动——
+   用户不知道该按 Resume、还是等模型、还是去查进程。现在 4 个瓦片给出证据，
+   state 决定颜色（ok/warn/bad/blocked），右侧 action 给出下一步。 */
+.health { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--sp-2); margin-bottom: var(--sp-3); }
+.health-tile { background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--muted);
+  border-radius: var(--r-sm); padding: 6px 10px; display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.health-tile.ok { border-left-color: var(--pos); }
+.health-tile.warn { border-left-color: var(--warn, #d8a657); }
+.health-tile.bad, .health-tile.blocked { border-left-color: var(--neg); }
+.health-k { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.health-v { font-size: 14px; font-variant-numeric: tabular-nums; }
+.health-h { font-size: 10.5px; color: var(--muted); opacity: .8; }
+.health-action { grid-column: 1 / -1; font-size: 12.5px; line-height: 1.5; color: var(--ink-dim);
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-sm); padding: 7px 10px; }
+
+/* 构成堆叠条（车队/车站按类型；只画非零类型） */
+.mix { display: flex; height: 10px; border-radius: 5px; overflow: hidden; background: var(--panel-2); margin: 6px 0 4px; }
+.mix > i { display: block; height: 100%; }
+.mix-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 11.5px; color: var(--muted); }
+.mix-legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+
+/* 运走比例条（Cargo 表内联；0% 与高占比一眼可分） */
+.share-bar { position: relative; height: 5px; width: 74px; background: var(--panel-2); border-radius: 3px; overflow: hidden; display: inline-block; vertical-align: middle; margin-right: 6px; }
+.share-bar > i { display: block; height: 100%; background: var(--accent); }
+
+/* 绩效条（0–255，OpenTTD 自己的评分） */
+.perf { position: relative; height: 8px; background: var(--panel-2); border-radius: 4px; overflow: hidden; margin-top: 6px; }
+.perf > i { display: block; height: 100%; background: var(--pos); }
+.perf > i.prev { background: var(--muted); opacity: .45; }
+
 .arm-card .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .mem-library { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
 .mem-library li { display: flex; gap: 10px; align-items: flex-start; font-size: .88rem; line-height: 1.5; }

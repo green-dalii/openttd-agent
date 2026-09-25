@@ -124,6 +124,11 @@ export interface AgentRunOptions {
 	/** External control hooks for the supervisor (stop/pause/resume). */
 	control?: {
 		onReady?: (h: { stop: () => void; pause: () => void; resume: () => void }) => void;
+		/**
+		 * agent **自己**改了暂停状态（`set_pause`）。serve 用它把归因写进 supervisor
+		 * （唯一写者）；没有它（CLI 单跑）时 runner 自己 publishRun。
+		 */
+		onAgentPause?: (paused: boolean, at: number) => void;
 	};
 	/** Min wall-clock gap between two LLM decisions (default 5s). */
 	decisionMinGapMs?: number;
@@ -282,13 +287,26 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 		// agent 自己调 `set_pause` → 记录归因并推给页面（"谁让它停的"是独立事实）。
 		onPauseChanged: (paused: boolean, at: number) => {
 			agentPause = { paused, at };
-			web?.publishRun({
-				state: paused ? "paused" : "running",
-				sessionId: session.id,
-				mode: "agent",
-				pausedBy: paused ? "agent" : null,
-				pausedAt: paused ? at : null,
-			});
+			// **决策节奏必须与世界一起停**（2026-09-25 真实事故）：agent 调 `set_pause`
+			// 后只发了 rcon，`scheduler` 仍在按"游戏日期推进"找触发 —— 而日期永远不再
+			// 推进，于是循环空转、页面只看到"进程活着但没进展"，直到人发现。
+			// 走与页面按钮**同一条**路径：scheduler.pause/resume + rcon（`reportControl`）。
+			if (paused) scheduler.pause();
+			else scheduler.resume(gameDaysSinceStart(deps));
+			// 归因交给 supervisor（`--serve` 时它是 run 状态的**唯一写者**；
+			// 这里若自己 publishRun，会被 supervisor 随后的 publish 覆盖回去，
+			// 于是页面又退回"未知是谁停的"）。CLI 单跑没有 supervisor，走下面的直发。
+			if (opts.control && typeof opts.control.onAgentPause === "function") {
+				opts.control.onAgentPause(paused, at);
+			} else {
+				web?.publishRun({
+					state: paused ? "paused" : "running",
+					sessionId: session.id,
+					mode: "agent",
+					pausedBy: paused ? "agent" : null,
+					pausedAt: paused ? at : null,
+				});
+			}
 		},
 	};
 	let streamFn: AgentOptionsStreamFn;

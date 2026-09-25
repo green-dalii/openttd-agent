@@ -140,6 +140,14 @@ export async function runServe(cfg: Config, opts: ServeOptions = {}): Promise<Se
 					hooks.pause = h.pause;
 					hooks.resume = h.resume;
 				},
+				// agent 自己按暂停 → **supervisor 是 run 状态的唯一写者**。
+				// pause("agent") 会调 hooks.pause（= scheduler.pause + rcon，与页面同路径）
+				// 并把 pausedBy 记成 "agent"；resume 同理。幂等：已 paused 时不改写来源
+				// （"第一个让它停的才是原因"），因此 agent 在页面已暂停后再按不会夺走归因。
+				onAgentPause: (paused: boolean) => {
+					const p = paused ? supervisor.pause("agent") : supervisor.resume();
+					void p.catch((e) => console.error(`[serve] agent pause/resume failed: ${e instanceof Error ? e.message : e}`));
+				},
 			});
 			const launch = opts.launcher ?? defaultLauncher;
 			// Run in the background: the supervisor tracks completion via onStopped.

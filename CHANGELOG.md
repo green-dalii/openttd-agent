@@ -9,6 +9,27 @@
 
 ## [Unreleased]
 
+### Added（2026-09-25：运行健康条 + 三处可视化）
+- **运行健康条**（Live 页顶部）：`World`（游戏日/分钟 · moving/frozen）· `Agent`（上次活动距今）·
+  `Game date` · `Decision`，四格按状态着色（ok/warn/bad/blocked）。它把"进程活着但没进展"
+  这种**无法行动**的告警，换成"世界在不在动 / agent 在不在动 / 下一步做什么"。
+- **Fleet & station mix**：车辆与车站**按类型**的堆叠条（`stats.breakdown` / `stationBreakdown`
+  一直在快照里，此前只显示总数 —— "17 辆车"看不出是 15 公交 + 2 卡车）。零类型不画。
+- **Performance**：OpenTTD 公司评分（0–255）与去年前年对比（条形）。
+- **Cargo 表的运走比例条**：把 `0%` 与 `67%` 变成一眼可分的长度。
+
+### Fixed（2026-09-25：暂停归因 + 告警可行动）
+- **agent 自己的 `set_pause` 没有停决策节奏，也没有把归因写进 supervisor**（只写了快照）：
+  结果是"进程活着、心跳正常、事件照收，但决策永远不再发生"，而页面只会说
+  "process is alive but nothing is progressing" —— **真相被遮蔽**。
+  现在 agent 的暂停走与页面按钮**同一条**路径（`scheduler.pause/resume` + rcon），
+  并由 supervisor 记录 `pausedBy = "agent"`（`SPEC.md` §10.101）。
+- 页面直接读快照的 `control.pausedByAgent`：即使 supervisor 尚未同步，也能说清"是 agent 自己停的，
+  按 Resume"。
+- 告警按**世界证据**分因：世界冻结 / 还在这一轮里 / 通道静默 / 真停滞，各自给出下一步；
+  没有证据时**不下结论**（刚重载的页面不再闪假告警）。
+- 公司绩效在**首个财年结束前**报的是占位值（实测 0/1）—— 此前被画成"0 分"；现在显示"尚无评分"。
+
 ### Added（2026-09-25：产业与货物面板 = P1+P2）
 - **Live 页新增 "Cargo & industry" 段**（数据全部来自 Bridge GS，仅 agent 模式有；watch 模式显示"读不到"）：
   - **Cargo — last month**：按货种的上月产量/运量 + "运走比例"，**表头写明口径是"全图（所有公司）"**；

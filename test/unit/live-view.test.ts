@@ -72,7 +72,7 @@ interface RouteRow {
 interface LiveModel {
 	// state
 	companies: Record<string, unknown>;
-	recent: unknown[];
+	recent: { kind?: string; ts?: number; payload?: { raw?: number; year?: number; month?: number; day?: number } }[];
 	telemetry: unknown;
 	steps: unknown[];
 	thinking: unknown[];
@@ -136,9 +136,27 @@ interface LiveModel {
 	ownCargoNote(): string;
 	ownQuarterText(): string;
 	ownDeliveredTotal(): string;
+	/** 可视化的数据源（2026-09-25） */
+	worldRate(nowMs?: number): { advancing: boolean; daysPerMin: number | null; lastAt: number | null; samples: number };
+	fleetMix(): {
+		vehicles: { parts: { label: string; n: number; pct: number | null }[]; total: number };
+		stations: { parts: { label: string; n: number; pct: number | null }[]; total: number };
+		companies: number;
+	};
+	performance(): { last: number | null; prev: number | null; delta: number | null; max: number; known: boolean };
+	runHealth(nowMs?: number): {
+		state: string;
+		tiles: { k: string; v: string; state: string; hint: string }[];
+		action: string;
+		rate: { advancing: boolean; daysPerMin: number | null };
+	};
+	channelAlive(nowMs?: number): boolean;
+	healthTiles(): { k: string; v: string; state: string; hint: string }[];
+	worldAdvancing(nowMs?: number): boolean;
+	mixRows(): { k: string; total: number; parts: { label: string; n: number; pct: number | null; color: string }[] }[];
 	drawerShowsRoutes(): boolean;
 	drawerRouteRows(): RouteRow[];
-	controlNote(): string;
+	controlNote(nowMs?: number): string;
 	stalled(nowMs?: number): boolean;
 	nowSummary(): { state: string; brain: string; lastDecision: string; intent: string; action: string };
 	memory: unknown;
@@ -177,6 +195,8 @@ interface LiveModel {
 		conditional: number;
 		summary: string;
 	} | null;
+	/** 暂停归因（snapshot.control） */
+	control: { pausedByAgent?: boolean; agentPausedAt?: number | null } | null;
 	/** 城镇样本（Bridge GS：人口前 10） */
 	towns: { id?: unknown; population?: unknown; x?: unknown; y?: unknown }[];
 	townsTotal: unknown;
@@ -1138,12 +1158,26 @@ describe("controlNote / stalled（页面要说出「为什么不动了」）", (
 		expect(v.controlNote()).toMatch(/the dashboard/);
 	});
 
-	it("running 但超过 10 分钟无决策 → 停滞告警", () => {
+	it("running、世界不推进、agent 久无活动、通道仍在 → 停滞告警", () => {
+		const v = makeView();
+		const old = Date.now() - 20 * 60 * 1000;
+		v.run = { state: "running" };
+		v.telemetry = { lastActivityAt: old };
+		// 通道仍在收数据，但**没有 date 事件**（世界被冻住）——这才是"停滞"的证据。
+		v.recent = [
+			{ kind: "date", ts: old },
+			{ kind: "company_stats", ts: Date.now() - 2_000 },
+		];
+		expect(v.stalled()).toBe(true);
+		expect(v.controlNote()).toMatch(/stalled/i);
+	});
+
+	it("没有事件证据时不猜原因（刚重载的页面不闪假告警）", () => {
 		const v = makeView();
 		v.run = { state: "running" };
 		v.telemetry = { lastActivityAt: Date.now() - 20 * 60 * 1000 };
-		expect(v.stalled()).toBe(true);
-		expect(v.controlNote()).toMatch(/stalled/i);
+		v.recent = [];
+		expect(v.controlNote()).toBe("");
 	});
 
 	it("running 且最近有决策 → 不告警", () => {
@@ -1313,5 +1347,222 @@ describe("live-view: cargo & industry", () => {
 		expect(model.industryRows()).toEqual([]);
 		expect(model.ownCargoRows()).toEqual([]);
 		expect(model.ownQuarterText()).toBe("—");
+	});
+});
+
+/**
+ * 为什么"没有进展"——**按世界的证据**分因，而不是一句通用话（2026-09-25 真机）。
+ *
+ * 事故：agent 在 turn 22 调 `set_pause` 自己冻结了世界。此后进程活着、心跳正常、
+ * company 事件照收，但游戏日期永远不再推进 → 没有决策触发。页面当时只显示
+ * "No decision for 1 hour… treat this as stalled" —— **没有说出真正的原因**
+ * （是 agent 自己停的），用户无从判断该按 Resume 还是该等模型。
+ *
+ * 新的判据全部来自**世界事实**（不依赖谁写了 run 状态）：
+ * ① `control.pausedByAgent`（快照自带，后端记录）→ "agent 自己停的"
+ * ② 最近有没有 `date` 事件（世界是否还在推进）
+ * ③ agent 最近有没有 step（模型是否还在忙）
+ * 三者组合出**互斥**的原因，且每条都带"该做什么"的下一步。
+ */
+describe("live-view: 没进展的分因诊断（controlNote）", () => {
+	const NOW = 1_000_000_000_000;
+
+	it("agent 自己按了暂停（快照事实）→ 直说是它停的，并给 Resume 下一步", () => {
+		const { model } = load();
+		model.run = { state: "running", pausedBy: null, pausedAt: null };
+		model.control = { pausedByAgent: true, agentPausedAt: NOW - 3_600_000 };
+		model.telemetry = { lastActivityAt: NOW - 3_600_000, steps: [] };
+		model.recent = [];
+		const note = model.controlNote(NOW);
+		expect(note).toMatch(/agent/i);
+		expect(note).toMatch(/paused|pause/i);
+		expect(note).toMatch(/resume/i);
+	});
+
+	it("世界不推进但模型刚有活动 → '模型还在这一轮里'，不是停滞", () => {
+		const { model } = load();
+		model.run = { state: "running" };
+		model.control = { pausedByAgent: false, agentPausedAt: null };
+		model.telemetry = { lastActivityAt: NOW - 30_000, steps: [] };
+		// 真实现场（2026-09-25 僵尸局）：company 事件仍在每秒到达，但**没有新的 date**
+		model.recent = [
+			{ kind: "date", ts: NOW - 3_600_000 },
+			{ kind: "company_stats", ts: NOW - 2_000 },
+		];
+		const note = model.controlNote(NOW);
+		expect(note).toMatch(/still inside a turn|thinking|还在这一轮/i);
+		expect(note).toMatch(/not stalled/i); // 明确否定，而不是含 "stalled" 字样
+	});
+
+	it("世界不推进且模型也无活动、也没暂停 → 真的停滞，并说明下一步", () => {
+		const { model } = load();
+		model.run = { state: "running" };
+		model.control = { pausedByAgent: false, agentPausedAt: null };
+		model.telemetry = { lastActivityAt: NOW - 7_200_000, steps: [] };
+		model.recent = [
+			{ kind: "date", ts: NOW - 7_200_000 },
+			{ kind: "company_stats", ts: NOW - 2_000 },
+		];
+		const note = model.controlNote(NOW);
+		expect(note).toMatch(/stalled|停滞/i);
+		expect(note).toMatch(/stop|resume|check/i);
+	});
+
+	it("世界仍在推进（最近的 date 事件很新）→ 没有 notice（正常在跑）", () => {
+		const { model } = load();
+		model.run = { state: "running" };
+		model.control = { pausedByAgent: false, agentPausedAt: null };
+		model.telemetry = { lastActivityAt: NOW - 20_000, steps: [] };
+		model.recent = [
+			{ kind: "date", ts: NOW - 15_000 },
+			{ kind: "company_stats", ts: NOW - 10_000 },
+		];
+		expect(model.controlNote(NOW)).toBe("");
+	});
+
+	it("controlNote 的分因依赖世界事实，而不是 run.state 的表面值", () => {
+		const { model } = load();
+		// supervisor 还说 running，但快照已经记录 agent 暂停了 —— 以快照为准
+		model.run = { state: "running" };
+		model.control = { pausedByAgent: true, agentPausedAt: NOW - 60_000 };
+		model.telemetry = { lastActivityAt: NOW - 60_000, steps: [] };
+		model.recent = [];
+		expect(model.controlNote(NOW)).toMatch(/agent/i);
+	});
+});
+
+/**
+ * 可视化背后的纯计算（2026-09-25）。
+ *
+ * 原则（同 SPEC §10.99 的诚实规则）：**比率与构成都在可单测的纯函数里算**，
+ * 模板只做呈现；没有证据时给"未知"而不是 0。
+ */
+describe("live-view: 可视化的数据源（health / 世界速率 / 车队构成）", () => {
+	const NOW = 1_000_000_000_000;
+
+	it("worldRate: 用 date 事件算游戏日/分钟，并标出冻结", () => {
+		const { model } = load();
+		// 3 分钟内推进了 6 个游戏日 ⇒ 2 days/min；最新 date 很新 ⇒ advancing
+		model.recent = [
+			{ kind: "date", ts: NOW - 180_000, payload: { raw: 100 } },
+			{ kind: "date", ts: NOW - 90_000, payload: { raw: 103 } },
+			{ kind: "date", ts: NOW - 2_000, payload: { raw: 106 } },
+		];
+		const r = model.worldRate(NOW);
+		expect(r.advancing).toBe(true);
+		expect(r.daysPerMin).toBeGreaterThan(1.5);
+		expect(r.daysPerMin).toBeLessThan(2.5);
+	});
+
+	it("worldRate: 只有 1 个 date 样本时速率是 null（不是 0），且不算在推进", () => {
+		const { model } = load();
+		model.recent = [{ kind: "date", ts: NOW - 5_000, payload: { raw: 100 } }];
+		const r = model.worldRate(NOW);
+		expect(r.daysPerMin).toBeNull();
+		expect(r.advancing).toBe(true);
+	});
+
+	it("worldRate: date 停在很久前 → advancing=false（世界被冻住的证据）", () => {
+		const { model } = load();
+		model.recent = [
+			{ kind: "date", ts: NOW - 3_600_000, payload: { raw: 100 } },
+			{ kind: "company_stats", ts: NOW - 2_000 },
+		];
+		expect(model.worldRate(NOW).advancing).toBe(false);
+	});
+
+	it("fleetMix: 车辆/车站按类型给出占比，只列非零类型（0 类型不占条）", () => {
+		const { model } = load();
+		model.companies = {
+			"0": {
+				info: { name: "AI" },
+				economy: {},
+				stats: {
+					vehicles: 17, stations: 9,
+					breakdown: { train: 0, truck: 2, bus: 15, aircraft: 0, ship: 0 },
+					stationBreakdown: { train: 0, truck: 0, bus: 9, aircraft: 0, ship: 0 },
+				},
+				history: [],
+			},
+		};
+		const m = model.fleetMix();
+		expect(m.vehicles.total).toBe(17);
+		expect(m.vehicles.parts.map((x) => [x.label, x.n])).toEqual([["Bus", 15], ["Truck", 2]]);
+		expect(m.vehicles.parts[0]!.pct).toBe(88);
+		expect(m.stations.total).toBe(9);
+		expect(m.stations.parts.map((x) => x.label)).toEqual(["Bus"]);
+	});
+
+	it("fleetMix: 没有 breakdown 时 parts 为空（不编构成），total 仍如实", () => {
+		const { model } = load();
+		model.companies = { "0": { info: {}, economy: {}, stats: { vehicles: 3, stations: 1 }, history: [] } };
+		const m = model.fleetMix();
+		expect(m.vehicles.total).toBe(3);
+		expect(m.vehicles.parts).toEqual([]);
+	});
+
+	it("performance: 去年 vs 去年前年，给出差值（没有就 null）", () => {
+		const { model } = load();
+		model.companies = { "0": { info: {}, economy: { performanceLastYear: 128, performancePrevYear: 114 }, stats: {}, history: [] } };
+		const p = model.performance();
+		expect(p.last).toBe(128);
+		expect(p.prev).toBe(114);
+		expect(p.delta).toBe(14);
+		expect(p.max).toBe(255);
+	});
+
+	it("performance: 首个财年之前的 0/1 是**占位值** → 报'尚无评分'，不是 0 分", () => {
+		const { model } = load();
+		// 第一个财年结束前游戏报占位值：companyValue 是 1（SPEC §10.95），
+		// performance 在真机实测里先是 0、随后 1 —— 同一占位族。画成"0 分"是编造事实。
+		for (const ph of [0, 1]) {
+			model.companies = { "0": { info: {}, economy: { performanceLastYear: ph, performancePrevYear: ph }, stats: {}, history: [] } };
+			const p = model.performance();
+			expect(p.known, `占位值 ${ph} 不该被当成评分`).toBe(false);
+			expect(p.last).toBeNull();
+			expect(p.prev).toBeNull();
+			expect(p.delta).toBeNull();
+		}
+	});
+
+	it("performance: 有真实评分时 known=true 且画条", () => {
+		const { model } = load();
+		model.companies = { "0": { info: {}, economy: { performanceLastYear: 200, performancePrevYear: 190 }, stats: {}, history: [] } };
+		expect(model.performance().known).toBe(true);
+	});
+
+	it("performance: 经济数据里没有绩效字段 → 全部为 null（不是 0 分）", () => {
+		const { model } = load();
+		model.companies = { "0": { info: {}, economy: {}, stats: {}, history: [] } };
+		const p = model.performance();
+		expect(p.last).toBeNull();
+		expect(p.prev).toBeNull();
+		expect(p.delta).toBeNull();
+	});
+
+	it("runHealthTiles: 把为什么不动变成可读瓦片（原因 + 下一步）", () => {
+		const { model } = load();
+		model.run = { state: "running" };
+		model.control = { pausedByAgent: true, agentPausedAt: NOW - 60_000 };
+		model.telemetry = { lastActivityAt: NOW - 60_000, steps: [] };
+		model.recent = [{ kind: "company_stats", ts: NOW - 2_000 }];
+		const h = model.runHealth(NOW);
+		expect(h.state).toBe("blocked");
+		expect(h.action).toMatch(/resume/i);
+		expect(h.tiles.map((t) => t.k)).toEqual(["World", "Agent", "Game date", "Decision"]);
+	});
+
+	it("runHealthTiles: 正常在跑 → state=ok，且没有行动建议", () => {
+		const { model } = load();
+		model.run = { state: "running" };
+		model.control = { pausedByAgent: false, agentPausedAt: null };
+		model.telemetry = { lastActivityAt: NOW - 20_000, steps: [] };
+		model.recent = [
+			{ kind: "date", ts: NOW - 15_000, payload: { raw: 100 } },
+			{ kind: "company_stats", ts: NOW - 5_000 },
+		];
+		const h = model.runHealth(NOW);
+		expect(h.state).toBe("ok");
+		expect(h.action).toBe("");
 	});
 });
