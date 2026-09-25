@@ -137,11 +137,21 @@ export function makeSignalHub(refs: SignalHubRefs): SignalHub {
 					// (SPEC §10.32).
 					if (Array.isArray(p.town_list)) {
 						refs.world.setTowns(
-							(p.town_list as { id?: unknown; pop?: unknown; x?: unknown; y?: unknown }[]).map((t) => ({
+							(p.town_list as { id?: unknown; pop?: unknown; x?: unknown; y?: unknown; tc?: unknown }[]).map((t) => ({
 								id: Number(t.id),
 								population: Number(t.pop),
 								x: Number(t.x),
 								y: Number(t.y),
+								// 主货种（GS 取该镇产量最高的 1–2 个）；形状不对就当没有这条事实。
+								...(Array.isArray(t.tc)
+									? {
+											cargo: (t.tc as { label?: unknown; produced?: unknown; transported?: unknown }[]).map((c) => ({
+												label: String(c.label ?? ""),
+												produced: Number(c.produced) || 0,
+												transported: Number(c.transported) || 0,
+											})),
+										}
+									: {}),
 							})),
 							// `towns` 是 GS 报的**总数**（`town_list` 只是人口前 10 的取样）。
 							typeof p.towns === "number" ? (p.towns as number) : undefined,
@@ -153,6 +163,49 @@ export function makeSignalHub(refs: SignalHubRefs): SignalHub {
 					// DATE does not advance, the game is stopped; if the date
 					// advances but the executor stays silent, the executor is
 					// starved of script ticks (ROADMAP 4b follow-up).
+					// 产业/货种（P1）：GS 发的是**原始计数**；比率由前端派生，
+					// 因为"利用率"有两种口径（SPEC §10.99）。
+					if (Array.isArray(p.industry_list)) {
+						refs.world.setIndustries(
+							(p.industry_list as { id?: unknown; cargo?: unknown; name?: unknown; produced?: unknown; transported?: unknown; stock?: unknown }[]).map((i) => ({
+								id: Number(i.id),
+								cargo: String(i.cargo ?? ""),
+								name: String(i.name ?? ""),
+								produced: Number(i.produced),
+								transported: Number(i.transported),
+								stock: i.stock === null || i.stock === undefined ? null : Number(i.stock),
+							})),
+							// `industries` 是总数（`industry_list` 只是按产量取样的前 N 个）。
+							typeof p.industries === "number" ? (p.industries as number) : undefined,
+						);
+					}
+					if (Array.isArray(p.cargo_totals)) {
+						refs.world.setCargoTotals(
+							(p.cargo_totals as { label?: unknown; produced?: unknown; transported?: unknown }[]).map((c) => ({
+								label: String(c.label ?? ""),
+								produced: Number(c.produced) || 0,
+								transported: Number(c.transported) || 0,
+							})),
+						);
+					}
+					// 公司口径（P2）：本会话累计（monitor）+ 游戏季度总量。
+					// 缺字段时**不调用** setter：老 GS 与新 harness 混跑时不能清空已知事实。
+					if (Array.isArray(p.own_delivered) || typeof p.own_quarter === "number" || p.own_monitored !== undefined) {
+						refs.world.setCompanyCargo({
+							byCargo: Array.isArray(p.own_delivered)
+								? (p.own_delivered as { label?: unknown; amount?: unknown }[]).map((c) => ({
+										label: String(c.label ?? ""),
+										amount: Number(c.amount) || 0,
+									}))
+								: [],
+							quarterDelivered: typeof p.own_quarter === "number" ? (p.own_quarter as number) : null,
+							monitored: (() => {
+								const m = p.own_monitored as { towns?: unknown; industries?: unknown } | undefined;
+								if (!m || typeof m !== "object") return null;
+								return { towns: Number(m.towns) || 0, industries: Number(m.industries) || 0 };
+							})(),
+						});
+					}
 					if (gsStates % 5 === 1) {
 						console.log(
 							`[agent] GS state #${gsStates} date=${String(p.date)} towns=${String(p.towns)} signs=${String(p.signs)}`,

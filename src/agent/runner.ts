@@ -417,6 +417,8 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 				routes: routeWireFacts(hub.getRouteStats(), routeLedger.all()),
 				routesAvailable: true,
 				townsAvailable: true,
+				industryAvailable: true,
+				companyCargoAvailable: true,
 			}) as Record<string, unknown>),
 			telemetry: telemetry.snapshot(),
 			sessionId: session.id,

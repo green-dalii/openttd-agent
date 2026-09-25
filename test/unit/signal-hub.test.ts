@@ -12,6 +12,9 @@ import type { GameEvent } from "../../src/types.js";
 const fakeWorld = () => ({
 	ingest: vi.fn(),
 	setTowns: vi.fn(),
+	setIndustries: vi.fn(),
+	setCargoTotals: vi.fn(),
+	setCompanyCargo: vi.fn(),
 	// G2: the hub now reads the clock to time construction progress.
 	snapshot: () => ({ date: { year: 1950, month: 1, day: 1 } }),
 });
@@ -277,5 +280,71 @@ describe("signal-hub —— GS 错误计数（通道健康）", () => {
 			payload: { kind: "err", cmd: "build", detail: { reason: "refused" } },
 		} as unknown as GameEvent);
 		expect(hub.getGsErrors()).toBe(2);
+	});
+});
+
+describe("GS state：产业/货种/公司口径（P1+P2）", () => {
+	function hub(w: unknown) {
+		return makeSignalHub({
+			world: w as never, getWeb: () => null, getSession: () => null,
+			routeLedger: fakeLedger() as never, getDecisionCount: () => 0,
+			onPhaseChange: () => {}, onNotableEvent: () => {},
+		});
+	}
+
+	it_("industry_list/cargo_totals 写入 world（GS 原始计数，比率不在这里算）", () => {
+		const w = fakeWorld();
+		hub(w).onEvent({
+			kind: "gamescript",
+			payload: {
+				cmd: "state", date: 1, industries: 37,
+				industry_list: [{ id: 5, cargo: "COAL", name: "Coal Mine", produced: 900, transported: 600, stock: 120 }],
+				cargo_totals: [{ label: "COAL", produced: 900, transported: 600 }],
+			},
+		} as unknown as GameEvent);
+		expect(w.setIndustries).toHaveBeenCalledWith(
+			[{ id: 5, cargo: "COAL", name: "Coal Mine", produced: 900, transported: 600, stock: 120 }],
+			37,
+		);
+		expect(w.setCargoTotals).toHaveBeenCalledWith([{ label: "COAL", produced: 900, transported: 600 }]);
+	});
+
+	it_("own_delivered/own_quarter/own_monitored 写入公司口径（缺失时为 null，不编 0）", () => {
+		const w = fakeWorld();
+		hub(w).onEvent({
+			kind: "gamescript",
+			payload: {
+				cmd: "state", date: 1,
+				own_delivered: [{ label: "PASS", amount: 120 }],
+				own_quarter: 5000,
+				own_monitored: { towns: 10, industries: 0 },
+			},
+		} as unknown as GameEvent);
+		expect(w.setCompanyCargo).toHaveBeenCalledWith({
+			byCargo: [{ label: "PASS", amount: 120 }],
+			quarterDelivered: 5000,
+			monitored: { towns: 10, industries: 0 },
+		});
+	});
+
+	it_("完全没有这些字段时不调用 setter（老 GS/新 harness 混跑也不能清空已有事实）", () => {
+		const w = fakeWorld();
+		hub(w).onEvent({ kind: "gamescript", payload: { cmd: "state", date: 1, towns: 1, town_list: [] } } as unknown as GameEvent);
+		expect(w.setIndustries).not.toHaveBeenCalled();
+		expect(w.setCargoTotals).not.toHaveBeenCalled();
+		expect(w.setCompanyCargo).not.toHaveBeenCalled();
+	});
+
+	it_("城镇带主货种 tc 时解析成 cargo 数组", () => {
+		const w = fakeWorld();
+		hub(w).onEvent({
+			kind: "gamescript",
+			payload: { cmd: "state", date: 1, towns: 1,
+				town_list: [{ id: 2, pop: 100, x: 1, y: 2, tc: [{ label: "PASS", produced: 30, transported: 12 }] }] },
+		} as unknown as GameEvent);
+		// 第二个实参是 GS 报的城镇总数（载荷里 towns: 1）
+		expect(w.setTowns).toHaveBeenCalledWith([
+			{ id: 2, population: 100, x: 1, y: 2, cargo: [{ label: "PASS", produced: 30, transported: 12 }] },
+		], 1);
 	});
 });

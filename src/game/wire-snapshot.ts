@@ -47,6 +47,10 @@ export interface WireSnapshotExtras {
 	 * 与 `routesAvailable` 同理：**"不可得"不是"地图上没有城镇"**。
 	 */
 	townsAvailable?: boolean;
+	/** 产业/货种事实是否可得（同样只有 agent 模式有 GS 通道）。 */
+	industryAvailable?: boolean;
+	/** 本公司口径运量（`GSCargoMonitor`）是否可得。 */
+	companyCargoAvailable?: boolean;
 }
 
 export function toWireSnapshot(world: WorldState, extras: WireSnapshotExtras = {}): unknown {
@@ -73,5 +77,13 @@ export function toWireSnapshot(world: WorldState, extras: WireSnapshotExtras = {
 		towns: snap.towns ?? [],
 		townsTotal: snap.townsTotal ?? null,
 		townsAvailable: extras.townsAvailable === true,
+		// 产业与货种：GS 原始计数（比率由前端派生，见 SPEC §10.99）。
+		industries: snap.industries ?? [],
+		industriesTotal: snap.industriesTotal ?? null,
+		cargoTotals: snap.cargoTotals ?? [],
+		industryAvailable: extras.industryAvailable === true,
+		// 本公司口径：null 表示**未收到**（不是零运量）。
+		companyCargo: snap.companyCargo ?? null,
+		companyCargoAvailable: extras.companyCargoAvailable === true,
 	};
 }

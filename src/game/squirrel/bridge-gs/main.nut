@@ -27,6 +27,12 @@ class BridgeV1 extends GSController {
     // null = 未启动；表 = 进行中。生命周期是有意的一等状态：
     // plan → stationA → stationB → road → depot → engine → buy → orders → run。
     _pr = null;
+    // P1/P2（2026-09-25）：产业/货种/公司口径的**缓存**。
+    // 重活（扫全图产业 + 监视所有城镇/产业）每 1000 tick 一次；心跳照旧每 200 tick。
+    // 用缓存而不是"按需才算"的原因：Squirrel 里**条件创建表键**是最容易出事的写法
+    //（D44：未建的键会让整个 GS 静默不加载），所以载荷永远是同一个字面量形状。
+    _facts = null;
+    _facts_tick = 0;
 
     /**
      * Parse an executor company-name phase string into a typed event payload.
@@ -687,6 +693,96 @@ class BridgeV1 extends GSController {
         return code;
     }
 
+    /**
+     * 采集产业/货种/公司口径事实（P1+P2）。
+     *
+     * 只发**原始计数**：比率（"利用率"）有两种口径 —— 产业口径（所有公司）与
+     * 公司口径（`GSCargoMonitor`，本公司）。在 GS 里算比率就等于把口径藏进管道，
+     * 所以派生放在前端（可单测）并显式标注口径。见 SPEC §10.99。
+     *
+     * 事实来源（已核对 GS API）：
+     *   GSIndustry.GetLastMonthProduction / GetLastMonthTransported / GetStockpiledCargo
+     *   GSIndustryList_CargoProducing（按货种过滤，避免 cargo × industry 全交叉）
+     *   GSCargo.GetCargoLabel（标签稳定；本地化 GetName 不作玩家可见字符串）
+     *   GSCargoMonitor.Get{Town,Industry}DeliveryAmount(company, cargo, id, keep_monitoring)
+     *   GSCompany.GetQuarterlyCargoDelivered(company, 0)  // 0 = 当前经济季度
+     */
+    function CollectFacts() {
+        local all_industries = GSIndustryList();
+        local industry_list = [];
+        local cargo_totals = [];
+
+        // --- 产业侧（按货种遍历）---
+        for (local c = 0; c < 64; c++) {
+            if (!GSCargo.IsValidCargo(c)) continue;
+            local label = GSCargo.GetCargoLabel(c);
+            local sum_prod = 0;
+            local sum_trans = 0;
+            foreach (iid, _ in GSIndustryList_CargoProducing(c)) {
+                local prod = GSIndustry.GetLastMonthProduction(iid, c);
+                local trans = GSIndustry.GetLastMonthTransported(iid, c);
+                if (prod == null || prod < 0) prod = 0;
+                if (trans == null || trans < 0) trans = 0;
+                sum_prod += prod;
+                sum_trans += trans;
+                // 负值 = 该产业不接受此货 → **不适用**，不能当成"库存 0"。
+                local stock = GSIndustry.GetStockpiledCargo(iid, c);
+                if (stock != null && stock < 0) stock = null;
+                local nm = GSIndustry.GetName(iid);
+                if (nm == null) nm = "";
+                if (nm.len() > 24) nm = nm.slice(0, 24);
+                nm = this.Trim(nm);   // 截断会留下尾空格（真机实测 "…Coal "）
+                industry_list.append({ id = iid, cargo = label, name = nm,
+                                       produced = prod, transported = trans, stock = stock });
+            }
+            if (sum_prod > 0 || sum_trans > 0) {
+                cargo_totals.append({ label = label, produced = sum_prod, transported = sum_trans });
+            }
+        }
+        // 产量降序 + 上限：不能把全图产业塞进每个载荷。
+        industry_list.sort(function(ia, ib) { return ib.produced - ia.produced; });
+        if (industry_list.len() > 12) industry_list.resize(12);
+        cargo_totals.sort(function(ca, cb) { return cb.produced - ca.produced; });
+
+        // --- 公司口径：把 id 先物化成 array（GSList 反复遍历不安全，
+        //     且仓库约定 array 用单变量 foreach）---
+        local town_ids = [];
+        foreach (tid, _ in GSTownList()) town_ids.append(tid);
+        local ind_ids = [];
+        foreach (iid, _ in all_industries) ind_ids.append(iid);
+
+        local own_by_cargo = [];
+        for (local c = 0; c < 64; c++) {
+            if (!GSCargo.IsValidCargo(c)) continue;
+            local amt = 0;
+            foreach (tid in town_ids) {
+                // keep_monitoring = true：这次读取**不清空**计量，下一次读到的是增量。
+                // 传 false 会静默丢掉这之间的交付量（monitor 是"读取即重置"的）。
+                local town_amt = GSCargoMonitor.GetTownDeliveryAmount(0, c, tid, true);
+                if (town_amt != null && town_amt > 0) amt += town_amt;
+            }
+            foreach (iid in ind_ids) {
+                local ind_amt = GSCargoMonitor.GetIndustryDeliveryAmount(0, c, iid, true);
+                if (ind_amt != null && ind_amt > 0) amt += ind_amt;
+            }
+            if (amt > 0) own_by_cargo.append({ label = GSCargo.GetCargoLabel(c), amount = amt });
+        }
+        own_by_cargo.sort(function(oa, ob) { return ob.amount - oa.amount; });
+
+        // 游戏口径的季度总量（全货种，精确）—— 用来和上面的 monitor 累计交叉核对。
+        local quarter = null;
+        try { quarter = GSCompany.GetQuarterlyCargoDelivered(0, 0); } catch (e) { quarter = null; }
+
+        return {
+            industries = all_industries.Count(),
+            industry_list = industry_list,
+            cargo_totals = cargo_totals,
+            own_delivered = own_by_cargo,
+            own_quarter = quarter,
+            own_monitored = { towns = town_ids.len(), industries = ind_ids.len() },
+        };
+    }
+
     function Start() {
         while (true) {
             this.HandleEvents();
@@ -737,8 +833,17 @@ class BridgeV1 extends GSController {
                     towns.push({ id = tid, pop = pop,
                                  x = GSMap.GetTileX(loc), y = GSMap.GetTileY(loc) });
                 }
+                local now = GSController.GetTick();
+                // 事实每 1000 tick 重算一次（心跳仍每 200 tick）：扫全图产业 +
+                // 监视所有城镇/产业是重活，不能挂在每个心跳上。
+                if (this._facts_tick + 1000 < now) {
+                    this._facts_tick = now;
+                    try { this._facts = this.CollectFacts(); }
+                    catch (e) { this._facts = null; }
+                }
+                local f = this._facts;
                 GSAdmin.Send({
-                    cmd = "state", tick = GSController.GetTick(),
+                    cmd = "state", tick = now,
                     date = GSDate.GetCurrentDate(),
                     towns = tlist.Count(),
                     town_list = towns,
@@ -746,6 +851,14 @@ class BridgeV1 extends GSController {
                     last_cmd = this._last_cmd,
                     signs = sc,
                     sign_names = names,
+                    // 形状恒定（不用条件建键）：没有事实时发 null/空表，
+                    // harness 只在字段存在时更新世界状态。
+                    industries = (f == null) ? null : f.industries,
+                    industry_list = (f == null) ? [] : f.industry_list,
+                    cargo_totals = (f == null) ? [] : f.cargo_totals,
+                    own_delivered = (f == null) ? [] : f.own_delivered,
+                    own_quarter = (f == null) ? null : f.own_quarter,
+                    own_monitored = (f == null) ? null : f.own_monitored,
                 });
             }
             this.Sleep(20);

@@ -164,3 +164,31 @@ describe("wire snapshot: towns（GS 一直有数据，此前从没发到页面�
 		expect(snap.townsTotal).toBeNull();
 	});
 });
+
+describe("wire snapshot: 产业/货种/公司口径", () => {
+	function withFacts() {
+		const w = new WorldState();
+		w.setIndustries([{ id: 1, cargo: "COAL", name: "Mine", produced: 10, transported: 4, stock: 2 }], 12);
+		w.setCargoTotals([{ label: "COAL", produced: 10, transported: 4 }]);
+		w.setCompanyCargo({ byCargo: [{ label: "COAL", amount: 3 }], quarterDelivered: 7, monitored: { towns: 1, industries: 1 } });
+		return w;
+	}
+
+	it("agent 模式：产业/货种/公司口径全部发出，并标记可得", () => {
+		const snap = toWireSnapshot(withFacts(), { industryAvailable: true, companyCargoAvailable: true }) as Record<string, unknown>;
+		expect(snap.industriesTotal).toBe(12);
+		expect(snap.industries).toHaveLength(1);
+		expect(snap.cargoTotals).toHaveLength(1);
+		expect((snap.companyCargo as { quarterDelivered: number }).quarterDelivered).toBe(7);
+		expect(snap.industryAvailable).toBe(true);
+		expect(snap.companyCargoAvailable).toBe(true);
+	});
+
+	it("watch 模式：标记不可得且不带数据（「不可得」≠「零」）", () => {
+		const snap = toWireSnapshot(new WorldState(), { industryAvailable: false, companyCargoAvailable: false }) as Record<string, unknown>;
+		expect(snap.industryAvailable).toBe(false);
+		expect(snap.companyCargoAvailable).toBe(false);
+		expect(snap.industries).toEqual([]);
+		expect(snap.companyCargo).toBeNull();
+	});
+});

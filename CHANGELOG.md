@@ -9,6 +9,23 @@
 
 ## [Unreleased]
 
+### Added（2026-09-25：产业与货物面板 = P1+P2）
+- **Live 页新增 "Cargo & industry" 段**（数据全部来自 Bridge GS，仅 agent 模式有；watch 模式显示"读不到"）：
+  - **Cargo — last month**：按货种的上月产量/运量 + "运走比例"，**表头写明口径是"全图（所有公司）"**；
+  - **Industry detail**：按产量取样的前 12 个产业（#id / 名称 / 货种 / 产量 / 运量 / 库存），
+    并注明 `largest N of M industries · sampled by production (not the whole map)`；
+  - **Delivered by this company**：本公司交付量（`GSCargoMonitor` 累计，**覆盖全部城镇与产业**，
+    面板写明 "all N towns and M industries monitored"），与游戏口径的**季度交付总量**分列作交叉核对。
+- 城镇表新增"主货种 + 运走比例"。
+
+### Fixed（2026-09-25）
+- 货种标签 `OIL_`（GS 定长 4 字符）在面板上原样显示 → 归一化为 `Oil`；
+  产业名截断留下尾空格（`"…Coal "`）→ GS 侧 Trim。
+- "Our deliveries" 在**有数据但尚无交付**时显示 `—`（被读成"未知"）→ 现在显示 **0**（真实测量），
+  只有没有 GS 通道时才显示 `—`。
+- 文档/提示漂移：`AGENTS.md` 与 preflight 提示里引用的 `pnpm run gen-squirrel`
+  **这条命令不存在**（GS 包在启动时从 `src/game/squirrel` 复制）→ 已改为事实描述。
+
 ### Added（2026-09-25：仪表盘的数据深度）
 - **Towns 面板**（Live 页）：城镇人口与坐标。数据来自 Bridge GS 的取样
   （**人口最多的 10 个**），同时给出**地图上的城镇总数**——页面明确写着

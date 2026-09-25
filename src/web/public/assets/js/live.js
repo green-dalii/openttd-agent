@@ -175,6 +175,14 @@
                   ? null
                   : Number(s.townsTotal);
               this.townsAvailable = s.townsAvailable === true;
+              // 产业/货种（P1）：GS 原始计数；比率由 view model 派生。
+              if (Array.isArray(s.industries)) this.industries = s.industries;
+              this.industriesTotal = s.industriesTotal === null || s.industriesTotal === undefined ? null : Number(s.industriesTotal);
+              if (Array.isArray(s.cargoTotals)) this.cargoTotals = s.cargoTotals;
+              this.industryAvailable = s.industryAvailable === true;
+              // 公司口径（P2）；null = 未收到（不是零运量）。
+              this.companyCargo = s.companyCargo || null;
+              this.companyCargoAvailable = s.companyCargoAvailable === true;
               // These three were sent by the server all along but never consumed,
               // so a page loaded mid-run saw no stages and no memory (MEMORY.md A1:
               // "no error" only holds if the code actually ran).

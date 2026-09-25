@@ -584,3 +584,47 @@ describe("Squirrel packs: 表键必须先初始化（D44）", () => {
 		expect([...sample.matchAll(re)].some((m) => m[1] === "missing")).toBe(true);
 	});
 });
+
+/**
+ * P1+P2：产业/货种/公司口径的上报（2026-09-25）。
+ *
+ * 这些守卫盯的是**会静默丢数据**的写法，不是风格：
+ * ① `GSCargoMonitor` 是"读取即重置"的计量，`keep_monitoring` 传错就永久丢增量；
+ * ② 重活必须**节流**（每 1000 tick），否则心跳里每 200 tick 扫全图产业；
+ * ③ 监视必须覆盖**所有**城镇与产业，否则"本公司交付量"只能是个来历不明的子集；
+ * ④ 库存为负（该产业不接受该货）必须落成 null，不能当作 0。
+ */
+describe("Squirrel 桥：产业/货种/公司口径上报", () => {
+	const src = stripComments(readFileSync(path.join("src/game/squirrel/bridge-gs/main.nut"), "utf8"));
+
+	it("存在 CollectFacts 且按 tick 节流（不是每个心跳都扫全图）", () => {
+		expect(src).toContain("function CollectFacts(");
+		expect(src).toMatch(/_facts_tick\s*\+\s*1000\s*</);
+	});
+
+	it("GSCargoMonitor 的两次读取都传 keep_monitoring = true（否则静默丢增量）", () => {
+		expect(src).toMatch(/GSCargoMonitor\.GetTownDeliveryAmount\(0,\s*c,\s*\w+,\s*true\)/);
+		expect(src).toMatch(/GSCargoMonitor\.GetIndustryDeliveryAmount\(0,\s*c,\s*\w+,\s*true\)/);
+	});
+
+	it("监视覆盖所有城镇与所有产业（否则'本公司交付量'是不明子集）", () => {
+		// 两个 for-each 都要出现在 CollectFacts 体内（用 GSTownList/GSIndustryList 驱动）
+		const fn = src.slice(src.indexOf("function CollectFacts("), src.indexOf("function Start("));
+		expect(fn).toContain("GSTownList()");
+		expect(fn).toContain("GSIndustryList()");
+	});
+
+	it("货种用 GetCargoLabel（本地化 GetName 不能作为玩家可见字符串）", () => {
+		expect(src).toContain("GSCargo.GetCargoLabel(c)");
+	});
+
+	it("库存为负 → null（'该产业不接受此货' 不是 '库存 0'）", () => {
+		const fn = src.slice(src.indexOf("function CollectFacts("), src.indexOf("function Start("));
+		expect(fn).toMatch(/stock\s*<\s*0/);
+	});
+
+	it("产业样本有上限（不能把全图产业塞进每个载荷）", () => {
+		const fn = src.slice(src.indexOf("function CollectFacts("), src.indexOf("function Start("));
+		expect(fn).toMatch(/resize\(\s*12\s*\)/);
+	});
+});

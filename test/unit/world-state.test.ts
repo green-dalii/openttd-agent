@@ -91,3 +91,55 @@ describe("world state: towns（Bridge GS 上报的候选城镇）", () => {
 		expect(w.snapshot().townsTotal).toBe(9);
 	});
 });
+
+describe("world state: 产业与货种（GS 上报的原始计数）", () => {
+	it("保存产业样本与货种合计，并记住产业总数", () => {
+		const w = new WorldState();
+		w.setIndustries(
+			[
+				{ id: 5, cargo: "PASS", name: "Town", produced: 100, transported: 40, stock: null },
+				{ id: 9, cargo: "COAL", name: "Coal Mine", produced: 900, transported: 600, stock: 120 },
+			],
+			37,
+		);
+		w.setCargoTotals([
+			{ label: "COAL", produced: 900, transported: 600 },
+			{ label: "PASS", produced: 100, transported: 40 },
+		]);
+		const snap = w.snapshot();
+		expect(snap.industriesTotal).toBe(37);
+		// 样本按产量降序（顺序是世界事实，不是建议）
+		expect(snap.industries.map((i) => i.id)).toEqual([9, 5]);
+		expect(snap.cargoTotals).toHaveLength(2);
+	});
+
+	it("垃圾/缺失输入被丢掉而不是变成 0（0 会被读成「该产业不产东西」）", () => {
+		const w = new WorldState();
+		w.setIndustries([{ id: "x" } as never, { id: 3, produced: Number.NaN } as never], null);
+		expect(w.snapshot().industries).toEqual([]);
+		expect(w.snapshot().industriesTotal).toBeNull();
+	});
+
+	it("公司口径运量：本会话累计 + 季度总量 + 被监视的目的地数", () => {
+		const w = new WorldState();
+		w.setCompanyCargo({
+			byCargo: [{ label: "PASS", amount: 120 }],
+			quarterDelivered: 5000,
+			monitored: { towns: 10, industries: 0 },
+		});
+		const c = w.snapshot().companyCargo;
+		expect(c?.byCargo[0]).toEqual({ label: "PASS", amount: 120 });
+		expect(c?.quarterDelivered).toBe(5000);
+		expect(c?.monitored).toEqual({ towns: 10, industries: 0 });
+	});
+
+	it("没收到公司口径数据时是 null（不是 0 —— 那等于说「一辆货都没送」）", () => {
+		expect(new WorldState().snapshot().companyCargo).toBeNull();
+	});
+
+	it("城镇可以带主货种（原始计数，比率由前端派生）", () => {
+		const w = new WorldState();
+		w.setTowns([{ id: 1, population: 100, x: 1, y: 2, cargo: [{ label: "PASS", produced: 30, transported: 12 }] } as never]);
+		expect(w.snapshot().towns[0]!.cargo).toEqual([{ label: "PASS", produced: 30, transported: 12 }]);
+	});
+});

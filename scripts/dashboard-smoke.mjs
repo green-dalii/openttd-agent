@@ -334,6 +334,37 @@ const towns = await send("Runtime.evaluate", {
 });
 console.log("TOWNS:", JSON.stringify(towns.result?.value, null, 2));
 const tv = towns.result?.value || {};
+// Cargo & industry（P1+P2）：无 GS 通道时必须显示"读不到"且不给 0；
+// 有数据时必须写明两种口径（"all companies" vs "this company"）。
+const cargo = await send("Runtime.evaluate", {
+  expression: `(() => {
+    const d = window.Alpine && document.querySelector('[x-data]') ? window.Alpine.$data(document.querySelector('[x-data]')) : null;
+    const sec = [...document.querySelectorAll('section')].find(s => /Cargo — last month/.test(s.textContent));
+    return {
+      found: !!sec,
+      industryAvailable: d ? d.industryAvailable === true : null,
+      companyCargoAvailable: d ? d.companyCargoAvailable === true : null,
+      note: d ? d.industryNote() : null,
+      cargoRows: d ? d.cargoRows().length : 0,
+      ownTotal: d ? d.ownDeliveredTotal() : null,
+      quarter: d ? d.ownQuarterText() : null,
+      text: sec ? sec.textContent.replace(/\\s+/g, ' ').trim().slice(0, 200) : null,
+    };
+  })()`,
+  returnByValue: true,
+});
+console.log("CARGO:", JSON.stringify(cargo.result?.value, null, 2));
+const cv = cargo.result?.value || {};
+if (!cv.found) stabilityProblems.push("Cargo & industry 面板不存在（P1 的渲染链断了）");
+if (cv.industryAvailable === false) {
+  if (!cv.note) stabilityProblems.push("Cargo 面板没有 GS 通道却没有说明文字（会被读成「零产量」）");
+  if (cv.cargoRows !== 0) stabilityProblems.push(`无通道时 cargoRows=${cv.cargoRows}（必须为 0）`);
+  if (cv.ownTotal !== "—") stabilityProblems.push(`无通道时「Our deliveries」显示 ${cv.ownTotal}（必须是 —）`);
+  if (cv.quarter !== "—") stabilityProblems.push(`无通道时「Delivered this quarter」显示 ${cv.quarter}（必须是 —）`);
+}
+if (cv.text && /all companies/i.test(cv.text) === false && cv.cargoRows > 0) {
+  stabilityProblems.push("Cargo 表没有写明「所有公司」口径");
+}
 if (!tv.found) stabilityProblems.push("Towns 面板不存在（城镇链断了）");
 if (tv.available === false) {
   // 没有 GS 通道时：必须有说明文字，且 KPI 不能是 0

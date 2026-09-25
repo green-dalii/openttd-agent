@@ -413,25 +413,20 @@ pgrep -fl "run-experiment|cli/run.ts|OpenTTD.app"     # 无输出 = 没有（202
 **修法（仍未做）**：候选为事件列表/步骤表的上限与增量插入、表格渲染节流（图表保持实时）、
 避免整表重建。验收 = 同一探针下**每帧变更数**下降 ≥10×，且用户可见内容不变（AGENTS §5.2）。
 
-### 6d. 重要数据的通道与呈现（**选型已定**，2026-09-25；见 `docs/DATA-CHANNELS-EVALUATION.md`）
+### 6d. 重要数据的通道与呈现（选型已定；**P1/P2 已完成**，P3/P4 待做）
 
-**选型结论（不再有候选分支）**：产业/城镇/车辆数据**只能**从 Game Script 取
-（admin 端口协议里没有这些包，主线 console 也没有对应命令 —— 见 `SPEC.md` §10.99）。
-因此采用：**C2 GS 周期上报（聚合 + top-N）** + **C3 GS 按需查询（全量明细）** +
-**C4 `GSCargoMonitor`（本公司口径运量，GS 内累计后上报）**；watch 模式下显示"不可得"。
+选型与理由见 `docs/DATA-CHANNELS-EVALUATION.md`；已落地的线上形状与真机读数见 `SPEC.md` §10.100。
+**P1（产业/货种聚合 + 取样）与 P2（本公司交付量，monitor + 季度交叉核对）已完成并做真机验收。**
 
-| 阶段 | 内容 | 验收（真机） |
-|------|------|--------------|
-| **P1** | C2：`cmd=state` 增加 `industries`（按产量 top-N：id/type/cargo/produced/transported/util%/stockpile）+ `cargo_totals`（按货种聚合）+ 城镇主货种与上月产/运比 | 面板数字与游戏内一致；`gsErrors = 0`；三态（有数据/空/不可得）都对；`dashboard:smoke` 有断言且**回放证明会红** |
-| **P2** | C4：GS 内用 `GSCargoMonitor` 周期累加，上报"本公司交付量 + 按城镇/产业的分布" | 累计量方向与线路收入一致；区间口径写在标题上（"delivered by this company, since <t>"） |
-| **P3** | C3：按需全量（agent 只读工具 `get_industries`/`get_cargo` + 页面"展开全部"） | 全量与取样一致；**不增加稳态载荷**（对比同一探针的前后帧字节/变更数） |
-| **P4** | 车辆明细（`GSVehicleList` 采样 + 按需全量） | 行数与 GS 车队数一致或明确标注"N of M" |
+| 阶段 | 内容 | 状态 |
+|------|------|------|
+| P1 | GS 上报 `industries`/`industry_list`(top-12)/`cargo_totals` + 前端 Cargo & industry 段（口径分块 + 取样说明 + 三态） | ✅ 2026-09-25（SPEC §10.100） |
+| P2 | `GSCargoMonitor` 全量监视（全部城镇+产业）→ 本公司交付量；季度总量作交叉核对 | ✅ 2026-09-25；**待补**：带 LLM 的真实运行的交付量读数（offline demo 里恒为 0） |
+| **P3** | **按需全量**（agent 只读工具 `get_industries`/`get_cargo` + 页面"展开全部"） | 待做。验收：全量与取样一致、**不增加稳态载荷**（同一探针比对前后帧字节/变更数） |
+| **P4** | **车辆明细**（`GSVehicleList` 采样 + 按需全量） | 待做。验收：行数与 GS 车队数一致或明确标注 "N of M" |
 
-**必须一并遵守**（否则会重犯已知错误）：
-- 两个"利用率"口径**分块呈现**（产业口径 = 所有公司；公司口径 = monitor）——见 `SPEC.md` §10.99。
-- Squirrel 侧防 **D44**（未建表键会静默杀死 GS）与 **D34**（字符串/名称）：新字段必须有守卫测试 + 真机 `gsErrors = 0`。
-- 每帧**不发全量**（产业/车辆可达几十上百条）→ top-N + 按需。
-- watch 模式**不编造**：沿用 `routesAvailable`/`townsAvailable` 的"不可得 ≠ 零"模式。
+尚未做但已定的两条口径规则（写进 `SPEC.md` §10.99，实现时不得违反）：
+产业口径（所有公司）与公司口径（monitor）**分块呈现**；"0" 与 "—" 不混用。
 
 ### 6e. 前端结构改造 S2–S4（**计划**，见 `docs/FRONTEND-ARCHITECTURE.md`）
 

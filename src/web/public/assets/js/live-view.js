@@ -183,6 +183,16 @@
       townsTotal: null,
       /** 城镇数据是否**可得**。false = 这个 run 没有 GS 通道（watch 模式）。 */
       townsAvailable: false,
+      /** 产业样本（GS 按产量取样）与总数。 */
+      industries: [],
+      industriesTotal: null,
+      /** 按货种聚合的上月原始计数（产业侧，所有公司）。 */
+      cargoTotals: [],
+      /** 产业/货种是否可得（与城镇同源：GS 通道）。 */
+      industryAvailable: false,
+      /** 本公司口径运量（`GSCargoMonitor` 累计 + 游戏季度总量）或 null。 */
+      companyCargo: null,
+      companyCargoAvailable: false,
       /** 线路表排序（默认按每日收益，null 排最后）。 */
       routeSortKey: "income",
       routeSortDir: "desc",
@@ -630,6 +640,11 @@
               x: Number.isFinite(Number(t.x)) ? Number(t.x) : null,
               y: Number.isFinite(Number(t.y)) ? Number(t.y) : null,
               at: Number.isFinite(Number(t.x)) && Number.isFinite(Number(t.y)) ? `${t.x}, ${t.y}` : "—",
+              // 主货种：原始计数 + 由前端派生的"运走比例"（口径：所有公司）。
+              cargo: (Array.isArray(t.cargo) ? t.cargo : []).slice(0, 2).map((c) => {
+                const pct = this.cargoSharePct(c.produced, c.transported);
+                return { label: this.cargoName(c.label), pct: pct === null ? "—" : `${pct}%` };
+              }),
             };
           })
           .sort((a, b) => b._population - a._population);
@@ -652,6 +667,150 @@
               : Number(this.townsTotal),
           shownPopulation: rows.reduce((a, r) => a + r._population, 0),
         };
+      },
+
+      /**
+       * 货种标签 → 人类可读名。
+       *
+       * 为什么用**标签**而不是 GS 的 `GSCargo.GetName`：后者是**本地化字符串**，
+       * 官方明确说"不应作为玩家可见字符串使用"（PR #8544 讨论）。标签（PASS/COAL…）
+       * 是稳定的机器键，映射放在可单测的这里，未知标签就原样显示（不编名字）。
+       */
+      cargoName(label) {
+        // GS 的标签是**定长 4 字符**（`OIL_`、`GOOD`、`PASS`）——尾部下划线/空格
+        // 是填充不是语义，直接显示会变成 "OIL_"（真机实测 2026-09-25）。
+        const l = String(label || "").toUpperCase().replace(/[\s_]+$/, "");
+        return (
+          {
+            PASS: "Passengers",
+            MAIL: "Mail",
+            COAL: "Coal",
+            WOOD: "Wood",
+            OIL: "Oil",
+            "GOOD": "Goods",
+            GRAI: "Grain",
+            LVST: "Livestock",
+            STEL: "Steel",
+            VALU: "Valuables",
+            FOOD: "Food",
+            PAPR: "Paper",
+            WATR: "Water",
+            FRUT: "Fruit",
+            MAIZ: "Maize",
+            IORE: "Iron ore",
+            RUBR: "Rubber",
+            SUGP: "Sugar",
+            TOYS: "Toys",
+            BATT: "Batteries",
+            CERE: "Cereals",
+            ORE: "Ore",
+            DIAM: "Diamonds",
+            ENSP: "Engineering supplies",
+            FMSP: "Farm supplies",
+          }[l] || l
+        );
+      },
+
+      /** 产业口径的"运走比例"：**所有公司**合计。produced=0 → null（显示 —，不是 0%）。 */
+      cargoSharePct(produced, transported) {
+        const p = Number(produced);
+        const t = Number(transported);
+        if (!Number.isFinite(p) || p <= 0 || !Number.isFinite(t)) return null;
+        return Math.round((t / p) * 100);
+      },
+
+      /** 货种聚合行（产业口径）。share 是**派生**值，hint 写明口径。 */
+      cargoRows() {
+        return (Array.isArray(this.cargoTotals) ? this.cargoTotals : []).map((c) => {
+          const pct = this.cargoSharePct(c.produced, c.transported);
+          return {
+            key: String(c.label),
+            label: String(c.label),
+            name: this.cargoName(c.label),
+            produced: U.fmtInt(c.produced),
+            transported: U.fmtInt(c.transported),
+            share: pct === null ? "—" : `${pct}%`,
+            shareHint: "share of the industry's last-month production that was transported — all companies, not just this one",
+          };
+        });
+      },
+
+      /** 产业样本行（按产量降序）。stock 为 null 时显示 —（该产业不接受该货）。 */
+      industryRows() {
+        const list = Array.isArray(this.industries) ? this.industries : [];
+        return list
+          .map((i) => ({
+            key: String(i.id),
+            id: i.id,
+            name: i.name || this.cargoName(i.cargo),
+            cargo: this.cargoName(i.cargo),
+            produced: U.fmtInt(i.produced),
+            transported: U.fmtInt(i.transported),
+            stock: i.stock === null || i.stock === undefined ? "—" : U.fmtInt(i.stock),
+            _produced: Number(i.produced) || 0,
+          }))
+          .sort((a, b) => b._produced - a._produced);
+      },
+
+      /** 取样说明（诚实：这是取样，不是全图）。 */
+      industrySampleNote() {
+        if (this.industryAvailable !== true) return "";
+        const rows = this.industryRows();
+        if (!rows.length) return "";
+        const total = Number.isFinite(Number(this.industriesTotal)) ? U.fmtInt(this.industriesTotal) : "unknown";
+        return `largest ${rows.length} of ${total} industries · sampled by production (not the whole map)`;
+      },
+
+      /** 与 `townsNote()` 同约定：空串 = 可显示；非空 = 为什么没有。 */
+      industryNote() {
+        if (this.industryAvailable !== true) {
+          return "not readable in this run — industry and cargo data come from the Bridge GS, which only runs in agent mode (this run is watch)";
+        }
+        return "";
+      },
+
+      industryEmpty() {
+        return "no industry report yet — the GS publishes its sample every few hundred ticks";
+      },
+
+      /** 公司口径：本公司实际交付（monitor 累计，只覆盖被监视的目的地）。 */
+      ownCargoRows() {
+        const c = this.companyCargo;
+        if (!c || !Array.isArray(c.byCargo)) return [];
+        return c.byCargo.map((x) => ({
+          key: String(x.label),
+          name: this.cargoName(x.label),
+          label: String(x.label),
+          amount: U.fmtInt(x.amount),
+        }));
+      },
+
+      /** 本公司口径的说明：**必须**写出"这是子集"（被监视的目的地数量）。 */
+      ownCargoNote() {
+        if (this.companyCargoAvailable !== true) return "";
+        const c = this.companyCargo || {};
+        const m = c.monitored;
+        if (!m) return "delivered by this company since this run started — destination coverage unknown";
+        // 覆盖**全部**城镇与产业（GS 侧就是全量监视）——所以说"all"而不是"subset"；
+        // 万一将来改成抽样，这里必须跟着改（措辞与事实要一致）。
+        return `delivered by this company since this run started · all ${U.fmtInt(m.towns)} towns and ${U.fmtInt(m.industries)} industries monitored`;
+      },
+
+      /** 本公司交付合计（monitor 口径，会话累计）；未收到时 —（不是 0）。 */
+      ownDeliveredTotal() {
+        // 有通道时 **0 是真实测量值**（monitor 还没收到交付），必须显示 0；
+        // 只有"没有这条通道"才显示 —。把它写成"空表 → —"就是又一次把 0 说成未知。
+        if (this.companyCargoAvailable !== true) return "—";
+        const sum = (this.companyCargo && this.companyCargo.byCargo ? this.companyCargo.byCargo : [])
+          .reduce((a, x) => a + (Number(x.amount) || 0), 0);
+        return U.fmtInt(sum);
+      },
+
+      /** 游戏口径的季度交付总量（精确值，用作交叉核对）；未收到时 —。 */
+      ownQuarterText() {
+        const c = this.companyCargo;
+        const q = c ? c.quarterDelivered : null;
+        return q === null || q === undefined || !Number.isFinite(Number(q)) ? "—" : U.fmtInt(q);
       },
 
       /** 与 `routesNote()` 同约定：空串 = 数据可用（显示表）；非空 = 为什么没有。 */

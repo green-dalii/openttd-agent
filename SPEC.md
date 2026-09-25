@@ -717,3 +717,23 @@ inst.__zoomedByUser = true;       // 让数据帧走 setData(data, false)，视�
 **规则**：同一面板里"产业利用率"与"本公司运量"必须**分块并各自标注口径**；
 所有这类字段都是**上月经济月**口径（`ScriptEconomyTime`），不是实时值，必须标注。
 具体选型与呈现方案见 `docs/DATA-CHANNELS-EVALUATION.md`；实施计划见 `ROADMAP.md` §6d。
+
+### 10.100 P1+P2 实测：产业/货种/公司交付量（2026-09-25 真机）
+
+按 `docs/DATA-CHANNELS-EVALUATION.md` 的选型落地的**线上形状**与真机读数
+（自建 agent 运行，隔离端口 + 数据目录，offline demo）：
+
+| 事实 | 证据 |
+|------|------|
+| **GS 上报原始计数，比率由前端派生** | `cmd=state` 新增字段：`industries`(总数) · `industry_list`(按产量取样 top-12：`{id,cargo,name,produced,transported,stock}`) · `cargo_totals`(按货种聚合 `{label,produced,transported}`) · `own_delivered`(本公司 monitor 累计 `{label,amount}`) · `own_quarter`(游戏季度总量) · `own_monitored`(`{towns,industries}`)。真机：`industriesTotal=49..52`、`industry_list=12`、`cargo_totals=6`、`own_monitored={towns:20..23, industries:49..52}` |
+| **重活节流**：事实每 1000 tick 重算一次（心跳仍 200 tick） | `bridge-gs/main.nut` 的 `_facts_tick + 1000 < now` 门；载荷形状恒定（不用条件建键 —— D44 的规避方式） |
+| **monitor 必须 `keep_monitoring = true`** | 语义是"读取即重置"（`cargomonitor.h`）：传 `false` 会静默丢掉这段增量。守卫测试锁死两次调用 |
+| **监视覆盖全部城镇与全部产业** | GS 侧把 `GSTownList()`/`GSIndustryList()` 物化成 id 数组后逐对轮询；真机 `own_monitored` 与地图上的数量一致 ⇒ 交付量**不是**不明子集 |
+| **货种标签是定长 4 字符**（`OIL_`） | 真机面板最初显示 `OIL_`；前端归一化后为 `Oil`（`GetName` 是本地化字符串，官方明确不作玩家可见文案） |
+| **产业名截断会留尾空格** | 真机 `"Chedingworth Falls Coal "` → GS 侧 `Trim(slice(0,24))` 后为 `"Wundston Coal Mine"` |
+| **库存 `—` 的含义** | `GetStockpiledCargo` 对该产业**不接受的货**返回负值 ⇒ 落成 `null` ⇒ 页面显示 `—`（不是"库存 0"） |
+| **两种口径必须分块** | 面板：`Cargo — last month`（标注 "map-wide (all companies)"）与 `Delivered by this company`（标注 "since this run started · all N towns and M industries monitored"）分开呈现；季度总量作为**交叉核对**单列 |
+| **0 与"—"不混用** | "Our deliveries" 在有通道但尚无交付时显示 **0**（真实测量），仅当没有通道时显示 `—` |
+
+**注意**：本节的读数来自 offline-demo（脚本化演示）——`own_delivered` 因此恒为 0
+（演示里没有真实交付）。真实交付量需要带 LLM 的 agent 运行，属 P2 的后续验收项。

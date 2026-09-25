@@ -60,7 +60,7 @@ src/
 test/
   unit/        # 纯单测 (vitest)
   integration/ # 需真机标记 @live
-scripts/       # dev 辅助 (gen-squirrel, setup-sandbox)
+scripts/       # dev 辅助 (loop-health, run-experiment, dashboard-smoke, sync/verify-vendor)
 ```
 
 新增模块必须归位；拿不准问（或放 `src/util/` 纯工具）。

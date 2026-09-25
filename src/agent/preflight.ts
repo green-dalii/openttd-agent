@@ -237,7 +237,7 @@ function checkGsFiles(cfg: Config): PreflightCheck {
 		label: "GameScript sources",
 		status: "warn",
 		detail: "generated at boot from src/game/squirrel",
-		hint: "If GS deployment fails later, run pnpm run gen-squirrel.",
+		hint: "The GS packs are copied from src/game/squirrel at boot; a Squirrel error shows up as a missing GS heartbeat in the run log.",
 	};
 }
 

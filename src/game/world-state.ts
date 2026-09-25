@@ -106,15 +106,61 @@ export interface WorldSnapshot {
 	 * null = 未收到（页面显示"—"），**不是 0**。
 	 */
 	townsTotal: number | null;
+	/** 产业样本（按产量降序，GS 采样）。 */
+	industries: IndustryInfo[];
+	/** 地图上的产业总数（`GSIndustryList().Count()`）；null = 未收到。 */
+	industriesTotal: number | null;
+	/** 按货种聚合的上月产量/运量（原始计数）。 */
+	cargoTotals: CargoAmounts[];
+	/** 本公司口径运量；null = 未收到（不是"零运量"）。 */
+	companyCargo: CompanyCargoFacts | null;
 }
 
 /** One town as the agent sees it - enough to make a real choice. */
+/**
+ * 一个货种在**产业侧**的上月原始计数（由 GS 上报，**不做比率**）。
+ *
+ * 为什么只发原始数：比率（"利用率"）有两种口径 —— 产业口径（所有公司）与
+ * 公司口径（`GSCargoMonitor`）。把它算在 GS 里就等于把口径藏进管道；
+ * 派生放在前端（可单测）并显式标注口径。见 `SPEC.md` §10.99。
+ */
+export interface CargoAmounts {
+	/** 货种标签（`GSCargo.GetCargoLabel`，如 PASS/COAL）——稳定，不像本地化名。 */
+	label: string;
+	produced: number;
+	transported: number;
+}
+
+/** 一个产业的上月读数（GS 采样，原始计数）。 */
+export interface IndustryInfo {
+	id: number;
+	/** 该行对应的**货种标签**（`GSCargo.GetCargoLabel`，如 COAL/OIL_）。 */
+	cargo: string;
+	name: string;
+	produced: number;
+	transported: number;
+	/** 等待加工的库存；null = 该产业不接受/不适用（**不是 0**）。 */
+	stock: number | null;
+}
+
+/** 本公司口径的运量（`GSCargoMonitor` 累计 + 游戏季度统计）。 */
+export interface CompanyCargoFacts {
+	/** 本会话累计：按货种（monitor 口径，只覆盖**被监视的目的地**）。 */
+	byCargo: { label: string; amount: number }[];
+	/** 游戏口径：本季度交付总量（所有货种，精确值），用作交叉核对。 */
+	quarterDelivered: number | null;
+	/** 被监视的目的地数量（缺了它就没法诚实地说"这是子集"）。 */
+	monitored: { towns: number; industries: number } | null;
+}
+
 export interface TownInfo {
 	id: number;
 	/** Population; the main signal for how much passenger demand exists. */
 	population: number;
 	x: number;
 	y: number;
+	/** 该镇主货种（GS 取产量最高的 1–2 个）——原始计数，比率由前端派生。 */
+	cargo?: CargoAmounts[];
 }
 
 export interface WorldStateOptions {
@@ -136,6 +182,10 @@ export class WorldState {
 	private recent: GameEvent[] = [];
 	private towns: TownInfo[] = [];
 	private townsTotal: number | null = null;
+	private industries: IndustryInfo[] = [];
+	private industriesTotal: number | null = null;
+	private cargoTotals: CargoAmounts[] = [];
+	private companyCargo: CompanyCargoFacts | null = null;
 	private totalEvents = 0;
 	private recentLimit: number;
 
@@ -246,6 +296,10 @@ export class WorldState {
 			totalEvents: this.totalEvents,
 			towns: [...this.towns],
 			townsTotal: this.townsTotal,
+			industries: [...this.industries],
+			industriesTotal: this.industriesTotal,
+			cargoTotals: [...this.cargoTotals],
+			companyCargo: this.companyCargo ? { ...this.companyCargo } : null,
 		};
 	}
 
@@ -258,11 +312,75 @@ export class WorldState {
 	setTowns(towns: TownInfo[], total?: number | null): void {
 		// 总数只在**明确给出**时更新：取样列表每帧都到，总数偶尔才带 ——
 		// 用 undefined 覆盖会把已知总数抹成 null（页面从"共 42 个"退回"—"）。
-		if (total !== undefined) this.townsTotal = Number.isFinite(Number(total)) ? Number(total) : null;
+		if (total !== undefined) this.townsTotal = total === null || !Number.isFinite(Number(total)) ? null : Number(total);
 		this.towns = (Array.isArray(towns) ? towns : [])
 			.filter((t) => t && Number.isFinite(t.id))
-			.map((t) => ({ id: Number(t.id), population: Number(t.population) || 0, x: Number(t.x) || 0, y: Number(t.y) || 0 }))
+			.map((t) => ({
+				id: Number(t.id),
+				population: Number(t.population) || 0,
+				x: Number(t.x) || 0,
+				y: Number(t.y) || 0,
+				// 主货种是可选事实：过滤掉不可用的条目，而不是补 0。
+				...(Array.isArray(t.cargo)
+					? {
+							cargo: t.cargo
+								.filter((c) => c && typeof c.label === "string" && Number.isFinite(Number(c.produced)))
+								.map((c) => ({ label: String(c.label), produced: Number(c.produced) || 0, transported: Number(c.transported) || 0 })),
+						}
+					: {}),
+			}))
 			.sort((a, b) => b.population - a.population);
+	}
+
+	/**
+	 * 替换产业样本（GS 拥有数据，harness 只读）。
+	 *
+	 * 过滤规则：**拿不到有限产量的条目直接丢掉**。把它当 0 会让页面显示
+	 * "该产业不产东西"——那是编造事实（同 `setTowns` 的规则）。
+	 * 总数只在明确给出时更新（`undefined` 不覆盖已知值）。
+	 */
+	setIndustries(list: IndustryInfo[], total?: number | null): void {
+		// `null` 是**明确的"未知"**：显式传 null 必须落成 null。
+		// （`Number(null) === 0` 会把"未知"变成"零个产业"—— 2026-09-25 同类 bug 第二次。）
+		if (total !== undefined) this.industriesTotal = total === null || !Number.isFinite(Number(total)) ? null : Number(total);
+		this.industries = (Array.isArray(list) ? list : [])
+			.filter((i) => i && Number.isFinite(Number(i.id)) && Number.isFinite(Number(i.produced)))
+			.map((i) => ({
+				id: Number(i.id),
+				cargo: String(i.cargo ?? ""),
+				name: String(i.name ?? "").slice(0, 40),
+				produced: Number(i.produced) || 0,
+				transported: Number(i.transported) || 0,
+				stock: i.stock === null || i.stock === undefined || !Number.isFinite(Number(i.stock)) ? null : Number(i.stock),
+			}))
+			.sort((a, b) => b.produced - a.produced);
+	}
+
+	setCargoTotals(list: CargoAmounts[]): void {
+		this.cargoTotals = (Array.isArray(list) ? list : [])
+			.filter((c) => c && typeof c.label === "string" && c.label !== "")
+			.map((c) => ({
+				label: String(c.label),
+				produced: Number(c.produced) || 0,
+				transported: Number(c.transported) || 0,
+			}))
+			.sort((a, b) => b.produced - a.produced);
+	}
+
+	/** 本公司口径运量。`null` = 未收到（与 `{byCargo: []}` = "收到但为零" 不同）。 */
+	setCompanyCargo(facts: CompanyCargoFacts | null): void {
+		if (!facts) { this.companyCargo = null; return; }
+		const byCargo = (Array.isArray(facts.byCargo) ? facts.byCargo : [])
+			.filter((c) => c && typeof c.label === "string")
+			.map((c) => ({ label: String(c.label), amount: Number(c.amount) || 0 }))
+			.sort((a, b) => b.amount - a.amount);
+		this.companyCargo = {
+			byCargo,
+			quarterDelivered: Number.isFinite(Number(facts.quarterDelivered)) ? Number(facts.quarterDelivered) : null,
+			monitored: facts.monitored && Number.isFinite(Number(facts.monitored.towns))
+				? { towns: Number(facts.monitored.towns), industries: Number(facts.monitored.industries) || 0 }
+				: null,
+		};
 	}
 
 	getTotalEvents(): number {

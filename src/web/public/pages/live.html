@@ -245,6 +245,102 @@
       <p class="hint" x-show="!routesNote()">Idle rows are built but have no vehicles on them yet.</p>
     </section>
 
+    <!-- ======================= ③c CARGO & INDUSTRY =======================
+         P1+P2（2026-09-25）。三种口径**必须分块**（SPEC §10.99）：
+         ① 产业侧上月产量/运量 —— 口径 = 所有公司（`GSIndustry.*`）
+         ② 产业样本（按产量取样，写明 largest N of M）
+         ③ 本公司交付 —— 口径 = `GSCargoMonitor` 累计（覆盖全部城镇/产业）
+         比率由 view model 派生（生产=0 → "—"，不是 0%）。没有 GS 通道时显示"读不到"。 -->
+    <div class="group"><h2>Cargo &amp; industry</h2><div class="rule"></div>
+      <span class="dim">what the map produces and transports — and what this company delivered</span></div>
+    <section class="kpis cols-4">
+      <div class="kpi">
+        <div class="kpi-k">Industries</div>
+        <div class="kpi-v" x-text="industryAvailable && industriesTotal !== null ? $fmt.int(industriesTotal) : '—'"></div>
+        <div class="kpi-hint">on the map (GS count)</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-k">Cargo types active</div>
+        <div class="kpi-v" x-text="$fmt.int(cargoRows().length)"></div>
+        <div class="kpi-hint">with production last month</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-k">Our deliveries</div>
+        <div class="kpi-v" x-text="ownDeliveredTotal()"></div>
+        <div class="kpi-hint">by this company, since this run started</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-k">Delivered this quarter</div>
+        <div class="kpi-v" x-text="ownQuarterText()"></div>
+        <div class="kpi-hint">game total, all cargo — cross-check</div>
+      </div>
+    </section>
+    <p class="empty" x-show="industryNote()" x-text="industryNote()"></p>
+    <section class="grid two" x-show="!industryNote()">
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Cargo — last month</h2>
+          <span class="dim">production &amp; transport are map-wide (all companies)</span>
+        </div>
+        <table>
+          <thead>
+            <tr><th>Cargo</th><th class="num">Produced</th><th class="num">Transported</th><th class="num">Share</th></tr>
+          </thead>
+          <tbody>
+            <template x-for="c in cargoRows()" :key="c.key">
+              <tr>
+                <td x-text="c.name"></td>
+                <td class="num" x-text="c.produced"></td>
+                <td class="num" x-text="c.transported"></td>
+                <td class="num" :title="c.shareHint" x-text="c.share"></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+        <p class="empty" x-show="!cargoRows().length" x-text="industryEmpty()"></p>
+      </div>
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Delivered by this company</h2>
+          <span class="dim" x-text="ownCargoNote()"></span>
+        </div>
+        <table>
+          <thead><tr><th>Cargo</th><th class="num">Amount</th></tr></thead>
+          <tbody>
+            <template x-for="c in ownCargoRows()" :key="c.key">
+              <tr><td x-text="c.name"></td><td class="num" x-text="c.amount"></td></tr>
+            </template>
+          </tbody>
+        </table>
+        <p class="empty" x-show="!ownCargoRows().length">Nothing delivered yet in this run (monitor returns 0 until the first drop-off).</p>
+      </div>
+    </section>
+    <section class="panel" x-show="!industryNote()">
+      <div class="panel-head">
+        <h2>Industry detail</h2>
+        <span class="dim" x-text="industrySampleNote()"></span>
+      </div>
+      <table>
+        <thead>
+          <tr><th>#</th><th>Industry</th><th>Cargo</th><th class="num">Produced</th><th class="num">Transported</th>
+            <th class="num" title="— means this industry does not accept that cargo (not zero)">Stockpile</th></tr>
+        </thead>
+        <tbody>
+          <template x-for="i in industryRows()" :key="i.key">
+            <tr>
+              <td x-text="'#' + i.id"></td>
+              <td x-text="i.name"></td>
+              <td x-text="i.cargo"></td>
+              <td class="num" x-text="i.produced"></td>
+              <td class="num" x-text="i.transported"></td>
+              <td class="num" x-text="i.stock"></td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+      <p class="empty" x-show="!industryRows().length" x-text="industryEmpty()"></p>
+    </section>
+
     <!-- =========================== ③b TOWNS ===========================
          "它能服务谁"。数据来自 Bridge GS 的取样（**人口最多的前 10 个**）——
          **取样不是全图**，所以汇总里同时给出样本量与地图总数（live-view.js

@@ -118,6 +118,24 @@ interface LiveModel {
 	townsSampleNote(): string;
 	/** 抽屉空态文案（fleet 与 routes 是两个不同的问题） */
 	drawerEmptyText(): string;
+	/** 产业/货种/公司口径（P1+P2） */
+	industries: { id?: unknown; cargo?: unknown; name?: unknown; produced?: unknown; transported?: unknown; stock?: unknown }[];
+	industriesTotal: unknown;
+	cargoTotals: { label?: unknown; produced?: unknown; transported?: unknown }[];
+	industryAvailable: boolean;
+	companyCargo: { byCargo?: { label?: string; amount?: number }[]; quarterDelivered?: number | null; monitored?: { towns: number; industries: number } | null } | null;
+	companyCargoAvailable: boolean;
+	cargoName(label: unknown): string;
+	cargoSharePct(produced: unknown, transported: unknown): number | null;
+	cargoRows(): { key: string; label: string; name: string; produced: string; transported: string; share: string; shareHint: string }[];
+	industryRows(): { key: string; id: unknown; name: string; cargo: string; produced: string; transported: string; stock: string }[];
+	industrySampleNote(): string;
+	industryNote(): string;
+	industryEmpty(): string;
+	ownCargoRows(): { key: string; name: string; label: string; amount: string }[];
+	ownCargoNote(): string;
+	ownQuarterText(): string;
+	ownDeliveredTotal(): string;
 	drawerShowsRoutes(): boolean;
 	drawerRouteRows(): RouteRow[];
 	controlNote(): string;
@@ -1213,5 +1231,87 @@ describe("live-view: towns", () => {
 		model.townsAvailable = true;
 		model.towns = [{ id: 1, population: undefined, x: 1, y: 2 }];
 		expect(model.townsRows()[0]!.population).toBe("—");
+	});
+});
+
+/**
+ * 产业/货种/公司口径的**派生规则**（P1+P2）。
+ *
+ * 为什么派生放在这里而不是 GS：比率有两种口径（产业口径 = 所有公司 /
+ * 公司口径 = 本公司的 monitor 累计）。把它算进管道就等于把口径藏起来；
+ * 放在可单测的纯函数里，口径必须显式出现在函数名和 UI 文案上（SPEC §10.99）。
+ */
+describe("live-view: cargo & industry", () => {
+	it("产业口径：share = transported / produced（produced=0 时是 null，不是 0%）", () => {
+		const { model } = load();
+		model.industryAvailable = true;
+		model.cargoTotals = [
+			{ label: "COAL", produced: 900, transported: 600 },
+			{ label: "PASS", produced: 0, transported: 0 },
+		];
+		const rows = model.cargoRows();
+		expect(rows[0]!.label).toBe("COAL");
+		expect(rows[0]!.share).toBe("67%");
+		expect(rows[0]!.shareHint).toMatch(/all companies/i);
+		expect(rows[1]!.share).toBe("—");
+	});
+
+	it("产业表按产量降序，并给出取样说明（largest N of M）", () => {
+		const { model } = load();
+		model.industryAvailable = true;
+		model.industriesTotal = 37;
+		model.industries = [
+			{ id: 1, cargo: "PASS", name: "Town", produced: 10, transported: 4, stock: null },
+			{ id: 2, cargo: "COAL", name: "Coal Mine", produced: 900, transported: 600, stock: 120 },
+		];
+		const rows = model.industryRows();
+		expect(rows.map((r) => r.id)).toEqual([2, 1]);
+		expect(rows[0]!.stock).toBe("120");
+		expect(rows[1]!.stock).toBe("—");
+		expect(model.industrySampleNote()).toContain("largest 2 of 37");
+		expect(model.industrySampleNote()).toMatch(/not the whole map|sampled/i);
+	});
+
+	it("公司口径：分开呈现，并写明被监视的目的地数（不说成全部交付）", () => {
+		const { model } = load();
+		model.companyCargoAvailable = true;
+		model.companyCargo = { byCargo: [{ label: "PASS", amount: 120 }], quarterDelivered: 5000, monitored: { towns: 10, industries: 0 } };
+		expect(model.ownCargoRows()[0]!.amount).toBe("120");
+		expect(model.ownCargoNote()).toMatch(/this company/i);
+		expect(model.ownCargoNote()).toMatch(/10 towns|monitored/i);
+		// 测试桩的 fmtInt 不做千分位（生产实现会），所以这里断言数值本身
+		expect(model.ownQuarterText()).toContain("5000");
+	});
+
+	it("货种标签归一化：GS 的定长标签（OIL_）→ 友好名（Oil）", () => {
+		const { model } = load();
+		expect(model.cargoName("OIL_")).toBe("Oil");
+		expect(model.cargoName("PASS")).toBe("Passengers");
+		expect(model.cargoName("GOOD")).toBe("Goods");
+		// 未知标签原样显示（不编名字）
+		expect(model.cargoName("ZZZZ")).toBe("ZZZZ");
+	});
+
+	it("本公司交付合计：有数据时求和，未收到时 —（不是 0）", () => {
+		const { model } = load();
+		model.companyCargoAvailable = true;
+		model.companyCargo = { byCargo: [{ label: "PASS", amount: 120 }, { label: "COAL", amount: 30 }], quarterDelivered: 900, monitored: { towns: 3, industries: 1 } };
+		expect(model.ownDeliveredTotal()).toBe("150");
+		// 有通道但还没交付：0 是真实测量值（不是"未知"）
+		model.companyCargo = { byCargo: [], quarterDelivered: 0, monitored: { towns: 1, industries: 1 } };
+		expect(model.ownDeliveredTotal()).toBe("0");
+		model.companyCargoAvailable = false;
+		expect(model.ownDeliveredTotal()).toBe("—");
+	});
+
+	it("watch 模式：三个口径都显示读不到，且不给 0", () => {
+		const { model } = load();
+		model.industryAvailable = false;
+		model.companyCargoAvailable = false;
+		expect(model.industryNote()).toMatch(/Bridge GS|agent mode/);
+		expect(model.cargoRows()).toEqual([]);
+		expect(model.industryRows()).toEqual([]);
+		expect(model.ownCargoRows()).toEqual([]);
+		expect(model.ownQuarterText()).toBe("—");
 	});
 });
