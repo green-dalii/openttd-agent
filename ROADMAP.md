@@ -413,21 +413,25 @@ pgrep -fl "run-experiment|cli/run.ts|OpenTTD.app"     # 无输出 = 没有（202
 **修法（仍未做）**：候选为事件列表/步骤表的上限与增量插入、表格渲染节流（图表保持实时）、
 避免整表重建。验收 = 同一探针下**每帧变更数**下降 ≥10×，且用户可见内容不变（AGENTS §5.2）。
 
-### 6d. 仪表盘数据深度：物资/产业、单车、城镇全集（**设计已定，未实现**；2026-09-25）
+### 6d. 重要数据的通道与呈现（**选型已定**，2026-09-25；见 `docs/DATA-CHANNELS-EVALUATION.md`）
 
-**已完成的部分**（同日）：城镇面板（GS 取样 top-10 + 地图总数，`SPEC.md` §10.98）、
-sessions 页的存档路径与结局表、页头统一、抽屉诚实态。
+**选型结论（不再有候选分支）**：产业/城镇/车辆数据**只能**从 Game Script 取
+（admin 端口协议里没有这些包，主线 console 也没有对应命令 —— 见 `SPEC.md` §10.99）。
+因此采用：**C2 GS 周期上报（聚合 + top-N）** + **C3 GS 按需查询（全量明细）** +
+**C4 `GSCargoMonitor`（本公司口径运量，GS 内累计后上报）**；watch 模式下显示"不可得"。
 
-**未完成的三项，各自的通道与代价**：
+| 阶段 | 内容 | 验收（真机） |
+|------|------|--------------|
+| **P1** | C2：`cmd=state` 增加 `industries`（按产量 top-N：id/type/cargo/produced/transported/util%/stockpile）+ `cargo_totals`（按货种聚合）+ 城镇主货种与上月产/运比 | 面板数字与游戏内一致；`gsErrors = 0`；三态（有数据/空/不可得）都对；`dashboard:smoke` 有断言且**回放证明会红** |
+| **P2** | C4：GS 内用 `GSCargoMonitor` 周期累加，上报"本公司交付量 + 按城镇/产业的分布" | 累计量方向与线路收入一致；区间口径写在标题上（"delivered by this company, since <t>"） |
+| **P3** | C3：按需全量（agent 只读工具 `get_industries`/`get_cargo` + 页面"展开全部"） | 全量与取样一致；**不增加稳态载荷**（对比同一探针的前后帧字节/变更数） |
+| **P4** | 车辆明细（`GSVehicleList` 采样 + 按需全量） | 行数与 GS 车队数一致或明确标注"N of M" |
 
-| 项 | 数据从哪来 | 代价 / 风险 | 验收 |
-|----|-----------|-------------|------|
-| **产业与物资**（存量/产量/运量/利用率） | 两条候选：① **admin 协议** `INDUSTRY_ADD/UPDATE/REMOVE` + `CARGO_ACCEPTANCE`（不碰 Squirrel，watch 模式也能用）；② GS `ScriptIndustryList` + `GetStockpiledCargo/GetLastMonthProduction`（只在 agent 模式） | ① 需要新增协议枚举 + 解析器 + **golden 字节样张**（AGENTS §5：必须先抓真实包）；② Squirrel 侧要防 D44（未建的表键会**静默杀死整个 GS**） | 真机：产业面板出现真实存量/产量，且 `gsErrors = 0`；没数据时显示"不可得"而不是 0 |
-| **单车明细**（车号/线路/状态/年龄） | GS `ScriptVehicleList`（GS 侧目前只发每条线路的**车辆数**） | 需要新事件字段 + 采样上限（车队可达数百辆 → 必须**限量 + 说明是取样**） | 真机：Fleet 抽屉能下钻到车辆行，行数与 GS 报的车队数一致或明确标注取样 |
-| **城镇全集**（现在是 top-10 取样） | 同一 GS 通道，提高上限或加"按人口分页" | 上限提高后每帧载荷上升（当前 10 条 ≈ 每帧几百字节） | 若 agent 需要比较更多城镇：`town_list` 上限可配，且页面说明"取样 vs 全集" |
-
-**为什么先做城镇**：那条通道（Bridge GS 的 `cmd=state`）**本来就在发** `town_list`，
-只是 `toWireSnapshot` 没带出来 —— 属于"零新增通道"的修复（见 `MEMORY.md` D55）。
+**必须一并遵守**（否则会重犯已知错误）：
+- 两个"利用率"口径**分块呈现**（产业口径 = 所有公司；公司口径 = monitor）——见 `SPEC.md` §10.99。
+- Squirrel 侧防 **D44**（未建表键会静默杀死 GS）与 **D34**（字符串/名称）：新字段必须有守卫测试 + 真机 `gsErrors = 0`。
+- 每帧**不发全量**（产业/车辆可达几十上百条）→ top-N + 按需。
+- watch 模式**不编造**：沿用 `routesAvailable`/`townsAvailable` 的"不可得 ≠ 零"模式。
 
 ### 6e. 前端结构改造 S2–S4（**计划**，见 `docs/FRONTEND-ARCHITECTURE.md`）
 

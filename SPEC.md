@@ -693,3 +693,27 @@ inst.__zoomedByUser = true;       // 让数据帧走 setData(data, false)，视�
 
 **样本量与总量必须分开渲染**（本节的通用规则）：GS 出于载荷只发前 10 个城镇；
 把 `towns.length` 当作"地图城镇数"、或把样本人口求和当作"全图人口"，都是编造事实。
+
+### 10.99 数据的唯一来源边界：admin 端口**没有**产业/城镇/车辆，只有 GS 有（2026-09-25 核对）
+
+要回答"城镇/物资/车辆数据从哪来"之前，必须先钉死**每条通道的能力边界**。
+以下三项事实来自：官方文档枚举页、OpenTTD `master` 源码枚举、本仓库枚举，
+以及**对本机 OpenTTD 15.0 的实测**（连自己的 dedicated server 读 `SERVER_PROTOCOL` 广告）。
+
+| 事实 | 证据 | 后果 |
+|------|------|------|
+| **admin 端口的更新类型只有 10 种**：`DATE, CLIENT_INFO, COMPANY_INFO, COMPANY_ECONOMY, COMPANY_STATS, CHAT, CONSOLE, CMD_NAMES, CMD_LOGGING, GAMESCRIPT`（+`END` 哨兵） | `docs.openttd.org` 的 `tcp_admin.h` 枚举页；GitHub `master` 同一枚举；本仓库 `admin-protocol.ts`（`Gamescript = 9` / `End = 10`，包类型到 `ServerEnableEncryption = 129`）；实测广告协议版本 **3**，最大 `update_type` 仍在 `GAMESCRIPT` 量级 | **产业、货物、城镇、车辆数据在 admin 端口不存在** —— 不是"我们没解析"，是**协议里没有**。公司级事实（economy/stats/breakdown/deliveredCargo）仍从 admin 拿 ✓ |
+| **曾误判"我们的枚举过期、缺 INDUSTRY/CARGO"** | 同一批证据 | 我们的枚举**是当前的**。教训与 D53 同源：**先核对再断言** |
+| **主线 console 没有按产业/城镇输出统计的命令** | 官方 console 命令表里与货相关的是枚举型 `dump_*`（如 `dump_cargo_types`，只列货种）；能按产业/城镇出统计的命令在官方 wiki 上位于 `/Community/Patches/`（**社区补丁**） | rcon/console 不是数据通道（次要项 `rcon cmds` 回包**未实测**） |
+| **唯一能取到这些数据的是 Game Script（Squirrel）** | GS API：`GSIndustry.GetStockpiledCargo / GetLastMonthProduction / GetLastMonthTransported / GetLastMonthTransportedPercentage`、`GSTown.GetPopulation / GetCargoProduction / GetLastMonthProduction / GetLastMonthTransportedPercentage`、`GSVehicleList`/`GSVehicle` | GS 只在 **agent 模式**存在 ⇒ **watch 模式下这些数据一律不可得**（必须显示"不可得"，不能显示 0） |
+
+**两个"利用率"不是一回事（呈现前必须分开）**：
+
+| 口径 | 取值 | 语义（源码依据） |
+|------|------|------------------|
+| **产业口径** | `GSIndustry.GetLastMonthTransportedPercentage(industry, cargo)` | 读的是产业**上月产量的历史**（`script_industry.cpp` 取 `produced[LAST_MONTH].transported`） ⇒ **所有公司**合计运走的比例。**不是**本公司的成绩 |
+| **公司口径** | `GSCargoMonitor.GetTownDeliveryAmount / GetIndustryDeliveryAmount / GetTownPickupAmount / GetIndustryPickupAmount(company, cargo, id, keep_monitoring)` | 返回**自上次查询以来**的量并**更新监视状态**（`cargomonitor.h`：get **and reset**） ⇒ **本公司**实际交付/取货量；**非幂等**，只能在 GS 内读一次并累计上报，页面不得直接查 |
+
+**规则**：同一面板里"产业利用率"与"本公司运量"必须**分块并各自标注口径**；
+所有这类字段都是**上月经济月**口径（`ScriptEconomyTime`），不是实时值，必须标注。
+具体选型与呈现方案见 `docs/DATA-CHANNELS-EVALUATION.md`；实施计划见 `ROADMAP.md` §6d。
