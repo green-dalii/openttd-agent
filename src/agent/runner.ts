@@ -469,6 +469,10 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 			sessionId: session.id,
 			// 暂停归因（谁让它停的）：只有 agent 侧才有这条信息；页面按钮走 supervisor。
 			control: agentPause ? { pausedByAgent: agentPause.paused, agentPausedAt: agentPause.at } : null,
+		// 执行器异常的**完整**文本（2026-09-25）。公司名上限 31 字符，所以生产端分块、
+		// hub 拼回（`getExecutorError`）后才发到页面；null = 这一局没有报告过异常。
+		// 页面此前只能显示 24 字符的截断串，"为什么卡住"当场不可诊断。
+		executorError: hub.getExecutorError(),
 			// Backlog for late subscribers / reloads (docs/DASHBOARD-UI.md §7).
 			checkpoints: session.current().checkpoints,
 			stages: stageViews.slice(-24),

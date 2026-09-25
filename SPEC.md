@@ -811,3 +811,47 @@ rcon 暂停世界（与页面按钮两条独立路径）⇒ `meta.json` 记 `wor
 `worldFrozenMs=66109`，而 `blockedByPause` 为**空**（暂停不来自我们）——两类原因被分开。
 页面截图复核：health 条从假的 `frozen` 变成真的 `30.2/min`，`GAME DATE` 从连接时刻的
 `1950-01-01` 变成实时的 `1950-02-01`。
+
+### 10.103 执行器异常：完整文本进事件流（2026-09-25）
+
+**问题**：`EX exc:can't execute over an un…` + `vehicles: 0`。错误文本在**生产端**被砍：
+`catch` 里 `if (es.len() > 24) es = es.slice(0, 24);`。为什么是 24？因为相位要写进
+**公司名**，而作者以为预算是 31 - 4 - 5。**上限是真的，算法是错的** —— 于是现场那句
+`…` 不是显示层截断，是信息在源头就没了。
+
+**三条候选通道，逐条实测排除**（隔离真机，探针已回退；勿再重试）：
+
+| 通道 | 实测结果 | 结论 |
+|------|----------|------|
+| 公司名（`AICompany.SetName`） | **31 接受；32/44/56/64/72 全部静默拒绝** | 上限 31 是硬事实，一条错误永远放不下 |
+| `AILog.*` | macOS dedicated `-v dedicated` 下 **0 行**（server.log 与 admin console 包都没有） | 与 §10.10 一致：这条通道在 macOS 上不存在 |
+| `AISign.BuildSign` → GS 的 `GSSignList()` | AI 建标牌**成功**（`ok30481`），但 GS 扫描 **16/16 次报告都看不到它**（current 模式 0 个；company 模式只看到 GS 自己放的 3 个 bp 标牌） | 可见性不通，这条通道不可用 |
+
+⇒ **公司名是唯一已验证的执行器→harness 通道**（GS 每 ~20 script tick ≈ 1.1 s 轮询一次），
+于是错误只能**分块**走它。
+
+**协议**：`exc<seq><marker><chunk>`，写进名字 `EX <phase> j<job>`（总长 ≤ 31）。
+marker 三态：`: ` 后续还有块 / `=` 末块且完整 / `~` 末块但被生产端 5 块上限截断。
+块宽由**真实预算**算出：`31 - 3("EX ") - 3("exc") - 1(seq) - 1(marker) - (2 + 位数(job))`，
+下限 4；每块**粘滞 5 轮**（≈1.4 s > GS 的 1.1 s 轮询），否则末块会被下一轮施工相位盖掉。
+GS 侧把 `exc<seq>` 映射成 `stage = "error" + seq`：**必须**带序号，否则 `ExecEventKey`
+指纹（只比 stage/job/hb）会把第 2..N 块全部抑制。
+
+**两个协议级陷阱（worker 复核时发现，已修）**：
+1. **指纹**：连续两条**单块**错误会算出同一个 `error1|job|0`，第二条永远发不出去。
+   修法：指纹对**错误相位**附加整段相位文本（非心跳相位，否则心跳每轮变 → 事件风暴）。
+2. **作业号后缀**：`s.find(" j")` 取**首次**命中，块文本里出现 `" j"`（例如
+   `can't join …`）就会切错并顺带截断相位。修法：从后往前找，且尾部必须全是数字，
+   否则宁可不切。
+
+**装配在 hub，且必须喂 `p.raw`**：`decodeExecutorPhase` 自己的后缀处理会吃掉块尾空格，
+于是 `cannot join` 会变成 `cannotjoin`——一个**自信的错误文本**比没有更坏。装配器规则：
+必须从 `seq 1` 开始且逐一递增；跳号/重复则丢弃重拼（采样通道可能漏轮询，缺字就
+不拼）；非块相位不动缓冲区；30 s 以上的残块在下一次 push 时丢弃。
+
+**真机验收（重放现场那句错误）**：一次性注入 `W3REPLAY: can't execute over an
+unfinished action (simulated 2026-09-25)`（72 字符）⇒ 真实事件流按序出现 4 块
+（`exc1:`…`exc4=`）⇒ 装配器还原出**完整 72 字符**（`truncated=false, complete=true`）；
+旧代码这里只剩前 24 字符。页面渲染出
+`The executor raised an error (2 minutes ago): W3REPLAY: can't execute over an unfinished action (simulated 2026-09-25)`。
+完整文本同时进 `events.jsonl`（走的是与收包相同的归档路径），所以事后 autopsy 不需要新通道。

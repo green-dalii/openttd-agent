@@ -154,8 +154,137 @@ export function phaseStage(phase: string): string {
 }
 
 /** Phases that report a failure or an exception. */
+// `exc[1-9]?[:=~]` 覆盖单块 `exc:<msg>` 与分块 `exc<seq><marker><chunk>`（见
+// decodeExecutorErrorChunk）：错误无论是整条还是分片，都必须被判成 error。
 const FAILURE_RE =
-	/stuck|giveup|exc:|nowhere|noconn|noeng|nocargo|nofront|slope_warn|_e(?=[\s:]|$)/;
+	/stuck|giveup|exc[1-9]?[:=~]|nowhere|noconn|noeng|nocargo|nofront|slope_warn|_e(?=[\s:]|$)/;
+
+/**
+ * One chunk of an executor exception, as the producer spells it.
+ *
+ * 为什么存在（2026-09-25，隔离真机实测）：公司名是执行器**唯一**已验证的回报通道，
+ * 而 `AICompany.SetName` 上限 31 字符（31 接受、32+ 静默拒绝）——一条引擎异常永远
+ * 放不进一个名字。旧实现把错误先截到 24 字符再写成 `exc:`，于是 harness 只看到
+ * `EX exc:can't execute over an un…`，"为什么卡住"当场不可诊断。现在生产端按真实
+ * 预算切片：`exc<seq><marker><chunk>`，marker 表达**这是不是最后一块**：
+ *   `:` 还有后续块 | `=` 末块、消息完整 | `~` 末块、消息被生产端 5 块上限截断
+ */
+export interface ExecutorErrorChunk {
+	/** 1-based chunk index. */
+	seq: number;
+	/** True on the last chunk of the message. */
+	final: boolean;
+	/** True when the producer's 5-chunk cap cut the message short. */
+	truncated: boolean;
+	/** The characters this chunk carries (no separator is added on join). */
+	chunk: string;
+}
+
+/** `exc` + one digit + marker + text. One digit because the producer caps at 5 chunks. */
+const ERROR_CHUNK_RE = /^exc([1-9])([:=~])([\s\S]*)$/;
+
+/**
+ * Decode one error-chunk phase, or null when the phase is not a chunk.
+ *
+ * Accepts both spellings the callers hand us: the bare phase (`exc1:can't…`) and the
+ * raw company name (`EX exc1:can't… j102`, which is what signal-hub forwards).
+ * Pure and never throws; a malformed string is "not a chunk", never a guess.
+ */
+export function decodeExecutorErrorChunk(phase: string): ExecutorErrorChunk | null {
+	// 只去掉**行首**空白：块的尾部空格是消息的一部分（分块边界可能正好落在词后），
+	// `trim()` 会把它们吃掉，拼出来的两个词会粘在一起。
+	let s = String(phase ?? "").replace(/^[ \t\r\n]+/, "");
+	if (s.startsWith("EX ")) s = s.slice(3);
+	// 作业号后缀锚定在尾部，且**只吃掉一个空格**（`\s+j` 会把块尾的空格一起卷走）。
+	// 锚定同时也避免把块文本里的 " j…"（例如 "can't join"）当成后缀切掉。
+	const jobMatch = / j(-?\d+)\s*$/.exec(s);
+	if (jobMatch) s = s.slice(0, jobMatch.index);
+	const m = ERROR_CHUNK_RE.exec(s);
+	if (!m) return null;
+	const marker = m[2]!;
+	return {
+		seq: Number(m[1]),
+		final: marker !== ":",
+		truncated: marker === "~",
+		chunk: m[3]!,
+	};
+}
+
+/**
+ * What `createExecutorErrorAssembler().push()` returns once a message is complete.
+ */
+export interface ExecutorErrorMessage {
+	message: string;
+	/** The producer hit its 5-chunk cap; the tail of the message is gone. */
+	truncated: boolean;
+	/** Always true today - an incomplete chunk run returns null instead. */
+	complete: boolean;
+}
+
+export interface ExecutorErrorAssembler {
+	/**
+	 * Feed one phase. Returns the joined message only on the final chunk; null for
+	 * everything else (a partial run, a gap, a non-chunk phase).
+	 */
+	push(phase: string, nowMs: number): ExecutorErrorMessage | null;
+	/** Drop any partial run. */
+	reset(): void;
+}
+
+/** A partial run this old is not a run any more - it is two unrelated errors. */
+const ERROR_CHUNK_STALE_MS = 30_000;
+
+/**
+ * Reassemble the producer's chunked exception into the full message.
+ *
+ * 规则（每一条都有成因，不是随意选择）：
+ *   - 必须以 `seq 1` 开头、且只能 +1 递增：公司名通道是**被采样**的，harness 可能
+ *     漏掉中间某次轮询。跳号意味着我们缺了字，拼出来的句子会是错的（比没有更坏），
+ *     所以 gap/repeat 一律丢弃并等下一轮 `seq 1`。
+ *   - 只有 last chunk（`=`/`~`）才产出消息：部分拼接会被读成"截断的事实"，而"最后一块到了"才是"这条消息完整了"。
+ *   - 非分块相位不动缓冲区（心跳/施工相位天天在发，不能被当成间隔）。
+ *   - 超过 30 s 的残块丢弃：两个不同错误的块若被拼在一起，会造出一句从未存在过的
+ *     错误（D20 那类"假因果"）。
+ */
+export function createExecutorErrorAssembler(): ExecutorErrorAssembler {
+	let buf: string[] = [];
+	let truncated = false;
+	let startedAt = 0;
+	return {
+		push(phase: string, nowMs: number): ExecutorErrorMessage | null {
+			const c = decodeExecutorErrorChunk(phase);
+			if (!c) return null; // 非分块相位：缓冲区原样不动
+			const now = Number.isFinite(nowMs) ? nowMs : Date.now();
+			if (buf.length > 0 && now - startedAt > ERROR_CHUNK_STALE_MS) {
+				buf = [];
+				truncated = false;
+			}
+			if (c.seq === 1) {
+				// 新的一条消息（或上一轮已结束）：重启缓冲区。
+				buf = [c.chunk];
+				startedAt = now;
+			} else if (c.seq === buf.length + 1) {
+				buf.push(c.chunk);
+			} else {
+				// gap 或 repeat：我们缺字/重复了，拼出来的句子是错的。丢弃，等下一次 seq 1。
+				buf = [];
+				truncated = false;
+				return null;
+			}
+			truncated = c.truncated;
+			if (!c.final) return null;
+			const message = buf.join("");
+			const out: ExecutorErrorMessage = { message, truncated, complete: true };
+			buf = [];
+			truncated = false;
+			return out;
+		},
+		reset(): void {
+			buf = [];
+			truncated = false;
+		},
+	};
+}
 
 /** True when this phase reports a failure or an exception - always worth waking for. */
 export function isErrorPhase(phase: string): boolean {
@@ -216,6 +345,31 @@ export function decodeExecutorPhase(input: string): ExecutorPhase {
 		base.description =
 			`executor is alive and still working on "${hb[1]}" ` +
 			`(heartbeat #${hb[2]}). No state change since the last beat.`;
+		return base;
+	}
+
+	// --- exception, chunked: `exc<seq><marker><chunk>` (2026-09-25) ---
+	// 与下面整条 `exc:<msg>` 并存：整条只装得下很短的错误，真正的引擎异常靠分块送达
+	// （见 decodeExecutorErrorChunk 的成因说明）。这里必须自己置 stage/error，因为
+	// 前缀表里的 `exc:` 匹配不到 `exc1`。
+	const chunk = decodeExecutorErrorChunk(s);
+	if (chunk) {
+		base.stage = "error";
+		base.error = true;
+		base.detail = {
+			seq: chunk.seq,
+			chunk: chunk.chunk,
+			final: chunk.final ? 1 : 0,
+			truncated: chunk.truncated ? 1 : 0,
+		};
+		base.description =
+			`executor raised an error and reports it in chunks: chunk ${chunk.seq}` +
+			(chunk.final
+				? chunk.truncated
+					? " (the last chunk; the reporter's 5-chunk cap cut the message short)"
+					: " (the last chunk; the message is complete)"
+				: " (more chunks follow)") +
+			`: "${chunk.chunk}"`;
 		return base;
 	}
 

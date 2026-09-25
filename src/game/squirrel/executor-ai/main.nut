@@ -49,6 +49,10 @@ class ExecutorV1 extends AIController {
     _layErr = "";        // why the last LayPath stopped early
     _dumpSeq = 0;
     _hbSeq = 0;
+    _errMsg = null;        // 最后一次上报的错误原文（同一错误每轮重抛一次，不能重启队列）
+    _errChunks = [];       // 当前错误的分块（有界：只保存这一条错误，<= 5 块）
+    _errNext = 0;          // 下一块的下标
+    _errTruncated = false; // 生产端 5 块上限吃掉了尾部
     // Pathfinder.Road class (library, imported once at load). Local sandbox
     // has v4 (needs graph.aystar v6); arena used v3 — API is compatible:
     //  pf = Road(); pf.cost.*; pf.InitializePath([from],[to]); pf.FindPath(n)
@@ -69,6 +73,8 @@ class ExecutorV1 extends AIController {
     /* One loop iteration of the build state machine. */
     function Tick() {
         try {
+            // 上一轮没发完的错误分块（每 5 轮推进一块，见 AdvanceErrorChunks）。
+            this.AdvanceErrorChunks();
             this.TickInner();
             // Periodic alive-heartbeat INSIDE the try so a reporting bug
             // cannot kill the script (earlier: GetOrderIndex crash here
@@ -99,13 +105,97 @@ class ExecutorV1 extends AIController {
             }
         } catch (e) {
             local es = "" + e;
-            // 24 chars: "exc:" (4) + 24 + " j<N>" (<=5) fits the 31-char budget.
-            // Was 16 - the truncation cut "can't execute ..." before the
-            // function name, making the error undiagnosable from the log.
-            if (es.len() > 24) es = es.slice(0, 24);
-            // 诊断**绕过粘滞**：否则一个长事件会把错误信息埋掉（那是更坏的沉默）。
-            this.WritePhase("exc:" + es);
+            // 为什么只能分块（2026-09-25 隔离真机各证一次，勿再试）：① `AICompany.SetName`
+            // 上限 31 字符（31 接受、32+ 静默拒绝）——一条错误放不进一个名字；
+            // ② `AILog.*` 在 macOS dedicated `-v dedicated` 下 0 行输出（SPEC §10.10）；
+            // ③ `AISign.BuildSign` 能建，但 Bridge GS 的 `GSSignList()` 看不到 AI 建的标牌。
+            // 所以公司名是唯一已验证的通道，而错误必须分块——不再在这里预截断
+            // （旧代码的 `es.slice(0, 24)` 正是 “EX exc:can't execute over an un…” 的来源）。
+            // 汇报本身也绝不能把脚本搞死（历史教训：catch 里的 bug 会让执行器**彻底静默**），
+            // 所以兜底再包一层。
+            try {
+                this.ReportError(es);
+            } catch (re) {
+                // 分块汇报器自己坏了：退回单块 `exc:<它自己的异常>` 诊断（WritePhase 绕过粘滞，
+                // 见 SetPhase 注释）。旧形状在这里有一个真实用途：**它只做一次字符串拼接**，
+                // 是分块路径不可用时最不可能再输的一步。
+                this.WritePhase("exc:" + ("" + re));
+            }
         }
+    }
+
+    /* 完整错误上报（2026-09-25）。
+     *
+     * 为什么需要：公司名（执行器**唯一**已验证的回报通道）上限 31 字符，而一条引擎
+     * 异常动辄上百字符。旧实现把错误先截到 24 字符再写成 `exc:`，于是 harness 只看到
+     * `EX exc:can't execute over an un…`——“为什么卡住”当场变成不可诊断。
+     * 为什么不换通道（三条实测事实，见 Tick() 的 catch 注释）——所以只能把错误切片放进
+     * 名字：`exc<seq><marker><chunk>`（`:` 后续还有块 / `=` 末块 / `~` 末块但被截断）。
+     *
+     * 同一错误每轮都会被重抛（真机事故就是持续失败）：**重复的错误不重启队列**，否则第
+     * 1 块会被反复重写、第 2..N 块永远发不出去。真正**新**的错误才替换队列。
+     */
+    function ReportError(msg) {
+        local es = this.SanitiseError(msg);
+        if (es == this._errMsg) return;
+        this._errMsg = es;
+        // 真实预算：31 字符减去 "EX " + "exc" + seq 位 + marker 位 + " j<job>"。
+        local width = 31 - 3 - 3 - 1 - 1 - (2 + ("" + this._job).len());
+        if (width < 4) width = 4;
+        local n = 0;
+        local chunks = [];
+        while (n < 5 && n * width < es.len()) {
+            chunks.append(es.slice(n * width, n * width + width));
+            n++;
+        }
+        if (chunks.len() == 0) chunks.append("");   // 空错误也要上报“抛了”这个事实
+        this._errTruncated = (n * width < es.len());
+        if (this._errTruncated) {
+            // 末块让出 1 字符给 `~`：宁可少报一个字，也要说清“这条消息不完整”。
+            chunks[chunks.len() - 1] = chunks[chunks.len() - 1].slice(0, width - 1);
+        }
+        this._errChunks = chunks;
+        this._errNext = 0;
+        this.WriteErrorChunk();   // 第一块立刻可见
+    }
+
+    /* 错误文本 → 公司名单行文本：控制字符转空格、连续空白折叠成一个、去掉首尾空白。
+     * 为什么：`"" + e` 常带换行/制表符，写进公司名后 harness 会把它们读成噪音，而且白白
+     * 吃掉 31 字符的预算（分块的宽度必须可预测）。
+     * 注：字符串索引在 OpenTTD 的 Squirrel 里是整数，所以一律 slice 后按字符串比较。 */
+    function SanitiseError(msg) {
+        local s = "" + msg;
+        local out = "";
+        for (local i = 0; i < s.len(); i++) {
+            local ch = s.slice(i, i + 1);
+            local ws = (ch == " " || ch == "\t" || ch == "\n" || ch == "\r" || ch < " ");
+            if (ws) {
+                if (out.len() > 0 && out.slice(out.len() - 1) != " ") out += " ";
+            } else {
+                out += ch;
+            }
+        }
+        while (out.len() > 0 && out.slice(out.len() - 1) == " ") out = out.slice(0, out.len() - 1);
+        return out;
+    }
+
+    /* 写出当前那一块。marker 由“是不是末块”与“有没有被截断”决定（见 ReportError）。
+     * 每块都粘滞 5 轮：GS 约每 20 script ticks（≈每 4 轮）轮询一次，不粘滞的话末块会被
+     * 下一轮的施工相位盖掉，harness 永远拼不完整。错误相位由此**抢占**普通粘滞窗口。 */
+    function WriteErrorChunk() {
+        local seq = this._errNext + 1;
+        local last = (seq == this._errChunks.len());
+        local marker = last ? (this._errTruncated ? "~" : "=") : ":";
+        this.WritePhase("exc" + seq + marker + this._errChunks[this._errNext]);
+        this._errNext++;
+        this._phaseHoldUntil = this._loopSeq + 5;
+    }
+
+    /* 每 5 轮推进一块错误分块（Sleep(5) ⇒ 约 1.4 s），保证 GS 的轮询采样到每一块。 */
+    function AdvanceErrorChunks() {
+        if (this._errNext >= this._errChunks.len()) return;
+        if (this._loopSeq < this._phaseHoldUntil) return;
+        this.WriteErrorChunk();
     }
 
     function TickInner() {

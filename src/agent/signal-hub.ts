@@ -18,7 +18,7 @@ import type { GameEvent } from "../types.js";
 import type { WorldState } from "../game/world-state.js";
 import type { RouteLedger } from "./route-ledger.js";
 import { createExecutorProgress, type ExecutorProgressReport } from "./executor-progress.js";
-import { decodeExecutorPhase } from "../game/executor-status.js";
+import { createExecutorErrorAssembler, decodeExecutorPhase, type ExecutorErrorMessage } from "../game/executor-status.js";
 import { gameDayFromRawDate, convertDateToYmd } from "../game/payload-parsers.js";
 import type { WebServer } from "../web/server.js";
 import type { RouteStats } from "./route-stats.js";
@@ -78,6 +78,12 @@ export interface SignalHub {
 	 * everything frozen.
 	 */
 	getWorldClock(): { rawDate: number | null; lastAdvancedAtMs: number | null; frozenForMs: number | null };
+	/**
+	 * The executor's last **complete** exception text (2026-09-25, SPEC §10.103),
+	 * reassembled from the producer's chunks. `null` = this run has not reported
+	 * one — not "an empty error".
+	 */
+	getExecutorError(): ExecutorErrorMessage & { at: number } | null;
 	/** Current executor stage, e.g. "boot" / "road" / "done" / "error". */
 	getStage(): string;
 	/** Last raw phase string (for the dashboard / RESULT line). */
@@ -117,6 +123,19 @@ export function makeSignalHub(refs: SignalHubRefs): SignalHub {
 	 * not advance" existed only as page copy.
 	 */
 	let lastDateAdvancedAtMs: number | null = null;
+	/**
+	 * Executor exception text, reassembled here (the hub is the single writer: it
+	 * is the only place that sees every `exec` relay in order).
+	 *
+	 * The producer sends `exc<seq><marker><chunk>` because the company name — its
+	 * only proven channel — is capped at 31 characters (measured: 31 accepted,
+	 * 32+ silently rejected). The chunks are fed `p.raw`, NOT the decoded phase:
+	 * the decoder's own suffix handling can eat a chunk's trailing space, and a
+	 * missing space turns "cannot join" into "cannotjoin" (a confidently wrong
+	 * error message is worse than none).
+	 */
+	const executorErr = createExecutorErrorAssembler();
+	let executorError: (ExecutorErrorMessage & { at: number }) | null = null;
 	const executorProgress = createExecutorProgress();
 	/**
 	 * Simulated day for progress maths. Same 360-day-year convention as the
@@ -285,6 +304,10 @@ export function makeSignalHub(refs: SignalHubRefs): SignalHub {
 					// on-change every ~20 ticks). Replaces the company-name regex
 					// decode retired in A3.
 					if (p.kind === "exec") {
+						// Reassemble a chunked exception before anything else looks at
+						// the phase: an incomplete run must not be shown as a message.
+						const assembled = executorErr.push(String(p.raw ?? ""), Date.now());
+						if (assembled) executorError = { ...assembled, at: Date.now() };
 						const stage = String(p.stage);
 						const job = Number(p.job);
 						if (stage === "done" && job >= 0) {
@@ -382,6 +405,7 @@ export function makeSignalHub(refs: SignalHubRefs): SignalHub {
 			lastAdvancedAtMs: lastDateAdvancedAtMs,
 			frozenForMs: lastDateAdvancedAtMs === null ? null : Date.now() - lastDateAdvancedAtMs,
 		}),
+		getExecutorError: () => executorError,
 	getStage: () => executorStage,
 		getPhase: () => executorPhase,
 		getReachedDone: () => reachedDone,

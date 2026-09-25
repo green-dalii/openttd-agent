@@ -399,6 +399,48 @@ describe("Squirrel 执行器：事件披露必须粘滞", () => {
 		expect(src).toContain('WritePhase("exc:"');
 	});
 
+	/**
+	 * W3（2026-09-25）：错误改为**分块**上报 `exc<seq><marker><chunk>`，因为公司名
+	 * 上限 31 字符（真机实测 31 接受 / 32+ 静默拒绝），而引擎异常放不进一个名字。
+	 * 旧的 `WritePhase("exc:"` 只剩兜底路径，所以这里锁住**真正的主路径**：
+	 * 序列号 + 末块标记 + 宽度来自真实预算 + 每块粘滞 5 轮（否则 GS 的采样会漏块）。
+	 */
+	it("完整错误走分块协议：seq + 末块标记 + 真实预算宽度 + 分块粘滞", () => {
+		expect(src).toMatch(/function ReportError\(/);
+		expect(src).toMatch(/function WriteErrorChunk\(/);
+		expect(src).toMatch(/function AdvanceErrorChunks\(/);
+		// marker 三态：还有后续 / 末块完整 / 末块但被 5 块上限截断
+		expect(src).toMatch(/last \? \(this\._errTruncated \? "~" : "="\) : ":"/);
+		// 宽度必须由 31 字符的真实预算算出来，而不是拍一个常数
+		expect(src).toMatch(/31 - 3 - 3 - 1 - 1 - \(2 \+ \("" \+ this\._job\)\.len\(\)\)/);
+		// 生产端不得再预截断（旧代码的 es.slice(0, 24) 就是现场那句 `…` 的来源）
+		expect(src).not.toMatch(/es\.slice\(0, 24\)/);
+		// 分块必须粘滞，否则末块会被下一轮施工相位盖掉，harness 拼不完整
+		expect(src).toMatch(/_phaseHoldUntil = this\._loopSeq \+ 5/);
+	});
+
+	/**
+	 * 指纹漏洞（2026-09-25，worker 复核时发现）：ExecEventKey 原本只比
+	 * stage|job|hb，于是**连续两条单块错误**算出同一个键，第二条永远发不出去。
+	 * 指纹只对错误相位生效 —— 心跳的 raw 每轮都变，算进去会刷成事件风暴。
+	 */
+	it("错误相位带内容指纹（连续两条错误不能互相抑制），心跳不变", () => {
+		const bridge = readFileSync(path.join(process.cwd(), "src/game/squirrel/bridge-gs/main.nut"), "utf8");
+		expect(bridge).toMatch(/if \(stage\.slice\(0, 5\) == "error"\) fp = s;/);
+		expect(bridge).toMatch(/\(ev\.hb \? "1" : "0"\) \+ "\|" \+ \(ev\.fp == null \? "" : ev\.fp\)/);
+	});
+
+	/**
+	 * 作业号后缀在**末尾**（WritePhase 追加）。原来的 find(" j") 取首次命中，
+	 * 块文本里出现 " j"（例如 "can't join …"）就会切错并顺带截断相位文本。
+	 */
+	it("作业号从后往前找，且尾部必须全是数字（否则宁可不切）", () => {
+		const bridge = readFileSync(path.join(process.cwd(), "src/game/squirrel/bridge-gs/main.nut"), "utf8");
+		expect(bridge).not.toMatch(/local jPos = s\.find\(" j"\);/);
+		expect(bridge).toMatch(/while \(i >= 0\)/);
+		expect(bridge).toMatch(/tail\.slice\(k, k \+ 1\)\.tointeger\(\)/);
+	});
+
 	it("SetPhaseSticky 的 hold 必须有默认值（Squirrel 强校验参数个数，单参调用会炸）", () => {
 		expect(src).toMatch(/function SetPhaseSticky\(p, hold = null\)/);
 	});

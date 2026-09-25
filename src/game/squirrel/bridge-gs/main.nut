@@ -64,8 +64,35 @@ class BridgeV1 extends GSController {
         local stage = "unknown";
         local hb = false;
         local job = -1;
+        // 错误相位的内容指纹（2026-09-25）。ExecEventKey 只比 stage/job/hb，于是
+        // **连续两条同样块数的错误**（典型：两条单块错误）会算出同一个键，第二条
+        // 被指纹抑制 —— 页面继续显示上一条，而真实错误早换了（实测隐患）。
+        // 这里用**整段相位文本**当指纹（不是哈希：31 字符上限下没有长度问题，
+        // 也不存在碰撞），且只对错误相位生效：心跳的 raw 每轮都变（#n / s<数>），
+        // 把它算进指纹会把心跳刷成事件风暴。相同错误仍然去重（这正是想要的）。
+        local fp = "";
+        if (stage.slice(0, 5) == "error") fp = s;
 
-        local jPos = s.find(" j");
+        local jPos = null;
+        // 作业号后缀由 WritePhase **追加在末尾**，所以从后往前找最后一个" j"+整数。
+        // 原来的 find(" j") 取**首次**命中：块文本里只要出现 " j"（例如
+        // "can't join …"）就会把块切错、作业号变垃圾。切错还会顺带截断 s，
+        // 让 stage 判定看到半句话。tail 全是数字才认，否则宁可不切。
+        local i = s.len() - 2;
+        while (i >= 0) {
+            if (s.slice(i, i + 2) == " j") {
+                local tail = s.slice(i + 2);
+                local k = 0;
+                if (tail.len() > 0 && tail.slice(0, 1) == "-") k = 1;
+                local ok = (k > 0 && k < tail.len());
+                while (ok && k < tail.len()) {
+                    try { tail.slice(k, k + 1).tointeger(); } catch (e2) { ok = false; break; }
+                    k++;
+                }
+                if (ok) { jPos = i; break; }
+            }
+            i--;
+        }
         if (jPos != null) {
             try { job = s.slice(jPos + 2).tointeger(); } catch (e) {}
             s = Trim(s.slice(0, jPos));
@@ -78,6 +105,15 @@ class BridgeV1 extends GSController {
         else if (s.slice(0, 4) == "road") stage = "road";
         else if (s.slice(0, 3) == "dpt" || s.slice(0, 5) == "depot") stage = "depot";
         else if (s.slice(0, 3) == "bus") stage = "fleet";
+        // 错误分块（2026-09-25）：`exc<seq><marker><chunk>`（`: `后续还有块 / `=` 末块 / `~` 末块且被生产端截断）。
+        // stage 必须带上序号：ExecEventKey 只比较 stage/job/hb，若每一块都是同一个 "error"，
+        // 第 2..N 块会被指纹抑制、永远发不出去，harness 就拼不出完整消息。
+        // `raw` 保持原样（harness 用它重建文本）。
+        else if (s.len() > 4 && s.slice(0, 3) == "exc"
+                 && s.slice(3, 4) >= "1" && s.slice(3, 4) <= "9"
+                 && (s.slice(4, 5) == ":" || s.slice(4, 5) == "=" || s.slice(4, 5) == "~")) {
+            stage = "error" + s.slice(3, 4);
+        }
         else if (s.slice(0, 3) == "exc") stage = "error";
         else if (s.slice(0, 3) == "hb ") { hb = true; stage = "heartbeat"; }
         else if (s.slice(0, 2) == "rd") stage = "road";
@@ -89,7 +125,7 @@ class BridgeV1 extends GSController {
             }
         }
 
-        return { stage = stage, job = job, hb = hb };
+        return { stage = stage, job = job, hb = hb, fp = fp };
     }
 
 /** Fingerprint = stage+job+hb+detail keys; values change => new event.
@@ -101,7 +137,8 @@ class BridgeV1 extends GSController {
      */
     function ExecEventKey(ev) {
         if (ev == null) return "";
-        return ev.stage + "|" + ev.job + "|" + (ev.hb ? "1" : "0");
+        // 形状恒定：fp 对非错误相位是空串，于是老行为逐字不变。
+        return ev.stage + "|" + ev.job + "|" + (ev.hb ? "1" : "0") + "|" + (ev.fp == null ? "" : ev.fp);
     }
 
     /**

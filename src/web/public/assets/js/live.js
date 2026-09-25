@@ -186,6 +186,10 @@
               // 暂停归因（后端记录的事实）："谁让它停的"必须以它为准，
               // 不能只看 run.state（agent 自己停时它可能还是 running）。
               this.control = s.control || null;
+              // 执行器异常的**完整**文本（2026-09-25）：公司名是执行器唯一已验证的通道、
+              // 上限 31 字符，所以它分块上报、由 harness 拼回后放在快照里。
+              // `null` = 这个 run 没有执行器错误（不是“空消息”）。
+              this.executorError = s.executorError || null;
               // These three were sent by the server all along but never consumed,
               // so a page loaded mid-run saw no stages and no memory (MEMORY.md A1:
               // "no error" only holds if the code actually ran).
@@ -287,6 +291,43 @@
           this.$nextTick(() => {
             if (this.follow && this.$refs.stepList) U.scrollToEnd(this.$refs.stepList);
           });
+        },
+
+        /* ------------------------ executor error ------------------------ */
+        /**
+         * 执行器异常的完整文本；没有错误时返回 ""。
+         *
+         * 为什么存在（2026-09-25 真机）：公司名（执行器唯一已验证的通道，SPEC §10.10）
+         * 上限 31 字符，而错误在生产端被截到 24 字符——页面只显示
+         * `EX exc:can't execute over an un…`，“为什么卡住”当场不可诊断。现在执行器分块
+         * 上报，harness 拼回完整文本并发在快照的 `executorError` 里。
+         * 防御：字段缺失/半成形一律当作“没有错误”，绝不抛（这是可选的线上字段）。
+         */
+        executorErrorText() {
+          const e = this.executorError;
+          if (!e || typeof e !== "object") return "";
+          const msg = typeof e.message === "string" ? e.message.trim() : "";
+          if (!msg) return "";
+          return e.truncated === true ? msg + " …truncated" : msg;
+        },
+
+        /**
+         * 运行面板里“为什么没有进展”的那句话。
+         *
+         * live-view.js 拥有暂停/停滞的判据（纯函数、有单测）；这里只**追加**执行器
+         * 自己抛出的异常——它是“循环不动”的第二个独立成因，与暂停归因并列显示，
+         * 不能混进 live-view.js 的判定树（那会让两个成因互相掩盖）。
+         */
+        controlNote(nowMs) {
+          const base = model.controlNote.call(this, nowMs);
+          const err = this.executorErrorText();
+          if (!err) return base;
+          const at = Number(this.executorError && this.executorError.at);
+          // fmtAgo 自带单位与 "ago"（"2 minutes ago"），再拼一次就成了
+          // "2 minutes ago ago"（真机截图里出现过）。
+          const when = Number.isFinite(at) && at > 0 ? " (" + U.fmtAgo(at) + ")" : "";
+          const line = "The executor raised an error" + when + ": " + err;
+          return base ? base + " " + line : line;
         },
 
         /* ----------------------------- drawer ----------------------------- */
