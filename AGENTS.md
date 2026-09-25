@@ -195,9 +195,19 @@ scripts/       # dev 辅助 (loop-health, run-experiment, dashboard-smoke, sync/
 - [ ] **文档正交**：同一事实只有一个权威位置，其余用**指针**（见 §9）
 - [ ] 没有留下 TODO 假代码、死代码、`console.log` 调试残留
 
-## 8. 提交卫生（禁止碎片化）
+## 8. 提交卫生（禁止碎片化 + 禁止中英混排）
 
 **一次逻辑变更 = 一个 commit。**
+
+**提交信息（subject 与 body）一律用英文。** 理由与边界：
+- 本项目是**国际化开源项目**（`README.md` 英文为主、`README.zh-CN.md` 为镜像），
+  提交历史是**公开的第一印象**；中英混排会让 `git log` 难以被国际读者检索与阅读。
+- 提交信息描述的是**代码变更**，而代码库里的文档/注释/规格（`SPEC.md`/`ROADMAP.md`/
+  `MEMORY.md`/源码注释）**按现状是中文**——这是两件事，不要互相"对齐"：
+  **commit = 英文，仓库内文档与注释 = 中文**。
+- 写错了就 `git commit --amend`；**未 push 的一整段历史语言写错，用 rebase 改写**（改完必须
+  核对 `git diff <old-head> HEAD` 为空、tree 对象一致，确认只改了信息没改内容）。
+
 
 已提交但**仍属同一次工作**的修正（写错、写漏、补充说明）→ **`git commit --amend`**，
 不要追加 `fix:` / `correct:` / `docs: 补充…` 之类的补丁 commit。
