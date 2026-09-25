@@ -11,6 +11,7 @@
 
 import type { CompanyEconomy, CompanySnapshot, CompanyStats, GameDate, GameEvent } from "../types.js";
 import { createDeliveryMeter } from "./delivery-meter.js";
+import { convertDateToYmd } from "./payload-parsers.js";
 
 /**
  * Game day in the project's 360-day-year convention. Absolute year is fine -
@@ -202,7 +203,7 @@ export class WorldState {
 		switch (ev.kind) {
 			case "date": {
 				const p = ev.payload as { raw: number; year: number; month: number; day: number };
-				this.date = { raw: p.raw, year: p.year, month: p.month, day: p.day };
+				this.applyDate(p.raw, { year: p.year, month: p.month, day: p.day });
 				break;
 			}
 			case "company_new": {
@@ -301,6 +302,41 @@ export class WorldState {
 			cargoTotals: [...this.cargoTotals],
 			companyCargo: this.companyCargo ? { ...this.companyCargo } : null,
 		};
+	}
+
+	/**
+	 * The current game date, from the Bridge GS's own clock (`GSDate`, every
+	 * 200 script ticks ≈ 6 s) — the finest source we have.
+	 *
+	 * 为什么需要（2026-09-25 真机取证）：admin port 的 DATE 包按 **Monthly**
+	 * 订阅（`admin-client.ts` 的 `DEFAULT_SUBSCRIBE`），也就是**一个游戏月**才来一次。
+	 * 于是一局 90 秒的真实运行里只收到 **1** 个 date 事件，而页面 health 条的
+	 * `worldRate` 判据是"最近 90 s 内有没有新 date" —— 它于是**结构性地**永远报
+	 * "world frozen"，哪怕世界每 6 秒推进一次（那次截图里的假事实）。agent 自己的
+	 * `observe` 读的也是这个字段，所以模型看到的世界时间同样停在连接那一刻。
+	 * 一条按月刷新的通道不能当"当前时间"用。
+	 *
+	 * 传的是 OpenTTD 的 raw 日期（天数计数），与 admin 包同一坐标系。
+	 */
+	setDateFromRaw(raw: number): void {
+		this.applyDate(raw);
+	}
+
+	/**
+	 * The ONE writer for `date` (2026-09-25). Two sources feed it now — the
+	 * monthly admin packet and the 6-second GS clock — so the field needs one
+	 * place deciding which reading wins.
+	 *
+	 * 规则：**单调**。较旧的读数一律丢弃（哪怕来自自认为"更新"的通道）：把日期
+	 * 往回滚会让按 gameDay 判季度的交付计量器（`delivery-meter.ts`）看到季度序号
+	 * 倒退，而倒序读数在真实网络里确实会发生。
+	 */
+	private applyDate(raw: number, ymd?: { year: number; month: number; day: number }): void {
+		if (!Number.isFinite(raw)) return;
+		if (this.date && raw < this.date.raw) return;
+		this.date = ymd
+			? { raw, year: ymd.year, month: ymd.month, day: ymd.day }
+			: { raw, ...convertDateToYmd(raw) };
 	}
 
 	/**

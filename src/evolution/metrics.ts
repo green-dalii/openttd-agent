@@ -42,6 +42,10 @@ export interface SessionMetaLike {
 		/** 局是在暂停中结束的（SPEC §10.101）；true = 不可用于比较。 */
 		blockedByPause?: boolean;
 		pausedBy?: "agent" | "dashboard" | null;
+		/** 局结束时世界是否冻住（且不是 harness 按住的）——SPEC §10.102。 */
+		worldFrozen?: boolean;
+		/** 距离世界最后一次推进过了多久（ms）；未记录则缺席。 */
+		worldFrozenMs?: number;
 		/** Company income (N2-4); absent when the packet never arrived. */
 		income?: number;
 		/**
@@ -131,6 +135,15 @@ export interface GameMetric {
 	blockedByPause?: boolean;
 	/** Who paused it; only meaningful together with `blockedByPause`. */
 	pausedBy?: "agent" | "dashboard" | null;
+	/**
+	 * The run ended with the world frozen while the harness held nothing
+	 * (SPEC §10.102). Distinct from `blockedByPause`: nobody stopped this run,
+	 * the world simply stopped moving — so its outcome measures the environment,
+	 * not the agent. Excluded from A/B with a disclosed count.
+	 */
+	worldFrozen?: boolean;
+	/** Wall-clock ms from the last world advance to finalize; null = not reported. */
+	worldFrozenMs: number | null;
 	/** Simulated days this run covered; null when not reported (legacy rows). */
 	simulatedDays: number | null;
 	/** Episode horizon in simulated days; null when not reported or none set. */
@@ -336,6 +349,19 @@ function num(v: unknown): number {
 }
 
 /**
+ * Like `num`, but **null** for "not reported" instead of 0.
+ *
+ * Needed for W2's `worldFrozenMs`: 0 is a real reading there (the world advanced
+ * right up to finalize), so folding "never recorded" into 0 would let an absent
+ * fact masquerade as a measurement — the exact null≠0 confusion this repository
+ * keeps paying for. `num` stays as it is for the older counters, whose lenient
+ * default predates this and is not in scope here.
+ */
+function numOrNull(v: unknown): number | null {
+	return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+
+/**
  * Project a finished session into a ledger entry.
  *
  * `memory` records what was actually injected; callers that did not inject
@@ -384,6 +410,10 @@ export function toGameMetric(
 		// undefined = 不是这个原因（不写 false，避免"没记录"与"没发生"混同）。
 		blockedByPause: o && o.blockedByPause === true ? true : undefined,
 		pausedBy: (o && (o.pausedBy === "agent" || o.pausedBy === "dashboard") ? o.pausedBy : undefined),
+		// W2（SPEC §10.102）：只记 true；`worldFrozenMs` 是证据（可为 0 = 正常），
+		// 与 `worldFrozen`（结论）分开，事后才能重判阈值而不必重跑。
+		worldFrozen: o && o.worldFrozen === true ? true : undefined,
+		worldFrozenMs: numOrNull(o && o.worldFrozenMs),
 		simulatedDays: num(o && o.simulatedDays),
 		horizonDays: o && typeof o.horizonDays === "number" ? o.horizonDays : null,
 		reachedHorizon: o && typeof o.reachedHorizon === "boolean" ? o.reachedHorizon : null,
@@ -734,7 +764,15 @@ export function compareArms(rawMetrics: GameMetric[], by: CompareBy = "memory"):
 	const all = metrics ?? [];
 	const scripted = all.filter((m) => m.llmKind === "faux").length;
 	const interrupted = all.filter((m) => m.llmKind !== "faux" && m.status === "interrupted").length;
-	const real = all.filter((m) => m.llmKind !== "faux" && m.status !== "interrupted");
+	// W2（SPEC §10.102）：世界冻住的局，**没有人**停它，是世界自己不动了。
+	// 它的 outcome 测的是环境而不是 agent（历史上 2026-09-12 的 pause_on_join
+	// 就是这样静默地让一批局停在 0），所以与 interrupted 同级排除并披露计数。
+	// 注意：`blockedByPause`（被人停的）已在 `comparableMetrics` 里先剔除，
+	// 两者是**不同**的原因，不允许合并成一个数字。
+	const frozen = all.filter((m) => m.worldFrozen === true);
+	const real = all.filter(
+		(m) => m.llmKind !== "faux" && m.status !== "interrupted" && m.worldFrozen !== true,
+	);
 	// G1 (SPEC §10.68): a run that hit the wall-clock cap before its simulated
 	// horizon measured a SHORTER world, so it is not the same unit of observation.
 	// Excluded with disclosure; rows written before the field existed (null) stay
@@ -859,6 +897,8 @@ export function compareArms(rawMetrics: GameMetric[], by: CompareBy = "memory"):
 		parts.push(`${horizonShort.length} that hit the wall-clock cap before the horizon`);
 	if (horizonUnknown.length > 0)
 		parts.push(`${horizonUnknown.length} with no recorded simulated horizon (unknown opportunity)`);
+	if (frozen.length > 0)
+		parts.push(`${frozen.length} that ended with the world frozen (not stopped by anyone - SPEC §10.102)`);
 
 	const compared =
 		`Compared ${a.count} with-lessons vs ${b.count} without-lessons run(s)`;

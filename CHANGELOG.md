@@ -18,7 +18,15 @@
 - **Performance**：OpenTTD 公司评分（0–255）与去年前年对比（条形）。
 - **Cargo 表的运走比例条**：把 `0%` 与 `67%` 变成一眼可分的长度。
 
-### Changed（2026-09-25：被暂停结束的局不再混进统计）
+### Fixed（2026-09-25：世界时钟走错通道——页面与模型曾拿到过时的时间）
+- admin port 的 DATE 包按 **Monthly** 订阅，而页面 health 条按"最近 90 s 有没有新 date"
+  判"世界是否推进" ⇒ 它**永远**显示 `WORLD frozen`，哪怕世界每 6 秒推进一次；agent 的
+  `observe` 读的同一个字段，所以模型看到的世界时间也停在连接那一刻。
+- 现在 Bridge GS 的游戏时钟（每 200 tick ≈ 6 s）会在日期变化时变成真正的 `date` 事件
+  （标注 `source:"gs"`），走与收包相同的三条路径；`WorldState` 是 `date` 的唯一写者且
+  **单调**（按月到达的旧包不会把日期往回滚）。
+
+### Changed（2026-09-25：世界冻住的局不再混进统计）
 - 局在**暂停中**结束时，outcome 会带上 `blockedByPause`（以及 `pausedBy` / `pausedAt`），
   并进入进化账本；**A/B 比较在入口统一剔除这类局**（它们不是"没学会"，而是被自己按停的）。
 - `pnpm exec tsx scripts/m3-verdict.ts <dataDir>` 现在会报出被剔除的局数，

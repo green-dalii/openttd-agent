@@ -102,6 +102,20 @@ export interface SessionMeta {
 		pausedBy?: "agent" | "dashboard" | null;
 		/** 暂停发生时刻（墙钟 ms）；用于复盘"停在哪一刻"。 */
 		pausedAt?: number | null;
+		/**
+		 * 局结束时的冻结判定（2026-09-25，SPEC §10.102）：世界超过
+		 * `WORLD_FROZEN_AFTER_MS` 没有推进，且**harness 当时没按住它**。
+		 * 与 `blockedByPause` 是两个独立事实：那个是"被人停的"，这个是
+		 * "世界自己不动了"（例如 OpenTTD 自己的 pause_on_join —— 2026-09-12
+		 * 的 executor 疑难就是这么来的）。两者都不该被平均成"没学会"。
+		 */
+		worldFrozen?: boolean;
+		/**
+		 * 距离世界最后一次推进过了多久（墙钟 ms，局结束时测得）。
+		 * 始终记录（只要见过 GS 日期）：它是**证据**，而 `worldFrozen` 是结论；
+		 * 有了证据才能事后重新判定阈值而不必重跑。
+		 */
+		worldFrozenMs?: number;
 		/** Tool calls refused by the per-decision budget (R1; absent = not reported). */
 		toolBudgetBlocks?: number;
 		/** Oracle probe (M3-1): fleet size requested downward, and what was observed. */

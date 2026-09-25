@@ -31,7 +31,16 @@ console.log(`dataDir : ${dataDir}`);
 // 被 agent 自己按停在世界里的局**不参与 A/B**（SPEC §10.101），但必须报出来：
 // 一个实验里悄悄少了几局、而报告没写，是最容易被误读成"结果更干净"的情况。
 const blocked = metrics.filter((m) => m.blockedByPause === true);
-console.log(`runs    : ${metrics.length} recorded${blocked.length ? ` (${blocked.length} ended while paused — excluded from A/B)` : ""}`);
+// W2（SPEC §10.102）：世界冻住的局同样不进 A/B，但原因**不同**（没有人停它），
+// 所以分开报：两个数字合并成一个，读者就分不清"被停掉"与"世界不动了"。
+const frozen = metrics.filter((m) => m.worldFrozen === true);
+const exclusions = [
+  blocked.length ? `${blocked.length} ended while paused (stopped by someone)` : "",
+  frozen.length ? `${frozen.length} ended with the world frozen` : "",
+].filter(Boolean);
+console.log(
+  `runs    : ${metrics.length} recorded${exclusions.length ? ` (${exclusions.join("; ")} — excluded from A/B)` : ""}`,
+);
 console.log("");
 console.log(`verdict : ${arms.conclusive ? "CONCLUSIVE" : "not enough data"}`);
 console.log(`note    : ${arms.note || "(none)"}`);

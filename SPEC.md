@@ -769,3 +769,45 @@ inst.__zoomedByUser = true;       // 让数据帧走 setData(data, false)，视�
 这类局（`m3-verdict.ts` 同时报出被剔除的局数，"悄悄少几局"不能被读成"结果更干净"）；
 `/sessions` 审核页把它排在 Outcome 表**第一行**并写明"不要当学习结果"。
 只写 true、不写 false：把"没发生"与"没记录"混成 false 就会在统计里变成另一种噪声。
+
+### 10.102 世界时钟：一个事实、一个写者、一条够细的通道（2026-09-25）
+
+W2 的目标是让"这局是在**世界冻住**时结束的"成为 run 记录里的事实。落地时先撞上一个
+**更底层**的缺陷，不修它 W2 的判据就没有可信的输入：
+
+| 事实 | 证据 |
+|------|------|
+| admin port 的 DATE 包按 **`Monthly`** 订阅 | `admin-client.ts` 的 `DEFAULT_SUBSCRIBE`：`[AdminUpdateType.Date, AdminUpdateFrequency.Monthly]` |
+| 于是一局 90 s 的真实运行只收到 **1** 个 date 事件 | 隔离真机 `events.jsonl` 事件计数：`date: 1`（同时 `company_info: 128`） |
+| 页面 health 条的判据是"最近 90 s 内有没有新 date 事件" | `live-view.js` 的 `worldRate()`：`advancing: now - lastAt <= 90 * 1000` |
+| ⇒ 它**结构性地**永远报 `world frozen` | 真机截图：世界每 6 s 推进一次，页面却写 `WORLD frozen — no new game date in the last 90s` |
+| 同一个字段还喂给 agent 的 `observe` | `tools/index.ts` 读 `snap.date` ⇒ **模型看到的世界时间也停在连接那一刻** |
+
+**结论（系统事实）**：按游戏月刷新的通道不能当"当前时间"用；页面与模型都曾因此拿到
+**结构上过时**的时间事实。可用的细粒度来源是 Bridge GS 的 `GSDate`（每 200 script tick
+≈ 6 s 一次，`signal-hub.ts` 的 `gsRawDate`）——它一直在报，只是从未变成 `date` 事件。
+
+**修法（三件事一起，缺一件就还是旧的谎）**：
+1. `WorldState` 成为 `date` 的**唯一写者**（`applyDate`），并**单调**：较旧的读数一律丢弃
+   ——按月到达的 admin 包不得把日期往回滚（交付计量器按 `gameDay` 判季度，倒退会污染它）。
+2. hub 在 GS 日期**变化**时把它变成一个真正的 `date` 事件（`source:"gs"`），走与收包
+   **完全相同**的三条路径（world / 页面 / 归档）。`source` 是诚实标注：它是 OpenTTD 时钟的
+   **观测**，不是 admin 包。
+3. 该段自带 `try/catch`：里面有 IO（归档写盘），一次失败不许连坐同一份 state 里的
+   城镇/产业/运量事实（SPEC §10.66 的 `IsStationTile` 就是"一处坏、整条通道按局退化"）。
+
+**W2 事实链**：`signal-hub` 记录"日期**变化**"的时刻 → runner 记录"**harness 自己**按住
+世界"的时刻表（agent `set_pause` / 页面按钮与 `supervisor.pause` / freeze 模式三条路径，
+见 `runner.ts` 的 `markWorldHeld`）→ 收尾时两者合成 outcome：
+`worldFrozen: true` 仅当"超过阈值且没有人按住"，另记证据 `worldFrozenMs`。
+只写 `true`、不写 `false`（把"没发生"与"没记录"混成 false 就是另一种噪声）。
+
+**阈值 45 s 的来历（实测，不是拍脑袋）**：健康期相邻推进间隔 **max 6.0 s**（41 个样本，
+中位 5.9 s）⇒ 45 s ≈ 7.5×；外部 rcon 暂停后的冻结段实测 **64–66 s**（outcome 记 66 109 ms，
+事件流独立算出 64 s，两者互相印证）；真机事故是 **1 小时**。
+
+**真机验收（重放 2026-09-12 `pause_on_join` 事故的形状）**：从 harness **之外**用 admin
+rcon 暂停世界（与页面按钮两条独立路径）⇒ `meta.json` 记 `worldFrozen=true`、
+`worldFrozenMs=66109`，而 `blockedByPause` 为**空**（暂停不来自我们）——两类原因被分开。
+页面截图复核：health 条从假的 `frozen` 变成真的 `30.2/min`，`GAME DATE` 从连接时刻的
+`1950-01-01` 变成实时的 `1950-02-01`。

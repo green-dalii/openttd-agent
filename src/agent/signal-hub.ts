@@ -19,7 +19,7 @@ import type { WorldState } from "../game/world-state.js";
 import type { RouteLedger } from "./route-ledger.js";
 import { createExecutorProgress, type ExecutorProgressReport } from "./executor-progress.js";
 import { decodeExecutorPhase } from "../game/executor-status.js";
-import { gameDayFromRawDate } from "../game/payload-parsers.js";
+import { gameDayFromRawDate, convertDateToYmd } from "../game/payload-parsers.js";
 import type { WebServer } from "../web/server.js";
 import type { RouteStats } from "./route-stats.js";
 import type { SessionStore } from "./session-store.js";
@@ -66,6 +66,18 @@ export interface SignalHub {
 	 * which is MONTHLY - the episode horizon needs the finer source.
 	 */
 	getGameDay(): number | null;
+	/**
+	 * The world clock as a FACT (W2): when the GS's own date last **advanced**,
+	 * and how long ago that was. `frozenForMs === null` means "no GS date has
+	 * ever been seen" — that is *unknown*, not "frozen" (null ≠ 0).
+	 *
+	 * Why the GS channel and not the admin `date` packet: measured on a real
+	 * 90 s run, the admin date packet arrives ONCE, while the GS `state`
+	 * report carries a fresh date every 200 script ticks (~3 game days). A
+	 * freeze detector on the admin packet would see one sample and call
+	 * everything frozen.
+	 */
+	getWorldClock(): { rawDate: number | null; lastAdvancedAtMs: number | null; frozenForMs: number | null };
 	/** Current executor stage, e.g. "boot" / "road" / "done" / "error". */
 	getStage(): string;
 	/** Last raw phase string (for the dashboard / RESULT line). */
@@ -97,6 +109,14 @@ export function makeSignalHub(refs: SignalHubRefs): SignalHub {
 	let executorPhase = "";
 	/** Raw OpenTTD date from the GS state channel (fine-grained episode clock). */
 	let gsRawDate: number | null = null;
+	/**
+	 * W2: wall-clock ms of the last date **change** (not the last packet).
+	 * The distinction is the whole feature: a channel that keeps delivering the
+	 * same date is exactly what a frozen world looks like, and until this was
+	 * recorded the repository had no way to tell the two apart — "the world did
+	 * not advance" existed only as page copy.
+	 */
+	let lastDateAdvancedAtMs: number | null = null;
 	const executorProgress = createExecutorProgress();
 	/**
 	 * Simulated day for progress maths. Same 360-day-year convention as the
@@ -112,25 +132,71 @@ export function makeSignalHub(refs: SignalHubRefs): SignalHub {
 	let lastRoute: Record<string, unknown> | null = null;
 	const routeStats = new Map<number, RouteStats>();
 
+	/**
+	 * The single path every event takes: world state → dashboard → session
+	 * archive (or the boot buffer).
+	 *
+	 * It used to be inlined in `onEvent`. It is a named function now because the
+	 * GS game clock is **synthesized** into a real `date` event below, and that
+	 * event must reach exactly the same three places — a second, slightly
+	 * different prologue is how a fact ends up on the page but not in the
+	 * archive (MEMORY.md C1/D56).
+	 */
+	function recordEvent(ev: GameEvent): void {
+		refs.world.ingest(ev);
+		// Forward to the dashboard. The `--watch` runner has always done this
+		// (src/game/runner.ts) but the agent path did not, so during `--agent`
+		// - the main mode - the page received NO event frames at all: its
+		// company mirror and history never advanced, and the KPIs stayed frozen
+		// at whatever the connect-time snapshot said until a manual reload.
+		// Same shape as the toWireSnapshot bug (MEMORY.md C1): two paths, one of
+		// them missing a piece, and the other path "looking fine" hid it.
+		refs.getWeb()?.publishEvent(ev);
+		const session = refs.getSession();
+		if (session) session.appendEvent(ev);
+		else if (bootEvents.length < BOOT_EVENT_CAP) bootEvents.push(ev);
+	}
+
 	return {
 		onEvent(ev) {
-			refs.world.ingest(ev);
-			// Forward to the dashboard. The `--watch` runner has always done this
-			// (src/game/runner.ts) but the agent path did not, so during `--agent`
-			// - the main mode - the page received NO event frames at all: its
-			// company mirror and history never advanced, and the KPIs stayed frozen
-			// at whatever the connect-time snapshot said until a manual reload.
-			// Same shape as the toWireSnapshot bug (MEMORY.md C1): two paths, one of
-			// them missing a piece, and the other path "looking fine" hid it.
-			refs.getWeb()?.publishEvent(ev);
-			const session = refs.getSession();
-			if (session) session.appendEvent(ev);
-			else if (bootEvents.length < BOOT_EVENT_CAP) bootEvents.push(ev);
+			recordEvent(ev);
 			if (ev.kind === "gamescript") {
 				const p = ev.payload as Record<string, unknown>;
 				if (p.cmd === "state") {
 					gsStates++;
-					if (typeof p.date === "number") gsRawDate = p.date;
+					// W2: only a date **change** is the world advancing. The same
+					// packet arriving again says nothing, and treating it as
+					// progress is what would hide a frozen world.
+					if (typeof p.date === "number") {
+						if (p.date !== gsRawDate) {
+							lastDateAdvancedAtMs = Date.now();
+							// The GS clock is the only **fine-grained** date we get (the
+							// admin DATE packet is Monthly — see WorldState.setDateFromRaw).
+							// Turn each advance into a real `date` event so every consumer
+							// of that event kind sees the world clock: the page's
+							// world-rate tile, the agent's `observe`, the episode maths and
+							// the session archive. `source:"gs"` records the origin — it is
+							// an observation of OpenTTD's clock, not an admin packet, and
+							// the archive must not pretend otherwise.
+							//
+							// 失败**不许**连坐：这一段里有 IO（归档写文件），抛出去会把
+							// 同一份 state 里的城镇/产业/运量事实一起带走（SPEC §10.66 的
+							// `IsStationTile` 就是这个形状：一处坏、整条通道按局退化）。
+							// 所以它自己兜住，并且**说出来**（不静默）。
+							try {
+								refs.world.setDateFromRaw(p.date);
+								recordEvent({
+									seq: 0,
+									kind: "date",
+									ts: Date.now(),
+									payload: { raw: p.date, ...convertDateToYmd(p.date), source: "gs" },
+								} as unknown as GameEvent);
+							} catch (e) {
+								console.warn(`[agent] GS game clock update failed: ${e instanceof Error ? e.message : String(e)}`);
+							}
+						}
+						gsRawDate = p.date;
+					}
 					// The GS owns the town list; the agent only reads it. Without
 					// this the agent could not see the options it was choosing
 					// between, which is what made the M3 experiment saturated
@@ -310,7 +376,12 @@ export function makeSignalHub(refs: SignalHubRefs): SignalHub {
 		getGsCount: () => gsStates,
 		getGsErrors: () => gsErrors,
 		getExecutorProgress: () => executorProgress.report(gameDayNow()),
-		getGameDay: () => (gsRawDate !== null ? gameDayFromRawDate(gsRawDate) : null),	
+		getGameDay: () => (gsRawDate !== null ? gameDayFromRawDate(gsRawDate) : null),
+		getWorldClock: () => ({
+			rawDate: gsRawDate,
+			lastAdvancedAtMs: lastDateAdvancedAtMs,
+			frozenForMs: lastDateAdvancedAtMs === null ? null : Date.now() - lastDateAdvancedAtMs,
+		}),
 	getStage: () => executorStage,
 		getPhase: () => executorPhase,
 		getReachedDone: () => reachedDone,

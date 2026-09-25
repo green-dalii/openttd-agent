@@ -267,11 +267,35 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 	// decision quality, only the command plumbing.
 	// Verified freeze controller (only when asked for). Defined before the loop and
 	// reused at finalize so the run record can PROVE the freeze really happened.
+	// W2（SPEC §10.102）：**harness 自己按住世界**的时刻表，单一写者。
+	//
+	// 背景：agent 在 turn 22 自己 `set_pause` 后，世界冻结了一小时，而"世界不推进"
+	// 当时只是页面上一句话，run 记录里没有任何事实。要判定"世界冻了"，必须先能
+	// 回答"是不是我们自己按住的"——三条路径都会按住世界，全部写这里：
+	//   ① agent 的 set_pause（onPauseChanged）
+	//   ② 页面按钮 / serve 的 pause 钩子（opts.control.onReady）
+	//   ③ freeze 模式为快照决策持有的暂停（下面的 freezeCtl）
+	// 于是"日期不动且**没有人**按住它"才能被写成 worldFrozen；反之就是 W1 的
+	// blockedByPause（被人为停掉的局，不是"没学会"）。
+	let worldHeldSince: number | null = null;
+	const markWorldHeld = (): void => {
+		if (worldHeldSince === null) worldHeldSince = Date.now();
+	};
+	const markWorldReleased = (): void => {
+		worldHeldSince = null;
+	};
+
 	const freezeCtl =
 		opts.freeze === true
 			? makeFreezeController({
-					pause: () => client!.rconAwait("pause"),
-					unpause: () => client!.rconAwait("unpause"),
+					pause: () => {
+						markWorldHeld();
+						return client!.rconAwait("pause");
+					},
+					unpause: () => {
+						markWorldReleased();
+						return client!.rconAwait("unpause");
+					},
 					now: () => Date.now(),
 					log: (m) => console.log(m),
 				})
@@ -287,6 +311,9 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 		// agent 自己调 `set_pause` → 记录归因并推给页面（"谁让它停的"是独立事实）。
 		onPauseChanged: (paused: boolean, at: number) => {
 			agentPause = { paused, at };
+			// W2：这也是"我们自己按住世界"的一种，必须记进同一本账。
+			if (paused) markWorldHeld();
+			else markWorldReleased();
 			// **决策节奏必须与世界一起停**（2026-09-25 真实事故）：agent 调 `set_pause`
 			// 后只发了 rcon，`scheduler` 仍在按"游戏日期推进"找触发 —— 而日期永远不再
 			// 推进，于是循环空转、页面只看到"进程活着但没进展"，直到人发现。
@@ -518,10 +545,14 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 	opts.control?.onReady?.({
 		stop: requestStop,
 		pause: () => {
+			// W2：页面按钮与 supervisor.pause("agent") 都走这里（同一funnel），
+			// 所以这一处就能覆盖 serve 模式下**所有**人为暂停的来源。
+			markWorldHeld();
 			scheduler.pause();
 			reportControl("pause");
 		},
 		resume: () => {
+			markWorldReleased();
 			scheduler.resume(gameDaysSinceStart(deps));
 			reportControl("unpause");
 		},
@@ -858,6 +889,12 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 		// 局是在**暂停中**结束的吗（agent 自己按的）？这是 outcome 的独立事实，
 		// 让统计能把这局从"完成/中止"里剔除（SPEC §10.101）。
 		agentPause,
+		// W2：世界时钟有多久没动 + harness 是不是正按着它。两个事实一起才能
+		// 区分"世界被冻"与"我们让它停"（SPEC §10.102）。
+		worldFrozen: {
+			frozenForMs: hub.getWorldClock().frozenForMs,
+			harnessHeld: worldHeldSince !== null,
+		},
 		scenario,
 		scenarioReason: prebuiltReason,
 		deliveredAtReady,

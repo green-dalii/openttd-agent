@@ -13,6 +13,10 @@ const fakeWorld = () => ({
 	ingest: vi.fn(),
 	setTowns: vi.fn(),
 	setIndustries: vi.fn(),
+	// 真实 WorldState 的方法之一（GS 时钟通道，2026-09-25）。测试替身必须与生产
+	// 契约一致：缺方法会让 hub 在这里抛错，而那一抛会连坐同一条 state 里的
+	// 城镇/产业事实 —— 守卫本身就是这条耦合的证据。
+	setDateFromRaw: vi.fn(),
 	setCargoTotals: vi.fn(),
 	setCompanyCargo: vi.fn(),
 	// G2: the hub now reads the clock to time construction progress.

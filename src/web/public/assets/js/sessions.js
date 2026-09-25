@@ -185,6 +185,16 @@
               { k: "Treat as", v: "NOT a learning result — filter it out of averages" },
             ];
           }
+          // W2（SPEC §10.102）：世界冻住 —— 没有人停它，是世界自己不动了。
+          // 与上面**原因不同**，所以分开写：审核者需要能一眼分清这两类局。
+          if (o.worldFrozen === true) {
+            const secs = typeof o.worldFrozenMs === "number" ? Math.round(o.worldFrozenMs / 1000) : null;
+            return [
+              { k: "Ended with the world frozen", v: `yes — no game-day advance for ${secs === null ? "an unrecorded span" : secs + " s"} while nothing held it` },
+              { k: "Status", v: String(m.status || "—") },
+              { k: "Treat as", v: "NOT a learning result — the environment stopped, not the agent" },
+            ];
+          }
           const f = m.freeze || null;
           const num = (v) => (v === null || v === undefined || v === "" ? "—" : U.fmtInt(v));
           const money = (v) => (v === null || v === undefined ? "—" : U.fmtMoney(v));

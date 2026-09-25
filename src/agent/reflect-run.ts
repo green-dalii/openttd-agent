@@ -21,6 +21,17 @@ import type { Telemetry } from "./telemetry.js";
 import type { RouteLedger } from "./route-ledger.js";
 import type { Config } from "../config.js";
 
+/**
+ * W2 阈值：世界连续多久不推进就算"冻住"（SPEC §10.102）。
+ *
+ * 取值依据（可查证，不是拍脑袋）：GS 的 `state` 通道每 200 script tick 报一次
+ * 自己的日期，注释记的是"约每 3 游戏日"一次 ⇒ 健康世界里这个值每几秒就会变一次；
+ * 45 s 远高于任何健康抖动（一个数量级以上），又远低于本次事故的代价
+ * （世界冻了 **1 小时**才被人发现）。真机复现（外部 rcon 暂停世界）测得
+ * 健康间隔与冻结时长后再校准；未校准前也不许把它说成"已测最优值"。
+ */
+export const WORLD_FROZEN_AFTER_MS = 45_000;
+
 export interface FinalizeAndReflectArgs {
 	cfg: Config;
 	world: WorldState;
@@ -50,6 +61,11 @@ export interface FinalizeAndReflectArgs {
 	 * 过滤掉的局**，不能混进"完成/中止"的平均里（SPEC §10.101）。
 	 */
 	agentPause?: { paused: boolean; at: number } | null;
+	/**
+	 * W2：世界有多久没推进 + harness 当时是不是正按着它（SPEC §10.102）。
+	 * `frozenForMs === null` = 从未见过 GS 日期（**不知道**，不是冻住）。
+	 */
+	worldFrozen?: { frozenForMs: number | null; harnessHeld: boolean } | null;
 	/**
 	 * EPISODE CLOCK (G1, SPEC §10.68). Recorded so a run that never reached its
 	 * simulated horizon cannot be averaged with one that did: the wall-clock cap
@@ -155,6 +171,17 @@ export async function runFinalizeAndReflect(args: FinalizeAndReflectArgs): Promi
 			blockedByPause: args.agentPause?.paused ? true : undefined,
 			pausedBy: args.agentPause?.paused ? "agent" : undefined,
 			pausedAt: args.agentPause?.paused ? args.agentPause.at : undefined,
+			// W2（SPEC §10.102）：世界不推进且**没有人按住它** → 这局测的不是
+			// agent 的能力，实验统计必须能把它与"agent 自己停了"（上面三个字段）
+			// 区分开。只写 true；`worldFrozenMs` 始终记下（它是证据，boolean 是结论）。
+			worldFrozenMs: args.worldFrozen?.frozenForMs ?? undefined,
+			worldFrozen:
+				args.worldFrozen &&
+				args.worldFrozen.frozenForMs !== null &&
+				args.worldFrozen.frozenForMs > WORLD_FROZEN_AFTER_MS &&
+				!args.worldFrozen.harnessHeld
+					? true
+					: undefined,
 			toolBudgetBlocks: args.toolBudgetBlocks,
 			scenario: args.scenario,
 			scenarioReason: args.scenarioReason ?? null,

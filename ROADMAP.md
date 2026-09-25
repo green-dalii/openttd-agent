@@ -436,7 +436,7 @@ pgrep -fl "run-experiment|cli/run.ts|OpenTTD.app"     # 无输出 = 没有（202
 | 项 | 内容 | 验收 |
 |----|------|------|
 | ~~**W1 暂停 = 显式状态机**~~ | ✅ 2026-09-25：`outcome.blockedByPause` / `pausedBy` / `pausedAt` 落盘 → 进化账本 → `compareArms` 在**比较入口**剔除（verdict 报出剔除数）→ `/sessions` 审核页第一行标出 | ✅ 单测 7 条 + gate 1287 passed（`SPEC.md` §10.101 末） |
-| **W2 冻结世界的兜底** | 世界长时间不推进（> N 游戏日无推进）且未暂停 → 明确标 `worldFrozen`（现在只是页面文案，run 记录里没有这个事实） | run 记录里有 `worldFrozen` 事实；实验统计能区分"世界被冻"与"agent 停了" |
+| ~~**W2 冻结世界的兜底**~~ | ✅ 2026-09-25：`outcome.worldFrozen` + 证据 `worldFrozenMs` → 账本 → `compareArms` 按**独立原因**剔除并披露 → `/sessions` 首行标出。**顺带修掉更底层的通道缺陷**：admin DATE 包是 `Monthly`，页面与 agent 的世界时间曾结构性过时（`SPEC.md` §10.102） | ✅ 真机重放（外部 rcon 暂停）：`worldFrozen=true`、`worldFrozenMs=66109`、`blockedByPause` 为空；页面从假 `frozen` 变成真 `30.2/min`；单测 21 条 |
 | **W3 执行器卡死可见化** | 本次现场 `EX exc:can't execute over an un…` + `vehicles: 0` 说明执行器也卡住了；现在只有 `exc:` 前缀出现在公司名里 | 完整错误串进入事件流并在页面显示（不是截断的 24 字符） |
 
 ### 6e. 前端结构改造 S2–S4（**计划**，见 `docs/FRONTEND-ARCHITECTURE.md`）
