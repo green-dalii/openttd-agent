@@ -108,7 +108,20 @@ interface LiveModel {
 	routeSortDir: "asc" | "desc";
 	routeRows(): RouteRow[];
 	routesSorted(): RouteRow[];
-	routesSummary(): { available: boolean; count: number; running: number; vehicles: number; waiting: number };
+	routesSummary(): {
+		available: boolean;
+		count: number;
+		running: number;
+		vehicles: number;
+		waiting: number;
+		vehiclesDeduplicated?: boolean;
+		waitingDeduplicated?: boolean;
+		stops?: number;
+	};
+	/** 数据新鲜度（连接活着 ≠ 数据在流）。 */
+	lastFrameAt: number | null;
+	link: string;
+	dataAge(nowMs?: number): { text: string; tone: string };
 	routesNote(): string;
 	/** 城镇（Bridge GS 取样：人口前 10） */
 	townsRows(): { key: string; id: unknown; population: string; at: string; _population: number }[];
@@ -1564,5 +1577,107 @@ describe("live-view: 可视化的数据源（health / 世界速率 / 车队构�
 		const h = model.runHealth(NOW);
 		expect(h.state).toBe("ok");
 		expect(h.action).toBe("");
+	});
+});
+
+/**
+ * 车队数必须**跨线路去重**（2026-09-25 用户真机：同屏出现 "25 veh" 与 "129"）。
+ *
+ * 真机数字：17 条线路 / 9 个车站，站点平均出现在 ~3.8 条线路上；公司只有 25 辆车，
+ * 却被报成 129（25 × ~5 同量级）。机制：GS 的每条线路读数是"停在这条线**两端站**上的
+ * 车"，而车站服务多条线路 ⇒ 同一辆车被重复计数。有车辆 id 就能去重；等待量按站号去重。
+ */
+describe("routesSummary：跨线路去重（否则两个车队数互相矛盾）", () => {
+	const model = load().model;
+	const routes = [
+		// 三条线路共用车站 4 / 8：站 4 上的 3 辆车会被三条各数一次
+		{ job: 100, townA: 4, townB: 8, vehicles: 5, waiting: 30, vehiclesIds: [11, 12, 13, 14, 15], endsA: 4, endsB: 8, waitA: 20, waitB: 10 },
+		{ job: 101, townA: 4, townB: 9, vehicles: 3, waiting: 12, vehiclesIds: [11, 12, 13], endsA: 4, endsB: 9, waitA: 20, waitB: 12 },
+		{ job: 102, townA: 12, townB: 8, vehicles: 2, waiting: 40, vehiclesIds: [21, 22], endsA: 12, endsB: 8, waitA: 40, waitB: 10 },
+	];
+
+	it("车辆按 id 去重（5+3+2 的声明值其实是 7 辆不同的车）", () => {
+		model.routes = routes as never;
+		const s = model.routesSummary() as unknown as { vehicles: number; vehiclesDeduplicated: boolean };
+		expect(s.vehicles).toBe(7);
+		expect(s.vehiclesDeduplicated).toBe(true);
+	});
+
+	it("等待人数按**站号**去重（站 4 被两条线各报一次 20，站 8 被两条各报一次 10）", () => {
+		model.routes = routes as never;
+		const s = model.routesSummary() as unknown as { waiting: number; stops: number; waitingDeduplicated: boolean };
+		expect(s.stops).toBe(4); // 4, 8, 9, 12
+		expect(s.waiting).toBe(20 + 10 + 12 + 40);
+		expect(s.waitingDeduplicated).toBe(true);
+	});
+
+	it("同一线路两端是同一个站时只算一次（否则站 4 的等待被自己翻倍）", () => {
+		model.routes = [
+			{ job: 1, townA: 4, townB: 4, vehicles: 1, waiting: 25, vehiclesIds: [1], endsA: 4, endsB: 4, waitA: 25, waitB: 25 },
+		] as never;
+		const s = model.routesSummary() as unknown as { waiting: number; stops: number };
+		expect(s.stops).toBe(1);
+		expect(s.waiting).toBe(25);
+	});
+
+	it("旧 GS（没有车辆 id）→ 退回求和，但**明说没去重**（不假装已经修好）", () => {
+		model.routes = [{ job: 1, vehicles: 4, waiting: 9 }] as never;
+		const s = model.routesSummary() as unknown as { vehicles: number; vehiclesDeduplicated: boolean };
+		expect(s.vehicles).toBe(4);
+		expect(s.vehiclesDeduplicated).toBe(false);
+	});
+});
+
+/**
+ * 数据新鲜度（2026-09-25 用户："Fleet Detail 不会自动更新"）。
+ *
+ * 面板"数字没变"有两种可能：世界真的没变（事实），或数据早就没在流（缺陷）。
+ * 不把"最后一帧多久前"显示出来，用户只能靠猜 —— 而猜错的方向是"相信页面"。
+ */
+describe("dataAge：说清数据在不在流", () => {
+	const model = load().model;
+	const NOW = 1_700_000_000_000;
+
+	it("刚收到帧 → ok，且写明是数据而不是含糊的 live", () => {
+		model.lastFrameAt = NOW - 3_000;
+		const a = model.dataAge(NOW) as unknown as { text: string; tone: string };
+		expect(a.tone).toBe("ok");
+		expect(a.text).toMatch(/^data /);
+	});
+
+	it("30 秒没帧 → warn（还没到死掉的程度，但该被注意到）", () => {
+		model.lastFrameAt = NOW - 30_000;
+		expect((model.dataAge(NOW) as unknown as { tone: string }).tone).toBe("warn");
+	});
+
+	it("90 秒没帧 → bad，并且直说没有数据 90 秒", () => {
+		model.lastFrameAt = NOW - 90_000;
+		const a = model.dataAge(NOW) as unknown as { text: string; tone: string };
+		expect(a.tone).toBe("bad");
+		expect(a.text).toBe("no data for 90s");
+	});
+
+	it("一帧都没收到 → 未知（dim），不是 0 秒前", () => {
+		model.lastFrameAt = null;
+		const a = model.dataAge(NOW) as unknown as { text: string; tone: string };
+		expect(a.tone).toBe("dim");
+		expect(a.text).not.toMatch(/0s/);
+	});
+});
+
+/** 口径必须写在界面上：不说清"这是哪一种车数"，两个数字就会继续互相打架。 */
+describe("车队口径写在界面上（否则 25 与 129 会继续并存）", () => {
+	it("KPI 标题与提示说清是线路端点的车，而不是含糊的在线路上", () => {
+		const html = readFileSync(join(PUBLIC_DIR, "pages/live.html"), "utf8");
+		expect(html).toMatch(/Vehicles at route ends/);
+		// 旧标题（听上去像车队规模，其实只是"站在端点上的车"）
+		expect(html).not.toMatch(/Vehicles on routes/);
+		// 未去重时（老 GS）必须明说，不能假装已经修好
+		expect(html).toMatch(/not de-duplicated/);
+	});
+
+	it("页头有独立的数据新鲜度项（连接活着 ≠ 数据在流）", () => {
+		const html = readFileSync(join(PUBLIC_DIR, "pages/live.html"), "utf8");
+		expect(html).toMatch(/x-text="dataAge\(\)\.text"/);
 	});
 });

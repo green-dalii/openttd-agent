@@ -891,3 +891,41 @@ unfinished action (simulated 2026-09-25)`（72 字符）⇒ 真实事件流按�
 现在列表项多一行"索引事实"（`sessions-view.js` 的 `runFacts` 纯函数，可单测）：
 `delivered 377 ✓` · `window 447d` · `verdict horizon not reached` / `stopped (paused) — exclude` ·
 `save …/save/<id>.sav`（完整路径在 title，详情面板可复制）。
+
+### 10.105 车队数必须跨线路去重：同屏两个"车队"曾经互相矛盾（2026-09-25）
+
+**真机现场**（用户自有 5 年长局，17 条线路 / 9 个车站 / 25 辆车）：同一屏上出现
+`FLEET 25 veh`（公司口径）与 `VEHICLES ON ROUTES 129`（线路求和）——两个都是"真的读数"，
+但放在一页上就是**互相矛盾的数字**。
+
+**机制**（算术可核对）：GS 的每条线路读数是"停在这条线**两端站**上的车 / 等在这两端的人"。
+一个车站服务多条线路 ⇒ 同一辆车、同一批乘客被**每条用到该站的线路各数一次**。
+17 条线分布在 9 个站上 ⇒ 站平均出现在 ~3.8 条线路上 ⇒ 25 × ~5 ≈ 125，与实测 129 同量级。
+等待人数同理（实测朴素求和 1 951）。
+
+**改法**（有 id 才能去重，否则只能重复计数）：
+1. `EmitRouteStats` 额外上报 `vehiclesIds`（两端的车辆 id 列表）、`endsA/endsB`
+   （GS 用 `StationNear` 真正找到的**站号**，不是标牌格 —— 执行器站点偏移时二者不同）、
+   `waitA/waitB`（**逐站**等待，而不是只有两端之和）。
+2. `RouteStats` → `joinRoutesWithLedger` → `routeWireFacts` 全程透传。
+   ⚠️ `joinRoutesWithLedger` 曾经**逐字段重建**对象，这些字段在那里被静默丢掉 ——
+   典型症状是"解析器有、wire 没有"，页面于是仍然重复计数。
+3. `routesSummary()` 跨线路去重：车辆按 id、等待按**站号**（同一线路两端同站时只算一次）。
+   旧 GS 没有 id 时退回求和，并在界面上**明说没去重**，不假装已经修好。
+4. 口径写进界面：`Vehicles at route ends`（旧标题 `Vehicles on routes` 听上去像车队规模）
+   + `distinct vehicles standing at line ends · buses between stops are not counted here`。
+
+**真机验收**（新 GS，seed 21）：有车时刻的线路**朴素求和 = 12**，按 id **去重后 = 3**
+（同一 4× 膨胀，与 129-vs-25 同形）；页面显示 `Vehicles at route ends 3`，
+`Waiting passengers 4 · 2 distinct stops`。
+
+**顺带暴露的另一半（诚实地说明它没有被"修掉"）**：这个口径只数**停在端点**上的车，
+**在途的车两个口径都看不到** —— 一条正常运营的线路大多数采样时刻会显示 0。
+真正的每线路归属要由**执行器**报（它知道每条线自己配了几辆），那是新通道，
+列在 `ROADMAP.md`；本轮只做到"不再重复计数 + 口径说清"。
+
+**数据新鲜度**：用户报"Fleet Detail 不会自动更新"，白盒注入证明**响应式链没坏**
+（`vehicles 5 → 11` 会更新抽屉 DOM，快照流 25 s 内 history 35 → 107）。真正缺的是
+**用户无法区分"数字没变"与"数据没在流"**。现在页头有独立的 `Data` 项：
+`data now` / `data 42s ago`（warn）/ `no data for 90s`（bad）/ `no data frame yet`（未知 = dim）。
+连接状态与数据状态是两个不同的问题，页头必须分开说。

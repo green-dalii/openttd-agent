@@ -73,6 +73,13 @@
             const r = await fetch("/api/sessions");
             if (!r.ok) throw new Error(`HTTP ${r.status}`);
             this.sessions = (await r.json()).sessions || [];
+            // 默认打开**最新的一局**（2026-09-25 用户：/sessions 信息太少）。
+            // 这个页面是"回放浏览器"：进来却右半屏空着、让人先点一下才能看到任何东西，
+            // 等于把最该先被看见的那一局藏起来了。最新一局就是用户刚跑完/最关心的一局。
+            if (!this.selected && this.sessions.length) {
+              const newest = this.sessions[0];
+              if (newest && newest.id) await this.open(newest.id);
+            }
           } catch (e) {
             this.sessions = [];
             this.detailError = `Could not list runs: ${e}`;

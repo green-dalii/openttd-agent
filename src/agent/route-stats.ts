@@ -19,6 +19,26 @@ export interface RouteStats {
 	waiting: number;
 	/** GS 当前游戏日期（天，含年份）。 */
 	gameDate: number;
+	/**
+	 * 这条线的两端**实际站到哪**（GS 的 `StationNear` 结果；-1 = 站还不存在）。
+	 *
+	 * 为什么需要（2026-09-25 真机）：仪表盘要按站点去重求"等待人数"，而线路账本里记的
+	 * 是**标牌格**（tA/tB），不是站点 —— 执行器站点偏移时二者不同（SPEC §10.66 记过
+	 * `FindAltSite`）。所以去重要用 GS 看到的站号。
+	 */
+	endsA?: number;
+	endsB?: number;
+	/** 逐站等待量（-1 = 该端不是客运站/无站）；`waiting` 是两者之和。 */
+	waitA?: number;
+	waitB?: number;
+	/**
+	 * 停在这条线两端的**车辆 id**。
+	 *
+	 * 存在的唯一理由是**跨线路去重**：一个车站服务多条线路时，站在站台上的同一辆车会被
+	 * 每条用到该站的线路各数一次（真机 17 线 / 9 站 ⇒ 25 辆车被报成 129）。
+	 * 有 id 才能在 harness 侧去重；没有它就只能重复计数。
+	 */
+	vehiclesIds?: number[];
 }
 
 /** OpenTTD 一年 365 天（闰年不做特殊处理，误差 ≤0.3%，如实标注不假装精确）。 */
@@ -94,12 +114,20 @@ export function joinRoutesWithLedger(
 		.sort((a, b) => a.job - b.job)
 		.map((r) => {
 			const pair = pairByJob.get(r.job);
+			// 去重字段必须**跟着走**（2026-09-25）：这里曾经逐字段重建对象，
+			// 于是 vehiclesIds/endsA/endsB/waitA/waitB 在 join 里被静默丢掉 ——
+			// 页面拿不到 id 就只能重复计数（25 辆车报成 129）。
 			const out: RouteStatsJoin = {
 				job: r.job,
 				vehicles: r.vehicles,
 				waiting: r.waiting,
 				profit: r.profit,
 				gameDate: r.gameDate,
+				...(r.vehiclesIds !== undefined ? { vehiclesIds: r.vehiclesIds } : {}),
+				...(r.endsA !== undefined ? { endsA: r.endsA } : {}),
+				...(r.endsB !== undefined ? { endsB: r.endsB } : {}),
+				...(r.waitA !== undefined ? { waitA: r.waitA } : {}),
+				...(r.waitB !== undefined ? { waitB: r.waitB } : {}),
 			};
 			if (pair) {
 				out.townA = pair.fromTown;
@@ -120,6 +148,12 @@ export interface RouteWireFact {
 	job: number;
 	vehicles: number;
 	waiting: number;
+	/** 去重所需（见 RouteStats.vehiclesIds / endsA / endsB / waitA / waitB）。 */
+	vehiclesIds?: number[];
+	endsA?: number;
+	endsB?: number;
+	waitA?: number;
+	waitB?: number;
 	/** 当年累计利润（-1 = GS 读不到该车；此时不要显示"亏损"）。 */
 	profitYtd: number;
 	/** 每日收益；`null` = 还不可测（年内天数太少，或没有车）。 */
@@ -150,6 +184,11 @@ export function routeWireFacts(stats: RouteStats[], ledger: LedgerPair[]): Route
 		};
 		if (r.townA !== undefined) f.townA = r.townA;
 		if (r.townB !== undefined) f.townB = r.townB;
+		if (r.endsA !== undefined) f.endsA = r.endsA;
+		if (r.endsB !== undefined) f.endsB = r.endsB;
+		if (r.waitA !== undefined) f.waitA = r.waitA;
+		if (r.waitB !== undefined) f.waitB = r.waitB;
+		if (r.vehiclesIds !== undefined) f.vehiclesIds = r.vehiclesIds;
 		return f;
 	});
 }

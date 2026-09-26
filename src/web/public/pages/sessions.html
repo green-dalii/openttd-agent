@@ -91,7 +91,7 @@
 
         <div x-show="loadingDetail" class="empty">Loading…</div>
         <div x-show="detailError" class="empty" x-text="detailError"></div>
-        <p class="empty" x-show="!selected && !loadingDetail">Pick a run on the left to replay it.</p>
+        <p class="empty" x-show="!selected && !loadingDetail">Pick a run on the left to replay it. The newest run opens automatically.</p>
 
         <!-- Detail: KPI strip + run facts + token composition + summaries + events -->
         <div x-show="data && !loadingDetail">

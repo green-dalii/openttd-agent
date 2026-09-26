@@ -352,12 +352,25 @@ export function makeSignalHub(refs: SignalHubRefs): SignalHub {
 					if (p.kind === "route-stats") {
 						const job = Number(p.job);
 						if (Number.isInteger(job)) {
+							const numOrUndef = (v: unknown): number | undefined => {
+								const n = Number(v);
+								return Number.isFinite(n) ? n : undefined;
+							};
 							routeStats.set(job, {
 								job,
 								vehicles: Number(p.vehicles) || 0,
 								profit: Number(p.profit) || 0,
 								waiting: Number(p.waiting) || 0,
 								gameDate: Number(p.gameDate) || 0,
+								// 去重所需：车辆 id + 两端站号 + 逐站等待（-1 = 不可得，
+								// 保持 undefined 而不是 0 —— "这一端不是客运站"不是"零人"）。
+								...(Array.isArray(p.vehiclesIds)
+									? { vehiclesIds: p.vehiclesIds.map((v: unknown) => Number(v)).filter((v: number) => Number.isFinite(v)) }
+									: {}),
+								...(numOrUndef(p.endsA) !== undefined ? { endsA: numOrUndef(p.endsA) } : {}),
+								...(numOrUndef(p.endsB) !== undefined ? { endsB: numOrUndef(p.endsB) } : {}),
+								...(numOrUndef(p.waitA) !== undefined ? { waitA: numOrUndef(p.waitA) } : {}),
+								...(numOrUndef(p.waitB) !== undefined ? { waitB: numOrUndef(p.waitB) } : {}),
 							});
 						}
 					}

@@ -122,3 +122,22 @@ describe("routeWireFacts（仪表盘线路事实）", () => {
 		expect(r.vehicles).toBe(3);
 	});
 });
+
+/** 去重字段必须一路到 wire（否则页面只能重复计数，见 SPEC §10.105）。 */
+describe("routeWireFacts 透传去重字段", () => {
+	it("vehiclesIds / endsA / endsB / waitA / waitB 到 wire 事实里", () => {
+		const facts = routeWireFacts(
+			[{ job: 100, vehicles: 3, profit: 10, waiting: 30, gameDate: 712300, vehiclesIds: [1, 2, 3], endsA: 4, endsB: 8, waitA: 20, waitB: 10 }],
+			[],
+		);
+		expect(facts[0]!.vehiclesIds).toEqual([1, 2, 3]);
+		expect(facts[0]!.endsA).toBe(4);
+		expect(facts[0]!.waitB).toBe(10);
+	});
+
+	it("老 GS（无字段）→ wire 事实里也不出现（不编造）", () => {
+		const facts = routeWireFacts([{ job: 100, vehicles: 3, profit: 10, waiting: 30, gameDate: 712300 }], []);
+		expect(facts[0]!.vehiclesIds).toBeUndefined();
+		expect(facts[0]!.endsA).toBeUndefined();
+	});
+});

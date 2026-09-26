@@ -1,4 +1,5 @@
 import { describe, expect, it as it_, vi } from "vitest";
+// 本文件把 `it` 重命名为 it_（为了和 sandbox 里的 it 区分），新测试用回原名。
 import { makeSignalHub } from "../../src/agent/signal-hub.js";
 import type { GameEvent } from "../../src/types.js";
 
@@ -350,5 +351,49 @@ describe("GS state：产业/货种/公司口径（P1+P2）", () => {
 		expect(w.setTowns).toHaveBeenCalledWith([
 			{ id: 2, population: 100, x: 1, y: 2, cargo: [{ label: "PASS", produced: 30, transported: 12 }] },
 		], 1);
+	});
+});
+
+/**
+ * 线路读数的**去重字段**必须活着传到 harness（2026-09-25 真机：25 辆车被报成 129）。
+ *
+ * 机制：GS 按"停在这条线两端站上的车"计数，而车站服务多条线路 ⇒ 同一辆车被每条线各数
+ * 一次。只有车辆 id 与站号到了 harness，页面才可能去重；这里锁住"字段没在管道里被丢掉"。
+ */
+describe("route-stats 去重字段（vehiclesIds / endsA / endsB / waitA / waitB）", () => {
+	function feed(fields: Record<string, unknown>) {
+		const hub = makeSignalHub({
+			world: fakeWorld() as never,
+			getWeb: () => null,
+			getSession: () => null,
+			routeLedger: fakeLedger() as never,
+			getDecisionCount: () => 0,
+			onPhaseChange: () => {},
+			onNotableEvent: () => {},
+		});
+		hub.onEvent({
+			seq: 1,
+			kind: "gamescript",
+			ts: 1,
+			payload: { kind: "route-stats", job: 100, vehicles: 3, profit: 10, waiting: 30, gameDate: 712300, ...fields },
+		} as never);
+		return hub.getRouteStats()[0];
+	}
+
+	it_("新 GS：id 与站号原样保留", () => {
+		const r = feed({ vehiclesIds: [11, 12, 13], endsA: 4, endsB: 8, waitA: 20, waitB: 10 });
+		expect(r!.vehiclesIds).toEqual([11, 12, 13]);
+		expect(r!.endsA).toBe(4);
+		expect(r!.endsB).toBe(8);
+		expect(r!.waitA).toBe(20);
+		expect(r!.waitB).toBe(10);
+	});
+
+	it_("旧 GS（没有这些字段）→ 字段缺席，vehicles/waiting 照旧可用（兼容老 GS/新 harness 混跑）", () => {
+		const r = feed({});
+		expect(r!.vehicles).toBe(3);
+		expect(r!.waiting).toBe(30);
+		expect(r!.vehiclesIds).toBeUndefined();
+		expect(r!.endsA).toBeUndefined();
 	});
 });

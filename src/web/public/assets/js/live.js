@@ -228,8 +228,18 @@
                 image: info && info.file,
               });
             },
+            onFrame: (at) => {
+              this.lastFrameAt = at;
+            },
           };
-          return U.connectWs(handlers);
+          const ws = U.connectWs(handlers);
+          // 断线重连后 lastFrameAt 由 onFrame 续上；这里也定期问一次 socket，
+          // 这样"页面开着但一帧都没来过"能被显示出来（而不是永远停在 '—'）。
+          this._dataAgeTimer = setInterval(() => {
+            const at = ws.lastFrameAt();
+            if (at !== null) this.lastFrameAt = at;
+          }, 2000);
+          return ws;
         },
 
         /** Fold one event into the local company/date mirror (live view only). */

@@ -541,6 +541,13 @@
             endpointsHint: hasPair ? undefined : "endpoints unknown (not in the route ledger)",
             vehicles: U.fmtInt(vehicles),
             waiting: U.fmtInt(waiting),
+            // 去重所需（2026-09-25）：共享车站会让同一辆车/同一批乘客被每条用到该站的
+            // 线路各数一次 —— 公司 25 辆车曾被报成 129。有 id 才算得出真数。
+            _vehIds: Array.isArray(r.vehiclesIds) ? r.vehiclesIds.map((v) => num(v)).filter((v) => Number.isFinite(v)) : [],
+            _endsA: num(r.endsA),
+            _endsB: num(r.endsB),
+            _waitA: Number.isFinite(Number(r.waitA)) ? Number(r.waitA) : null,
+            _waitB: Number.isFinite(Number(r.waitB)) ? Number(r.waitB) : null,
             income: perDayKnown ? U.fmtMoney(perDayRaw) : "—",
             incomeHint: perDayKnown
               ? undefined
@@ -871,6 +878,28 @@
        * （"进程活着但没进展"既可能是 agent 自己停了，也可能是模型慢、通道死）。
        * 瓦片让状态一眼可读，`action` 给出该做什么。
        */
+      /**
+       * 数据新鲜度（2026-09-25 用户："Fleet Detail 不会自动更新"）。
+       *
+       * 为什么单独一行：面板"数字没变"有两种可能——① 世界真的没变（事实），
+       * ② 数据早就没在流（缺陷）。不给这个信号，用户只能靠猜，而猜错的方向是
+       * "相信页面"。所以把"最后一帧数据多久前"明写出来。
+       *
+       * 纯函数：返回 `{text, tone}`。tone: ok(<15s) / warn(<60s) / bad(≥60s) / dim(未知)。
+       */
+      dataAge(nowMs) {
+        const now = Number.isFinite(nowMs) ? nowMs : Date.now();
+        const at = Number(this.lastFrameAt);
+        if (!Number.isFinite(at) || at <= 0) {
+          // 没收到过帧 = **不知道**，不是"0 秒前"（AGENTS 的 null≠0）
+          return { text: this.link === "live" ? "no data frame yet" : "—", tone: "dim" };
+        }
+        const secs = Math.max(0, Math.round((now - at) / 1000));
+        if (secs < 15) return { text: `data ${U.fmtAgo(at)}`, tone: "ok" };
+        if (secs < 60) return { text: `data ${U.fmtAgo(at)}`, tone: "warn" };
+        return { text: `no data for ${secs}s`, tone: "bad" };
+      },
+
       runHealth(nowMs) {
         const now = Number.isFinite(nowMs) ? nowMs : Date.now();
         const r = this.run || {};
@@ -1152,14 +1181,44 @@
         return `largest ${s.shown} of ${total} towns · ${U.fmtInt(s.shownPopulation)} people in this sample (not the whole map)`;
       },
 
+      /**
+       * 线路区的四个数。
+       *
+       * 为什么 `vehicles` / `waiting` 要**去重**（2026-09-25 真机：同屏出现
+       * "25 veh"（公司口径）与 "129"（线路求和）两个互相矛盾的数字）：
+       * GS 的每条线路读数是"停在这条线**两端站**上的车 / 等在这两端的人"，而一个车站
+       * 服务多条线路 —— 于是同一辆车、同一批乘客被每条用到该站的线路各数一次
+       * （17 线 / 9 站 ⇒ 25 辆车 ≈ 25 × 5 = 125，与实测 129 同量级）。
+       * 有车辆 id 就按 id 去重；等待量按**站号**去重（GS 逐站上报）。
+       *
+       * 口径必须写出来：这个数是"**在站台上被看见的**车"，不是车队规模（后者是公司口径
+       * 的数字），在途的车两个口径都看不到。说不清口径，两个数就会继续互相打架。
+       */
       routesSummary() {
         const rows = this.routeRows();
+        const vehIds = new Set();
+        const waitByStation = new Map();
+        let idsKnown = false;
+        for (const r of rows) {
+          if (r._vehIds.length) idsKnown = true;
+          for (const v of r._vehIds) vehIds.add(v);
+          if (Number.isFinite(r._endsA) && r._endsA >= 0 && r._waitA !== null) waitByStation.set(r._endsA, r._waitA);
+          if (Number.isFinite(r._endsB) && r._endsB >= 0 && r._endsB !== r._endsA && r._waitB !== null) {
+            waitByStation.set(r._endsB, r._waitB);
+          }
+        }
+        let waitSum = 0;
+        for (const v of waitByStation.values()) waitSum += v;
         return {
           available: this.routesAvailable === true,
           count: rows.length,
           running: rows.filter((r) => !r.idle).length,
-          vehicles: rows.reduce((a, r) => a + r._vehicles, 0),
-          waiting: rows.reduce((a, r) => a + r._waiting, 0),
+          // 车辆：能按 id 去重就去重；旧 GS（没有 id）退回求和并在界面上说明是"未去重"。
+          vehicles: idsKnown ? vehIds.size : rows.reduce((a, r) => a + r._vehicles, 0),
+          vehiclesDeduplicated: idsKnown,
+          waiting: waitByStation.size ? waitSum : rows.reduce((a, r) => a + r._waiting, 0),
+          waitingDeduplicated: waitByStation.size > 0,
+          stops: waitByStation.size,
         };
       },
 

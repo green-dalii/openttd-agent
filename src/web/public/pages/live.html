@@ -42,6 +42,10 @@
       <div class="item"><span class="lbl">Connection</span>
         <span class="pill" :class="linkOk ? 'ok' : link === 'waiting for server…' ? 'idle' : 'bad'"
               x-text="link"></span></div>
+      <div class="item"><span class="lbl">Data</span>
+        <span class="pill" :class="dataAge().tone === 'bad' ? 'bad' : dataAge().tone === 'warn' ? 'idle' : 'ok'"
+              :title="'time since the last data frame arrived from the harness'"
+              x-text="dataAge().text"></span></div>
       <div class="item"><span class="lbl">Session</span><span class="val dim" x-text="sessionId || '—'"></span></div>
       <div class="item"><span class="lbl">Game date</span>
         <span class="val" x-text="date ? $fmt.gameDate(date) : '—'"></span></div>
@@ -238,15 +242,19 @@
       </div>
       <div class="kpi clickable" role="button" tabindex="0" @click="openDrawer('fleet')"
            @keydown.enter="openDrawer('fleet')" @keydown.space.prevent="openDrawer('fleet')">
-        <div class="kpi-k">Vehicles on routes</div>
+        <div class="kpi-k">Vehicles at route ends</div>
         <div class="kpi-v" x-text="$fmt.int(routesSummary().vehicles)"></div>
-        <div class="kpi-hint">from the GS route readout</div>
+        <div class="kpi-hint" x-text="routesSummary().vehiclesDeduplicated
+            ? 'distinct vehicles standing at line ends · buses between stops are not counted here'
+            : 'from the GS route readout (not de-duplicated: this GS reports no vehicle ids)'"></div>
         <span class="kpi-more">details ▸</span>
       </div>
       <div class="kpi">
         <div class="kpi-k">Waiting passengers</div>
         <div class="kpi-v" x-text="$fmt.int(routesSummary().waiting)"></div>
-        <div class="kpi-hint">at both ends of every line</div>
+        <div class="kpi-hint" x-text="routesSummary().waitingDeduplicated
+            ? routesSummary().stops + ' distinct stops'
+            : 'at both ends of every line (not de-duplicated)'"></div>
       </div>
       <div class="kpi">
         <div class="kpi-k">Type</div>

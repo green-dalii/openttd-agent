@@ -733,6 +733,8 @@ function connectWs(handlers) {
   let closed = false;
   let attempts = 0;
   let everOpen = false;
+  /** 收到的最后一帧数据（墙钟 ms）；null = 还没收到过。 */
+  let lastFrameAt = null;
 
   const setLink = (text, cls) => {
     if (handlers.onLink) handlers.onLink(text, cls);
@@ -749,6 +751,13 @@ function connectWs(handlers) {
     ws.onmessage = (m) => {
       let msg;
       try { msg = JSON.parse(m.data); } catch { return; }
+      // 数据新鲜度（2026-09-25 用户："Fleet Detail 不会自动更新"）：连接是"活的"，
+      // 数据却可能早就停了 —— 页面必须能区分这两者，否则用户无法判断
+      // "数字没变"还是"根本没在更新"。`lastFrameAt` 是**收到的最后一帧**的时间。
+      if (msg.type === "snapshot" || msg.type === "event" || msg.type === "telemetry" || msg.type === "step" || msg.type === "run") {
+        lastFrameAt = Date.now();
+        if (handlers.onFrame) handlers.onFrame(lastFrameAt);
+      }
       switch (msg.type) {
         case "snapshot": handlers.onSnapshot && handlers.onSnapshot(msg.data); break;
         case "event": handlers.onEvent && handlers.onEvent(msg.data); break;
@@ -769,7 +778,11 @@ function connectWs(handlers) {
     ws.onerror = () => { try { ws.close(); } catch { /* ignore */ } };
   }
   open();
-  return { close() { closed = true; try { ws && ws.close(); } catch { /* ignore */ } } };
+  return {
+    close() { closed = true; try { ws && ws.close(); } catch { /* ignore */ } },
+    /** 收到的最后一帧数据的时间；null = 还没收到过（"不知道"不是"0"）。 */
+    lastFrameAt: () => lastFrameAt,
+  };
 }
 
 /* --------------------------- chrome / nav --------------------------- */

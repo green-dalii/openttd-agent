@@ -242,15 +242,20 @@ class BridgeV1 extends GSController {
                 local tB = rec.rawget("tB");
                 local sa = this.StationNear(tA, 6);
                 local sb = this.StationNear(tB, 6);
+                local vehIds = [];
                 local vlist = [];
+                // 车辆 id 一并上报（2026-09-25）：仪表盘要把**跨线路**的车队数去重。
+                // 不去重就是拿 25 辆车报出 129 —— 一个车站服务多条线路时，站在站台上的
+                // 同一辆车会被每条用到该站的线路各数一次（真机：17 条线路 / 9 个站，
+                // 站点平均出现在 ~3.8 条线路上，25 × 5 ≈ 129，与实测一致）。
                 if (GSStation.IsValidStation(sa)) {
                     foreach (v, _ in GSVehicleList_Station(sa)) {
-                        if (GSVehicle.GetOwner(v) == exec) vlist.append(v);
+                        if (GSVehicle.GetOwner(v) == exec) { vlist.append(v); vehIds.append(v); }
                     }
                 }
                 if (GSStation.IsValidStation(sb)) {
                     foreach (v, _ in GSVehicleList_Station(sb)) {
-                        if (GSVehicle.GetOwner(v) == exec) vlist.append(v);
+                        if (GSVehicle.GetOwner(v) == exec) { vlist.append(v); vehIds.append(v); }
                     }
                 }
                 local profit = 0;
@@ -262,14 +267,24 @@ class BridgeV1 extends GSController {
                     profit += GSVehicle.GetProfitThisYear(v);
                 }
                 local waiting = 0;
+                // 逐站上报等待量（而不是只报两端之和）：harness 要按**站点去重**求和，
+                // 共享车站的等待量被重复计入是同一个双重计数错误（2026-09-25 真机：
+                // 1 951 人 vs 公司实际在等的人数）。
+                local waitA = -1;
+                local waitB = -1;
                 if (pax >= 0) {
-                    if (GSStation.IsValidStation(sa)) waiting += GSStation.GetCargoWaiting(sa, pax);
-                    if (GSStation.IsValidStation(sb)) waiting += GSStation.GetCargoWaiting(sb, pax);
+                    if (GSStation.IsValidStation(sa)) { waitA = GSStation.GetCargoWaiting(sa, pax); waiting += waitA; }
+                    if (GSStation.IsValidStation(sb)) { waitB = GSStation.GetCargoWaiting(sb, pax); waiting += waitB; }
                 }
                 GSAdmin.Send({
                     kind = "route-stats",
                     job = job_str.tointeger(),
                     vehicles = vlist.len(),
+                    vehiclesIds = vehIds,
+                    endsA = sa,
+                    endsB = sb,
+                    waitA = waitA,
+                    waitB = waitB,
                     profit = profit,
                     waiting = waiting,
                     gameDate = GSDate.GetCurrentDate(),

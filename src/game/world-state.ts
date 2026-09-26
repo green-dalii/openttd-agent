@@ -14,6 +14,18 @@ import { createDeliveryMeter } from "./delivery-meter.js";
 import { convertDateToYmd } from "./payload-parsers.js";
 
 /**
+ * 有限数 → number，缺/非数 → **null**（"未上报"），不是 0。
+ *
+ * 为什么单独一个：`Number(x) || 0` 是本文件里反复出现的写法，而它把"没这个读数"
+ * 与"读数是零"合并了 —— 页面上两者都渲染成 `0`，于是**未测量的产业看起来像是没在运输**。
+ */
+function numOrNull(v: unknown): number | null {
+	if (v === null || v === undefined || v === "") return null;
+	const n = Number(v);
+	return Number.isFinite(n) ? n : null;
+}
+
+/**
  * Game day in the project's 360-day-year convention. Absolute year is fine -
  * the meter only compares differences and quarter boundaries.
  */
@@ -129,7 +141,8 @@ export interface CargoAmounts {
 	/** 货种标签（`GSCargo.GetCargoLabel`，如 PASS/COAL）——稳定，不像本地化名。 */
 	label: string;
 	produced: number;
-	transported: number;
+	/** 上月运量；**null = 未上报**（不是 0，见 numOrNull）。 */
+	transported: number | null;
 }
 
 /** 一个产业的上月读数（GS 采样，原始计数）。 */
@@ -139,7 +152,8 @@ export interface IndustryInfo {
 	cargo: string;
 	name: string;
 	produced: number;
-	transported: number;
+	/** 上月运量；**null = 未上报**（不是 0，见 numOrNull）。 */
+	transported: number | null;
 	/** 等待加工的库存；null = 该产业不接受/不适用（**不是 0**）。 */
 	stock: number | null;
 }
@@ -386,8 +400,11 @@ export class WorldState {
 				cargo: String(i.cargo ?? ""),
 				name: String(i.name ?? "").slice(0, 40),
 				produced: Number(i.produced) || 0,
-				transported: Number(i.transported) || 0,
-				stock: i.stock === null || i.stock === undefined || !Number.isFinite(Number(i.stock)) ? null : Number(i.stock),
+				// `transported` 保持 null = **未上报**（2026-09-25）：`Number(x) || 0`
+				// 会把"没有这个读数"变成"运了 0 吨"——两者在页面上都显示成 0，
+				// 于是"这座产业没参与运输"被说成了"运输量为零"。
+				transported: numOrNull(i.transported),
+				stock: numOrNull(i.stock),
 			}))
 			.sort((a, b) => b.produced - a.produced);
 	}
@@ -397,8 +414,8 @@ export class WorldState {
 			.filter((c) => c && typeof c.label === "string" && c.label !== "")
 			.map((c) => ({
 				label: String(c.label),
-				produced: Number(c.produced) || 0,
-				transported: Number(c.transported) || 0,
+				produced: numOrNull(c.produced) ?? 0,
+				transported: numOrNull(c.transported),
 			}))
 			.sort((a, b) => b.produced - a.produced);
 	}
