@@ -426,6 +426,22 @@
       },
 
       /** Axis labels: game dates, so the curve is readable without a legend. */
+      /**
+       * 区间读数用的标签：**日**精度（轴标签是月，读数要给更细的那一层）。
+       *
+       * 为什么不是"第几个采样点"：那对人没有意义。也不是"天"：x 是采样序号，
+       * 一天可能有多个点，写成"76 天"就是编造单位（AGENTS 的诚实规则）。
+       * 所以念**首尾采样点各自的日期** —— 是真的，且用户能对照日历。
+       */
+      cashRangeLabel(i) {
+        const first = Object.values(this.companies || {})[0] || {};
+        const h = (first.history || [])[i];
+        if (!h || h.year == null) return "—";
+        const mm = String(h.month ?? 1).padStart(2, "0");
+        const dd = String(h.day ?? 1).padStart(2, "0");
+        return `${h.year}-${mm}-${dd}`;
+      },
+
       cashLabels() {
         const first = Object.values(this.companies || {})[0] || {};
         return (first.history || []).map((h) =>

@@ -38,6 +38,14 @@
   const instances = new WeakMap();
   /** 复位按钮（按宿主记录）：未缩放时置灰，有意义的禁用胜过点了没反应。 */
   const ctrlReset = new Map();
+  /**
+   * 每张图的区间读数配置（单位 + 取哪个标签）。
+   *
+   * 为什么由调用方给：现金图的 x 是**采样序号**、标签是游戏日期；用量图的 x 是
+   * **轮次**。图自己知道"数据是什么"，但只有页面知道"这串数字该怎么念"（日期 vs 轮次），
+   * 所以单位/标签由页面传进来，图只负责把当前视野念出来。
+   */
+  const chartCfg = new Map();
   /** One observer for every chart: re-fits width when the layout changes. */
   let ro = null;
 
@@ -211,7 +219,12 @@
     }
     const hasAny = series.some((s) => (s && s.data ? s.data.length : 0) > 0);
     if (!hasAny) return { kind: "line", empty: true, emptyText: "no history yet — points appear as the run progresses" };
-    return { kind: "line", data: rows, opts: lineOpts(c, series, labels) };
+    return {
+      kind: "line",
+      data: rows,
+      opts: lineOpts(c, series, labels),
+      range: { unit: c.rangeUnit || "points", label: c.rangeLabel || labels },
+    };
   }
 
   /**
@@ -227,15 +240,23 @@
    * **注意**：`setData` 默认会重置 scales —— 用户缩放后必须显式传 `false` 才保得住视野
    *（2026-09-23 实测：不传就等于"每次数据帧把缩放擦掉"）。
    */
+  /**
+   * 指针交互：**x 轴**上裸拖拽 = 框选缩放，Shift+拖拽 = 平移，滚轮 = 以指针为锚缩放。
+   *
+   * 为什么这样分（2026-09-25 用户实测："缩放逻辑不正确"）：上一版把裸拖拽接成**平移**，
+   * 而页面提示写的是 "drag to zoom" —— 提示承诺的动作不存在，未缩放时拖拽还是个静默
+   * no-op。第一性原理：框一段放大是时间轴最常用的手势；平移只在**已经放大**之后才有
+   * 意义，所以它是修饰键动作。同时 uPlot 的原生框选被关掉（`setSelect: false`），
+   * 由我们在 pointer 层做——这样"框选 + 读数 + 复位"是同一套代码，行为可测。
+   */
   function cursorOpts() {
     return {
       show: true,
       points: { show: false },
-      // `setSelect: false` 关掉"框选即缩放"，改由我们自己在 pointer 层做**拖拽平移**。
-      // 为什么改（2026-09-23 用户："图表没有控件（放大、缩小、移动、复位）"）：
-      // uPlot 只给"框选缩放 + 双击复位"，**滚轮缩放与拖拽平移都要自己接**
-      // （维护者在 issue #298 里明说这一点反直觉）。时间序列上"拖着看前后"是最常用的动作，
-      // 所以把它放在最自然的裸拖拽上；选区缩放退到 Shift+拖拽。
+      // `setSelect: false` 关掉 uPlot 自己的框选缩放，改由下面的 pointer 层做：
+      // 我们要的不只是"缩放"，还要**选区反馈**与**区间读数**（uPlot 都不给）。
+      // y 轴固定为货币/计数刻度：允许 y 缩放会把零基线推出视野，读者就再也判断不出
+      // "这条线是不是从 0 开始的"——对收益曲线那是误导，不是交互。
       drag: { x: true, y: false, setScale: false, setSelect: false, uni: 1 },
     };
   }
@@ -259,6 +280,15 @@
       axes: [
         {
           ...axis,
+          // 竖直网格线在**放大后**变成噪声（2026-09-25 真机截图：107/400 个点的视野里
+          // 挤了 ~20 根线、只留下 2 个标签，读者既定位不到时间、也被线挡住曲线）。
+          // 而且它们的职责已经被**区间读数**接管了：“我现在看的是哪一段”写在图下方，
+          // 不需要靠一堆竖线去猜。横向网格线留着——读 y 值靠它。
+          //
+          // 键名是 `grid`（已对 vendored uPlot 1.6.32 核过：`grid:` 出现在轴默认值里；
+          // `splits` 是**刻度概念**（`scale.splits`），写在轴上会让 uPlot 的配置合并
+          // 走偏——实测症状是 x 轴 `values` 回调收到非数组，图表直接抛异常）。
+          grid: { show: false },
           // x ticks read as the caller's labels (game dates), not indices.
           // 相邻重复的标签留空白：服务端每几秒推一个点，而游戏日期只按**月**变，
           // 于是同一根月标签会连着出现两三次（真机截图：`1950-07, 1950-07, 1950-08, …`）。
@@ -428,7 +458,12 @@
     if (!items || items.length === 0) {
       return { kind: "stackedArea", empty: true, emptyText: "no turns recorded yet" };
     }
-    return { kind: "stackedArea", data: rows, opts: stackedAreaOpts(c, seriesOpts, items) };
+    return {
+      kind: "stackedArea",
+      data: rows,
+      opts: stackedAreaOpts(c, seriesOpts, items),
+      range: { unit: c.rangeUnit || "turns", label: c.rangeLabel || null },
+    };
   }
 
   function stackedAreaOpts(c, seriesOpts, items) {
@@ -677,6 +712,108 @@
   }
 
   /**
+   * 拖拽选区 → 样本区间（**纯函数**：无 DOM/uPlot，可直接单测）。
+   *
+   * 为什么裸拖拽是"选区缩放"而不是"平移"（2026-09-25 用户实测："折线图、Token 用量等，
+   * 鼠标缩放逻辑不正确"）：页面自己的提示写着 "drag to zoom"，而实现里裸拖拽接的是
+   * **平移**——未缩放时平移是个**静默 no-op**，于是用户看到的是"提示承诺的动作根本
+   * 不存在"。第一性原理：时间轴上最常用的手势是"框一段放大"，平移只在放大之后才有意义，
+   * 所以裸拖拽给缩放，**平移退到 Shift+拖拽**。
+   *
+   * 返回样本下标区间（含端点，闭区间）；`null` = 这不是一次有效的框选：
+   *  - 位移太短（< minPx）当作误触，不改变视野；
+   *  - 竖直位移为主（|dy| > |dx|）当作别的意图（uPlot 的 y 轴是固定的货币刻度，
+   *    框选它没有意义）。
+   */
+  function dragToRange(x0, x1, y0, y1, opts) {
+    const o = opts || {};
+    const width = Number(o.width);
+    if (!Number.isFinite(width) || width <= 0) return null;
+    if (!Number.isFinite(x0) || !Number.isFinite(x1) || !Number.isFinite(y0) || !Number.isFinite(y1)) return null;
+    const dx = x1 - x0;
+    const dy = y1 - y0;
+    const minPx = Number.isFinite(o.minPx) ? o.minPx : 8;
+    if (Math.abs(dx) < minPx) return null;
+    if (Math.abs(dy) > Math.abs(dx)) return null;
+    const total = Number.isFinite(o.total) ? o.total : 0;
+    // 像素 → 数据坐标：与 uPlot 的默认线性 x 轴一致（左边界 = 0，右边界 = total-1）。
+    const perPx = (total - 1) / width;
+    const a = Math.min(x0, x1) * perPx;
+    const b = Math.max(x0, x1) * perPx;
+    // 吸附到整点，避免拖出 3.37 这种没意义的刻度；同时防止把单点框成一个
+    // "看不见任何东西"的视野。
+    let from = Math.round(a);
+    let to = Math.round(b);
+    if (to - from < 1) {
+      const grow = to - from >= 0 ? 1 : -1;
+      to += grow;
+    }
+    const lo = Math.max(0, Math.min(from, to));
+    const hi = Math.min(total - 1, Math.max(from, to));
+    if (!(hi > lo)) return null;
+    return { from: lo, to: hi };
+  }
+
+  /**
+   * 视野区间的**人话**（纯函数）。
+   *
+   * 用户要的不是"scales.x 变了"，而是"我现在看的是哪一段"（2026-09-25 用户原话：
+   * "没有对应坐标轴范围显示缩放及区间范围"）。所以缩放后必须有一行明说区间。
+   *
+   * 单位要诚实：现金图/用量图的 x 是**采样序号**（标签是日期，但两点可以同一天），
+   * 所以写 "points" 而不是 "days" —— 把采样点说成"天"是编造一个不存在的单位。
+   */
+  function formatRangeCaption(range, opts) {
+    const o = opts || {};
+    const from = Number(range && range.from);
+    const to = Number(range && range.to);
+    const total = Number(range && range.total);
+    const unit = String(o.unit || "points");
+    const label = typeof o.label === "function" ? o.label : null;
+    const fmt = (v) => (label ? String(label(v)) : String(Math.round(v)));
+    if (!Number.isFinite(from) || !Number.isFinite(to) || !Number.isFinite(total) || total < 2) return "";
+    if (from <= 0 && to >= total - 1) {
+      return "full range · " + total + " " + unit;
+    }
+    const span = to - from + 1;
+    const pct = Math.round((span / total) * 100);
+    return (
+      fmt(from) + " → " + fmt(to) + " · " + span + " of " + total + " " + unit + " (" + pct + "%)"
+    );
+  }
+
+  /**
+   * 写区间读数 + 广播事件。
+   *
+   * 为什么由 `applyXRange` 统一做：它是**视野的唯一写者**（见那里的说明），
+   * 读数若在别处同步，就会出现"画面缩放了、读数还是全量"这种半真半假的状态。
+   * 事件（`uplot:range`）让页面其它部分与探针都能观测当前视野，而不必去摸 uPlot 内部。
+   */
+  function setRangeCaption(el, inst, min, max) {
+    const host = el && el.parentElement;
+    // 防御：宿主不能渲染子节点时**只跳过读数**，绝不让缩放本身失败。
+    // `mount()` 对这种宿主会大声报错（图表直接不渲染）；而缩放是已有的交互，
+    // 不能因为读数无处可写就跟着坏掉。
+    if (!host || typeof host.appendChild !== "function" || typeof document === "undefined") return;
+    const xs = (inst && inst.data && inst.data[0]) || [];
+    if (xs.length < 2) return;
+    const cfg = chartCfg.get(el) || {};
+    const from = Math.max(0, Math.round(min));
+    const to = Math.min(xs.length - 1, Math.round(max));
+    let node = host.__chartRange;
+    if (!node) {
+      node = document.createElement("div");
+      node.className = "chart-range";
+      host.appendChild(node);
+      host.__chartRange = node;
+    }
+    node.textContent = formatRangeCaption({ from, to, total: xs.length }, cfg);
+    if (typeof host.dispatchEvent === "function" && typeof CustomEvent === "function") {
+      host.dispatchEvent(new CustomEvent("uplot:range", { detail: { from, to, total: xs.length }, bubbles: true }));
+    }
+  }
+
+  /**
    * 应用 x 轴视野 —— **所有缩放/平移/复位的唯一入口**。
    *
    * 为什么不能走 uPlot 的 `setScale()`（2026-09-23 实测，代价一轮调试）：
@@ -714,6 +851,8 @@
     setZoomed(el, zoomed);
     const btn = ctrlReset.get(el);
     if (btn) btn.disabled = !zoomed;
+    // 区间读数与"已缩放"标记同源：视野是唯一事实，它的两个投影也必须一起变。
+    setRangeCaption(el, inst, min, max);
     return true;
   }
 
@@ -798,7 +937,7 @@
         resetZoom(el);
       });
 
-      // 滚轮缩放（以指针所在的数据位置为锚）+ 拖拽平移。
+      // 滚轮缩放（以指针所在的数据位置为锚）+ 拖拽手势。
       // uPlot 两者都不提供（issue #298），所以由我们在 pointer 层实现。
       const over = instance && instance.over;
       if (over) {
@@ -818,26 +957,97 @@
           },
           { passive: false },
         );
-        let dragging = false;
+        // 选区带：拖拽时**当场**画出将放大的区间。没有它的话，拖拽在松手前毫无反馈，
+        // 用户只能靠"松手后才知道缩到哪"来学习这个手势（2026-09-25 用户：交互不合直觉）。
+        const hostEl = el.parentElement;
+        const band = (function () {
+          if (!hostEl || !hostEl.appendChild || typeof document === "undefined") return null;
+          if (hostEl.__chartSel) return hostEl.__chartSel;
+          const d = document.createElement("div");
+          d.className = "chart-sel";
+          d.hidden = true;
+          hostEl.appendChild(d);
+          hostEl.__chartSel = d;
+          return d;
+        })();
+        let mode = null; // "zoom" | "pan"
+        let startX = 0;
+        let startY = 0;
         let lastX = 0;
+        const hideBand = function () {
+          if (band) band.hidden = true;
+        };
         over.addEventListener("pointerdown", function (ev) {
-          if (ev.button !== 0 || ev.shiftKey) return; // Shift+拖拽 = uPlot 的选区缩放
-          dragging = true;
+          if (ev.button !== 0) return;
+          // Shift+拖拽 = 平移（只在放大之后才有意义，所以是修饰键动作）；
+          // 裸拖拽 = 框选缩放（页面提示与用户的预期都是这个）。
+          mode = ev.shiftKey ? "pan" : "zoom";
+          startX = ev.clientX;
+          startY = ev.clientY;
           lastX = ev.clientX;
           over.setPointerCapture?.(ev.pointerId);
         });
         over.addEventListener("pointermove", function (ev) {
-          if (!dragging) return;
-          const dx = ev.clientX - lastX;
-          lastX = ev.clientX;
-          panBy(el, dx);
+          if (mode === "pan") {
+            const dx = ev.clientX - lastX;
+            lastX = ev.clientX;
+            if (dx !== 0) panBy(el, dx);
+            return;
+          }
+          if (mode !== "zoom" || !band) return;
+          const rect = over.getBoundingClientRect();
+          const left = Math.min(ev.clientX, startX) - rect.left;
+          const width = Math.abs(ev.clientX - startX);
+          if (width < 4) {
+            hideBand();
+            return;
+          }
+          // 区间读数在**拖拽过程中**就给：它就是"对应坐标轴范围"的即时反馈。
+          const cur = instances.get(el);
+          const xs = (cur && cur.data && cur.data[0]) || [];
+          const r = dragToRange(startX - rect.left, ev.clientX - rect.left, startY - rect.top, ev.clientY - rect.top, {
+            width: rect.width,
+            total: xs.length,
+          });
+          band.hidden = false;
+          band.style.left = left + "px";
+          band.style.width = width + "px";
+          if (r) {
+            const cfg = chartCfg.get(el) || {};
+            band.title = formatRangeCaption({ from: r.from, to: r.to, total: xs.length }, cfg);
+          } else {
+            band.title = "";
+          }
         });
-        const stop = function () {
-          dragging = false;
+        const finish = function (ev) {
+          if (mode === "pan") {
+            mode = null;
+            return;
+          }
+          if (mode !== "zoom") return;
+          mode = null;
+          hideBand();
+          if (!ev) return;
+          const rect = over.getBoundingClientRect();
+          const cur = instances.get(el);
+          const xs = (cur && cur.data && cur.data[0]) || [];
+          const r = dragToRange(startX - rect.left, ev.clientX - rect.left, startY - rect.top, ev.clientY - rect.top, {
+            width: rect.width,
+            total: xs.length,
+          });
+          if (r && cur) applyXRange(el, cur, r.from, r.to);
         };
-        over.addEventListener("pointerup", stop);
-        over.addEventListener("pointercancel", stop);
-        over.addEventListener("pointerleave", stop);
+        over.addEventListener("pointerup", finish);
+        over.addEventListener("pointercancel", function () {
+          mode = null;
+          hideBand();
+        });
+        over.addEventListener("pointerleave", function () {
+          if (mode !== "pan") {
+            mode = null;
+            hideBand();
+          }
+        });
       }
     }
     const rt = ctrlReset.get(el);
@@ -946,7 +1156,15 @@
         el.style.minHeight = built.opts.height + LEGEND_RESERVE_PX + "px";
       }
       instances.set(el, instance);
+      // 区间读数的配置（单位/标签）来自调用方：图知道数据，不知道怎么念它。
+      chartCfg.set(el, built.range || {});
       ensureZoomUi(el, instance);
+      // 首帧也要有区间读数：否则"full range"只在用户第一次交互后才出现，
+      // 而用户正是靠这一行判断"现在看的是不是全部"。
+      setRangeCaption(el, instance, ...(() => {
+        const xs = (instance.data && instance.data[0]) || [];
+        return [xs[0] ?? 0, xs[xs.length - 1] ?? 0];
+      })());
       const obs = ensureResizeObserver();
       if (obs) obs.observe(el);
       return instance;
@@ -973,7 +1191,15 @@
       /* already gone */
     }
     instances.delete(el);
+    chartCfg.delete(el);
     setZoomed(el, false);
+    // 区间读数与图同寿：图没了还留着一行"1960-01 → 1960-05"就是**幽灵事实**。
+    const host = el && el.parentElement;
+    if (host && host.__chartRange) {
+      host.__chartRange.remove();
+      host.__chartRange = null;
+    }
+    if (host && host.__chartSel) host.__chartSel.remove();
     // uPlot leaves its canvas behind; clear so a redraw cannot stack them.
     if (el && el.replaceChildren) el.replaceChildren();
   }
@@ -1006,6 +1232,8 @@
     // Exposed for tests: the zoom/pan range math + the apply path (no setScale).
     zoomRange: zoomRange,
     panRange: panRange,
+    dragToRange: dragToRange,
+    formatRangeCaption: formatRangeCaption,
     applyXRange: applyXRange,
     // Exposed for tests: pure translations with no DOM/uPlot involvement.
     toLineData: toLineData,

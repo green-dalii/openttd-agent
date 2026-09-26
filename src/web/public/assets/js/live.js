@@ -366,6 +366,11 @@
             if (!this.$refs.cashChart) return;
             C.line(el, {
               series, labels, area: series.length === 1, height: this.chartHeight(260), // 固定高度
+              // 区间读数的单位与标签：x 是**采样序号**，标签是月；读数给日精度，
+              // 因为"我现在看的是哪一段"需要比轴标签更细的一层（单位写 points，
+              // 不写 days —— 两个采样点可以同一天，叫"天"就是编造单位）。
+              rangeUnit: "points",
+              rangeLabel: (i) => this.cashRangeLabel(i),
               // `key` 标识"这张图画的是什么"：切换指标时 format 都是函数，
               // ucharts 的复用判断只能靠这个键，否则会把 cost 画成 money。
               key: "cash:" + this.cashMetric,

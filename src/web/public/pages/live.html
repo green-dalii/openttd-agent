@@ -168,7 +168,7 @@
       <div class="chart-box"><div id="chart" x-ref="cashChart" x-effect="drawCash()"></div></div>
       <div class="legend">
         <span class="lg dim" x-text="'showing ' + cashMetric"></span>
-        <span class="lg dim">drag to zoom on the time axis · double-click or “reset zoom” to go back</span>
+        <span class="lg dim">drag across the time axis to zoom · shift+drag to pan · wheel to zoom · double-click or ⟲ to reset</span>
       </div>
     </section>
     <!-- 构成（车队/车站按类型 + 绩效）：`stats.breakdown` 一直在快照里，
@@ -560,7 +560,7 @@
         <!-- 零值系列不进图，但**必须说明**：静默隐藏会被读成"这个指标不存在"。 -->
         <div class="legend">
           <span class="lg dim" x-text="tokenHiddenNote()"></span>
-          <span class="lg dim">drag to zoom · double-click / “reset zoom” to go back</span>
+          <span class="lg dim">drag to zoom · shift+drag to pan · double-click / ⟲ to reset</span>
         </div>
         <h3>Per-turn detail</h3>
         <div class="scroll-y">

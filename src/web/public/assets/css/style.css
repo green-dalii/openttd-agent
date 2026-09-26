@@ -360,6 +360,15 @@ label.check input { accent-color: var(--accent); }
 .pick-main { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
 .pick-name { font-family: var(--mono); font-size: 12.5px; }
 .pick-sub { font-size: 11px; color: var(--muted); margin-top: 3px; line-height: 1.5; }
+/* 列表里的"索引事实"（2026-09-25 用户：/sessions 缺少关键信息）。
+   刻意用等宽数字 + 弱化底色：它是**扫读**用的，不是正文——一眼能扫到"这局该不该看"即可。 */
+.pick-facts { display: flex; flex-wrap: wrap; gap: 4px 6px; margin-top: 5px; }
+.pick-facts .fact { font-size: 10.5px; line-height: 1.5; padding: 1px 6px; border-radius: 999px;
+  border: 1px solid var(--line); color: var(--muted); background: var(--panel-2);
+  font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pick-facts .fact.ok { color: var(--ink-dim); border-color: var(--line-strong); }
+.pick-facts .fact.warn { color: #e2b04a; border-color: #6a5320; }
+.pick-facts .fact.bad { color: #ff8a7a; border-color: #6e3229; }
 
 /* ------------------------------ events ------------------------------ */
 .event-tools { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; margin-bottom: var(--sp-2); }
@@ -598,3 +607,13 @@ button[disabled] { opacity: .45; cursor: not-allowed; }
 .chart-ctrl button:hover { color: var(--ink); border-color: var(--ink-dim); }
 .chart-ctrl button:disabled { opacity: .35; cursor: default; }
 .chart-hint { margin: 6px 2px 0; font-size: 11.5px; color: var(--muted); }
+/* 区间读数（2026-09-25 用户："没有对应坐标轴范围显示缩放及区间范围"）。
+   它是**常驻**的一行，不是 tooltip：tooltip 只在鼠标悬停时存在，而"我现在看的是哪一段"
+   必须在鼠标离开后仍然可读。缩放中用 accent 色，未缩放时用弱化色。 */
+.chart-range { margin: 2px 2px 0; font-size: 11.5px; color: var(--muted);
+  font-variant-numeric: tabular-nums; }
+.chart-box.chart-zoomed .chart-range { color: var(--ink-dim); }
+/* 拖拽选区：拖动时**当场**显示将放大的区间（否则松手才知道缩到哪）。 */
+.chart-sel { position: absolute; top: 0; bottom: 22px; z-index: 4; pointer-events: none;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  border-left: 1px solid var(--accent); border-right: 1px solid var(--accent); }

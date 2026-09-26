@@ -45,6 +45,12 @@ interface Model {
 	steps(): { kind: string; ok?: boolean }[];
 	deltaText(d: number | null): string;
 	deltaClass(d: number | null): string;
+	runFacts(session: SessionLike & { savegame?: { exists?: boolean; path?: string } }): Array<{
+		k: string;
+		v: string;
+		tone: string;
+		title?: string;
+	}>;
 }
 
 /** Load the component module with a recording UI stub. */
@@ -416,5 +422,75 @@ describe("sessions: 暂停收场的局要能被一眼挑出（W1 源码守卫）
 		// 必须**优先**返回（早于其它测量项），否则审核者要在一堆数字里找它
 		const fn = src.slice(src.indexOf("outcomeRows()"), src.indexOf("brainText()"));
 		expect(fn.indexOf("blockedByPause")).toBeLessThan(fn.indexOf("Construction done"));
+	});
+});
+
+/**
+ * 列表项的"索引事实"（2026-09-25 用户："/sessions 统计信息过少，缺少关键信息，
+ * 也缺少该 session 的存档文件位置显示"）。
+ *
+ * 关键断言是**无效样本必须显眼**：一条被暂停结束 / 世界冻住的局，在列表里若长得和好局
+ * 一样，它就会被拿去参与平均（W1/W2 的全部意义就丢在这张列表上）。
+ */
+describe("sessions 列表：runFacts（不必点开就能判断一局值不值得看）", () => {
+	const model = load().model;
+	const factsOf = (s: Record<string, unknown>) => {
+		const rows = model.runFacts(s as never);
+		const by = (k: string) => rows.find((r) => r.k === k);
+		return { rows, by };
+	};
+
+	it("正常局：交付量 + 窗口 + 存档位置", () => {
+		const { by } = factsOf({
+			outcome: { deliveredRun: 33, deliveredRunComplete: true, simulatedDays: 1500, reachedHorizon: true },
+			savegame: { exists: true, path: "/tmp/dd/save/20260926-075117-seed9.sav" },
+		});
+		expect(by("delivered")!.v).toBe("33 ✓");
+		expect(by("window")!.v).toBe("1500d");
+		expect(by("save")!.v).toMatch(/save\/20260926-075117-seed9\.sav$/);
+		// 完整路径在 title 里（列表只给尾巴，但"这局能不能接着玩"要能拿到全路径）
+		expect(by("save")!.title).toBe("/tmp/dd/save/20260926-075117-seed9.sav");
+		expect(by("verdict")).toBeUndefined();
+	});
+
+	it("被暂停结束的局 → 一眼可见的 exclude 标记（W1）", () => {
+		const { by } = factsOf({ outcome: { deliveredRun: 0, blockedByPause: true, pausedBy: "agent" } });
+		expect(by("verdict")!.tone).toBe("bad");
+		expect(by("verdict")!.v).toMatch(/paused/);
+		expect(by("verdict")!.v).toMatch(/exclude/);
+	});
+
+	it("世界冻住的局 → 另一种原因，同样 exclude（W2：两类原因不许合并成一个词）", () => {
+		const { by } = factsOf({ outcome: { worldFrozen: true, worldFrozenMs: 3_600_000 } });
+		expect(by("verdict")!.tone).toBe("bad");
+		expect(by("verdict")!.v).toMatch(/world frozen/);
+		expect(by("verdict")!.v).not.toMatch(/paused/);
+	});
+
+	it("GS 报错 / 未达窗口 → 警告级（次一级，但要说出来）", () => {
+		expect(factsOf({ outcome: { gsErrors: 152 } }).by("verdict")!.v).toMatch(/152 GS errors/);
+		expect(factsOf({ outcome: { reachedHorizon: false, simulatedDays: 90 } }).by("verdict")!.tone).toBe("warn");
+	});
+
+	it("交付量未记录 → 「—」，不是 0（没发生 ≠ 零）", () => {
+		expect(factsOf({ outcome: {} }).by("delivered")!.v).toBe("—");
+	});
+
+	it("存档没写出来时说清原因，而不是显示一个不存在的路径", () => {
+		const { by } = factsOf({ outcome: {}, savegame: { exists: false, path: "/x/y.sav" } });
+		expect(by("save")!.v).toBe("not written yet");
+		expect(by("save")!.title).toMatch(/saves when it ends/);
+	});
+
+	it("没有 savegame 字段（旧数据）→ 不出现这一项，而不是假装没存档", () => {
+		expect(factsOf({ outcome: {} }).by("save")).toBeUndefined();
+	});
+});
+
+/** 模板必须真的把 runFacts 渲染出来（"算了但没渲染"是本页最常见的失败形状）。 */
+describe("sessions 模板：索引事实被渲染", () => {
+	it("列表项里有 runFacts 的渲染点", () => {
+		const html = readFileSync(join(PUBLIC_DIR, "pages/sessions.html"), "utf8");
+		expect(html).toMatch(/x-for="f in runFacts\(s\)"/);
 	});
 });

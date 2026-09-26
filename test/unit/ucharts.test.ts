@@ -37,6 +37,13 @@ interface UChartsApi {
 	/** 纯视野计算（无 DOM/uPlot）——缩放的**唯一**数学来源。 */
 	zoomRange: (xs: number[], lo: number, hi: number, factor: number, anchorValue?: number) => { min: number; max: number } | null;
 	panRange: (xs: number[], lo: number, hi: number, dxPixels: number, width: number) => { min: number; max: number } | null;
+	/** 裸拖拽 → 样本区间（框选缩放的唯一数学来源）。 */
+	dragToRange: (
+		x0: number, x1: number, y0: number, y1: number,
+		opts: { width: number; total: number; minPx?: number },
+	) => { from: number; to: number } | null;
+	/** 区间读数（"我现在看的是哪一段"）。 */
+	formatRangeCaption: (range: { from: number; to: number; total: number }, opts: { unit?: string; label?: unknown }) => string;
 	/** 应用视野（写 scales + redraw），并同步"已缩放"标记与复位按钮状态。 */
 	applyXRange: (el: unknown, inst: unknown, min: number, max: number) => boolean;
 	stackedUpperBounds: (items: unknown, si: number, i0: number, i1: number) => number[];
@@ -748,5 +755,104 @@ describe("uPlot 缩放机制（缩放范围计算 + 应用）", () => {
 		const api = load().api;
 		expect(api.applyXRange({ parentElement: null }, {}, 1, 2)).toBe(false);
 		expect(api.applyXRange({ parentElement: null }, null, 1, 2)).toBe(false);
+	});
+});
+
+/**
+ * 拖拽 = 框选缩放（2026-09-25 用户实测："折线图、Token 用量等，鼠标缩放逻辑不正确"）。
+ *
+ * 上一版把裸拖拽接成**平移**：页面提示写着 "drag to zoom"，实现却是 pan，而未缩放时
+ * pan 是个静默 no-op —— 提示承诺的动作根本不存在。这里锁住新语义的两个纯函数：
+ * 像素 → 样本区间，以及区间 → 人话。
+ */
+describe("拖拽框选缩放：dragToRange", () => {
+	const api = load().api;
+	const W = 1000;
+	const TOTAL = 101; // 100 个间隔
+
+	it("横向拖拽 → 覆盖被框住的那段样本（方向无关）", () => {
+		const r = api.dragToRange(300, 600, 100, 105, { width: W, total: TOTAL })!;
+		expect(r).not.toBeNull();
+		expect(r.from).toBe(30);
+		expect(r.to).toBe(60);
+		const back = api.dragToRange(600, 300, 105, 100, { width: W, total: TOTAL })!;
+		expect(back).toEqual(r);
+	});
+
+	it("位移太短 → null（误触不改视野，也不该把视图清空）", () => {
+		expect(api.dragToRange(500, 504, 100, 100, { width: W, total: TOTAL })).toBeNull();
+	});
+
+	it("竖直位移为主 → null（y 是固定货币刻度，框它没有意义）", () => {
+		expect(api.dragToRange(500, 520, 100, 300, { width: W, total: TOTAL })).toBeNull();
+	});
+
+	it("横跨全宽的拖拽 = 回到全量（不是无反应）", () => {
+		// 用户已经放大时横着拖一遍，期望是"复位"，不是"没反应"。
+		// applyXRange 会认出 from/to 就是数据两端 ⇒ 已缩放标记与复位按钮一起清掉。
+		const r = api.dragToRange(0, W, 100, 100, { width: W, total: TOTAL })!;
+		expect(r).toEqual({ from: 0, to: TOTAL - 1 });
+	});
+
+	it("宽度未知就不能换算 → null（静默给一个假区间比不给更坏）", () => {
+		expect(api.dragToRange(10, 200, 0, 0, { width: 0, total: TOTAL })).toBeNull();
+	});
+
+	it("只框到一个采样点时给两个点（否则用户看到的是一片空白）", () => {
+		const r = api.dragToRange(500, 512, 100, 100, { width: W, total: TOTAL, minPx: 8 })!;
+		expect(r.to - r.from).toBeGreaterThanOrEqual(1);
+	});
+
+	it("结果永远落在数据范围内（拖到图外不会越界）", () => {
+		const r = api.dragToRange(-500, 5000, 0, 0, { width: W, total: TOTAL })!;
+		expect(r.from).toBeGreaterThanOrEqual(0);
+		expect(r.to).toBeLessThanOrEqual(TOTAL - 1);
+	});
+});
+
+/**
+ * 区间读数：缩放后必须能一眼看出"看的是哪一段、占全量的多少"
+ * （用户原话："没有对应坐标轴范围显示缩放及区间范围"）。
+ */
+describe("区间读数：formatRangeCaption", () => {
+	const api = load().api;
+
+	it("未缩放 → 说清是全量，而不是显示 0→100 假装是区间", () => {
+		expect(api.formatRangeCaption({ from: 0, to: 100, total: 101 }, { unit: "points" })).toBe(
+			"full range · 101 points",
+		);
+	});
+
+	it("已缩放 → 区间 + 占比，单位用调用方给的（不编造“天”）", () => {
+		const cap = api.formatRangeCaption({ from: 30, to: 60, total: 101 }, { unit: "points" });
+		expect(cap).toBe("30 → 60 · 31 of 101 points (31%)");
+	});
+
+	it("标签由调用方给（图知道数据，页面知道怎么念它）", () => {
+		const labels = ["1959-12-14", "1960-01-01", "1960-01-09"];
+		const cap = api.formatRangeCaption(
+			{ from: 0, to: 1, total: 3 },
+			{ unit: "points", label: (i: number) => labels[i] },
+		);
+		expect(cap).toBe("1959-12-14 → 1960-01-01 · 2 of 3 points (67%)");
+		// 全量区间时用"全量"那句话，不重复写成 0→N（那会让用户以为刚缩放过）
+		expect(
+			api.formatRangeCaption({ from: 0, to: 2, total: 3 }, { unit: "points", label: (i: number) => labels[i] }),
+		).toBe("full range · 3 points");
+	});
+
+	it("点数不足两个 → 空串（没有区间可言，不要显示 0→0）", () => {
+		expect(api.formatRangeCaption({ from: 0, to: 0, total: 1 }, {})).toBe("");
+	});
+});
+
+/** 文案是契约：提示必须与实现的手势一致（上一版文案承诺 drag=zoom、实现是 pan）。 */
+describe("缩放提示语与实现一致", () => {
+	it("页面提示描述裸拖拽缩放 + shift 拖拽平移", () => {
+		const html = readFileSync(join(PUBLIC_DIR, "pages/live.html"), "utf8");
+		expect(html).toMatch(/drag across the time axis to zoom/);
+		expect(html).toMatch(/shift\+drag to pan/);
+		// 旧文案（承诺了不存在的动作）不许再出现
+		expect(html).not.toMatch(/drag to zoom on the time axis/);
 	});
 });

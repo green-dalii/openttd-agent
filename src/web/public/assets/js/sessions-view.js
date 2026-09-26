@@ -48,6 +48,69 @@
   const outcomeOf = (meta) => (meta || {}).outcome || {};
 
   /**
+   * 一行局在**列表里**就该回答的问题（2026-09-25 用户："/sessions 页面显示统计信息过少，
+   * 缺少关键信息，也缺少该 session 的存档文件位置显示"）。
+   *
+   * 第一性原理：左侧列表是**索引**，它的职责是让你**不用逐个点开**就能判断"哪一局值得看"。
+   * 原先只有钱/车/站/决策/token，而决定一局**能不能进比较**的三件事都不在列表里：
+   *   ① 交付量（本项目的主结果）；② 窗口长度（不同窗口的局不可比，G7）；
+   *   ③ 这局**是不是有效样本**（被暂停结束 / 世界冻住 —— W1/W2 的事实）。
+   * ③ 最关键：一条"不该参与平均"的局，在列表里长得和好局一模一样。
+   *
+   * 纯函数（无 IO、可单测）：返回 `{k, v, tone}` 列表，tone ∈ ok|warn|bad|dim。
+   */
+  function runFacts(session) {
+    const row = session || {};
+    const o = row.outcome || {};
+    const out = [];
+    const int = (v) => (v === null || v === undefined || v === "" ? "—" : U.fmtInt(v));
+
+    // ① 交付量（本项目的主结果；跨季度积分的 deliveredRun 才是可比的量）
+    if (o.deliveredRun !== undefined && o.deliveredRun !== null) {
+      out.push({
+        k: "delivered",
+        v: int(o.deliveredRun) + (o.deliveredRunComplete === true ? " ✓" : o.deliveredRunComplete === false ? " (not settled)" : ""),
+        tone: o.deliveredRun > 0 ? "ok" : "dim",
+      });
+    } else {
+      out.push({ k: "delivered", v: "—", tone: "dim" });
+    }
+
+    // ② 窗口：不可比的局必须在这里就看得出来
+    if (o.simulatedDays !== undefined && o.simulatedDays !== null) {
+      out.push({
+        k: "window",
+        v: int(o.simulatedDays) + "d" + (o.horizonDays ? "/" + int(o.horizonDays) : ""),
+        tone: o.reachedHorizon === false ? "warn" : "dim",
+      });
+    }
+
+    // ③ 有效性标记：不该进平均的局，在列表里就要看得见（W1/W2 的事实）
+    if (o.blockedByPause === true) {
+      out.push({ k: "verdict", v: "stopped (paused) — exclude", tone: "bad" });
+    } else if (o.worldFrozen === true) {
+      out.push({ k: "verdict", v: "world frozen — exclude", tone: "bad" });
+    } else if (o.gsErrors !== undefined && o.gsErrors !== null && o.gsErrors > 0) {
+      out.push({ k: "verdict", v: int(o.gsErrors) + " GS errors", tone: "warn" });
+    } else if (o.reachedHorizon === false) {
+      out.push({ k: "verdict", v: "horizon not reached", tone: "warn" });
+    }
+
+    // ④ 存档位置：服务器已经把 savegame 挂在每个列表项上（serve.ts），
+    //    原先只有详情面板显示它 —— 于是"这局能不能接着玩"要点开才知道。
+    const sg = row.savegame;
+    if (sg && typeof sg === "object") {
+      out.push({
+        k: "save",
+        v: sg.exists ? shortPath(sg.path) : "not written yet",
+        tone: "dim",
+        title: sg.exists ? String(sg.path || "") : "the run saves when it ends (or from the live page's controls)",
+      });
+    }
+    return out;
+  }
+
+  /**
    * Build the Sessions view model.
    *
    * `seed` carries the already-loaded data so the model stays a pure projection:
@@ -163,6 +226,11 @@
         U.setPref("sessions.onlyDone", this.onlyDone);
       },
 
+      /** 列表项的索引事实（委托给模块级纯函数，见上方 runFacts）。 */
+      runFacts(session) {
+        return runFacts(session);
+      },
+
       /** Human-readable Δ cell; `null` means "not comparable". */
       deltaText(d) {
         if (d === null || !Number.isFinite(d)) return "—";
@@ -177,5 +245,18 @@
     };
   }
 
-  window.SessionsView = { create: create, TOKEN_SLICES: TOKEN_SLICES, STATUS_INFO: STATUS_INFO };
+  /** 存档路径太长，列表里只给尾巴（完整路径在 title 里，且详情面板有 copy）。 */
+  function shortPath(p) {
+    const s = String(p || "");
+    const parts = s.split("/");
+    return parts.length <= 2 ? s : "…/" + parts.slice(-2).join("/");
+  }
+
+  window.SessionsView = {
+    create: create,
+    TOKEN_SLICES: TOKEN_SLICES,
+    STATUS_INFO: STATUS_INFO,
+    shortPath: shortPath,
+    runFacts: runFacts,
+  };
 })();

@@ -60,6 +60,15 @@
                 <span x-text="` · ${$fmt.ago(s.startedAt)}`"></span><br />
                 <span x-text="runSummary(s)"></span>
               </div>
+              <!-- 2026-09-25 用户："/sessions 统计信息过少，缺少关键信息，也缺少存档位置"。
+                   列表是**索引**：交付量 / 窗口 / 是否有效样本 / 存档位置必须在这里就
+                   看得见，否则判断"哪一局值得点开"得点开每一局（见 sessions-view.js runFacts）。 -->
+              <div class="pick-facts">
+                <template x-for="f in runFacts(s)" :key="f.k">
+                  <span class="fact" :class="f.tone" :title="f.title || f.k + ': ' + f.v"
+                        x-text="f.k + ' ' + f.v"></span>
+                </template>
+              </div>
             </li>
           </template>
           <li class="empty" x-show="!visible().length && sessions.length">

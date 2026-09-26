@@ -146,6 +146,8 @@
         /** 存档信息（服务端给：路径 + 是否已落盘）；null = 服务端没给这条信息。 */
         savegameInfo() { return (this.data && this.data.savegame) || null; },
         savegamePath() { const sg = this.savegameInfo(); return sg && sg.path ? sg.path : "—"; },
+        /** 列表项的索引事实（模块级纯函数；不为每行新建 model）。 */
+        runFacts(session) { return window.SessionsView.runFacts(session); },
         /**
          * 存档状态一句话。**"还没写"不等于"路径不存在"**：
          * 路径照给（用户可以先去看目录），只是文件还没落盘。
