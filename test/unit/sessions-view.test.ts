@@ -45,6 +45,12 @@ interface Model {
 	steps(): { kind: string; ok?: boolean }[];
 	deltaText(d: number | null): string;
 	deltaClass(d: number | null): string;
+	trainingSeries(metrics: unknown[]): {
+		runs: { key: string; order: number; scenario: string; deliveredRun: number | null; comparable: boolean; reason: string | null }[];
+		summary: { total: number; comparable: number; excludedCounts: Record<string, number> };
+		verdict: string;
+	};
+	trainingChartSvg(series: unknown, width?: number, height?: number): string;
 	runFacts(session: SessionLike & { savegame?: { exists?: boolean; path?: string } }): Array<{
 		k: string;
 		v: string;
@@ -492,5 +498,91 @@ describe("sessions 模板：索引事实被渲染", () => {
 	it("列表项里有 runFacts 的渲染点", () => {
 		const html = readFileSync(join(PUBLIC_DIR, "pages/sessions.html"), "utf8");
 		expect(html).toMatch(/x-for="f in runFacts\(s\)"/);
+	});
+});
+
+/**
+ * TRAINING 面板（P0-3）：一屏回答「变强了吗 / 为什么这局不算」。
+ * 口径（D61）：可比局 < 2 → 「不可判定」；缺失 ≠ 0；排除**按原因分别计数**（D56）。
+ */
+describe("trainingSeries：变强了吗 / 为什么这局不算", () => {
+	const base = { id: "a", startedAt: 1000, deliveredRun: 100, excluded: null };
+
+	it("按 startedAt 排序；可比局进趋势，排除局不进且带具名原因", () => {
+		const { model } = load();
+		const s = model.trainingSeries([
+			{ ...base, id: "b", startedAt: 2000, deliveredRun: 300, excluded: null },
+			{ ...base, id: "a", deliveredRun: 100, excluded: "stopped (paused)" },
+		]);
+		expect(s.runs.map((r) => r.key)).toEqual(["a", "b"]);
+		expect(s.runs[0]!.comparable).toBe(false);
+		expect(s.runs[0]!.reason).toBe("stopped (paused)");
+		expect(s.summary.comparable).toBe(1);
+		expect(s.summary.excludedCounts).toEqual({ "stopped (paused)": 1 });
+	});
+
+	it("可比且有计量的局 < 2 → 结论是「不可判定」（不画假趋势）", () => {
+		const { model } = load();
+		const s = model.trainingSeries([{ ...base, deliveredRun: 100 }]);
+		expect(s.verdict).toMatch(/not determinable/);
+		const s2 = model.trainingSeries([]);
+		expect(s2.verdict).toMatch(/not determinable/);
+	});
+
+	it("deliveredRun 缺失/非法 → null（缺失 ≠ 0），且不进趋势", () => {
+		const { model } = load();
+		const s = model.trainingSeries([
+			{ id: "x", startedAt: 1, deliveredRun: null, excluded: null },
+			{ id: "y", startedAt: 2, deliveredRun: "n/a", excluded: null },
+			base,
+			{ ...base, id: "z", startedAt: 3 },
+		]);
+		expect(s.runs.find((r) => r.key === "x")!.deliveredRun).toBeNull();
+		expect(s.runs.find((r) => r.key === "y")!.deliveredRun).toBeNull();
+		// 3 个可比局里只有 2 个有计量 → 有 2 个点才可判定
+		expect(s.verdict).toMatch(/shown across 2 comparable runs/);
+	});
+
+	it("服务端没标 excluded 的行 → 记为 not marked（不冒充可比）", () => {
+		const { model } = load();
+		const s = model.trainingSeries([{ id: "u", startedAt: 1, deliveredRun: 5 }]);
+		expect(s.runs[0]!.comparable).toBe(false);
+		expect(s.runs[0]!.reason).toBe("not marked");
+	});
+});
+
+describe("trainingChartSvg：区分度必须在图上", () => {
+	it("可比局是实心点 + 折线；排除局是空心点且不在折线上", () => {
+		const { model } = load();
+		const s = model.trainingSeries([
+			{ id: "a", startedAt: 1, deliveredRun: 100, excluded: null },
+			{ id: "b", startedAt: 2, deliveredRun: 200, excluded: "world frozen" },
+			{ id: "c", startedAt: 3, deliveredRun: 300, excluded: null },
+		]);
+		const svg = model.trainingChartSvg(s, 640, 160);
+		expect(svg).toContain("<svg");
+		expect(svg).toContain("polyline"); // 可比局连线
+		expect(svg.match(/<circle/g)).toHaveLength(3);
+		// 排除局空心（circle 上 fill="none" + 虚线描边；polyline 也带 fill="none"，别混）
+		expect(svg.match(/<circle[^>]*fill="none"/g)).toHaveLength(1);
+	});
+
+	it("没有可比点时只画坐标轴（不画假折线）", () => {
+		const { model } = load();
+		const s = model.trainingSeries([{ id: "a", startedAt: 1, deliveredRun: 10, excluded: "demo (not a real LLM)" }]);
+		const svg = model.trainingChartSvg(s);
+		expect(svg).not.toContain("polyline");
+		expect(svg).toContain("<svg");
+	});
+});
+
+describe("sessions 模板：训练面板被渲染（算了但没渲染是本页最常见失败）", () => {
+	it("有 TRAINING 区 + series 的渲染点 + verdict 文本", () => {
+		const html = readFileSync(join(PUBLIC_DIR, "pages/sessions.html"), "utf8");
+		expect(html).toMatch(/TRAINING/);
+		expect(html).toContain("trainingChartSvg(");
+		expect(html).toContain("trainingSeries(");
+		// 排除原因必须逐条列出，不许合并成一个数字（D56）
+		expect(html).toContain("excludedCounts");
 	});
 });

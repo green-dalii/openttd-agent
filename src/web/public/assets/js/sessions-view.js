@@ -59,6 +59,77 @@
    *
    * 纯函数（无 IO、可单测）：返回 `{k, v, tone}` 列表，tone ∈ ok|warn|bad|dim。
    */
+  /**
+   * 训练面板（P0-3）：一屏回答「变强了吗 / 为什么这局不算」。
+   *
+   * 输入是 `/api/metrics` 的行（服务端已用 `metricExclusion` 标好排除原因——
+   * 规则的单一写者在 `src/evolution/metrics.ts`，本函数只做编排与计数）。
+   * 口径（D61）：`deliveredRun` 缺失是 null，不是 0；可比局 < 2 时结论是
+   * 「样本不足，不可判定」，**不画趋势**。
+   */
+  function trainingSeries(metrics) {
+    const rows = (Array.isArray(metrics) ? metrics : [])
+      .filter((m) => m && typeof m === "object")
+      .slice()
+      .sort((a, b) => (Number(a.startedAt) || 0) - (Number(b.startedAt) || 0));
+    const runs = rows.map((m, i) => {
+      const d = m.deliveredRun;
+      const deliveredRun = typeof d === "number" && Number.isFinite(d) ? d : null;
+      const excluded = m.excluded === undefined ? "not marked" : m.excluded;
+      return {
+        key: String(m.id ?? i),
+        order: i + 1,
+        scenario: typeof m.scenario === "string" && m.scenario ? m.scenario : "freeform",
+        deliveredRun,
+        comparable: excluded === null,
+        reason: excluded,
+      };
+    });
+    const counts = {};
+    for (const r of runs) if (r.reason !== null) counts[r.reason] = (counts[r.reason] || 0) + 1;
+    const comparable = runs.filter((r) => r.comparable);
+    const measured = comparable.filter((r) => r.deliveredRun !== null);
+    const verdict = measured.length < 2
+      ? `not determinable - ${measured.length} comparable run${measured.length === 1 ? "" : "s"} with a measured outcome (need >= 2)`
+      : `shown across ${measured.length} comparable runs`;
+    return {
+      runs,
+      summary: {
+        total: runs.length,
+        comparable: comparable.length,
+        excludedCounts: counts,
+      },
+      verdict,
+    };
+  }
+
+  /** 训练折线图（纯函数 -> SVG 字符串；排除局画空心点，区分度必须在图上）。 */
+  function trainingChartSvg(series, width = 640, height = 160) {
+    const runs = series && Array.isArray(series.runs) ? series.runs : [];
+    const vals = runs.filter((r) => r.deliveredRun !== null).map((r) => r.deliveredRun);
+    const max = vals.length ? Math.max(...vals, 1) : 1;
+    const pad = 24;
+    const innerW = width - pad * 2;
+    const innerH = height - pad * 2;
+    const x = (i) => (runs.length <= 1 ? pad + innerW / 2 : pad + (innerW * i) / (runs.length - 1));
+    const y = (v) => height - pad - (innerH * v) / max;
+    const pts = runs
+      .map((r, i) => (r.deliveredRun === null ? null : { x: x(i), y: y(r.deliveredRun), ok: r.comparable }))
+      .filter(Boolean);
+    const line = pts.filter((q) => q.ok).map((q) => `${q.x.toFixed(1)},${q.y.toFixed(1)}`).join(" ");
+    const dots = pts
+      .map((q) => (q.ok
+        ? `<circle cx="${q.x.toFixed(1)}" cy="${q.y.toFixed(1)}" r="3.5" fill="#e8b339"/>`
+        : `<circle cx="${q.x.toFixed(1)}" cy="${q.y.toFixed(1)}" r="3.5" fill="none" stroke="#8b93a7" stroke-dasharray="2 2"/>`))
+      .join("");
+    return `<svg class="training-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="deliveredRun per run">`
+      + `<line x1="${pad}" y1="${height - pad}" x2="${width - pad}" y2="${height - pad}" stroke="#2a3244"/>`
+      + `<line x1="${pad}" y1="${pad}" x2="${pad}" y2="${height - pad}" stroke="#2a3244"/>`
+      + (line ? `<polyline points="${line}" fill="none" stroke="#e8b339" stroke-width="1.5"/>` : "")
+      + dots
+      + `</svg>`;
+  }
+
   function runFacts(session) {
     const row = session || {};
     const o = row.outcome || {};
@@ -122,6 +193,7 @@
     return {
       /* ------------------------------ state ------------------------------ */
       sessions: s.sessions || [],
+      metrics: s.metrics || [],
       data: s.data || null,
       compareData: s.compareData || null,
       compareWith: s.compareWith || null,
@@ -226,6 +298,13 @@
         U.setPref("sessions.onlyDone", this.onlyDone);
       },
 
+      /** 训练面板（委托给模块级纯函数）。 */
+      trainingSeries(metrics) {
+        return trainingSeries(metrics);
+      },
+      trainingChartSvg(series, width, height) {
+        return trainingChartSvg(series, width, height);
+      },
       /** 列表项的索引事实（委托给模块级纯函数，见上方 runFacts）。 */
       runFacts(session) {
         return runFacts(session);
@@ -258,5 +337,7 @@
     STATUS_INFO: STATUS_INFO,
     shortPath: shortPath,
     runFacts: runFacts,
+    trainingSeries: trainingSeries,
+    trainingChartSvg: trainingChartSvg,
   };
 })();

@@ -25,6 +25,7 @@ import { runPreflight, formatPreflight } from "./preflight.js";
 import { applyLlmSettingsFile } from "./llm-settings.js";
 import { APP_VERSION } from "../version.js";
 import { actionCatalog } from "./tools/catalog.js";
+import { metricExclusion } from "../evolution/metrics.js";
 
 export interface ServeOptions {
 	webPort?: number;
@@ -184,7 +185,9 @@ export async function runServe(cfg: Config, opts: ServeOptions = {}): Promise<Se
 		evolution: {
 			// Read fresh on each request: the page must reflect games that finished
 			// after it was loaded.
-			metrics: () => evolutionView(cfg.dataDir).metrics,
+			// `excluded` 是加法字段（P0-3）：排除原因由 metricExclusion 单一写者算出，
+			// 页面只负责渲染——不让页面抄一份规则（D64/C1：规则抄一遍就会漂移）。
+			metrics: () => evolutionView(cfg.dataDir).metrics.map((m) => ({ ...m, excluded: metricExclusion(m) })),
 			lessons: () => evolutionView(cfg.dataDir).lessons,
 			strategies: () => evolutionView(cfg.dataDir).strategies,
 			arms: () => evolutionView(cfg.dataDir).arms,

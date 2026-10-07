@@ -25,6 +25,7 @@
         sessions: [],
         data: null,
         compareData: null,
+        metrics: [],
         onlyDone: U.getPref("sessions.onlyDone", false),
       });
 
@@ -44,6 +45,11 @@
 
         /* ------------------------------- init ------------------------------- */
         async init() {
+          // 训练面板（P0-3）：跨局账本。失败不挡页面（面板显示空态说明）。
+          fetch("/api/metrics")
+            .then((r) => (r.ok ? r.json() : []))
+            .then((rows) => { this.metrics = Array.isArray(rows) ? rows : []; })
+            .catch(() => { this.metrics = []; });
           // 页头（标题+导航）只有这一个来源：common.js 的 renderChrome()。
           // 它由 common.js 定义，所以不需要"桥没加载"的回退分支（那会让 #nav
           // 以一个 HTML 里已不存在的元素为依赖，被 web-assets 守卫抓住）。

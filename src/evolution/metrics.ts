@@ -741,6 +741,36 @@ export function degradationStats(rows: GameMetric[]): {
  * "被停掉的局"读成"没学会的局"（MEMORY D56）。留在这里 = 每个消费者拿到同一集合。
  * 原始 `metrics` 仍可从 ledger 读到（`readMetrics`），便于审计。
  */
+/**
+ * 一局**不能说明训练效果**的具名原因（P0-3 面板口径）；null = 可比。
+ *
+ * 与 `comparableMetrics` 的分工是**两个问题**，不是一处重复：
+ * - `comparableMetrics` 问「这局能不能进 A/B 统计」（窄口径，动它会改历史判定）；
+ * - 本函数问「这局的成绩能不能说明训练效果」（宽排除、逐条具名）——
+ *   例如 horizon 未达的局可以进某些统计，但它证明不了任何趋势。
+ * 面板把排除**按原因分别计数**（D56：不许把不同原因压成一个数字）。
+ */
+export type MetricExclusion =
+	| "stopped (paused)"
+	| "world frozen"
+	| "demo (not a real LLM)"
+	| "interrupted"
+	| "horizon not reached"
+	| "outcome not measured";
+
+export function metricExclusion(m: GameMetric | null | undefined): MetricExclusion | null {
+	if (!m) return "outcome not measured";
+	// 优先级：先判「被人停/世界冻住」（结果根本没跑完），再判「这是演示/被打断」，
+	// 最后才是「没到窗口/没计量」。一个局只报**第一个**命中原因，可复现。
+	if (m.blockedByPause === true) return "stopped (paused)";
+	if (m.worldFrozen === true) return "world frozen";
+	if (m.llmKind === "faux") return "demo (not a real LLM)";
+	if (m.status === "interrupted") return "interrupted";
+	if (m.reachedHorizon === false) return "horizon not reached";
+	if (m.deliveredRun === null || m.deliveredRun === undefined) return "outcome not measured";
+	return null;
+}
+
 export function comparableMetrics(metrics: GameMetric[]): GameMetric[] {
 	return (Array.isArray(metrics) ? metrics : []).filter((m) => m && m.blockedByPause !== true);
 }

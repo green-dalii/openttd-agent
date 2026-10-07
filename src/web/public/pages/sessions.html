@@ -35,6 +35,31 @@
     <div class="group"><h2>History</h2><div class="rule"></div>
       <span class="dim">every <code>--watch</code> / <code>--agent</code> run is archived here</span></div>
 
+    <div class="group"><h2>Training</h2><div class="rule"></div>
+      <span class="dim">is it getting better &mdash; and why a run does not count</span></div>
+
+    <section class="panel" id="training">
+      <div class="panel-head"><h2>TRAINING</h2>
+        <span class="dim" x-text="trainingSeries(metrics).verdict">…</span></div>
+      <div class="training-chart" x-html="trainingChartSvg(trainingSeries(metrics))"></div>
+      <p class="empty" x-show="!trainingSeries(metrics).runs.length"
+         x-text="'no metrics ledger yet — one line is appended when a run finalizes'"></p>
+      <div class="training-facts" x-show="trainingSeries(metrics).runs.length">
+        <div class="fact"><span class="k">runs</span><span class="v" x-text="trainingSeries(metrics).summary.total"></span></div>
+        <div class="fact"><span class="k">comparable</span><span class="v" x-text="trainingSeries(metrics).summary.comparable"></span></div>
+        <div class="fact" x-show="Object.keys(trainingSeries(metrics).summary.excludedCounts).length">
+          <span class="k">excluded</span>
+          <span class="v">
+            <template x-for="[reason, n] in Object.entries(trainingSeries(metrics).summary.excludedCounts)" :key="reason">
+              <span class="chip" x-text="`${reason}: ${n}`"></span>
+            </template>
+          </span>
+        </div>
+      </div>
+      <p class="dim">deliveredRun = cargo delivered per run window (game days). Filled points are comparable runs;
+        hollow points are excluded, each with its named reason (a stopped run is not a failed run).</p>
+    </section>
+
     <section class="grid split-12">
       <div class="panel">
         <div class="panel-head"><h2>Runs</h2>

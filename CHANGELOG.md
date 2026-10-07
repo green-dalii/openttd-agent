@@ -9,6 +9,17 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Training panel on `/sessions` (P0-3).** One panel answers "is it getting better?" and
+  "why does this run not count": a per-run `deliveredRun` chart (filled = comparable,
+  hollow = excluded), comparable/excluded counts with each exclusion named separately
+  (a stopped run is not a failed run), and an honest verdict — with fewer than two
+  comparable measured runs it says "not determinable" instead of drawing a fake trend
+  (D61). Exclusion reasons are computed server-side by `metricExclusion` (single writer
+  in `src/evolution/metrics.ts`); `/api/metrics` rows now carry the additive `excluded`
+  field and the page only renders it.
+
 ### Changed
 
 - **`scripts/` is now typechecked.** The judging script (`scripts/run-experiment.ts`) sat
