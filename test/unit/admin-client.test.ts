@@ -19,11 +19,21 @@ class FakeAdminServer {
 	received: Array<{ type: number; payload: Uint8Array }> = [];
 	private parser = new FrameStreamParser();
 	onWelcome = true;
+	/** 协议顺序：服务端连上后先发 ServerProtocol（真机如此）；false = 手动控制。 */
+	autoProtocol = true;
+	/** 前 N 个连接直接被服务端断开（模拟 OpenTTD 自举期踢连接）。 */
+	destroyFirst = 0;
 	sockets: net.Socket[] = [];
 
 	constructor() {
 		this.server = net.createServer((sock) => {
 			this.sockets.push(sock);
+			if (this.destroyFirst > 0) {
+				this.destroyFirst--;
+				sock.destroy();
+				return;
+			}
+			if (this.autoProtocol) this.sendProtocol(sock);
 			sock.on("data", (c) => {
 				for (const pkt of this.parser.push(new Uint8Array(c))) {
 					this.received.push({ type: pkt.type, payload: pkt.payload });
@@ -72,6 +82,11 @@ class FakeAdminServer {
 
 	sendError(sock: net.Socket, msg: string): void {
 		sock.write(this.frame(AdminPacketType.ServerError, (w) => w.raw(packCStr(msg))));
+	}
+
+	/** 服务端握手第一步：ServerProtocol（payload 内容客户端忽略）。 */
+	sendProtocol(sock: net.Socket): void {
+		sock.write(this.frame(AdminPacketType.ServerProtocol, (w) => w.str("15.3").uint16(1)));
 	}
 
 	/** Push a ServerDate frame to all sockets. */
@@ -228,5 +243,53 @@ describe("rconAwait —— 等待 rcon 回执（FIFO + RCON_END）", () => {
 		expect(await second).toBe("B1");
 		client.close();
 		srv.close();
+	});
+});
+
+/**
+ * 握手与自举竞态（2026-10-07 真机事故）：OpenTTD 的 admin 端口在**游戏就绪前**
+ * 就监听（地图生成期间），旧实现在 TCP 连上后立刻发 JOIN，于是在自举窗口里被
+ * 踢（`'' has disconnected`）或被 reset（ECONNRESET/EPIPE），而初始握手**没有
+ * 重试**（autoReconnect 只管建立之后掉线）⇒ 一局直接报废。
+ */
+describe("AdminClient 握手：协议顺序 + 自举期重试", () => {
+	it("JOIN 立即发，不等 ServerProtocol（实测该服务端「先收后说」，空等会死锁）", async () => {
+		const fake = new FakeAdminServer();
+		fake.autoProtocol = false; // 服务端保持沉默（真机如此：客户端不发它就不说）
+		await fake.listen();
+		const client = new AdminClient({ cfg: makeCfg(fake.port), callbacks: {} });
+		await client.connect(2_000);
+		await new Promise((r) => setTimeout(r, 120));
+		// 2026-10-07 裸 socket 实测：服务端不先发字节。等 PROTOCOL 再 JOIN = 死锁。
+		expect(fake.received.filter((p) => p.type === AdminPacketType.AdminJoin)).toHaveLength(1);
+		// PROTOCOL 迟到时不得重复 JOIN（joinSent 幂等）
+		fake.sendProtocol(fake.sockets[0]!);
+		await new Promise((r) => setTimeout(r, 120));
+		expect(fake.received.filter((p) => p.type === AdminPacketType.AdminJoin)).toHaveLength(1);
+		client.close();
+		fake.close();
+	});
+
+	it("connectAuthed：自举窗口被踢/被 reset 后有界重试，直到握手成功", async () => {
+		const fake = new FakeAdminServer();
+		fake.destroyFirst = 2; // 前两个连接直接被服务端断开
+		await fake.listen();
+		const client = new AdminClient({ cfg: makeCfg(fake.port), callbacks: {} });
+		await client.connectAuthed(10_000);
+		expect(client.isAuthed()).toBe(true);
+		expect(fake.received.filter((p) => p.type === AdminPacketType.AdminJoin)).toHaveLength(1);
+		client.close();
+		fake.close();
+	});
+
+	it("connectAuthed：超时后抛错并停止（不能无限重试）", async () => {
+		const fake = new FakeAdminServer();
+		fake.destroyFirst = 999; // 永远踢
+		await fake.listen();
+		const client = new AdminClient({ cfg: makeCfg(fake.port), callbacks: {} });
+		await expect(client.connectAuthed(1_200)).rejects.toThrow();
+		expect(client.isAuthed()).toBe(false);
+		client.close();
+		fake.close();
 	});
 });

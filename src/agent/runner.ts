@@ -240,7 +240,9 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 			},
 		},
 	});
-	await client.connect(10_000);
+	// 握手要等到 Welcome（不是 TCP 连上就算数）：OpenTTD 自举窗口里连接会被
+	// 踢/被 reset，一次失败必须重试（2026-10-07 真机事故，见 admin-client 注释）。
+	await client.connectAuthed(30_000);
 
 	const gsDeadline = Date.now() + 20_000;
 	while (hub.getGsCount() === 0 && Date.now() < gsDeadline && !stopRequested) await sleep(250);

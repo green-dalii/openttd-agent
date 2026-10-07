@@ -80,6 +80,9 @@ export class AdminClient {
 	private parser = new FrameStreamParser();
 	private status: ClientStatus = "idle";
 	private joined = false;
+	/** 收到 ServerProtocol 后才允许 JOIN（协议顺序：服务端先行，SPEC §2）。 */
+	private protocolSeen = false;
+	private joinSent = false;
 	private seq = 0;
 	private reconnectAttempts = 0;
 	private reconnectTimer: NodeJS.Timeout | null = null;
@@ -107,6 +110,8 @@ export class AdminClient {
 
 	async connect(timeoutMs = 10_000): Promise<void> {
 		if (this.status === "connecting" || this.status === "connected") return;
+		this.protocolSeen = false;
+		this.joinSent = false;
 		this.setStatus("connecting");
 		const sock = this.socketFactory();
 		this.sock = sock;
@@ -139,11 +144,62 @@ export class AdminClient {
 		sock.on("close", () => this.handleClose());
 		this.setStatus("connected");
 
-		if (this.autoBoot) this.boot();
+		// 实测（2026-10-07，裸 socket 对真机）：OpenTTD 15.3 的 admin 端口
+		// **先收后说**——客户端不先发字节，ServerProtocol 永远不来（3s 零字节）。
+		// 所以 JOIN 立即发；ServerProtocol 到达只是兜底（joinSent 幂等）。
+		if (this.autoBoot && !this.joinSent) this.boot();
+	}
+
+	/**
+	 * 连接并**完成握手**（收到 ServerWelcome 才算数），带界重试。
+	 *
+	 * 为什么需要：OpenTTD 的 admin 端口在游戏就绪前就监听（地图生成期间）。
+	 * 一次性 connect/boot 会在自举窗口里被踢（`'' has disconnected`）或被 reset
+	 * （2026-10-07 真机：ECONNRESET / write EPIPE 交替出现）。
+	 * 探针口径：attempts 计数进了回调（`onStatusChange` 的 detail），失败可查。
+	 */
+	async connectAuthed(timeoutMs = 30_000): Promise<void> {
+		const deadline = Date.now() + timeoutMs;
+		let attempt = 0;
+		let lastErr: Error | null = null;
+		while (Date.now() < deadline) {
+			attempt++;
+			try {
+				await this.connect(Math.max(1, Math.min(4_000, deadline - Date.now())));
+				// 等 Welcome（= 握手完成）。半开连接在这里被丢弃并重试。
+				const authDeadline = Math.min(4_000, Math.max(1, deadline - Date.now()));
+				const t0 = Date.now();
+				// socket 被踢（close → sock=null）就立刻结束等待进下一轮，不空转 4 s。
+				while (!this.isAuthed() && this.sock !== null && Date.now() - t0 < authDeadline) {
+					await new Promise((r) => setTimeout(r, 100));
+				}
+				if (this.isAuthed()) return;
+				lastErr = new Error(`admin handshake not completed (attempt ${attempt})`);
+			} catch (e) {
+				lastErr = e instanceof Error ? e : new Error(String(e));
+			}
+			// 丢弃半开 socket，允许下一轮 connect()
+			this.dropSocket();
+			this.setStatus("closed", `handshake retry ${attempt}`);
+			await new Promise((r) => setTimeout(r, Math.min(500 * attempt, 2_000)));
+		}
+		throw lastErr ?? new Error(`admin connect timed out after ${timeoutMs}ms (${attempt} attempts)`);
+	}
+
+	/** 只丢连接，不动 autoReconnect/closing（供握手重试内部用）。 */
+	private dropSocket(): void {
+		const sock = this.sock;
+		this.sock = null;
+		this.joined = false;
+		if (sock) {
+			sock.removeAllListeners();
+			sock.destroy();
+		}
 	}
 
 	/** Join + default subscriptions + initial polls. */
 	boot(): void {
+		this.joinSent = true;
 		this.send(AdminPacketType.AdminJoin, (w) =>
 			w.str(this.cfg.adminPassword).str("openttd-agent").str("0.1.0"),
 		);
@@ -268,9 +324,13 @@ export class AdminClient {
 
 	private dispatch(pkt: RawPacket): void {
 		switch (pkt.type) {
-			case AdminPacketType.ServerProtocol:
+			case AdminPacketType.ServerProtocol: {
+				this.protocolSeen = true;
+				if (this.autoBoot && !this.joinSent) this.boot();
+				return;
+			}
 			case AdminPacketType.ServerPong:
-				return; // ignored (proto version / ping reply)
+				return; // ignored (ping reply)
 			case AdminPacketType.ServerWelcome: {
 				const info = decodeWelcome(pkt.payload);
 				this.joined = true;
@@ -364,8 +424,7 @@ export class AdminClient {
 			this.reconnectTimer = null;
 			if (this.closing) return;
 			this.connect()
-				.then(() => this.boot())
-				.catch(() => this.handleClose()); // will re-schedule
+				.catch(() => this.handleClose()); // will re-schedule（JOIN 由 ServerProtocol 驱动）
 		}, delay);
 	}
 }
