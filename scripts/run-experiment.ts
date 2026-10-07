@@ -28,6 +28,8 @@ interface Args {
 	/** S1/G4 scenario; both arms MUST use the same one (comparability). */
 	scenario?: "freeform" | "prebuilt";
 	seed: number;
+	/** 自变量（memory = 记忆注入 / freeze = 决策期冻结）——两臂只差这一个。 */
+	vary: "memory" | "freeze";
 }
 
 function parseArgs(argv: string[]): Args {
@@ -120,7 +122,7 @@ function runOne(
 }
 
 const args = parseArgs(process.argv.slice(2));
-const codes: Record<string, number[]> = { control: [], treatment: [] };
+const codes: { control: number[]; treatment: number[] } = { control: [], treatment: [] };
 for (let i = 1; i <= args.n; i++) {
 	// cleanup between runs: the game must die or the next one can't bind the port
 	spawnSync("pkill", ["-f", "OpenTTD.app/Contents/MacOS/openttd"]);

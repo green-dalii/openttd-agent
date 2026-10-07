@@ -15,6 +15,7 @@
 import { type CompareBy, compareArms, type GameMetric} from "./metrics.js";
 import { evaluatePromotion, type StrategyCard } from "./strategies.js";
 import { readLessons, readMetrics, readStrategies, setStrategyEnabled } from "./store.js";
+import type { ArmComparison } from "./metrics.js";
 
 /** A strategy card plus the server's verdict on whether it may ever be injected. */
 export interface AnnotatedStrategy extends StrategyCard {
@@ -26,7 +27,8 @@ export interface EvolutionView {
 	lessons: unknown[];
 	strategies: AnnotatedStrategy[];
 	/** Arm comparison for the M3 acceptance ("with vs without lessons"). */
-	arms: unknown;
+	/** 对照结果（`compareArms` 的返回）——判据的单一事实源，不再留 unknown。 */
+	arms: ArmComparison;
 }
 
 /** Read + annotate everything the Evolution page shows. Never throws. */

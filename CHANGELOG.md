@@ -9,6 +9,15 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **`scripts/` is now typechecked.** The judging script (`scripts/run-experiment.ts`) sat
+  outside every tsc project with 25 real type errors while the gate stayed green (D62:
+  the gate's coverage itself needs a guard). `tsconfig.scripts.json` joins the typecheck
+  chain, `EvolutionView.arms` is typed as `ArmComparison` again (it had decayed to
+  `unknown`), and a repo-hygiene guard locks the coverage: every git-tracked `*.ts` must
+  be matched by some tsc project run by `pnpm run typecheck`.
+
 ### Fixed
 
 - **Admin handshake survives OpenTTD's boot window.** The admin port listens while the

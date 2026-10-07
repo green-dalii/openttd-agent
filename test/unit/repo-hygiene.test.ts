@@ -143,3 +143,38 @@ describe("交接文档必须可执行（2026-09-12）", () => {
 		}
 	});
 });
+
+/**
+ * D62（2026-10-07）：`tsconfig` 只含 src+test ⇒ `scripts/*.ts`（含**判据脚本**
+ * `run-experiment.ts`）带 25 个真 TS 错误裸奔，而 gate 一直是绿的。
+ * 门禁的覆盖面本身要有守卫。
+ */
+describe("typecheck 覆盖面守卫（D62）", () => {
+	it("git 跟踪的每个 *.ts 都在 typecheck 命令跑的某个 tsc 项目里", () => {
+		const pkg = JSON.parse(readFileSync("package.json", "utf8")) as { scripts: { typecheck: string } };
+		const projects = [...pkg.scripts.typecheck.matchAll(/-p\s+(\S+)/g)].map((m) => m[1]!);
+		expect(projects.length).toBeGreaterThan(0);
+		// glob → regex（占位符方案：先保护 `**`，转换 `*`，再还原。
+		// 链式 replace 会把插入的 `*` 也换掉——第一版守卫就是这样自伤的）。
+		const toRe = (g: string): RegExp => {
+			const body = g
+				.split("**/").join("\u0001")
+				.split("**").join("\u0002")
+				.split("*").join("[^/]*")
+				.split("\u0001").join("(?:[^/]+/)*")
+				.split("\u0002").join(".*");
+			return new RegExp(`^${body.replace(/\./g, "\\.")}$`);
+		};
+		const globs: Array<(f: string) => boolean> = projects.map((proj) => {
+			// 只剥**行**注释：块注释正则会把 `src/**` 里的 `/**` 当注释吃掉。
+			const raw = readFileSync(proj, "utf8").replace(/^\s*\/\/.*$/gm, "");
+			const cfg = JSON.parse(raw) as { include?: string[] };
+			const include = cfg.include ?? ["**/*.ts"];
+			return (f: string) => include.some((g) => toRe(g).test(f));
+		});
+		const files = execFileSync("git", ["ls-files", "*.ts"], { encoding: "utf8" }).trim().split("\n").filter(Boolean);
+		expect(files.length).toBeGreaterThan(10);
+		const uncovered = files.filter((f) => !globs.some((g) => g(f)));
+		expect(uncovered, `这些 .ts 不在任何 tsc 项目里（D62）: ${uncovered.join(", ")}`).toEqual([]);
+	});
+});
