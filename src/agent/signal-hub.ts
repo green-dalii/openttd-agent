@@ -106,6 +106,18 @@ export interface SignalHub {
 /** Max events buffered before a session exists (early-connect frames). */
 const BOOT_EVENT_CAP = 256;
 
+/**
+ * 计数事实的缺失语义（D60）：**缺失/负值 → null，绝不折叠成 0**。
+ *
+ * 为什么：OpenTTD 的产业读数里 `-1` 是「该产业不涉此货」= 不适用。
+ * 折叠成 0 就是捏造「运了 0 吨」（探针实测一个采样期 548 个负读数被这样折叠）。
+ * `null ≠ 0` 是本仓库红线；`0` 只能是量出来的 0。
+ */
+function rawCount(v: unknown): number | null {
+	const n = Number(v);
+	return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
 export function makeSignalHub(refs: SignalHubRefs): SignalHub {
 	const bootEvents: GameEvent[] = [];
 	let gsStates = 0;
@@ -222,8 +234,11 @@ export function makeSignalHub(refs: SignalHubRefs): SignalHub {
 					// (SPEC §10.32).
 					if (Array.isArray(p.town_list)) {
 						refs.world.setTowns(
-							(p.town_list as { id?: unknown; pop?: unknown; x?: unknown; y?: unknown; tc?: unknown }[]).map((t) => ({
+							(p.town_list as { id?: unknown; name?: unknown; pop?: unknown; x?: unknown; y?: unknown; tc?: unknown }[]).map((t) => ({
 								id: Number(t.id),
+								// 名字（2026-09-25）：GS 侧 `GSTown.GetName` 已真机验证。
+								// 空串保持空串，**不**把缺失写成 id 字符串 —— 那是编造。
+								...(typeof t.name === "string" && t.name.trim() !== "" ? { name: t.name.trim() } : {}),
 								population: Number(t.pop),
 								x: Number(t.x),
 								y: Number(t.y),
@@ -232,8 +247,8 @@ export function makeSignalHub(refs: SignalHubRefs): SignalHub {
 									? {
 											cargo: (t.tc as { label?: unknown; produced?: unknown; transported?: unknown }[]).map((c) => ({
 												label: String(c.label ?? ""),
-												produced: Number(c.produced) || 0,
-												transported: Number(c.transported) || 0,
+												produced: rawCount(c.produced),
+												transported: rawCount(c.transported),
 											})),
 										}
 									: {}),
@@ -256,9 +271,9 @@ export function makeSignalHub(refs: SignalHubRefs): SignalHub {
 								id: Number(i.id),
 								cargo: String(i.cargo ?? ""),
 								name: String(i.name ?? ""),
-								produced: Number(i.produced),
-								transported: Number(i.transported),
-								stock: i.stock === null || i.stock === undefined ? null : Number(i.stock),
+								produced: rawCount(i.produced),
+								transported: rawCount(i.transported),
+								stock: rawCount(i.stock),
 							})),
 							// `industries` 是总数（`industry_list` 只是按产量取样的前 N 个）。
 							typeof p.industries === "number" ? (p.industries as number) : undefined,
@@ -268,8 +283,8 @@ export function makeSignalHub(refs: SignalHubRefs): SignalHub {
 						refs.world.setCargoTotals(
 							(p.cargo_totals as { label?: unknown; produced?: unknown; transported?: unknown }[]).map((c) => ({
 								label: String(c.label ?? ""),
-								produced: Number(c.produced) || 0,
-								transported: Number(c.transported) || 0,
+								produced: rawCount(c.produced),
+								transported: rawCount(c.transported),
 							})),
 						);
 					}

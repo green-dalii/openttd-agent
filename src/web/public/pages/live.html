@@ -440,7 +440,7 @@
           <tbody>
             <template x-for="t in townsRows()" :key="t.key">
               <tr>
-                <td x-text="'#' + t.id"></td>
+                <td x-text="t.name" :title="'town #' + t.id"></td>
                 <td class="num" x-text="t.population"></td>
                 <td class="num dim" x-text="t.at"></td>
               </tr>

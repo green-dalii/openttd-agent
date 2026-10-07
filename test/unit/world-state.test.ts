@@ -143,3 +143,31 @@ describe("world state: 产业与货种（GS 上报的原始计数）", () => {
 		expect(w.snapshot().towns[0]!.cargo).toEqual([{ label: "PASS", produced: 30, transported: 12 }]);
 	});
 });
+
+/**
+ * D63（2026-10-07）：`setTowns` 的 map 重建对象时把 `name` 丢在最后一公里——
+ * 事件流有、页面没有。凡"重塑对象"的层都必须有**字段透传测试**。
+ */
+describe("setTowns 字段透传（重塑层不得丢字段）", () => {
+	it("name/cargo 逐字段出现在 snapshot().towns（D55/D63 家族的回归）", () => {
+		const w = new WorldState();
+		w.setTowns([
+			{
+				id: 4, name: "New Badworth", population: 700, x: 1, y: 2,
+				cargo: [{ label: "PASS", produced: 30, transported: -1 }],
+			},
+			{ id: 9, population: 2400, x: 3, y: 4 },
+		], 40);
+		// setTowns 按人口降序（世界事实的顺序），用 find 不用下标
+		const towns = w.snapshot().towns;
+		const named = towns.find((t) => t.id === 4)!;
+		expect(named).toMatchObject({ id: 4, name: "New Badworth", population: 700, x: 1, y: 2 });
+		// 缺失语义（D60）：-1 不适用 → null，不是 0；名字缺失保持缺失（不造 id 字符串）
+		expect(named.cargo?.[0]).toEqual({ label: "PASS", produced: 30, transported: null });
+		expect("name" in towns.find((t) => t.id === 9)!).toBe(false);
+		// 人口缺失 → null（不是 0）
+		const w2 = new WorldState();
+		w2.setTowns([{ id: 1, population: undefined as unknown as number, x: 1, y: 2 }]);
+		expect(w2.snapshot().towns[0]!.population).toBeNull();
+	});
+});

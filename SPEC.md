@@ -929,3 +929,31 @@ unfinished action (simulated 2026-09-25)`（72 字符）⇒ 真实事件流按�
 **用户无法区分"数字没变"与"数据没在流"**。现在页头有独立的 `Data` 项：
 `data now` / `data 42s ago`（warn）/ `no data for 90s`（bad）/ `no data frame yet`（未知 = dim）。
 连接状态与数据状态是两个不同的问题，页头必须分开说。
+
+### 10.106 事实通道补全与 admin 握手竞态（2026-10-07 真机实测）
+
+**城镇名**：`GSTown.GetName(tid)` **存在且返回真名**（真机探针："New Badworth"，25 镇）。
+名字现走完整链路 GS `town_list.name` → hub → `WorldState.setTowns` → `wire-snapshot` → 页面。
+`WorldState.setTowns` 曾在"最后一公里"重建对象时丢掉 `name`（D55 同类**第三次**），
+事件流里有名字而页面显示 `#id` —— 新字段的验收必须包含"它到页面并被渲染"。
+线路端点同理解析名字；**样本外的镇回退 `#id`**（GS 只发人口前 10 的样本）。
+
+**`-1` ≠ 0**：`GSIndustry.GetLastMonthTransported` 在**全交叉**（产业×货种）下实测
+一采样期 **548 个负读数**（-1 = 该产业不涉此货 = 不适用）；在 `GSIndustryList_CargoProducing`
+的产出对上是实数（本轮全 0：游戏早期且公司只做客运）。折叠 `-1→0` 的四层
+（GS `trans<0→0`、hub `Number(x)||0`、world-state 重建、view `cargoSharePct`）已全部拆除：
+缺失/负值 → `null` → 页面 `—`。注意 `Number(null) === 0`：**先问缺失，再转换**。
+
+**未验证（D43/D59，不得引用）**：`GSVehicle.GetLastStation` —— 探针在公司 0 辆车时
+循环体 0 次，`ok=0` 什么也没证明（"未测"≠"失败"）。要重测需保证循环真的执行。
+
+**admin 握手竞态（本次事故根因）**：
+1. OpenTTD 15.3 的 admin 端口在**游戏自举期间**（地图生成）就监听 ⇒ `waitForAdminPort`
+   放行后立即连接会被 reset（`connect ECONNRESET` / `read ECONNRESET`）。
+2. 该服务端是**"先收后说"**：裸 socket 连上后空等 3 s **零字节**；客户端不先发字节，
+   `ServerProtocol` 永远不来。"等 PROTOCOL 再 JOIN"（照协议应然顺序写的实现）**死锁**。
+   **协议文档的"应然"是假设，实测才是事实（D53 同族）。**
+3. 修复：JOIN 立即发（`joinSent` 幂等，`ServerProtocol` 到达只作兜底）+
+   `connectAuthed()` 有界重试直到收到 `ServerWelcome`（半开连接丢弃重试；
+   socket close 即结束本轮等待，不空转）。
+4. 症状指纹：`'' () has disconnected`（JOIN 从未被服务端解析）+ `write EPIPE`（对端已关）。

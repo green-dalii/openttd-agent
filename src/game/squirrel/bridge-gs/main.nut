@@ -773,10 +773,13 @@ class BridgeV1 extends GSController {
             foreach (iid, _ in GSIndustryList_CargoProducing(c)) {
                 local prod = GSIndustry.GetLastMonthProduction(iid, c);
                 local trans = GSIndustry.GetLastMonthTransported(iid, c);
-                if (prod == null || prod < 0) prod = 0;
-                if (trans == null || trans < 0) trans = 0;
-                sum_prod += prod;
-                sum_trans += trans;
+                // D60（2026-09-26）：缺失/负值 = 不适用，**不是 0**。这里曾折叠成 0 ——
+                // 探针实测一个采样期 **548 个负读数**被这样报成「运了 0 吨」。
+                // 键保持存在、值是 null（形状恒定，D44），harness 侧映射为 —。
+                if (prod == null || prod < 0) prod = null;
+                if (trans == null || trans < 0) trans = null;
+                if (prod != null) sum_prod += prod;
+                if (trans != null) sum_trans += trans;
                 // 负值 = 该产业不接受此货 → **不适用**，不能当成"库存 0"。
                 local stock = GSIndustry.GetStockpiledCargo(iid, c);
                 if (stock != null && stock < 0) stock = null;
@@ -792,7 +795,12 @@ class BridgeV1 extends GSController {
             }
         }
         // 产量降序 + 上限：不能把全图产业塞进每个载荷。
-        industry_list.sort(function(ia, ib) { return ib.produced - ia.produced; });
+        // 降序按产量；null 产量排最后（null 不做算术，先归一再比）。
+        industry_list.sort(function(ia, ib) {
+            local pa = (ia.produced == null) ? -1 : ia.produced;
+            local pb = (ib.produced == null) ? -1 : ib.produced;
+            return pb - pa;
+        });
         if (industry_list.len() > 12) industry_list.resize(12);
         cargo_totals.sort(function(ca, cb) { return cb.produced - ca.produced; });
 
@@ -882,7 +890,14 @@ class BridgeV1 extends GSController {
                 foreach (tid, pop in tlist) {
                     if (towns.len() >= 10) break;
                     local loc = GSTown.GetLocation(tid);
-                    towns.push({ id = tid, pop = pop,
+                    // 城镇**名字**（2026-09-25 真机验证：`GSTown.GetName` 存在且返回
+                    // 真实名字，如 "New Badworth"）。之前载荷只有 id/pop/x/y，于是线路
+                    // 端点只能显示 `#4 → #8` —— 那是给机器看的编号，给人看不出是哪两座城。
+                    // 单次 API 调用，10 次/200 tick，可以接受。
+                    local nm = "";
+                    try { nm = this.Trim("" + GSTown.GetName(tid)); } catch (e) { nm = ""; }
+                    if (nm.len() > 24) nm = nm.slice(0, 24);
+                    towns.push({ id = tid, pop = pop, name = nm,
                                  x = GSMap.GetTileX(loc), y = GSMap.GetTileY(loc) });
                 }
                 local now = GSController.GetTick();

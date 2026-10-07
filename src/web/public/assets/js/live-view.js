@@ -537,7 +537,9 @@
           return {
             key: String(job),
             job,
-            endpoints: hasPair ? `#${num(r.townA)} → #${num(r.townB)}` : "—",
+            // 端点显示**城镇名**（2026-09-25）：`#4 → #8` 看不出是哪两座城，
+            // 而"为什么选了这两座"正是复盘第一个要回答的问题。没有名字时回退 `#4`。
+            endpoints: hasPair ? `${this.townName(r.townA)} → ${this.townName(r.townB)}` : "—",
             endpointsHint: hasPair ? undefined : "endpoints unknown (not in the route ledger)",
             vehicles: U.fmtInt(vehicles),
             waiting: U.fmtInt(waiting),
@@ -973,6 +975,22 @@
        * 城镇行（人口降序）。位置/人口都是世界事实，**不含任何建议**
        * （harness 边界：给事实与因果，不给策略）。
        */
+      /**
+       * 城镇 id → 名字（2026-09-25 用户：线路端点只显示 `#4 → #8`）。
+       *
+       * 为什么：id 是给机器看的，复盘时第一个问题是"这是哪两座城"。`GSTown.GetName`
+       * 已在真机验证存在，GS 现在把名字一起发上来；**没有名字时回退显示 id**，
+       * 不编造名字（空串/缺失 → `#4`）。
+       */
+      townName(id) {
+        const n = Number(id);
+        if (!Number.isFinite(n)) return "—";
+        const list = Array.isArray(this.towns) ? this.towns : [];
+        const hit = list.find((t) => Number(t.id) === n);
+        const name = hit && typeof hit.name === "string" ? hit.name.trim() : "";
+        return name || `#${n}`;
+      },
+
       townsRows() {
         const list = Array.isArray(this.towns) ? this.towns : [];
         return list
@@ -981,6 +999,7 @@
             return {
               key: String(t.id ?? i),
               id: t.id,
+              name: typeof t.name === "string" && t.name.trim() !== "" ? t.name.trim() : `#${t.id}`,
               _population: Number.isFinite(pop) ? pop : 0,
               population: U.fmtInt(Number.isFinite(pop) ? pop : null),
               x: Number.isFinite(Number(t.x)) ? Number(t.x) : null,
@@ -1059,8 +1078,12 @@
 
       /** 产业口径的"运走比例"：**所有公司**合计。produced=0 → null（显示 —，不是 0%）。 */
       cargoSharePct(produced, transported) {
+        // D60：**先问缺失**——`Number(null)` 是 0，不问就又把 null 折成 0%（修复时踩中）。
+        if (transported === null || transported === undefined) return null;
         const p = Number(produced);
         const t = Number(transported);
+        // 缺失/-1 是「不适用」，不是 0%——负值绝不能被四舍五入成 0。
+        if (t < 0) return null;
         if (!Number.isFinite(p) || p <= 0 || !Number.isFinite(t)) return null;
         return Math.round((t / p) * 100);
       },

@@ -35,14 +35,15 @@ function toResult(r: ActionResult): {
  * ranking beyond population - the ORDER is a fact about the world, the CHOICE is
  * the agent's.
  */
-function townSummary(snap: WorldSnapshot): { id: number; pop: number; x: number; y: number }[] {
+function townSummary(snap: WorldSnapshot): { id: number; pop: number | null; x: number; y: number }[] {
 	// Sorted here rather than trusting the caller: the order the model sees must
 	// be deterministic, and a plain snapshot (tests, replays) may not have gone
 	// through WorldState.setTowns. Population descending is a fact about the
 	// world; which of them to connect is the agent's call.
 	return (snap.towns ?? [])
-		.map((t) => ({ id: t.id, pop: t.population, x: t.x, y: t.y }))
-		.sort((a, b) => b.pop - a.pop);
+		// pop 允许 null：缺失 ≠ 0（D60）。模型看到 null 而不是一个假的 0 人口。
+		.map((t) => ({ id: t.id, pop: t.population ?? null, x: t.x, y: t.y }))
+		.sort((a, b) => (b.pop ?? -1) - (a.pop ?? -1));
 }
 
 /**

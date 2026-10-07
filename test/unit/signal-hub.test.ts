@@ -314,6 +314,48 @@ describe("GS state：产业/货种/公司口径（P1+P2）", () => {
 		expect(w.setCargoTotals).toHaveBeenCalledWith([{ label: "COAL", produced: 900, transported: 600 }]);
 	});
 
+	it_("transported 的 -1 是「不适用」→ null（D60：折成 0 是搰造「运了 0 吨」）", () => {
+		const w = fakeWorld();
+		hub(w).onEvent({
+			kind: "gamescript",
+			payload: {
+				cmd: "state", date: 1, industries: 1,
+				industry_list: [{ id: 5, cargo: "COAL", name: "Coal Mine", produced: 900, transported: -1, stock: -1 }],
+				cargo_totals: [{ label: "COAL", produced: 900, transported: -1 }],
+			},
+		} as unknown as GameEvent);
+		expect(w.setIndustries).toHaveBeenCalledWith(
+			[{ id: 5, cargo: "COAL", name: "Coal Mine", produced: 900, transported: null, stock: null }],
+			1,
+		);
+		expect(w.setCargoTotals).toHaveBeenCalledWith([{ label: "COAL", produced: 900, transported: null }]);
+	});
+
+	it_("transported/produced 缺席 → null（缺席 ≠ 0）", () => {
+		const w = fakeWorld();
+		hub(w).onEvent({
+			kind: "gamescript",
+			payload: { cmd: "state", date: 1, industries: 1,
+				industry_list: [{ id: 5, cargo: "COAL", name: "Coal Mine", stock: 120 }] },
+		} as unknown as GameEvent);
+		expect(w.setIndustries).toHaveBeenCalledWith(
+			[expect.objectContaining({ produced: null, transported: null })], 1,
+		);
+	});
+
+	it_("城镇 tc 的 transported -1 → null（不是 0）", () => {
+		const w = fakeWorld();
+		hub(w).onEvent({
+			kind: "gamescript",
+			payload: { cmd: "state", date: 1, towns: 1,
+				town_list: [{ id: 2, pop: 100, x: 1, y: 2, name: "Foo", tc: [{ label: "PASS", produced: 30, transported: -1 }] }] },
+		} as unknown as GameEvent);
+		expect(w.setTowns).toHaveBeenCalledWith(
+			[expect.objectContaining({ name: "Foo", cargo: [{ label: "PASS", produced: 30, transported: null }] })],
+			1,
+		);
+	});
+
 	it_("own_delivered/own_quarter/own_monitored 写入公司口径（缺失时为 null，不编 0）", () => {
 		const w = fakeWorld();
 		hub(w).onEvent({

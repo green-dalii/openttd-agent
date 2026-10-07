@@ -9,6 +9,26 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **Admin handshake survives OpenTTD's boot window.** The admin port listens while the
+  map is still generating, so a single connect attempt died (`ECONNRESET`) or got kicked
+  before the join was parsed (`'' has disconnected`, `write EPIPE`); the run then aborted
+  with "GS never heartbeated". The client now retries the handshake (`connectAuthed`,
+  bounded) until the server welcomes it. Measured fact: OpenTTD 15.3 speaks **second** —
+  a bare socket that waits for `ServerProtocol` gets zero bytes, so the join is sent
+  eagerly and the protocol frame only acts as a fallback (SPEC §10.106).
+- **Town names end to end.** `GSTown.GetName` is real (verified on the wire); the name now
+  flows GS → hub → world → wire → page, so route endpoints and the towns table read
+  `Trennton` instead of `#4`. Towns outside the GS's top-10 sample fall back to `#id`
+  (stated, not invented). The last mile (`WorldState.setTowns`) was rebuilding the objects
+  without the field — the third occurrence of the "computed but never rendered" family.
+- **Absence is no longer folded into zero.** `GetLastMonthTransported` returns `-1`
+  ("not applicable") — 548 negative readings per sample on the industry×cargo cross. Four
+  layers used to flatten them to `0` ("0 tonnes moved", a fabricated fact): the GS fold,
+  `Number(x) || 0` in the hub, the world-state rebuild, and the view's share math.
+  Missing/negative now stays `null` and renders `—` (`null ≠ 0`).
+
 ### Added（2026-09-25：运行健康条 + 三处可视化）
 - **运行健康条**（Live 页顶部）：`World`（游戏日/分钟 · moving/frozen）· `Agent`（上次活动距今）·
   `Game date` · `Decision`，四格按状态着色（ok/warn/bad/blocked）。它把"进程活着但没进展"

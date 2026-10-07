@@ -637,6 +637,20 @@ describe("Squirrel packs: 表键必须先初始化（D44）", () => {
  * ④ 库存为负（该产业不接受该货）必须落成 null，不能当作 0。
  */
 describe("Squirrel 桥：产业/货种/公司口径上报", () => {
+	it("D60：GS 不把缺失折叠成 0（`trans<0 → 0` 是搰造「运了 0 吨」，探针实测 548 个负读数）", () => {
+		const src = readFileSync(path.join("src/game/squirrel/bridge-gs/main.nut"), "utf8");
+		expect(src).not.toMatch(/trans\s*<\s*0\)\s*trans\s*=\s*0/);
+		expect(src).not.toMatch(/prod\s*<\s*0\)\s*prod\s*=\s*0/);
+		// -1/缺失必须原样成 null 送出去（键还在，值是 null——形状恒定，D44）
+		expect(src).toMatch(/transported\s*=\s*trans/);
+	});
+
+	it("城镇名走 GSTown.GetName（2026-09-26 真机验证：存在且返回真名）", () => {
+		const src = readFileSync(path.join("src/game/squirrel/bridge-gs/main.nut"), "utf8");
+		expect(src).toContain("GSTown.GetName(tid)");
+		// 名字要进 towns 载荷（算了但没发 = 没接线）
+		expect(src).toMatch(/name = nm/);
+	});
 	const src = stripComments(readFileSync(path.join("src/game/squirrel/bridge-gs/main.nut"), "utf8"));
 
 	it("存在 CollectFacts 且按 tick 节流（不是每个心跳都扫全图）", () => {

@@ -140,8 +140,9 @@ export interface WorldSnapshot {
 export interface CargoAmounts {
 	/** 货种标签（`GSCargo.GetCargoLabel`，如 PASS/COAL）——稳定，不像本地化名。 */
 	label: string;
-	produced: number;
-	/** 上月运量；**null = 未上报**（不是 0，见 numOrNull）。 */
+	/** 上月产量；null = 未上报/不适用（**不是 0**，D60）。 */
+	produced: number | null;
+	/** 上月运量；null = 未上报/不适用（**不是 0**，D60；`-1` 是 OpenTTD 的「无此货」）。 */
 	transported: number | null;
 }
 
@@ -151,8 +152,9 @@ export interface IndustryInfo {
 	/** 该行对应的**货种标签**（`GSCargo.GetCargoLabel`，如 COAL/OIL_）。 */
 	cargo: string;
 	name: string;
-	produced: number;
-	/** 上月运量；**null = 未上报**（不是 0，见 numOrNull）。 */
+	/** 上月产量；null = 未上报/不适用（**不是 0**，D60）。 */
+	produced: number | null;
+	/** 上月运量；null = 未上报/不适用（**不是 0**，D60；`-1` 是 OpenTTD 的「无此货」）。 */
 	transported: number | null;
 	/** 等待加工的库存；null = 该产业不接受/不适用（**不是 0**）。 */
 	stock: number | null;
@@ -170,8 +172,16 @@ export interface CompanyCargoFacts {
 
 export interface TownInfo {
 	id: number;
+	/**
+	 * 城镇**名字**（2026-09-25 真机验证 `GSTown.GetName` 存在）。
+	 *
+	 * 为什么必须有：线路端点此前只能显示 `#4 → #8` —— id 是给机器看的，给人看不出
+	 * 是哪两座城，而"为什么 agent 选了这两座城"正是复盘时第一个要回答的问题。
+	 * 空串 = 该局没收到名字（旧 GS），页面回退显示 id。
+	 */
+	name?: string;
 	/** Population; the main signal for how much passenger demand exists. */
-	population: number;
+	population: number | null;
 	x: number;
 	y: number;
 	/** 该镇主货种（GS 取产量最高的 1–2 个）——原始计数，比率由前端派生。 */
@@ -184,6 +194,12 @@ export interface WorldStateOptions {
 }
 
 const DEFAULT_RECENT_LIMIT = 500;
+
+/** 计数缺失语义（D60）：缺失/负值 → null；`0` 只能是量出来的 0。 */
+function countOr(v: unknown): number | null {
+	const n = Number(v);
+	return Number.isFinite(n) && n >= 0 ? n : null;
+}
 
 export class WorldState {
 	private date: GameDate | null = null;
@@ -367,7 +383,10 @@ export class WorldState {
 			.filter((t) => t && Number.isFinite(t.id))
 			.map((t) => ({
 				id: Number(t.id),
-				population: Number(t.population) || 0,
+				// 名字（D55 第三次同类：在"最后一公里"重建对象时漏字段 = 永远到不了页面）。
+				// 缺失保持缺失，**不**折叠成 id 字符串或 0。
+				...(typeof t.name === "string" && t.name.trim() !== "" ? { name: t.name.trim() } : {}),
+				population: Number.isFinite(Number(t.population)) ? Number(t.population) : null,
 				x: Number(t.x) || 0,
 				y: Number(t.y) || 0,
 				// 主货种是可选事实：过滤掉不可用的条目，而不是补 0。
@@ -375,11 +394,13 @@ export class WorldState {
 					? {
 							cargo: t.cargo
 								.filter((c) => c && typeof c.label === "string" && Number.isFinite(Number(c.produced)))
-								.map((c) => ({ label: String(c.label), produced: Number(c.produced) || 0, transported: Number(c.transported) || 0 })),
+								// D60：缺失/负值保持 null（`Number(x) || 0` 会捏造 0）。
+								.map((c) => ({ label: String(c.label), produced: countOr(c.produced), transported: countOr(c.transported) })),
 						}
 					: {}),
 			}))
-			.sort((a, b) => b.population - a.population);
+			// null = 未上报（D60）；排序时排最后，不用 0 冒充最小人口。
+			.sort((a, b) => (b.population ?? -1) - (a.population ?? -1));
 	}
 
 	/**

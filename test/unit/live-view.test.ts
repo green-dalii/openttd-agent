@@ -124,7 +124,9 @@ interface LiveModel {
 	dataAge(nowMs?: number): { text: string; tone: string };
 	routesNote(): string;
 	/** 城镇（Bridge GS 取样：人口前 10） */
-	townsRows(): { key: string; id: unknown; population: string; at: string; _population: number }[];
+	townsRows(): { key: string; id: unknown; name: string; population: string; at: string; _population: number }[];
+	/** 城镇 id → 名字（缺失回退 `#id`，不编造） */
+	townName(id: number | unknown): string;
 	townsSummary(): { available: boolean; shown: number; total: number | null; shownPopulation: number };
 	townsNote(): string;
 	townsEmpty(): string;
@@ -211,7 +213,7 @@ interface LiveModel {
 	/** 暂停归因（snapshot.control） */
 	control: { pausedByAgent?: boolean; agentPausedAt?: number | null } | null;
 	/** 城镇样本（Bridge GS：人口前 10） */
-	towns: { id?: unknown; population?: unknown; x?: unknown; y?: unknown }[];
+	towns: { id?: unknown; name?: unknown; population?: unknown; x?: unknown; y?: unknown }[];
 	townsTotal: unknown;
 	townsAvailable: boolean;
 }
@@ -1679,5 +1681,76 @@ describe("车队口径写在界面上（否则 25 与 129 会继续并存）", (
 	it("页头有独立的数据新鲜度项（连接活着 ≠ 数据在流）", () => {
 		const html = readFileSync(join(PUBLIC_DIR, "pages/live.html"), "utf8");
 		expect(html).toMatch(/x-text="dataAge\(\)\.text"/);
+	});
+});
+
+/** 城镇名（2026-09-26）：`#4 → #8` 看不出是哪两座城，而复盘第一个问题就是“选了哪两座”。 */
+describe("线路端点与城镇表显示城镇名（缺失回退 id，不编造）", () => {
+	it("townName：有名字用名字；缺失/空白回退 #id；非数字是 —", () => {
+		const v = load().model;
+		v.towns = [
+			{ id: 4, population: 700, x: 1, y: 2, name: "New Badworth" },
+			{ id: 9, population: 2400, x: 3, y: 4 },
+			{ id: 11, population: 100, x: 5, y: 6, name: "   " },
+		];
+		expect(v.townName(4)).toBe("New Badworth");
+		expect(v.townName(9)).toBe("#9");
+		expect(v.townName(11)).toBe("#11");
+		expect(v.townName(999)).toBe("#999");
+		expect(v.townName("x")).toBe("—");
+	});
+
+	it("routeRows：端点显示 `名 → 名`（townA/townB 是城镇 id）", () => {
+		const v = load().model;
+		v.towns = [
+			{ id: 4, population: 700, x: 1, y: 2, name: "Foo" },
+			{ id: 20, population: 500, x: 2, y: 2, name: "Bar" },
+		];
+		v.routes = [{ job: 100, townA: 4, townB: 20, vehicles: 6, waiting: 12, profitYtd: 3650, incomePerDay: 18.25 }];
+		v.routesAvailable = true;
+		expect(v.routeRows()[0]!.endpoints).toBe("Foo → Bar");
+	});
+
+	it("townsRows 带 name；缺失回退 #id（回退值也要可读，不能是空）", () => {
+		const v = load().model;
+		v.towns = [
+			{ id: 4, population: 700, x: 1, y: 2, name: "Foo" },
+			{ id: 9, population: 2400, x: 3, y: 4 },
+		];
+		const rows = v.townsRows();
+		expect(rows.find((r) => r.id === 4)!.name).toBe("Foo");
+		expect(rows.find((r) => r.id === 9)!.name).toBe("#9");
+	});
+
+	it("live.html：城镇表渲染 t.name（算了但没渲染是本页最常见失败）", () => {
+		const html = readFileSync(join(PUBLIC_DIR, "pages", "live.html"), "utf8");
+		expect(html).toMatch(/x-text="t\.name"/);
+	});
+});
+
+/** D60：缺失折叠成 0 = 捏造。-1 是「不适用」，必须显示 —，不是「运了 0 吨」。 */
+describe("transported 的缺失显示 —（不是 0）", () => {
+	it("industry 行：transported=null → '—'", () => {
+		const v = load().model;
+		v.industries = [{ id: 5, cargo: "COAL", name: "Coal Mine", produced: 900, transported: null, stock: 120 }];
+		const row = v.industryRows()[0]!;
+		expect(row.transported).toBe("—");
+		expect(row.produced).toBe("900"); // 真值不受影响
+	});
+
+	it("cargo 行：transported=null → '—'，share 也是 '—'（不是 0%）", () => {
+		const v = load().model;
+		v.cargoTotals = [{ label: "COAL", produced: 900, transported: null }];
+		const row = v.cargoRows()[0]!;
+		expect(row.transported).toBe("—");
+		expect(row.share).toBe("—");
+	});
+
+	it("cargoSharePct：transported 缺失或负 → null（不是 0%）", () => {
+		const v = load().model;
+		expect(v.cargoSharePct(900, null)).toBeNull();
+		expect(v.cargoSharePct(900, -1)).toBeNull();
+		expect(v.cargoSharePct(900, undefined)).toBeNull();
+		expect(v.cargoSharePct(900, 450)).toBe(50);
 	});
 });
