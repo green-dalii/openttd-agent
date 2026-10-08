@@ -617,3 +617,35 @@ button[disabled] { opacity: .45; cursor: not-allowed; }
 .chart-sel { position: absolute; top: 0; bottom: 22px; z-index: 4; pointer-events: none;
   background: color-mix(in srgb, var(--accent) 16%, transparent);
   border-left: 1px solid var(--accent); border-right: 1px solid var(--accent); }
+
+/* FLEET 归因分解（P1-3）：恒等式渲染。差额行永远带 note——"具名"是产品行为。 */
+.fleet-attr {
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--border, #2a2f3a);
+  border-radius: 8px;
+}
+.fleet-attr h3 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted, #8b93a5);
+}
+.attr-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 10px;
+  align-items: baseline;
+  padding: 3px 0;
+  font-size: 13px;
+}
+.attr-row .num {
+  font-variant-numeric: tabular-nums;
+}
+.attr-note {
+  font-size: 11px;
+  color: var(--muted, #8b93a5);
+  min-width: 130px;
+  text-align: right;
+}

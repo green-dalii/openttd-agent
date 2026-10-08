@@ -397,6 +397,9 @@ export function makeSignalHub(refs: SignalHubRefs): SignalHub {
 								...(Array.isArray(p.fleetIds)
 									? { fleetIds: p.fleetIds.map((v: unknown) => Number(v)).filter((v: number) => Number.isFinite(v)) }
 									: {}),
+								...(Array.isArray(p.fleetDepot)
+									? { fleetDepot: p.fleetDepot.map((v: unknown) => Number(v)).filter((v: number) => Number.isFinite(v)) }
+									: {}),
 								...(numOrUndef(p.fleetApplied) !== undefined ? { fleetApplied: numOrUndef(p.fleetApplied) } : {}),
 								// P1-2 生效值：改装货物（标签）/车型（引擎 id）。缺失 = 未改装/未计量。
 								...(typeof p.cargoApplied === "string" ? { cargoApplied: p.cargoApplied } : {}),

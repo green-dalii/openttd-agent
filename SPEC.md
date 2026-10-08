@@ -1061,3 +1061,25 @@ to clone`），不吞请求不假装成功。
 **可选车型目录**：state 报告新增 `engines: [{id, name, speed}]`（GSEngineList(VT_ROAD) +
 IsBuildable + GetName + GetMaxSpeed，四个 API 均实测存在）——agent 要看得见选项才可能学选择。
 `route-stats` 带 `cargoApplied`（标签）/`engineApplied`（引擎 id），缺失 = 未改装（字段缺席）。
+
+### 10.111 P1-3 收尾：FLEET 归因分解（2026-10-08 真机实证）
+
+**恒等式**（`src/agent/route-stats.ts` `fleetDecomposition`，纯函数 + 单测）：
+```
+owned + unattributed === companyTotal      // 跨线路按 id 去重
+owned = onRoad + inDepot                   // 在途/在库（GS 报 fleetDepot）
+```
+任何一项不可得 = `null`（显示 `—`），**不是 0**（D60）。差额**具名**
+（"Unattributed — named gap, not dropped"），不再有两个各自为政的车队数字。
+
+**数据**：`route-stats` 增 `fleetDepot`（登记车辆中 `IsStoppedInDepot` 的 id，引擎读数）。
+分解在**服务端**算好下发（wire `fleet` 字段），页面只渲染（`fleetAttributionRows`，
+永不为 null 的数组，D45 模板守卫）。
+
+**真机页面实证**（demo seed 11，CDP 全级别控制台）：
+```
+Company total 3 · Owned by routes 3 · — on the road 3 · — in depot 0 ·
+Unattributed 0 (named gap, not dropped)
+```
+恒等式 3+0=3 对上；0 控制台条目。**未做截图**（CDP captureScreenshot 在本机
+headless 持续超时）——布局正确性由 DOM 文本断言 + smoke 的元素检查兜底，如实披露。

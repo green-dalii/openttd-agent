@@ -1689,6 +1689,15 @@ class BridgeV1 extends GSController {
                 };
                 if (fleetIds != null) payload.rawset("fleetIds", fleetIds);
                 if (fleetApplied != null) payload.rawset("fleetApplied", fleetApplied);
+                // P1-3：登记车辆中此刻**停在库里**的 id（IsStoppedInDepot 已验证）。
+                // 有了它 harness 才能分解「在途/在库」；缺失保持字段缺席。
+                if (fleetIds != null) {
+                    local dep = [];
+                    foreach (vid in fleetIds) {
+                        if (GSVehicle.IsValidVehicle(vid) && GSVehicle.IsStoppedInDepot(vid)) dep.append(vid);
+                    }
+                    payload.rawset("fleetDepot", dep);
+                }
                 // P1-2 生效值：改装到的货物（标签，人可读）/车型（引擎 id）。
                 // 缺失 = 未计量/未改装，字段缺席（D60）。
                 if (this._core != null) {

@@ -11,6 +11,17 @@
 
 ### Added
 
+- **The fleet numbers now add up (P1-3).** A single identity replaces the two
+  competing fleet counts: `owned + unattributed === companyTotal`, with `owned`
+  split into `on the road` and `in depot` (the GS reports which registered vehicles
+  are parked in a depot). Every part renders as `—` when unmeasured rather than 0,
+  and the difference is named ("Unattributed - named gap, not dropped") instead of
+  being dropped. Computed server-side (`fleetDecomposition`, unit-tested), rendered
+  in the Live page's Fleet drawer.
+
+
+### Added
+
 - **Two new actions widen the agent's choice space (P1-2).** `set_route_cargo` refits a
   route's fleet to a different cargo (send to depot, refit on arrival, restart - the
   engine requires vehicles to be in a depot); `set_route_engine` replaces a route's

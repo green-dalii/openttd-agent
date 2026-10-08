@@ -182,6 +182,8 @@
               this.industryAvailable = s.industryAvailable === true;
               // 公司口径（P2）；null = 未收到（不是零运量）。
               this.companyCargo = s.companyCargo || null;
+              // P1-3：FLEET 归因分解（服务端算好的恒等式）。null = 未计量。
+              this.fleet = s.fleet || null;
               this.companyCargoAvailable = s.companyCargoAvailable === true;
               // 暂停归因（后端记录的事实）："谁让它停的"必须以它为准，
               // 不能只看 run.state（agent 自己停时它可能还是 running）。

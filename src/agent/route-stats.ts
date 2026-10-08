@@ -45,6 +45,8 @@ export interface RouteStats {
 	cargoApplied?: string;
 	/** P1-2：这条线的**车型**（引擎 id）；缺席 = 未换车/未计量。 */
 	engineApplied?: number;
+	/** P1-3：这条线登记车辆中**此刻停在库里**的 id（IsStoppedInDepot，引擎读数）；缺席 = 未计量。 */
+	fleetDepot?: number[];
 	/**
 	 * 停在这条线两端的**车辆 id**。
 	 *
@@ -205,4 +207,57 @@ export function routeWireFacts(stats: RouteStats[], ledger: LedgerPair[]): Route
 		if (r.vehiclesIds !== undefined) f.vehiclesIds = r.vehiclesIds;
 		return f;
 	});
+}
+
+/**
+ * FLEET 分解（P1-3 尾巴）：把公司总数**对上**，剩下的一律**具名**。
+ *
+ * 为什么存在（HARNESS-AUDIT F 系）：仪表盘的车队数字互相矛盾过——站点归属口径
+ * 报 129、公司口径报 25。分解后只有一个恒等式：
+ *   `owned + unattributed === companyTotal`
+ * 并且 owned 再分 `onRoad + inDepot`。任何一项不可得就是 null，不是 0（D60）。
+ *
+ * 禁止：把 null 参与加法折叠成 0；把差额静默丢掉。
+ */
+export interface FleetDecomposition {
+	/** 引擎总数（company_stats）；null = 未计量。 */
+	companyTotal: number | null;
+	/** 线路登记的去重车辆数（跨线路同 id 只算一次）。 */
+	owned: number;
+	/** 登记车辆中停在库里的；null = 未计量（GS 未报 fleetDepot）。 */
+	inDepot: number | null;
+	/** owned 中在路上的；null = 同上（不是 owned - 0）。 */
+	onRoad: number | null;
+	/** 公司总数里**不属于任何线路登记**的部分——差额具名；null = 公司总数未知。 */
+	unattributed: number | null;
+}
+
+export function fleetDecomposition(routes: RouteStats[], companyTotal: number | null): FleetDecomposition {
+	const ownedIds = new Set<number>();
+	const depotIds = new Set<number>();
+	let depotMeasured = false;
+	for (const r of routes) {
+		for (const id of r.fleetIds ?? []) ownedIds.add(id);
+		if (r.fleetDepot !== undefined) {
+			depotMeasured = true;
+			for (const id of r.fleetDepot) depotIds.add(id);
+		}
+	}
+	const owned = ownedIds.size;
+	let inDepot: number | null = null;
+	let onRoad: number | null = null;
+	if (depotMeasured) {
+		// 只有「既登记为线路车、又被报在库里」的才算在库（两个事实的交集）
+		let n = 0;
+		for (const id of depotIds) if (ownedIds.has(id)) n++;
+		inDepot = n;
+		onRoad = owned - n;
+	}
+	return {
+		companyTotal,
+		owned,
+		inDepot,
+		onRoad,
+		unattributed: companyTotal === null ? null : companyTotal - owned,
+	};
 }

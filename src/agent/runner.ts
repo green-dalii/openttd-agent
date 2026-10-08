@@ -56,7 +56,7 @@ import {
 	type LoadedMemory,
 } from "../evolution/memory.js";
 import { routeFactsProviderFor } from "../evolution/route-facts.js";
-import { joinRoutesWithLedger, routeWireFacts } from "./route-stats.js";
+import { joinRoutesWithLedger, routeWireFacts, fleetDecomposition } from "./route-stats.js";
 import { makeFreezeController } from "./freeze.js";
 import { actionCatalog } from "./tools/catalog.js";
 import { RouteLedger } from "./route-ledger.js";
@@ -463,6 +463,12 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 				// 仪表盘此前**完全没有**线路信息——数据一直存在，只是没被发出去。
 				routes: routeWireFacts(hub.getRouteStats(), routeLedger.all()),
 				routesAvailable: true,
+				// P1-3：FLEET 分解（在途/在库/差额具名）——服务端算，页面只渲染。
+				// 恒等式 owned + unattributed === companyTotal（route-stats.ts）。
+				fleet: fleetDecomposition(
+					hub.getRouteStats(),
+					_world.snapshot().companies.get(0)?.stats?.vehicles ?? null,
+				),
 				townsAvailable: true,
 				industryAvailable: true,
 				companyCargoAvailable: true,

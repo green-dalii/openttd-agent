@@ -1313,6 +1313,26 @@
         return this.drawer === "fleet" || this.drawer === "routes";
       },
 
+      /**
+       * FLEET 归因分解（P1-3）：公司总数 → 线路登记（去重）→ 在途/在库，差额**具名**。
+       *
+       * 数据是服务端算好的恒等式（route-stats.ts `fleetDecomposition`）：
+       *   owned + unattributed === companyTotal
+       * 这里只做显示：null 渲染 "—"（未计量，不是 0）。永远返回数组（D45）。
+       */
+      fleetAttributionRows() {
+        const f = this.fleet;
+        if (!f || typeof f !== "object") return [];
+        const d = (v) => (v === null || v === undefined ? "—" : U.fmtInt(v));
+        return [
+          { k: "Company total", v: d(f.companyTotal), note: "engine count" },
+          { k: "Owned by routes", v: d(f.owned), note: "deduped by id" },
+          { k: "— on the road", v: d(f.onRoad), note: "" },
+          { k: "— in depot", v: d(f.inDepot), note: "" },
+          { k: "Unattributed", v: d(f.unattributed), note: "named gap, not dropped" },
+        ];
+      },
+
       /** 抽屉里的线路行：Fleet 只看**有车**的线（"车都在哪"）。 */
       drawerRouteRows() {
         const rows = this.routesSorted();

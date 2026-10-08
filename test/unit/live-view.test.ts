@@ -70,6 +70,9 @@ interface RouteRow {
 }
 
 interface LiveModel {
+	/** P1-3：FLEET 分解（服务端 wire 字段）。 */
+	fleet?: { companyTotal: number | null; owned: number; inDepot: number | null; onRoad: number | null; unattributed: number | null } | null;
+	fleetAttributionRows(): { k: string; v: string; note: string }[];
 	// state
 	companies: Record<string, unknown>;
 	recent: { kind?: string; ts?: number; payload?: { raw?: number; year?: number; month?: number; day?: number } }[];
@@ -1752,5 +1755,42 @@ describe("transported 的缺失显示 —（不是 0）", () => {
 		expect(v.cargoSharePct(900, -1)).toBeNull();
 		expect(v.cargoSharePct(900, undefined)).toBeNull();
 		expect(v.cargoSharePct(900, 450)).toBe(50);
+	});
+});
+
+/**
+ * P1-3：FLEET 归因分解的显示层（纯函数）。
+ * 数据恒等式在 route-stats.test.ts 锁；这里只锁**渲染语义**：null → "—"（未计量，
+ * 不是 0），差额行永远带 note（具名是产品行为），无数据 → 空数组（D45 模板守卫）。
+ */
+describe("fleetAttributionRows（FLEET 分解显示）", () => {
+	it("null 渲染 '—'（未计量 ≠ 0）", () => {
+		const { model } = load();
+		model.fleet = { companyTotal: null, owned: 2, inDepot: null, onRoad: null, unattributed: null };
+		const rows = model.fleetAttributionRows();
+		expect(rows.find((r: { k: string }) => r.k === "Company total")!.v).toBe("—");
+		expect(rows.find((r: { k: string }) => r.k === "— in depot")!.v).toBe("—");
+		expect(rows.find((r: { k: string }) => r.k === "— on the road")!.v).toBe("—");
+		expect(rows.find((r: { k: string }) => r.k === "Unattributed")!.v).toBe("—");
+	});
+
+	it("有值时正常渲染，差额行带具名 note", () => {
+		const { model } = load();
+		model.fleet = { companyTotal: 5, owned: 3, inDepot: 1, onRoad: 2, unattributed: 2 };
+		const rows = model.fleetAttributionRows();
+		expect(rows.find((r: { k: string }) => r.k === "Owned by routes")!.v).toBe("3");
+		expect(rows.find((r: { k: string }) => r.k === "— on the road")!.v).toBe("2");
+		expect(rows.find((r: { k: string }) => r.k === "— in depot")!.v).toBe("1");
+		const gap = rows.find((r: { k: string }) => r.k === "Unattributed")!;
+		expect(gap.v).toBe("2");
+		expect(gap.note).toContain("named gap");
+	});
+
+	it("无数据 → 空数组（模板 x-for 的守卫）", () => {
+		const { model } = load();
+		model.fleet = null;
+		expect(model.fleetAttributionRows()).toEqual([]);
+		delete model.fleet;
+		expect(model.fleetAttributionRows()).toEqual([]);
 	});
 });

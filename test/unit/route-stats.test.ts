@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { incomePerDay, formatRouteStats, joinRoutesWithLedger, routeWireFacts } from "../../src/agent/route-stats.js";
+import { incomePerDay, formatRouteStats, joinRoutesWithLedger, routeWireFacts, fleetDecomposition } from "../../src/agent/route-stats.js";
 
 /**
  * NEXT-2 N2-1：线路经济（纯函数部分）。
@@ -139,5 +139,55 @@ describe("routeWireFacts 透传去重字段", () => {
 		const facts = routeWireFacts([{ job: 100, vehicles: 3, profit: 10, waiting: 30, gameDate: 712300 }], []);
 		expect(facts[0]!.vehiclesIds).toBeUndefined();
 		expect(facts[0]!.endsA).toBeUndefined();
+	});
+});
+
+/**
+ * P1-3 尾巴：FLEET 分解（在途/在库/差额具名）。
+ *
+ * 背景（HARNESS-AUDIT F 系）：仪表盘的车队数字互相矛盾过（站点归属 129 vs 公司 25）。
+ * 分解的唯一目的：把公司总数**对上**，剩下的一律**具名**（"未归属 N"），
+ * 而不是让两个数字各自为政。缺失 = null（D60），不是 0。
+ */
+describe("fleetDecomposition（对上公司总数，差额具名）", () => {
+	it("按 id 去重归属；同车被两条线记到只算一次", () => {
+		const routes = [
+			{ job: 100, vehicles: 2, profit: 0, waiting: 0, gameDate: 1, fleetIds: [4, 5], fleetDepot: [4] },
+			{ job: 101, vehicles: 2, profit: 0, waiting: 0, gameDate: 1, fleetIds: [5, 6], fleetDepot: [] },
+		] as never as Parameters<typeof fleetDecomposition>[0];
+		const d = fleetDecomposition(routes, 3);
+		expect(d.owned).toBe(3); // 4,5,6 —— 不是 4
+		expect(d.inDepot).toBe(1); // 只有 4 在库
+		expect(d.onRoad).toBe(2);
+		expect(d.companyTotal).toBe(3);
+		expect(d.unattributed).toBe(0); // 对上了
+	});
+
+	it("差额具名：公司总数多出的部分是 unattributed，不是静默消失", () => {
+		const routes = [
+			{ job: 100, vehicles: 1, profit: 0, waiting: 0, gameDate: 1, fleetIds: [4], fleetDepot: [] },
+		] as never as Parameters<typeof fleetDecomposition>[0];
+		const d = fleetDecomposition(routes, 5);
+		expect(d.owned).toBe(1);
+		expect(d.unattributed).toBe(4); // 公司还有 4 辆不属于任何线路登记
+	});
+
+	it("公司总数缺失 → unattributed=null（未计量 ≠ 对上了），不是 0", () => {
+		const routes = [] as never as Parameters<typeof fleetDecomposition>[0];
+		const d = fleetDecomposition(routes, null);
+		expect(d.companyTotal).toBeNull();
+		expect(d.unattributed).toBeNull();
+		expect(d.owned).toBe(0);
+	});
+
+	it("库内信息缺失 → inDepot/onRoad=null，owned 照常", () => {
+		const routes = [
+			{ job: 100, vehicles: 2, profit: 0, waiting: 0, gameDate: 1, fleetIds: [4, 5] },
+		] as never as Parameters<typeof fleetDecomposition>[0];
+		const d = fleetDecomposition(routes, 2);
+		expect(d.owned).toBe(2);
+		expect(d.inDepot).toBeNull();
+		expect(d.onRoad).toBeNull();
+		expect(d.unattributed).toBe(0);
 	});
 });

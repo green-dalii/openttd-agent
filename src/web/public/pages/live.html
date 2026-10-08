@@ -788,6 +788,18 @@
         <button type="button" class="btn sm" @click="closeDrawer()">close (Esc)</button>
       </div>
       <div class="drawer-body">
+        <template x-if="drawer === 'fleet' && fleetAttributionRows().length">
+          <div class="fleet-attr">
+            <h3>Fleet attribution</h3>
+            <template x-for="row in fleetAttributionRows()" :key="row.k">
+              <div class="attr-row">
+                <span x-text="row.k"></span>
+                <span class="num" x-text="row.v"></span>
+                <span class="attr-note" x-text="row.note"></span>
+              </div>
+            </template>
+          </div>
+        </template>
         <template x-if="drawerShowsRoutes()">
           <div>
             <!-- 诚实态：没有 GS 通道时**不能**说"没有线路"（2026-09-25，用户实测）——

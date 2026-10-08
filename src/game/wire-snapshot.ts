@@ -34,6 +34,8 @@ export const MAX_WIRE_RECENT = 100;
 export interface WireSnapshotExtras {
 	/** 线路事实（只有 agent 模式有 GS 通道；watch 模式为空）。 */
 	routes?: unknown[];
+	/** P1-3：FLEET 分解（owned/onRoad/inDepot/unattributed + companyTotal）。 */
+	fleet?: unknown;
 	/**
 	 * 线路数据是否**可得**。
 	 *
@@ -71,6 +73,8 @@ export function toWireSnapshot(world: WorldState, extras: WireSnapshotExtras = {
 		totalEvents: snap.totalEvents,
 		recent: snap.recent.slice(-MAX_WIRE_RECENT),
 		routes: extras.routes ?? [],
+		// P1-3：FLEET 分解（服务端算好，页面只渲染）。null = 未计量。
+		fleet: extras.fleet ?? null,
 		routesAvailable: extras.routesAvailable === true,
 		// 城镇：GS 一直在发（`bridge-gs/main.nut` 的 `town_list`），但此前**从没进过
 		// 这个快照** —— `world.towns` 于是永远到不了页面（2026-09-25）。
