@@ -137,7 +137,19 @@ class ExecCore {
         if (this._job < 0) {
             local next = this.FindNextJob();
             if (next == null) {
+                // 队列空 ≠ 躺平：车队请求/卖车/退役是**线路级**操作，施工队列空了
+                // 它们还要生效。曾经在这里直接 return —— 于是 done 后发出的
+                // set_route_vehicles/retire_route 永远排队（真机 2026-10-08：
+                // fleet_req/retire_req 有回执，世界纹丝不动）。
                 this._loopSeq++;
+                try {
+                    local im = GSCompanyMode(this._company);
+                    if (GSCompanyMode.IsValid()) {
+                        this.CheckAddVehicles();
+                        this.ProcessFleetSells();
+                    }
+                    this.CheckRetireRequests();
+                } catch (e) { this.Fail(e); }
                 return;
             }
             this._job = next.job;
@@ -870,7 +882,11 @@ class ExecCore {
             local cv = GSVehicle.CloneVehicle(this._slotD.bp[0], v, true);
             if (!GSVehicle.IsValidVehicle(cv)) break;
             GSVehicle.StartStopVehicle(cv);
+            // 克隆车也是这条线的车队（P1-3 归因）：不登记就是"引擎有 3 辆、
+            // 注册表说 1 辆"（真机 2026-10-08 实测）。
+            this._fleetOwned.append(cv);
         }
+        this.RegisterRoute(this._job);
         this.Ph("bus_live");
         this._stage = "done";
     }
@@ -1202,6 +1218,13 @@ class ExecCore {
         };
     }
 
+    /* 该线路的目标车队规模（set_route_vehicles 的生效值；未登记 = null）。 */
+    function RouteApplied(job) {
+        if (job == this._job) return this._fleetApplied;
+        if (this._routes.rawin(job)) return this._routes.rawget(job).rawin("applied") ? this._routes[job].applied : null;
+        return null;
+    }
+
     /* 该线路的车队（当前线路用活字段，旧线路用登记表）。 */
     function RouteVehicles(job) {
         if (job == this._job) return this._fleetOwned;
@@ -1476,7 +1499,15 @@ class BridgeV1 extends GSController {
                     if (GSStation.IsValidStation(sa)) { waitA = GSStation.GetCargoWaiting(sa, pax); waiting += waitA; }
                     if (GSStation.IsValidStation(sb)) { waitB = GSStation.GetCargoWaiting(sb, pax); waiting += waitB; }
                 }
-                GSAdmin.Send({
+                // 车队真值（执行器注册表，引擎 id）：与 vehiclesIds（站点归属）是
+                // 两个事实。无核心/未登记 → 不带字段（未计量 ≠ 空车队，D60）。
+                local fleetIds = null;
+                local fleetApplied = null;
+                if (this._core != null) {
+                    fleetIds = this._core.RouteVehicles(job_str.tointeger());
+                    fleetApplied = this._core.RouteApplied(job_str.tointeger());
+                }
+                local payload = {
                     kind = "route-stats",
                     job = job_str.tointeger(),
                     vehicles = vlist.len(),
@@ -1488,7 +1519,10 @@ class BridgeV1 extends GSController {
                     profit = profit,
                     waiting = waiting,
                     gameDate = GSDate.GetCurrentDate(),
-                });
+                };
+                if (fleetIds != null) payload.rawset("fleetIds", fleetIds);
+                if (fleetApplied != null) payload.rawset("fleetApplied", fleetApplied);
+                GSAdmin.Send(payload);
             }
         } catch (e) {
             GSAdmin.Send({ kind = "err", cmd = "route_stats", detail = { reason = "" + e } });

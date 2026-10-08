@@ -32,6 +32,16 @@ export interface RouteStats {
 	waitA?: number;
 	waitB?: number;
 	/**
+	 * **执行器注册表**里的车辆 id（引擎真值：这条线施工时买下、登记在这条线名下）。
+	 *
+	 * 与 `vehiclesIds` 是两个不同的事实：那个是"此刻停在两端站上的车"（站点归属，
+	 * 会随车离站而变、会被多条线重复计数），这个是"这条线拥有哪些车"（登记归属，
+	 * 唯一、稳定、到退役为止）。车队双向/退役的验证就看它（P1-3）。
+	 */
+	fleetIds?: number[];
+	/** 这条线的**目标**车队规模（`set_route_vehicles` 的生效值）；owned = fleetIds.length。 */
+	fleetApplied?: number;
+	/**
 	 * 停在这条线两端的**车辆 id**。
 	 *
 	 * 存在的唯一理由是**跨线路去重**：一个车站服务多条线路时，站在站台上的同一辆车会被

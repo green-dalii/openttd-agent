@@ -60,6 +60,50 @@ function stripComments(src: string): string {
 	return src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
 }
 
+describe("队列空 ≠ 躺平：done 后的车队/退役请求必须有人处理（真机 2026-10-08）", () => {
+	const nut = readFileSync(
+		new URL("../../src/game/squirrel/bridge-gs/main.nut", import.meta.url),
+		"utf8",
+	);
+
+	it("Tick 的空队列分支仍然处理车队请求/卖车/退役（否则请求永远排队）", () => {
+		const at = nut.indexOf("if (next == null) {");
+		expect(at, "空队列分支锚点").toBeGreaterThan(-1);
+		const branch = nut.slice(at, at + 600);
+		expect(branch).toContain("CheckAddVehicles");
+		expect(branch).toContain("ProcessFleetSells");
+		expect(branch).toContain("CheckRetireRequests");
+	});
+
+	it("空队列分支在公司作用域内执行（克隆/卖车是公司动作）", () => {
+		const at = nut.indexOf("if (next == null) {");
+		const branch = nut.slice(at, at + 700);
+		expect(branch).toContain("GSCompanyMode(this._company)");
+	});
+});
+
+describe("P1-3 车队归因：克隆车必须进注册表（引擎真值）", () => {
+	const nut = readFileSync(
+		new URL("../../src/game/squirrel/bridge-gs/main.nut", import.meta.url),
+		"utf8",
+	);
+
+	it("bus 阶段的克隆循环把每辆克隆车登记进 _fleetOwned（真机：3 辆只记 1 辆）", () => {
+		// 找 "clone to 3" 注释后的克隆循环体
+		const at = nut.indexOf("clone to 3");
+		expect(at, "克隆循环锚点").toBeGreaterThan(-1);
+		const loop = nut.slice(at, nut.indexOf("this.Ph(\"bus_live\")", at));
+		expect(loop).toContain("CloneVehicle");
+		expect(loop).toContain("_fleetOwned.append(cv)");
+	});
+
+	it("克隆循环之后重新登记线路（_routes 快照带全车队）", () => {
+		const at = nut.indexOf("clone to 3");
+		const after = nut.slice(at, at + 700);
+		expect(after).toContain("RegisterRoute(this._job)");
+	});
+});
+
 describe("Squirrel packs: no calls to API that does not exist", () => {
 	it("finds the pack sources (the guard would be vacuous otherwise)", () => {
 		const files = packFiles();

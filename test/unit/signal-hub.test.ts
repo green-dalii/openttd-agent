@@ -431,11 +431,26 @@ describe("route-stats 去重字段（vehiclesIds / endsA / endsB / waitA / waitB
 		expect(r!.waitB).toBe(10);
 	});
 
+	it_("车队真值字段 fleetIds/fleetApplied 原样保留（执行器注册表，引擎 id）", () => {
+		const r = feed({ vehiclesIds: [11], fleetIds: [4, 5], fleetApplied: 3 });
+		expect(r!.fleetIds).toEqual([4, 5]);
+		expect(r!.fleetApplied).toBe(3);
+		// 两类 id 是不同的事实：站点归属 vs 执行器注册——不得互相顶替
+		expect(r!.vehiclesIds).toEqual([11]);
+	});
+
+	it_("fleetIds 缺席 = 未计量，不是空车队（null ≠ 0，D60）", () => {
+		const r = feed({});
+		expect(r!.fleetIds).toBeUndefined();
+		expect(r!.fleetApplied).toBeUndefined();
+	});
+
 	it_("旧 GS（没有这些字段）→ 字段缺席，vehicles/waiting 照旧可用（兼容老 GS/新 harness 混跑）", () => {
 		const r = feed({});
 		expect(r!.vehicles).toBe(3);
 		expect(r!.waiting).toBe(30);
 		expect(r!.vehiclesIds).toBeUndefined();
 		expect(r!.endsA).toBeUndefined();
+		expect(r!.fleetIds).toBeUndefined();
 	});
 });

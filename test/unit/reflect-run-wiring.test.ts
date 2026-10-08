@@ -27,6 +27,9 @@ function fakeSession() {
 		update: vi.fn(),
 		addCheckpoint: vi.fn(),
 		finalize: vi.fn(),
+		// 反思会写审计（reflect-run）；假件缺方法 = catch 吞掉真实接线，
+		// 控制台只剩 "reflection error: ... is not a function"（D61 通路≠效果）。
+		appendAudit: vi.fn(),
 	} as never;
 }
 

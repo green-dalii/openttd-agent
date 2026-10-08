@@ -380,6 +380,12 @@ export function makeSignalHub(refs: SignalHubRefs): SignalHub {
 								...(Array.isArray(p.vehiclesIds)
 									? { vehiclesIds: p.vehiclesIds.map((v: unknown) => Number(v)).filter((v: number) => Number.isFinite(v)) }
 									: {}),
+								// 车队真值（执行器注册表）：目标规模 + 归属 id。
+								// 缺失保持 undefined（未计量 ≠ 空车队，D60）。
+								...(Array.isArray(p.fleetIds)
+									? { fleetIds: p.fleetIds.map((v: unknown) => Number(v)).filter((v: number) => Number.isFinite(v)) }
+									: {}),
+								...(numOrUndef(p.fleetApplied) !== undefined ? { fleetApplied: numOrUndef(p.fleetApplied) } : {}),
 								...(numOrUndef(p.endsA) !== undefined ? { endsA: numOrUndef(p.endsA) } : {}),
 								...(numOrUndef(p.endsB) !== undefined ? { endsB: numOrUndef(p.endsB) } : {}),
 								...(numOrUndef(p.waitA) !== undefined ? { waitA: numOrUndef(p.waitA) } : {}),

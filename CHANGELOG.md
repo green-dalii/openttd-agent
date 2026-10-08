@@ -9,6 +9,24 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **Fleet scaling and route retirement now take effect after construction ends (P1-1b).**
+  The executor's tick used to return early once the construction queue was empty, so
+  `set_route_vehicles` / `retire_route` requests queued with an acknowledgement but never
+  applied. The idle path now runs the fleet/retire maintenance passes inside a company
+  scope. Cloned vehicles are registered to their route, so per-route fleet truth matches
+  the engine. Verified live in both directions (3->5 grow, 5->1 shrink, then retire with
+  progressive sales), each step named with counts in the exec event stream.
+
+### Added
+
+- **Per-route fleet truth in `route-stats` (P1-3 data layer):** `fleetIds` (which engine
+  vehicles this route owns) and `fleetApplied` (the target fleet size) alongside the
+  existing station attribution `vehiclesIds` - three different facts, kept distinct,
+  absent when unmeasured.
+
+
 ### Added
 
 - **The GameScript can find its road pathfinder again (P1-1b).** `pathfinder.road` v4

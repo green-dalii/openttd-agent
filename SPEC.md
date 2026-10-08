@@ -1010,3 +1010,29 @@ dpt_conn → bus_live → done`，`done.fleet = {owned:1, ids:[4], applied:-1}`
 **遗留（收尾链缺陷，登记 ROADMAP）**：offline demo 收尾时反射步骤失败
 （faux 队列耗尽）会让 `runFinalizeAndReflect` 返回 1、进程退出码 1 且**不写指标行**
 （`/api/metrics` 看不到该局）——数据丢失，P2 的短局多跑必须先修。
+
+### 10.109 P1-1b 尾巴 + P1-3 数据层：车队双向/退役实证（2026-10-08 真机）
+
+**双向与退役在新核心上全部落地**（D58 探针，seed 11）：
+- **增**（3→5）：`fleet_wait5j100c3L3 → fleetg5j100L5C5`（克隆 2 辆，注册表 5/公司 5）；
+- **减**（5→1）：`fleet_wait1j100c5L5 → fleetsend4j100C5 → fleetsold1…`（送库 4 辆、逐辆卖出）；
+- **退役**：`retire4C4` + 逐辆卖出（公司 5→4→3→2 递减，卖车跨 tick 是引擎语义）。
+每个相位带计数（want/cur/list/company），具名可核（D20）。
+
+**两个真值字段（P1-3 数据层）**：`route-stats` 现带 `fleetIds`（执行器注册表 =
+**归属**，稳定唯一）与 `fleetApplied`（目标规模）；与 `vehiclesIds`（站点归属 =
+**此刻站在两端站的车**，会重复计数）是两个事实。真机对照：`fleetIds:[4,5,6]`
+vs `vehiclesIds:[6,5,4,6,5,4]` vs 引擎 `company_stats.vehicles=3`——三个数字
+三个含义，页面去重只能靠 id（D60 语义：缺失 = 字段缺席，不折叠成 0）。
+
+**修复的两个真缺陷**（各带先红守卫）：
+1. **克隆车不进注册表**：`bus` 阶段克隆循环只登记头车 ⇒「引擎 3 辆、注册表 1 辆」。
+   现在每辆克隆车 `append` 进 `_fleetOwned` 并重登记线路。
+2. **队列空 = 躺平**：`Tick` 在施工队列空时提前 `return`，尾部的
+   `CheckAddVehicles/ProcessFleetSells/CheckRetireRequests` 永不执行 ⇒ done 后发出的
+   车队/退役请求永远排队（有回执、无效果——「通路 ≠ 效果」的又一实例）。现在空队列
+   分支在公司作用域内照常做维护。
+
+**工具层的诚实拒绝也已实证**（observe-or-refuse）：公司统计未到/车为 0 时
+`set_route_vehicles` 明确拒绝并具名理由（`no reported stats` / `0 vehicles … nothing
+to clone`），不吞请求不假装成功。
