@@ -19,9 +19,21 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const SQUIRREL_SRC = path.resolve(__dirname, "squirrel");
 export const BRIDGE_GS_DIR = path.join(SQUIRREL_SRC, "bridge-gs");
 export const EXECUTOR_AI_DIR = path.join(SQUIRREL_SRC, "executor-ai");
+export const LIBRARY_DIR = path.join(SQUIRREL_SRC, "library");
 
 export const BRIDGE_GS_NAME = "BridgeV1";
 export const EXECUTOR_AI_NAME = "ExecutorV1";
+
+/** Recursively copy a directory (vendored library packs have subdirs). */
+async function copyTree(srcDir: string, destDir: string): Promise<void> {
+	await mkdir(destDir, { recursive: true });
+	for (const e of await readdir(srcDir, { withFileTypes: true })) {
+		const from = path.join(srcDir, e.name);
+		const to = path.join(destDir, e.name);
+		if (e.isDirectory()) await copyTree(from, to);
+		else await writeFile(to, await readFile(from));
+	}
+}
 
 /** Copy a pack dir (info.nut + main.nut) to dest/<Name>/. */
 async function copyPack(srcDir: string, destDir: string): Promise<void> {
@@ -33,10 +45,13 @@ async function copyPack(srcDir: string, destDir: string): Promise<void> {
 	}
 }
 
-/** Deploy GS + Executor AI packs into the sandbox data dir. */
+/** Deploy GS + Executor AI packs + Script libraries into the sandbox data dir. */
 export async function deploySquirrelPacks(cfg: Config): Promise<void> {
 	await copyPack(BRIDGE_GS_DIR, path.join(cfg.dataDir, "game", BRIDGE_GS_NAME));
 	await copyPack(EXECUTOR_AI_DIR, path.join(cfg.dataDir, "ai", EXECUTOR_AI_NAME));
+	// 库进 GS 的库扫描树 `game/library/`（SPEC §10.107：content_download/ai/library
+	// 只对 AI 上下文可见；GS 连的是 game/library）。原样字节（GPL 独立作品）。
+	await copyTree(LIBRARY_DIR, path.join(cfg.dataDir, "game", "library"));
 }
 
 /**

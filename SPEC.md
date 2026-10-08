@@ -983,3 +983,30 @@ unfinished action (simulated 2026-09-25)`（72 字符）⇒ 真实事件流按�
    现在 `Dispatch` 调用点有护栏：命令异常 → `dispatch_error` 全文事件，GS 继续跑。
 4. Squirrel 类里 `this.Sleep` 来自 `AIController`/`GSController` 继承：
    `ExecCore` 不继承 ⇒ 需要自备代理（`GSController.Sleep` 存在）。
+
+### 10.108 P1-1b：GS 寻路库入库（2026-10-08 真机实测）
+
+**GS 库解析的实测事实**：
+1. GS 的库扫描树是 **`<data>/game/library/`**（OpenTTD 自建该目录；content 下载树
+   `content_download/ai/library/` 只对 **AI 上下文**可见——这就是旧 AI 能 import
+   而 GS 不能的全部原因）。
+2. **GS 虚拟机的库基类注册名是 `GSLibrary`**（四选一探针实测：`GameLibrary`/
+   `Library`/`ScriptLibrary`/`AILibrary` 均报 `the index '...' does not exist`）。
+3. **GS 虚拟机不注册 AI* API 名**（`the index 'AIList' does not exist`）；库内代码须按
+   双名映射改 GS 名（AITile/AIMap/AITunnel/AIBridge/AIRoad/AIVehicle/AITestMode/
+   AIList/AIBridgeList_Length → GSTile/GSMap/GSTunnel/GSBridge/GSRoad/GSVehicle/
+   GSTestMode/GSList/GSBridgeList_Length）。
+4. 依赖链：`pathfinder.road`(v4) → `graph.aystar`(v6) → `queue.binary_heap`(v1)。
+   三件套已 vendored 进 `src/game/squirrel/library/`（GPL v2 独立作品，保留许可全文，
+   修改声明在各 `library.nut` 顶部；边界见该目录 README）。`squirrel-deploy` 部署到
+   `<data>/game/library/`。
+
+**完整线路建成（P1-1a 验收补齐，seed 11 真机）**：
+`queued → work j100 → stA_ok → stB_ok → road seg1..3 → road_built → dpt_ok →
+dpt_conn → bus_live → done`，`done.fleet = {owned:1, ids:[4], applied:-1}`
+——车站×2 + 道路（真 Pathfinder.Road 分段寻路）+ 车库 + 巴士 + 发车，全部经 GS 执行
+核心，server.log 零 API 缺失。贪心回退（`GreedyPath`）保留为库不可用时的兜底。
+
+**遗留（收尾链缺陷，登记 ROADMAP）**：offline demo 收尾时反射步骤失败
+（faux 队列耗尽）会让 `runFinalizeAndReflect` 返回 1、进程退出码 1 且**不写指标行**
+（`/api/metrics` 看不到该局）——数据丢失，P2 的短局多跑必须先修。

@@ -9,6 +9,19 @@
 
 ## [Unreleased]
 
+### Added
+
+- **The GameScript can find its road pathfinder again (P1-1b).** `pathfinder.road` v4
+  with its dependencies (`graph.aystar` v6, `queue.binary_heap` v1) is vendored into
+  `src/game/squirrel/library/` as GPL v2 independent works and deployed to
+  `<data>/game/library/` - the GS library tree. The published packages were adapted to
+  the GS context (base class `GSLibrary`, GS-named API classes) with per-file change
+  notices per GPL 2(a); provenance (BaNaNaS ids, original MD5s) is in the directory
+  README. A full route now builds end to end through the GS executor core:
+  two stations, road, depot, a bus, and its departure, with engine-truth fleet ids.
+  Greedy walking remains as the fallback when the library is unavailable.
+
+
 ### Changed
 
 - **The executor moved into the GameScript (P1-1a).** The construction state machine
