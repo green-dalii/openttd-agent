@@ -60,6 +60,39 @@ function stripComments(src: string): string {
 	return src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
 }
 
+describe("P1-2 动作面：选货/换车（具名失败 + 先买后卖）", () => {
+	const nut = readFileSync(
+		new URL("../../src/game/squirrel/bridge-gs/main.nut", import.meta.url),
+		"utf8",
+	);
+
+	it("选货：具名失败三件套（未知线/退役线/无此货物）", () => {
+		expect(nut).toContain("refit_unknown");
+		expect(nut).toContain("refit_retired");
+		expect(nut).toContain("refit_nocargo");
+	});
+
+	it("换车：具名失败四件套（未知/退役/不可造/无站）", () => {
+		expect(nut).toContain("reeng_unknown");
+		expect(nut).toContain("reeng_retired");
+		expect(nut).toContain("reeng_nobuild");
+		expect(nut).toContain("reeng_nostations");
+	});
+
+	it("换车是先买后卖（运力不断档）：BuildVehicle 在 SendVehicleToDepot 之前", () => {
+		const fn = nut.slice(nut.indexOf("function ReengineRoute"), nut.indexOf("function ReengineRoute") + 3000);
+		const buy = fn.indexOf("BuildVehicle");
+		const sell = fn.indexOf("SendVehicleToDepot");
+		expect(buy).toBeGreaterThan(-1);
+		expect(sell).toBeGreaterThan(-1);
+		expect(buy, "先买后卖").toBeLessThan(sell);
+	});
+
+	it("选货用标签解析（GSCargo.GetCargoLabel，实测存在），不是猜的 API", () => {
+		expect(nut).toContain("GSCargo.GetCargoLabel");
+	});
+});
+
 describe("队列空 ≠ 躺平：done 后的车队/退役请求必须有人处理（真机 2026-10-08）", () => {
 	const nut = readFileSync(
 		new URL("../../src/game/squirrel/bridge-gs/main.nut", import.meta.url),
@@ -69,7 +102,7 @@ describe("队列空 ≠ 躺平：done 后的车队/退役请求必须有人处�
 	it("Tick 的空队列分支仍然处理车队请求/卖车/退役（否则请求永远排队）", () => {
 		const at = nut.indexOf("if (next == null) {");
 		expect(at, "空队列分支锚点").toBeGreaterThan(-1);
-		const branch = nut.slice(at, at + 600);
+		const branch = nut.slice(at, at + 900);
 		expect(branch).toContain("CheckAddVehicles");
 		expect(branch).toContain("ProcessFleetSells");
 		expect(branch).toContain("CheckRetireRequests");
@@ -77,7 +110,7 @@ describe("队列空 ≠ 躺平：done 后的车队/退役请求必须有人处�
 
 	it("空队列分支在公司作用域内执行（克隆/卖车是公司动作）", () => {
 		const at = nut.indexOf("if (next == null) {");
-		const branch = nut.slice(at, at + 700);
+		const branch = nut.slice(at, at + 1000);
 		expect(branch).toContain("GSCompanyMode(this._company)");
 	});
 });
@@ -99,7 +132,7 @@ describe("P1-3 车队归因：克隆车必须进注册表（引擎真值）", ()
 
 	it("克隆循环之后重新登记线路（_routes 快照带全车队）", () => {
 		const at = nut.indexOf("clone to 3");
-		const after = nut.slice(at, at + 700);
+		const after = nut.slice(at, at + 1000);
 		expect(after).toContain("RegisterRoute(this._job)");
 	});
 });
@@ -241,7 +274,7 @@ describe("Squirrel 执行器：按线路登记 + 退役", () => {
 
 	it("切 job 时把当前线路存进登记表（否则旧线路的车队丢失）", () => {
 		// 顺序是「先登记再重置」（否则旧线路的车队会先被清空）：
-		expect(src).toMatch(/this\._routes\[this\._job\] <- \{[\s\S]{0,400}?this\._job = -1;/);
+		expect(src).toMatch(/this\._routes\[this\._job\] <- \{[\s\S]{0,900}?this\._job = -1;/);
 	});
 
 	it("退役必须能卖掉**头车**（普通缩编的下限 1 对退役不适用）", () => {
@@ -443,7 +476,7 @@ describe("ExecCore：类型化反馈（错误全文），31 字符协议已死",
 
 	it("同相位不重发；但 Fail 每次都发（错误不能互相抑制）", () => {
 		expect(gs).toMatch(/if \(p == this\._lastPh\) return;/);
-		expect(gs).toMatch(/function Fail\(msg\)[\s\S]{0,400}?this\.Report\(/);
+		expect(gs).toMatch(/function Fail\(msg\)[\s\S]{0,900}?this\.Report\(/);
 	});
 
 	it("公司外壳不做施工（shell 只提供公司身份；施工 API 出现 = 边界破了）", () => {
@@ -475,7 +508,7 @@ describe("Squirrel 执行器：车队请求对已登记线路生效", () => {
 
 	it("解析所有 V 请求的 job（而不是只认当前 job）", () => {
 		expect(src).toContain("function FleetRequests()");
-		expect(src).toMatch(/function FleetTarget\(job\)[\s\S]{0,400}?_routes\.rawin\(job\)/);
+		expect(src).toMatch(/function FleetTarget\(job\)[\s\S]{0,900}?_routes\.rawin\(job\)/);
 	});
 
 	it("未知与已退役线路各有具名拒绝（静默会让模型学错因果）", () => {

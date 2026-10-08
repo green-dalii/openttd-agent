@@ -111,7 +111,7 @@ function fakeDeps() {
 	const gameScript: string[] = [];
 	const sink: CommandSink = { gameScript: (j) => gameScript.push(j), rcon: () => {} };
 	const state: StateReader = {
-		snapshot: () => ({ date: null, companies: new Map(), recent: [], totalEvents: 0, towns: [], townsTotal: null, industries: [], industriesTotal: null, cargoTotals: [], companyCargo: null }),
+		snapshot: () => ({ date: null, companies: new Map(), recent: [], totalEvents: 0, towns: [], townsTotal: null, industries: [], industriesTotal: null, cargoTotals: [], engines: [], companyCargo: null }),
 	};
 	const deps: AgentDeps = { sink, state };
 	return { deps, gameScript };

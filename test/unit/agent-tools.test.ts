@@ -8,6 +8,8 @@ import {
 	recallTool,
 	retireRouteTool,
 	setRouteVehiclesTool,
+	setRouteCargoTool,
+	setRouteEngineTool,
 	buildBusRouteTool,
 	createTools,
 	inspectRouteTool,
@@ -46,6 +48,7 @@ function fakeState(snap: Partial<WorldSnapshot> = {}): StateReader {
 			industries: [],
 			industriesTotal: null,
 			cargoTotals: [],
+			engines: [],
 			companyCargo: null,
 			...snap,
 		}),
@@ -69,6 +72,7 @@ describe("summarizeState", () => {
 		industries: [],
 		industriesTotal: null,
 		cargoTotals: [],
+			engines: [],
 		companyCargo: null,
 		});
 		expect(out.date).toBe("1950-03-01");
@@ -108,6 +112,7 @@ describe("summarizeState", () => {
 		industries: [],
 		industriesTotal: null,
 		cargoTotals: [],
+			engines: [],
 		companyCargo: null,
 		});
 		const c = (out.companies as Array<Record<string, unknown>>)[0]!;
@@ -398,6 +403,8 @@ describe("createTools", () => {
 			"inspect_route",
 			"build_bus_route",
 			"set_route_vehicles",
+			"set_route_cargo",
+			"set_route_engine",
 			// M3-2a：运输公司最有后果的动词之一——关掉一条正在亏钱的线路
 			"retire_route",
 			// M4a：按需检索自己过往的观测（"记忆有没有被用"的唯一测量入口）
@@ -698,5 +705,26 @@ describe("门控声明的一致性（AB-1 契约）", () => {
 		for (const a of gated) {
 			expect(a.gate!.reason.length).toBeGreaterThan(10);
 		}
+	});
+});
+
+describe("P1-2 工具契约：set_route_cargo / set_route_engine", () => {
+	it("选货命令携带 job+cargo，措辞是「请求」且说明会逐车上报结果", async () => {
+		const { sink, gameScript } = fakeSink();
+		const tool = setRouteCargoTool({ sink, state: { snapshot: () => ({ companies: new Map() }) } } as never);
+		const r = await tool.execute("t1", { job: 100, cargo: "MAIL" } as never);
+		expect(gameScript).toHaveLength(1);
+		expect(JSON.parse(gameScript[0]!)).toMatchObject({ cmd: "set_route_cargo", job: 100, cargo: "MAIL" });
+		expect((r as { details: { summary: string } }).details.summary).toContain("sent set_route_cargo");
+		expect((r as { details: { summary: string } }).details.summary).toContain("per-vehicle results");
+	});
+
+	it("换车命令携带 job+engine，措辞说明先买后卖", async () => {
+		const { sink, gameScript } = fakeSink();
+		const tool = setRouteEngineTool({ sink, state: { snapshot: () => ({ companies: new Map() }) } } as never);
+		const r = await tool.execute("t2", { job: 100, engine: 12 } as never);
+		expect(gameScript).toHaveLength(1);
+		expect(JSON.parse(gameScript[0]!)).toMatchObject({ cmd: "set_route_engine", job: 100, engine: 12 });
+		expect((r as { details: { summary: string } }).details.summary).toContain("bought before");
 	});
 });

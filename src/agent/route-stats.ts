@@ -41,6 +41,10 @@ export interface RouteStats {
 	fleetIds?: number[];
 	/** 这条线的**目标**车队规模（`set_route_vehicles` 的生效值）；owned = fleetIds.length。 */
 	fleetApplied?: number;
+	/** P1-2：这条线**改装到的货物**（标签，如 "MAIL"）；缺席 = 未改装/未计量（D60）。 */
+	cargoApplied?: string;
+	/** P1-2：这条线的**车型**（引擎 id）；缺席 = 未换车/未计量。 */
+	engineApplied?: number;
 	/**
 	 * 停在这条线两端的**车辆 id**。
 	 *

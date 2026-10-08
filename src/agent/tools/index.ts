@@ -259,6 +259,87 @@ export function setRouteVehiclesTool(deps: AgentDeps): AgentTool<typeof SetRoute
 	};
 }
 
+const SetRouteCargoSchema = Type.Object({
+	cargo: Type.Union([Type.String(), Type.Number()], {
+		description:
+			"Cargo to carry: a cargo LABEL as seen in observe() (e.g. \"PASS\", \"MAIL\") or a numeric cargo id. " +
+			"The route's vehicles are refitted to it; vehicles whose engine cannot carry it stay as they are " +
+			"and are reported as failures.",
+	}),
+	company: Type.Optional(Type.Number({ description: "Executor company id (default 0)" })),
+	job: Type.Number({ description: "The route (job id) to refit." }),
+});
+
+/**
+ * `set_route_cargo` — 选货（P1-2）：把一条线的车队改装到指定货物。
+ *
+ * 观测契约：改装的生效与否以**引擎回执**为准（RefitVehicle 的返回值逐车上报），
+ * 不是工具自己的声称。具名失败：未知线/退役线/无此货物标签。
+ */
+export function setRouteCargoTool(deps: AgentDeps): AgentTool<typeof SetRouteCargoSchema, ActionResult> {
+	void deps;
+	return {
+		name: "set_route_cargo",
+		label: "Set Route Cargo",
+		description:
+			"Refit a running route's vehicles to a different cargo (by label, e.g. MAIL, or by numeric id). " +
+			"This is how a route switches what it earns from. The executor refits each vehicle and reports " +
+			"per-vehicle results; a vehicle whose engine cannot carry the cargo keeps its current one. " +
+			"Unknown or retired routes are refused by name.",
+		executionMode: "sequential",
+		parameters: SetRouteCargoSchema,
+		execute: async (_id, params) => {
+			const cmd: Record<string, unknown> = { cmd: "set_route_cargo", company: params.company ?? DEFAULT_COMPANY, job: params.job, cargo: params.cargo };
+			deps.sink.gameScript(JSON.stringify(cmd));
+			return toResult({
+				ok: true,
+				summary: `sent set_route_cargo job=${params.job} cargo=${String(params.cargo)}; the executor refits the fleet and reports per-vehicle results in the event stream`,
+				data: cmd,
+			});
+		},
+	};
+}
+
+const SetRouteEngineSchema = Type.Object({
+	engine: Type.Number({
+		description:
+			"Engine id from the road engine list in observe() (engines: id/name/speed). The route's vehicles " +
+			"are replaced with this engine: new vehicles are bought first (same route, same cargo), then the " +
+			"old ones are retired to the depot and sold, so capacity does not drop to zero.",
+	}),
+	company: Type.Optional(Type.Number({ description: "Executor company id (default 0)" })),
+	job: Type.Number({ description: "The route (job id) to change." }),
+});
+
+/**
+ * `set_route_engine` — 换车（P1-2）：把一条线的车队换成指定车型。
+ *
+ * 观测契约：新车 id 进登记表（fleetIds 变化 = 引擎真值）+ 具名相位
+ * （reeng<n>e<engine>j<job>）。先买后卖：运力不断档。
+ */
+export function setRouteEngineTool(deps: AgentDeps): AgentTool<typeof SetRouteEngineSchema, ActionResult> {
+	void deps;
+	return {
+		name: "set_route_engine",
+		label: "Set Route Engine",
+		description:
+			"Replace a running route's vehicles with a different road engine (by engine id from observe()'s " +
+			"engine list). The executor buys the new vehicles first (same orders and cargo), then sends the " +
+			"old ones to the depot to be sold. Unknown or retired routes are refused by name.",
+		executionMode: "sequential",
+		parameters: SetRouteEngineSchema,
+		execute: async (_id, params) => {
+			const cmd: Record<string, unknown> = { cmd: "set_route_engine", company: params.company ?? DEFAULT_COMPANY, job: params.job, engine: params.engine };
+			deps.sink.gameScript(JSON.stringify(cmd));
+			return toResult({
+				ok: true,
+				summary: `sent set_route_engine job=${params.job} engine=${params.engine}; new vehicles are bought before the old ones are retired`,
+				data: cmd,
+			});
+		},
+	};
+}
+
 const SetPauseSchema = Type.Object({
 	paused: Type.Boolean({ description: "true to pause, false to resume" }),
 });
@@ -556,6 +637,8 @@ export function createTools(deps: AgentDeps): AgentTool<TSchema, ActionResult>[]
 		inspectRouteTool(deps),
 		buildBusRouteTool(deps),
 		setRouteVehiclesTool(deps),
+		setRouteCargoTool(deps),
+		setRouteEngineTool(deps),
 		retireRouteTool(deps),
 		recallTool(deps),
 		setPauseTool(deps),

@@ -9,6 +9,19 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Two new actions widen the agent's choice space (P1-2).** `set_route_cargo` refits a
+  route's fleet to a different cargo (send to depot, refit on arrival, restart - the
+  engine requires vehicles to be in a depot); `set_route_engine` replaces a route's
+  vehicles with a chosen road engine, buying the new ones before retiring the old so
+  capacity never drops to zero. Both report named, count-bearing phases and record only
+  values the engine confirmed. The world state now carries the road engine catalog
+  (id/name/speed) so the choice is visible before it is made. Verified live:
+  `refit3f0c2` (3 refits to MAIL) and `reeng3e153j100` with fleet ids changing
+  [4,5,6] -> [7,8,9].
+
+
 ### Fixed
 
 - **Fleet scaling and route retirement now take effect after construction ends (P1-1b).**

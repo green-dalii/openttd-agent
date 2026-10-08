@@ -1036,3 +1036,28 @@ vs `vehiclesIds:[6,5,4,6,5,4]` vs 引擎 `company_stats.vehicles=3`——三个�
 **工具层的诚实拒绝也已实证**（observe-or-refuse）：公司统计未到/车为 0 时
 `set_route_vehicles` 明确拒绝并具名理由（`no reported stats` / `0 vehicles … nothing
 to clone`），不吞请求不假装成功。
+
+### 10.110 P1-2：动作面扩——选货 / 换车（2026-10-08 真机实证）
+
+**两个新动作**（`set_route_cargo` / `set_route_engine`，类型化命令进 ExecCore）：
+
+| 动作 | 做法 | 真机证据 |
+|---|---|---|
+| **选货** `set_route_cargo {job, cargo}` | 送库 → 到库 `RefitVehicle` → 重启（跨 tick 队列，最新意图顶替） | `refitq3c2 → refit3f0c2`（3 成 0 败）+ `cargoApplied: "MAIL"` |
+| **换车** `set_route_engine {job, engine}` | **先买后卖**：新车（同订单同货物）进登记表，旧车送库卖掉 | `reeng3e153j100` + `fleetIds [4,5,6]→[7,8,9]` + `engineApplied: 153` |
+
+**D43 实测的 API 事实**（探针一次性验证，存在性进 SPEC 的只有实测过的）：
+`GSCargo.GetCargoLabel`/`GSEngine.GetName`/`GSVehicle.GetRefitCapacity`/
+`GSVehicle.GetCapacity`/`GSCargo.CC_MAIL`/`GSOrder.GetOrderCount` **存在**；
+`GSOrder.GetOrderDest`/`GSVehicle.GetVehicleEngine` **不存在**（勿引）。
+
+**引擎前置（真机实测，三连坑）**：
+1. `RefitVehicle` 要求**车停在库里**（不然逐辆失败）——所以选货是「送库→到库改→重启」的
+   多 tick 流程，不是一次调用。已库内的车直接进队列（`SendVehicleToDepot` 对库内车是 false）。
+2. **公司动作必须在公司作用域内**：`SendVehicleToDepot`/`BuildVehicle`/`RefitVehicle` 在
+   Dispatch 上下文裸调 ⇒ `ERR_PRECONDITION_INVALID_COMPANY` / 静默 false。
+3. 登记表只记**生效值**（引擎回执 ok>0 才写）；请求值 ≠ 事实（D61）。
+
+**可选车型目录**：state 报告新增 `engines: [{id, name, speed}]`（GSEngineList(VT_ROAD) +
+IsBuildable + GetName + GetMaxSpeed，四个 API 均实测存在）——agent 要看得见选项才可能学选择。
+`route-stats` 带 `cargoApplied`（标签）/`engineApplied`（引擎 id），缺失 = 未改装（字段缺席）。

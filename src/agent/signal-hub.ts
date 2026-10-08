@@ -278,6 +278,18 @@ export function makeSignalHub(refs: SignalHubRefs): SignalHub {
 							typeof p.industries === "number" ? (p.industries as number) : undefined,
 						);
 					}
+					if (Array.isArray(p.engines)) {
+						// P1-2：可选车型目录（id/名字/速度）——agent 要看得见选项才可能做选择。
+						refs.world.setEngines(
+							(p.engines as { id?: unknown; name?: unknown; speed?: unknown }[])
+								.filter((e) => Number.isInteger(Number(e.id)))
+								.map((e) => ({
+									id: Number(e.id),
+									name: String(e.name ?? ""),
+									speed: Number(e.speed) || 0,
+								})),
+						);
+					}
 					if (Array.isArray(p.cargo_totals)) {
 						refs.world.setCargoTotals(
 							(p.cargo_totals as { label?: unknown; produced?: unknown; transported?: unknown }[]).map((c) => ({
@@ -386,6 +398,9 @@ export function makeSignalHub(refs: SignalHubRefs): SignalHub {
 									? { fleetIds: p.fleetIds.map((v: unknown) => Number(v)).filter((v: number) => Number.isFinite(v)) }
 									: {}),
 								...(numOrUndef(p.fleetApplied) !== undefined ? { fleetApplied: numOrUndef(p.fleetApplied) } : {}),
+								// P1-2 生效值：改装货物（标签）/车型（引擎 id）。缺失 = 未改装/未计量。
+								...(typeof p.cargoApplied === "string" ? { cargoApplied: p.cargoApplied } : {}),
+								...(numOrUndef(p.engineApplied) !== undefined ? { engineApplied: numOrUndef(p.engineApplied) } : {}),
 								...(numOrUndef(p.endsA) !== undefined ? { endsA: numOrUndef(p.endsA) } : {}),
 								...(numOrUndef(p.endsB) !== undefined ? { endsB: numOrUndef(p.endsB) } : {}),
 								...(numOrUndef(p.waitA) !== undefined ? { waitA: numOrUndef(p.waitA) } : {}),

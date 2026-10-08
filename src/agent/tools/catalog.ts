@@ -79,6 +79,8 @@ export const ACTION_EFFECTS: Record<string, ActionEffect> = {
 	capabilities: "read",
 	build_bus_route: "write",
 	set_route_vehicles: "write",
+	set_route_cargo: "write",
+	set_route_engine: "write",
 	retire_route: "write",
 	set_pause: "write",
 };

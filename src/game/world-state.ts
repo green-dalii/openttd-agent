@@ -125,6 +125,8 @@ export interface WorldSnapshot {
 	industriesTotal: number | null;
 	/** 按货种聚合的上月产量/运量（原始计数）。 */
 	cargoTotals: CargoAmounts[];
+	/** P1-2 车型目录；空 = 未计量。 */
+	engines: { id: number; name: string; speed: number }[];
 	/** 本公司口径运量；null = 未收到（不是"零运量"）。 */
 	companyCargo: CompanyCargoFacts | null;
 }
@@ -216,6 +218,8 @@ export class WorldState {
 	private industries: IndustryInfo[] = [];
 	private industriesTotal: number | null = null;
 	private cargoTotals: CargoAmounts[] = [];
+	/** P1-2：可选车型目录（引擎 id/名字/速度）。空 = 未计量（不是没有车）。 */
+	private engines: { id: number; name: string; speed: number }[] = [];
 	private companyCargo: CompanyCargoFacts | null = null;
 	private totalEvents = 0;
 	private recentLimit: number;
@@ -330,6 +334,7 @@ export class WorldState {
 			industries: [...this.industries],
 			industriesTotal: this.industriesTotal,
 			cargoTotals: [...this.cargoTotals],
+			engines: [...this.engines],
 			companyCargo: this.companyCargo ? { ...this.companyCargo } : null,
 		};
 	}
@@ -375,6 +380,10 @@ export class WorldState {
 	 * Sorted by population descending so the most promising candidates come first;
 	 * the ORDER is a fact about the world, not advice about what to pick.
 	 */
+	setEngines(list: { id: number; name: string; speed: number }[]): void {
+		this.engines = list;
+	}
+
 	setTowns(towns: TownInfo[], total?: number | null): void {
 		// 总数只在**明确给出**时更新：取样列表每帧都到，总数偶尔才带 ——
 		// 用 undefined 覆盖会把已知总数抹成 null（页面从"共 42 个"退回"—"）。

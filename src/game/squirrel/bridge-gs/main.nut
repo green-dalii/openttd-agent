@@ -147,6 +147,7 @@ class ExecCore {
                     if (GSCompanyMode.IsValid()) {
                         this.CheckAddVehicles();
                         this.ProcessFleetSells();
+                        this.ProcessFleetRefits();
                     }
                     this.CheckRetireRequests();
                 } catch (e) { this.Fail(e); }
@@ -161,6 +162,7 @@ class ExecCore {
             this._reportDone = false; this._vehicle = -1; this._paxCargo = -1;
             this._radius = -1; this._fleetApplied = next.fleet;
             this._fleetOwned = []; this._fleetWaitAnnounced = "";
+            this._routeCargo = -1; this._routeEngine = -1;
             this._fleetSell = []; this._fleetRefused = "";
             this._roadCur = -1; this._roadSeg = 0; this._roadSegStep = 0;
             this._lastLaid = -1; this._layErr = ""; this._builtRoad = null;
@@ -183,6 +185,7 @@ class ExecCore {
         else if (this._stage == "bus") { this.PhaseBus(); }
         if (this._stage == "done" || this._loopSeq % 40 == 0) { this.CheckAddVehicles(); }
         this.ProcessFleetSells();
+        this.ProcessFleetRefits();
         this.CheckRetireRequests();
         if (this._stage == "done" && !this._reportDone) {
             this._reportDone = true;
@@ -194,6 +197,9 @@ class ExecCore {
                 vehicles = this._fleetOwned, lead = this._vehicle,
                 depot = (this._slotD.bp == null ? -1 : this._slotD.bp[0]),
                 retired = false, applied = this._fleetApplied,
+                stA = (this._slotA.bp == null ? -1 : this._slotA.bp[0]),
+                stB = (this._slotB.bp == null ? -1 : this._slotB.bp[0]),
+                cargo = this._routeCargo, engine = this._routeEngine,
             };
             this._job = -1;   // 下一轮取队列里的下一个（字段整套复位）
         }
@@ -228,6 +234,9 @@ class ExecCore {
     _paxCargo = -1;
     _radius = -1;
     _fleetApplied = -1;  // last applied fleet size from a V sign
+    _routeCargo = -1;    // 这条线**改装**到的货物 id（set_route_cargo 生效值）
+    _routeEngine = -1;   // 这条线当前**车型**（set_route_engine 生效值；-1 = 未记）
+    _fleetRefit = [];    // 改装请求（送库→到库改装→重启），最新意图顶替
     _fleetOwned = [];    // vehicles cloned for the CURRENT job (per-route accounting, G3)
     _fleetWaitAnnounced = ""; // last deferred request we announced (M3-1b: one phase per request)
     _fleetSell = [];     // clones told to go to the depot, waiting to be sold (M3-1b)
@@ -1065,13 +1074,19 @@ class ExecCore {
             return { known = true, retired = false, vehicles = this._fleetOwned,
                      lead = this._vehicle,
                      depot = (this._slotD.bp == null ? -1 : this._slotD.bp[0]),
-                     applied = this._fleetApplied };
+                     applied = this._fleetApplied,
+                     stA = (this._slotA.bp == null ? -1 : this._slotA.bp[0]),
+                     stB = (this._slotB.bp == null ? -1 : this._slotB.bp[0]),
+                     cargo = this._routeCargo, engine = this._routeEngine };
         }
         if (this._routes.rawin(job)) {
             local r = this._routes[job];
             return { known = true, retired = (r.retired == true), vehicles = r.vehicles,
                      lead = r.lead, depot = r.depot,
-                     applied = (r.rawin("applied") ? r.applied : -1) };
+                     applied = (r.rawin("applied") ? r.applied : -1),
+                     stA = (r.rawin("stA") ? r.stA : -1), stB = (r.rawin("stB") ? r.stB : -1),
+                     cargo = (r.rawin("cargo") ? r.cargo : -1),
+                     engine = (r.rawin("engine") ? r.engine : -1) };
         }
         return { known = false, retired = false, vehicles = null, lead = -1, depot = -1, applied = -1 };
     }
@@ -1267,6 +1282,158 @@ class ExecCore {
         // table 集合：`in` 判断存在、`<-` 新建槽位（array 没有 rawin，用错就是运行时异常）
         if (!(job in this._retiredJobs)) this._retiredJobs[job] <- true;
         this.Ph("retire" + queued + "C" + this.CountOwnVehicles());
+    }
+
+    /* 货物 id 解析：数字直接用；字符串按**标签**匹配（GSCargo.GetCargoLabel，实测存在）。 */
+    function ResolveCargo(cargo) {
+        if (typeof cargo == "integer") return cargo;
+        local label = "" + cargo;
+        local cl = GSCargoList();
+        foreach (c, _ in cl) {
+            if (GSCargo.GetCargoLabel(c) == label) return c;
+        }
+        return -1;
+    }
+
+    /* 选货（P1-2）：把一条线的车队**改装**到指定货物。
+     * 引擎前置（真机实测）：RefitVehicle 要求**车停在库里**（ERR_PRECONDITION 系），
+     * 所以流程是「送库 → 到库改装 → 重启」，跨多个 tick（与卖车机器同构）。
+     * 观测 = 引擎回执（RefitVehicle 返回值逐辆计数）+ 登记表只记**生效值**。 */
+    function RefitRoute(job, cargo) {
+        local t = this.FleetTarget(job);
+        if (!t.known) { this.Report({ kind = "exec", job = job, stage = "refit", error = "refit_unknown" + job }); return; }
+        if (t.retired) { this.Report({ kind = "exec", job = job, stage = "refit", error = "refit_retired" + job }); return; }
+        local cid = this.ResolveCargo(cargo);
+        if (cid < 0) { this.Report({ kind = "exec", job = job, stage = "refit", error = "refit_nocargo:" + cargo }); return; }
+        local queued = 0; local blocked = 0; local live = 0;
+        // 公司作用域：SendVehicleToDepot/RefitVehicle 都是公司动作（真机：在
+        // Dispatch 上下文裸调返回 false，三辆车全记 blocked）。
+        local cm = GSCompanyMode(job == this._job ? this._company : 0);
+        if (!GSCompanyMode.IsValid()) {
+            this.Report({ kind = "exec", job = job, stage = "refit", error = "refit_nocompany" });
+            return;
+        }
+        foreach (vid in t.vehicles) {
+            if (!GSVehicle.IsValidVehicle(vid)) continue;
+            live++;
+            // 已在库的车不用"送"——直接算进改装队列（真机：刚造的车就在库里，
+            // SendVehicleToDepot 对它是 false，不计就永远改装不到）。
+            if (GSVehicle.IsStoppedInDepot(vid)) { queued++; continue; }
+            if (GSVehicle.SendVehicleToDepot(vid)) queued++; else blocked++;
+        }
+        if (live == 0) {
+            this.Report({ kind = "exec", job = job, stage = "refit", error = "refit_nofleet" + job });
+            return;
+        }
+        // 同线的新请求**顶替**旧请求（最新意图为准，与 FleetRequests 同语义）
+        local kept = [];
+        foreach (rq in this._fleetRefit) if (rq.job != job) kept.append(rq);
+        this._fleetRefit = kept;
+        this._fleetRefit.append({ job = job, cid = cid, rest = queued, ok = 0, bad = blocked });
+        this.Report({ kind = "exec", job = job, stage = "refit",
+                      note = "refitq" + queued + "c" + cid });
+    }
+
+    /* 送库 → 到库改装 → 重启：每 tick 推进（挂 Tick 的维护段，公司作用域内）。 */
+    function ProcessFleetRefits() {
+        if (this._fleetRefit.len() == 0) return;
+        local pending = [];
+        foreach (rq in this._fleetRefit) {
+            local t = this.FleetTarget(rq.job);
+            if (!t.known) {
+                this.Report({ kind = "exec", job = rq.job, stage = "refit", error = "refit_gone" + rq.job });
+                continue;
+            }
+            foreach (vid in t.vehicles) {
+                if (!GSVehicle.IsValidVehicle(vid)) continue;
+                if (!GSVehicle.IsStoppedInDepot(vid)) continue;
+                if (GSVehicle.RefitVehicle(vid, rq.cid)) rq.ok++; else rq.bad++;
+                GSVehicle.StartStopVehicle(vid);
+                rq.rest--;
+            }
+            if (rq.rest > 0) { pending.append(rq); continue; }
+            // 只记**生效值**（ok=0 时登记表保持原样：失败不是事实变更）
+            if (rq.ok > 0) this.SaveRouteCargo(rq.job, rq.cid);
+            this.Report({ kind = "exec", job = rq.job, stage = "refit",
+                          note = "refit" + rq.ok + "f" + rq.bad + "c" + rq.cid });
+        }
+        this._fleetRefit = pending;
+    }
+
+    /* 把一条线的「改装到的货物」写进登记表（当前 job 用活字段，旧 job 用登记表）。 */
+    function SaveRouteCargo(job, cid) {
+        if (job == this._job) { this._routeCargo = cid; return; }
+        local r = this._routes[job];
+        this._routes[job] <- {
+            vehicles = r.vehicles, lead = r.lead, depot = r.depot,
+            retired = (r.retired == true),
+            applied = (r.rawin("applied") ? r.applied : -1),
+            stA = (r.rawin("stA") ? r.stA : -1), stB = (r.rawin("stB") ? r.stB : -1),
+            cargo = cid, engine = (r.rawin("engine") ? r.engine : -1),
+        };
+    }
+
+    /* 换车（P1-2）：把一条线的车队换成**指定车型**。
+     * 做法：先买新（同数、同订单、同货物）再送走旧车卖掉——线路运力不断档。
+     * 引擎前置：IsBuildable（已验证）。观测 = 新车 id 进登记表 + 具名相位。 */
+    function ReengineRoute(job, engine) {
+        local t = this.FleetTarget(job);
+        if (!t.known) { this.Report({ kind = "exec", job = job, stage = "reeng", error = "reeng_unknown" + job }); return; }
+        if (t.retired) { this.Report({ kind = "exec", job = job, stage = "reeng", error = "reeng_retired" + job }); return; }
+        if (!GSEngine.IsBuildable(engine)) { this.Report({ kind = "exec", job = job, stage = "reeng", error = "reeng_nobuild:" + engine }); return; }
+        if (t.depot < 0) { this.Report({ kind = "exec", job = job, stage = "reeng", error = "reeng_nodepot" + job }); return; }
+        local want = 0;
+        foreach (vid in t.vehicles) if (GSVehicle.IsValidVehicle(vid)) want++;
+        if (want < 1) { this.Report({ kind = "exec", job = job, stage = "reeng", error = "reeng_nofleet" + job }); return; }
+        local stA = (job == this._job) ? (this._slotA.bp == null ? -1 : this._slotA.bp[0])
+                                       : (t.stA != null ? t.stA : -1);
+        local stB = (job == this._job) ? (this._slotB.bp == null ? -1 : this._slotB.bp[0])
+                                       : (t.stB != null ? t.stB : -1);
+        if (stA < 0 || stB < 0) { this.Report({ kind = "exec", job = job, stage = "reeng", error = "reeng_nostations" + job }); return; }
+        local cargo = (job == this._job) ? this._routeCargo : t.cargo;
+        if (cargo == null) cargo = -1;
+        local made = [];
+        // 公司作用域：BuildVehicle/Refit 是公司动作——在 Dispatch 里裸调会报
+        // ERR_PRECONDITION_INVALID_COMPANY（真机实测 2026-10-08）。
+        local cm = GSCompanyMode(job == this._job ? this._company : 0);
+        if (!GSCompanyMode.IsValid()) {
+            this.Report({ kind = "exec", job = job, stage = "reeng", error = "reeng_nocompany" });
+            return;
+        }
+        for (local i = 0; i < want; i++) {
+            local nv = GSVehicle.BuildVehicle(t.depot, engine);
+            if (!GSVehicle.IsValidVehicle(nv)) break;
+            if (cargo >= 0) GSVehicle.RefitVehicle(nv, cargo);
+            GSOrder.AppendOrder(nv, stA, GSOrder.OF_NON_STOP_INTERMEDIATE);
+            GSOrder.AppendOrder(nv, stB, GSOrder.OF_NON_STOP_INTERMEDIATE);
+            GSVehicle.StartStopVehicle(nv);
+            made.append(nv);
+        }
+        if (made.len() == 0) {
+            this.Report({ kind = "exec", job = job, stage = "reeng", error = "reeng_buyfail:" + GSError.GetLastErrorString() });
+            return;
+        }
+        // 旧车送库卖掉（复用退役的送库→卖车机器）
+        foreach (vid in t.vehicles) {
+            if (!GSVehicle.IsValidVehicle(vid)) continue;
+            if (GSVehicle.SendVehicleToDepot(vid)) this._fleetSell.append(vid);
+        }
+        if (job == this._job) {
+            this._fleetOwned = made;
+            this._vehicle = made[0];
+            this._routeEngine = engine;
+            this.RegisterRoute(job);
+        } else {
+            local r = this._routes[job];
+            this._routes[job] <- {
+                vehicles = made, lead = made[0], depot = t.depot, retired = false,
+                applied = (r.rawin("applied") ? r.applied : -1),
+                stA = stA, stB = stB,
+                cargo = (r.rawin("cargo") ? r.cargo : -1), engine = engine,
+            };
+        }
+        this.Report({ kind = "exec", job = job, stage = "reeng",
+                      note = "reeng" + made.len() + "e" + engine + "j" + job });
     }
 
     /* 清掉某个 job 的 NUTZ 标牌（退役后必须清：否则会被重新捡起来重建）。 */
@@ -1522,6 +1689,19 @@ class BridgeV1 extends GSController {
                 };
                 if (fleetIds != null) payload.rawset("fleetIds", fleetIds);
                 if (fleetApplied != null) payload.rawset("fleetApplied", fleetApplied);
+                // P1-2 生效值：改装到的货物（标签，人可读）/车型（引擎 id）。
+                // 缺失 = 未计量/未改装，字段缺席（D60）。
+                if (this._core != null) {
+                    local tgt = this._core.FleetTarget(job_str.tointeger());
+                    if (tgt.known) {
+                        if (tgt.cargo != null && tgt.cargo >= 0) {
+                            payload.rawset("cargoApplied", GSCargo.GetCargoLabel(tgt.cargo));
+                        }
+                        if (tgt.engine != null && tgt.engine >= 0) {
+                            payload.rawset("engineApplied", tgt.engine);
+                        }
+                    }
+                }
                 GSAdmin.Send(payload);
             }
         } catch (e) {
@@ -2149,8 +2329,20 @@ class BridgeV1 extends GSController {
                     catch (e) { this._facts = null; }
                 }
                 local f = this._facts;
+                // P1-2 动作面：可选车型目录（agent 要能看见选项才可能学选择）。
+                // 只用实测存在的 API：GSEngineList(VT_ROAD)/IsBuildable/GetName/GetMaxSpeed。
+                local engines = [];
+                try {
+                    local el = GSEngineList(GSVehicle.VT_ROAD);
+                    el.Valuate(GSEngine.IsBuildable);
+                    el.KeepValue(1);
+                    foreach (eid, _ in el) {
+                        engines.append({ id = eid, name = GSEngine.GetName(eid), speed = GSEngine.GetMaxSpeed(eid) });
+                    }
+                } catch (e) { engines = []; }
                 GSAdmin.Send({
                     cmd = "state", tick = now,
+                    engines = engines,
                     date = GSDate.GetCurrentDate(),
                     towns = tlist.Count(),
                     town_list = towns,
@@ -2433,6 +2625,18 @@ class BridgeV1 extends GSController {
             this.ProbeCompanyMode();
         } else if (cmd == "build_bus_route") {
             this.BuildBusRoute(obj);
+        } else if (cmd == "set_route_cargo") {
+            if (this._core == null) {
+                GSAdmin.Send({ kind = "err", cmd = "set_route_cargo", reason = "executor core not ready" });
+            } else {
+                this._core.RefitRoute("job" in obj ? obj.job : -1, "cargo" in obj ? obj.cargo : -1);
+            }
+        } else if (cmd == "set_route_engine") {
+            if (this._core == null) {
+                GSAdmin.Send({ kind = "err", cmd = "set_route_engine", reason = "executor core not ready" });
+            } else {
+                this._core.ReengineRoute("job" in obj ? obj.job : -1, "engine" in obj ? obj.engine : -1);
+            }
         } else if (cmd == "add_vehicles") {
             this.AddVehicles(obj);
         } else if (cmd == "retire_route") {

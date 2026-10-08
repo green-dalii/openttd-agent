@@ -439,6 +439,18 @@ describe("route-stats 去重字段（vehiclesIds / endsA / endsB / waitA / waitB
 		expect(r!.vehiclesIds).toEqual([11]);
 	});
 
+	it_("P1-2 生效值 cargoApplied/engineApplied 原样保留", () => {
+		const r = feed({ cargoApplied: "MAIL", engineApplied: 7 });
+		expect(r!.cargoApplied).toBe("MAIL");
+		expect(r!.engineApplied).toBe(7);
+	});
+
+	it_("P1-2 生效值缺席 = 未改装/未计量（不是空字符串/0）", () => {
+		const r = feed({});
+		expect(r!.cargoApplied).toBeUndefined();
+		expect(r!.engineApplied).toBeUndefined();
+	});
+
 	it_("fleetIds 缺席 = 未计量，不是空车队（null ≠ 0，D60）", () => {
 		const r = feed({});
 		expect(r!.fleetIds).toBeUndefined();

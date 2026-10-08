@@ -32,6 +32,7 @@ function fakeDeps() {
 			companies: new Map(),
 			recent: [],
 			totalEvents: 0, towns: [], townsTotal: null, industries: [], industriesTotal: null, cargoTotals: [], companyCargo: null,
+			engines: [],
 		}),
 	};
 	const deps: AgentDeps = { sink, state };
@@ -46,7 +47,7 @@ function fauxAgent(deps: AgentDeps, responses: Parameters<ReturnType<typeof crea
 }
 
 describe("createAgent", () => {
-	it("installs the nine tools and the default system prompt", () => {
+	it("installs the eleven tools and the default system prompt", () => {
 		const { deps } = fakeDeps();
 		const faux = createFauxCore({});
 		faux.setResponses([fauxAssistantMessage("hi")]);
@@ -57,6 +58,8 @@ describe("createAgent", () => {
 			"inspect_route",
 			"build_bus_route",
 			"set_route_vehicles",
+			"set_route_cargo",
+			"set_route_engine",
 			"retire_route",
 			"recall",
 			"set_pause",
@@ -440,6 +443,7 @@ describe("harness boundary: 框架不替 agent 做决定", () => {
 					]) as never,
 					recent: [],
 					totalEvents: 0, towns: [], townsTotal: null, industries: [], industriesTotal: null, cargoTotals: [], companyCargo: null,
+			engines: [],
 				}),
 			},
 		};

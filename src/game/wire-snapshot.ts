@@ -81,6 +81,7 @@ export function toWireSnapshot(world: WorldState, extras: WireSnapshotExtras = {
 		industries: snap.industries ?? [],
 		industriesTotal: snap.industriesTotal ?? null,
 		cargoTotals: snap.cargoTotals ?? [],
+		engines: snap.engines ?? [],
 		industryAvailable: extras.industryAvailable === true,
 		// 本公司口径：null 表示**未收到**（不是零运量）。
 		companyCargo: snap.companyCargo ?? null,
