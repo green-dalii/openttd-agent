@@ -1047,3 +1047,63 @@ const BUILD_RATE_GAP = 1 / 3;
 function fmtRate(r: number | null): string {
 	return r === null ? "unknown" : `${Math.round(r * 100)}%`;
 }
+
+/* ============================================================
+ * P2-3 统计预登记（跑前拒绝不够 n 的比较，G7 同型先例）
+ * ============================================================
+ *
+ * 效应量与所需样本量**先于数据**写死：免得看完结果再挑一个"刚好显著"的口径。
+ * 公式（正态近似、双臂各 n 局、80% 功效、α=0.05 的常用近似）：
+ *     n ≈ 16 · (CV / 效应量)²
+ * 其中 CV = 观测变异系数（标准差/均值），效应量 = 相对提升（0.2 = +20%）。
+ *
+ * 预登记条目（P2 系列实验不得事后修改）：
+ *   - 默认声明效应量 = +20%（0.2）；
+ *   - CV=1 时 +20% 需要 400 局/臂 —— **声明 +20% 而只跑十几局 = 拒绝**，
+ *     不是给出一个安慰剂 p 值。
+ */
+
+/** 检出 `effectSize`（相对提升）所需**每臂**局数：n ≈ 16·(CV/effect)²。 */
+export function requiredSampleSize(cv: number, effectSize: number): number {
+	if (!(cv > 0) || !(effectSize > 0)) return Number.POSITIVE_INFINITY;
+	return Math.ceil(16 * Math.pow(cv / effectSize, 2));
+}
+
+export interface PowerVerdict {
+	/** null = 缺参数不可判（不是放行）。 */
+	detectable: boolean | null;
+	/** 需要的每臂局数；不可判时为 null。 */
+	requiredN: number | null;
+	/** 人类可读的裁决说明（含所需 n 与现实 n）。 */
+	message: string;
+}
+
+/** 一次比较能不能裁决：n 够不够检出声明的效应量。 */
+export function powerVerdict(args: {
+	declaredEffect: number | null;
+	observedCv: number | null;
+	actualN: number;
+}): PowerVerdict {
+	if (args.declaredEffect === null || !(args.declaredEffect > 0)) {
+		return { detectable: null, requiredN: null, message: "no declared effect size (pre-registration missing)" };
+	}
+	if (args.observedCv === null || !(args.observedCv > 0)) {
+		return { detectable: null, requiredN: null, message: "observed CV unavailable - power not determinable" };
+	}
+	const required = requiredSampleSize(args.observedCv, args.declaredEffect);
+	if (args.actualN >= required) {
+		return {
+			detectable: true,
+			requiredN: required,
+			message: `powered: ${args.actualN} run(s)/arm >= ${required} required (CV ${(args.observedCv * 100).toFixed(0)}%, effect +${(args.declaredEffect * 100).toFixed(0)}%)`,
+		};
+	}
+	return {
+		detectable: false,
+		requiredN: required,
+		message:
+			`!! UNDERPOWERED: detecting +${(args.declaredEffect * 100).toFixed(0)}% at CV ${(args.observedCv * 100).toFixed(0)}% ` +
+			`needs ${required} run(s)/arm; this comparison has ${args.actualN}. ` +
+			"Pre-registered rule: refuse, do not report a p-value.",
+	};
+}

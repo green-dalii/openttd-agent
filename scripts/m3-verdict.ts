@@ -15,7 +15,7 @@
  * 收尾时实测过。交接文档里的命令必须是**跑得通**的，所以落成文件。
  */
 import { evolutionView, type EvolutionView } from "../src/evolution/web-view.js";
-import { degradationStats, deliveredOutcome, formatMetricStat } from "../src/evolution/metrics.js";
+import { degradationStats, deliveredOutcome, formatMetricStat, powerVerdict } from "../src/evolution/metrics.js";
 import { reflectionStats } from "../src/evolution/reflection-stats.js";
 
 const dataDir = process.argv[2];
@@ -87,6 +87,26 @@ console.log(`income delta  : ${arms.incomeDelta?.toFixed(0) ?? "—"}`);
 			`without ${formatMetricStat(wit_out.peakRequestTokens)}  ` +
 			`(G6 - decides whether context compaction is needed at all)`,
 	);
+	// P2-3 统计预登记：n 够不够检出**声明的**效应量？不够 → 拒绝比较。
+	// 声明效应量 = argv[3]（默认 +20%，预登记值）；事后改口径就是把预登记废掉。
+	{
+		const effect = Number(process.argv[3] ?? 0.2);
+		const vals = view.metrics
+			.map((m) => Number(m.deliveredRun))
+			.filter((v) => Number.isFinite(v));
+		const nPerArm = Math.min(
+			view.metrics.filter((m) => m.arm === "treatment").length,
+			view.metrics.filter((m) => m.arm === "control").length,
+		);
+		const mean = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
+		const sd = vals.length
+			? Math.sqrt(vals.reduce((a, b) => a + (b - mean) * (b - mean), 0) / vals.length)
+			: 0;
+		const cv = mean !== 0 ? Math.abs(sd / mean) : null;
+		const v = powerVerdict({ declaredEffect: Number.isFinite(effect) ? effect : null, observedCv: cv, actualN: nPerArm });
+		console.log(`power: ${v.message}`);
+		if (v.detectable === false) process.exitCode = 1;
+	}
 	// G7：判据能不能动，必须先于"有无效果"的主张（SPEC §10.85）。
 	{
 		const dep = deliveredOutcome(view.metrics);

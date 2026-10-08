@@ -16,7 +16,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, openSync } from "node:fs";
 import { join } from "node:path";
 import { evolutionView } from "../src/evolution/web-view.js";
-import { degradationStats, deliveredOutcome, formatMetricStat, horizonIsComparable, MIN_COMPARABLE_HORIZON_DAYS } from "../src/evolution/metrics.js";
+import { degradationStats, deliveredOutcome, formatMetricStat, horizonIsComparable, MIN_COMPARABLE_HORIZON_DAYS , powerVerdict } from "../src/evolution/metrics.js";
 import { reflectionStats } from "../src/evolution/reflection-stats.js";
 
 interface Args {
@@ -30,6 +30,10 @@ interface Args {
 	seed: number;
 	/** 自变量（memory = 记忆注入 / freeze = 决策期冻结）——两臂只差这一个。 */
 	vary: "memory" | "freeze";
+	/** P2-3 预登记：声明效应量（相对提升，0.2 = +20%）。 */
+	effect?: number;
+	/** P2-3 预登记：假定 CV（保守默认 1.0）。 */
+	cv?: number;
 }
 
 function parseArgs(argv: string[]): Args {
@@ -65,6 +69,20 @@ function parseArgs(argv: string[]): Args {
 		);
 		process.exit(2);
 	}
+
+	// P2-3 统计预登记：跑前拒绝不够 n 的比较（G7 同型）。默认声明效应 +20%、
+	// 假定 CV=100%（保守）。`--effect`/`--cv` 改的是**预登记**，不是事后口径。
+	{
+		const effect = Number(get("--effect") ?? 0.2);
+		const cv = Number(get("--cv") ?? 1.0);
+		const plannedN = Number(get("--n") ?? 3);
+		const v = powerVerdict({ declaredEffect: effect, observedCv: cv, actualN: plannedN });
+		if (v.detectable === false) {
+			console.error(v.message);
+			console.error("  Refusing to start: this experiment cannot detect its declared effect.");
+			process.exit(1);
+		}
+	}
 	return {
 		dir,
 		n: Number(get("--n") ?? 3),
@@ -77,6 +95,8 @@ function parseArgs(argv: string[]): Args {
 		// 自变量（2026-09-17）：memory = 记忆注入（默认）；freeze = 决策期冻结世界。
 		// 两个臂必须只差这一个变量，否则比较又在撒谎。
 		vary: (get("--vary") ?? "memory") as "memory" | "freeze",
+		...(get("--effect") !== undefined ? { effect: Number(get("--effect")) } : {}),
+		...(get("--cv") !== undefined ? { cv: Number(get("--cv")) } : {}),
 	};
 }
 

@@ -11,6 +11,17 @@
 
 ### Added
 
+- **Statistical pre-registration is enforced before runs, not after (P2-3).** The
+  detectable effect and the required sample size are fixed before data collection:
+  `n ~= 16 * (CV / effect)^2` per arm, default declared effect +20%. Both verdict
+  entry points refuse under-powered work: `run-experiment.ts` refuses to start and
+  `m3-verdict.ts` refuses to judge, each printing the required n against the actual
+  one ("!! UNDERPOWERED: ... needs 400 run(s)/arm; this comparison has 3").
+  Missing CV or effect means "not determinable", never "pass".
+
+
+### Added
+
 - **The fleet numbers now add up (P1-3).** A single identity replaces the two
   competing fleet counts: `owned + unattributed === companyTotal`, with `owned`
   split into `on the road` and `in depot` (the GS reports which registered vehicles

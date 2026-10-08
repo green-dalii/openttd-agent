@@ -1083,3 +1083,19 @@ Unattributed 0 (named gap, not dropped)
 ```
 恒等式 3+0=3 对上；0 控制台条目。**未做截图**（CDP captureScreenshot 在本机
 headless 持续超时）——布局正确性由 DOM 文本断言 + smoke 的元素检查兜底，如实披露。
+
+### 10.112 P2-3：统计预登记（2026-10-08，跑前拒绝）
+
+**预登记条目**（P2 系列实验不得事后修改）：
+- 公式：`n ≈ 16·(CV/效应量)²`（每臂局数；正态近似、80% 功效、α=0.05）
+- 默认声明效应量 = **+20%**（0.2）；假定 CV = 100%（保守）
+- **声明 +20% 而 n 不足 = 拒绝比较/拒绝开跑**，不给安慰剂 p 值
+
+**实现**：`requiredSampleSize` / `powerVerdict`（`src/evolution/metrics.ts`，纯函数 + 单测）。
+两个判据脚本接**跑前拒绝**（G7 同型）：
+- `scripts/run-experiment.ts --effect X --cv Y`：开跑前不够 n → `!! UNDERPOWERED` + exit 1
+- `scripts/m3-verdict.ts [dataDir] [effect]`：裁决前不够 n → 打印拒绝 + exit code 1
+
+**双向自证（真跑脚本）**：`--n 3 --effect 0.2 --cv 1.0` →
+`!! UNDERPOWERED: detecting +20% at CV 100% needs 400 run(s)/arm; this comparison has 3` + 拒绝；
+`--n 64 --effect 0.5` → 放行开跑。缺 CV/效应量 → `detectable: null`（不可判 ≠ 放行）。

@@ -30,6 +30,8 @@ import {
 	metricStat,
 	comparableMetrics,
 	type GameMetric,
+	requiredSampleSize,
+	powerVerdict,
 } from "../../src/evolution/metrics.js";
 import type { SessionMeta } from "../../src/agent/session-store.js";
 
@@ -894,5 +896,39 @@ describe("W1: blockedByPause —— 暂停收场的局可被统计剔除", () =>
 		const withZombie = [...normal, toGameMetric(meta({ id: "z", outcome: { constructionDone: false, blockedByPause: true, pausedBy: "agent" } }))];
 		const countOf = (c: ReturnType<typeof compareArms>) => c.withLessons.count + c.withoutLessons.count;
 		expect(countOf(compareArms(withZombie, "memory"))).toBe(countOf(compareArms(normal, "memory")));
+	});
+});
+
+/**
+ * P2-3 统计预登记（跑前拒绝不够 n 的比较，G7 同型）。
+ *
+ * 预登记的意义：效应量与所需样本量**先于数据**写死，免得看完结果再挑一个
+ * "刚好显著"的口径。公式：n ≈ 16·(CV/效应量)²。+20% 效应在常见 CV 下要几百局——
+ * 声明它却只跑十几局，就必须被拒绝，而不是给一个 p 值安慰剂。
+ */
+describe("统计预登记：requiredSampleSize / powerVerdict", () => {
+	it("n ≈ 16·(CV/效应量)²：CV=1、效应 20% → 400 局", () => {
+		expect(requiredSampleSize(1.0, 0.2)).toBe(400);
+		expect(requiredSampleSize(0.5, 0.2)).toBe(100);
+		expect(requiredSampleSize(1.0, 0.5)).toBe(64); // 大效应便宜得多
+	});
+
+	it("n 不够 → 拒绝，并把所需 n 说清楚（不给安慰剂结论）", () => {
+		const v = powerVerdict({ declaredEffect: 0.2, observedCv: 1.0, actualN: 12 });
+		expect(v.detectable).toBe(false);
+		expect(v.requiredN).toBe(400);
+		expect(v.message).toContain("400");
+		expect(v.message).toContain("12");
+	});
+
+	it("n 够 → 放行", () => {
+		const v = powerVerdict({ declaredEffect: 0.2, observedCv: 0.5, actualN: 100 });
+		expect(v.detectable).toBe(true);
+	});
+
+	it("缺参数 → 不可判（null 语义，不是放行）", () => {
+		const v = powerVerdict({ declaredEffect: 0.2, observedCv: null, actualN: 50 });
+		expect(v.detectable).toBeNull();
+		expect(v.message).toContain("CV");
 	});
 });
