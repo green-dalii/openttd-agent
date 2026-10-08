@@ -9,6 +9,18 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **The executor moved into the GameScript (P1-1a).** The construction state machine
+  now runs in `bridge-gs` under `GSCompanyMode`; feedback is typed `exec` events with
+  full-text errors (`error:` field) and engine-truth fleet on `done`. The 31-char
+  company-name channel, the sign mailbox, and the W3 chunk protocol are **deleted**
+  (assembler + its tests included). The AI remains as a company shell — OpenTTD has no
+  "create company" API, so a script must own the company the GS builds with. Known gap
+  (SPEC §10.107): `pathfinder.road` is not importable in the GS context (measured), so
+  road finding uses a greedy walker — it completes fewer routes on rough terrain than
+  the AI's Pathfinder.Road did.
+
 ### Added
 
 - **Training panel on `/sessions` (P0-3).** One panel answers "is it getting better?" and

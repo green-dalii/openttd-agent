@@ -207,13 +207,49 @@ el.Sort(GSList.SORT_BY_VALUE, false);
 GameScript 消息**不会**被 `ScriptEventAdminPort` 收到。这本身对
 "外部工具能否旁路观察/控制"很重要。
 
-### 阶段二：把执行器搬进 GS
-- 把 `main.nut` 的状态机逻辑移植成 GS 模块（施工顺序不变，通道换掉）
-- 状态改为 `GSAdmin.Send(json)` 结构化上报
-- 保留 `PhaseRoad` 那套分段探测（`Pathfinder.Road` 在 GS 下同样可用；
-  长距离单次搜索会死锁 —— 这个实测事实要保留）
+### 阶段二：把执行器搬进 GS（✅ 2026-10-08 P1-1a 完成，真机验证见 SPEC §10.107）
 
-### 阶段三：删除 Executor AI 与标牌邮箱
+**模块边界**（一个事实一个写者）：
+
+| 模块 | 职责 | 禁止 |
+|---|---|---|
+| `bridge-gs/main.nut`（控制器） | 命令解析（`Dispatch`）、事实上报（state/route-stats）、`GSAdmin.Send` | 不施工 |
+| `bridge-gs/exec-core.nut`（新） | `ExecCore` 类：施工状态机（站→路→库→车→单），逐 tick 推进，全程 `GSCompanyMode(company)` | 不碰 admin 协议；错误以**完整文本**交给控制器 |
+| `executor-ai/` | **停用**（P1-1b 删除） | — |
+
+**输入**：`Dispatch` 直接 `core.Enqueue(job)`（命令载荷已含 townA/townB/车队数）。
+**标牌邮箱整体作废**：`LookForBlueprint`/`PlaceBlueprint`/`CountSignsWithPrefix` 删除——
+GS 自己算站点（`FindStationSite`/`FindPaxStationSite` 已在控制器里），不再经文本中继。
+
+**反馈**（这是收益所在）：`ExecCore` 发**类型化事件**，复用现有 `exec` 事件通道（harness 已解码），
+字段扩为：`stage/job/progress{seg,remaining}/fleet{owned,applied}/error`（**错误全文**，
+不再有 31 字符上限、不再有分块协议）。每线路车队直接来自引擎真值
+（`_fleetOwned` 的车辆 id 列表）⇒ P1-3 的归因同时解决。
+
+**API 映射**（从 AI 移植到 GS；同名即同义）：
+`AIRoad→GSRoad` `AIVehicle→GSVehicle` `AIStation→GSStation` `AIOrder→GSOrder`
+`AIEngine→GSEngine` `AITile→GSTile` `AIMap→GSMap` `AICompany→GSCompany`
+`AIError→GSError` `AIDepot→GSRoad.BuildRoadDepot` `AIGroup→GSGroup`。
+`AILog`/`AISign` **不移植**（上报走 admin；邮箱作废）。
+`AIController.Sleep` 不存在于 GS：状态机本就逐 tick（`TickInner` 模式），改为每 `Start()` 循环调用一次。
+**每个施工调用必须在 `GSCompanyMode(company)` 作用域内**（阶段一实测：钱从公司账上扣）。
+
+**保留的实测事实**（勿回退）：分段探测（`SegmentProbe`/`FindSegment`）——
+长距离单次寻路会死锁；`GSEngineList(GSVehicle.VT_ROAD)` 需要载具类型参数；
+`IsStoppedInDepot` 才允许卖车（`vehicle_cmd.cpp:261`）；卖车先送库再等停。
+
+**验收（P1-1a）**：真机一局经新核心建完一条线（station×2 + road + depot + bus + order + start），
+事件流里 `exec` 带 `stage` 推进与（若失败）**错误全文**；公司账扣钱；
+`squirrel-api-guard` 新增守卫（bridge-gs 不得引用 AI* API；必须有 GSCompanyMode 包裹）。
+
+### 阶段二遗留（P1-1b）
+- **寻路质量**：`pathfinder.road` 在 GS 上下文 import 不到（真机实测）⇒ 贪心分段
+  完成率低。路线：把库 vendoring 进 `game/library/`（来源：OpenTTD content 的
+  PathFinder.Road + graph.aystar，需 GPL 兼容入库并经 sync-vendor 管理），
+  或给贪心走法加更宽绕行。
+- 车队双向/退役在新核心上的真机复验；每线路车辆归因（P1-3）接 `done.fleet.ids`。
+
+### ✅ 阶段三：删除 Executor AI 与标牌邮箱（P1-1a 已删通道部分）
 - 删 `src/game/squirrel/executor-ai/`、标牌协议、GS↔AI 中继
 - `src/game/executor-status.ts` 保留（解码器仍有用于兼容/日志），
   但 agent 直接拿结构化字段，不再需要解码电报体

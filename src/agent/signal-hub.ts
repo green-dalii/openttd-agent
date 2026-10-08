@@ -18,7 +18,7 @@ import type { GameEvent } from "../types.js";
 import type { WorldState } from "../game/world-state.js";
 import type { RouteLedger } from "./route-ledger.js";
 import { createExecutorProgress, type ExecutorProgressReport } from "./executor-progress.js";
-import { createExecutorErrorAssembler, decodeExecutorPhase, type ExecutorErrorMessage } from "../game/executor-status.js";
+import { decodeExecutorPhase, type ExecutorErrorMessage } from "../game/executor-status.js";
 import { gameDayFromRawDate, convertDateToYmd } from "../game/payload-parsers.js";
 import type { WebServer } from "../web/server.js";
 import type { RouteStats } from "./route-stats.js";
@@ -146,7 +146,6 @@ export function makeSignalHub(refs: SignalHubRefs): SignalHub {
 	 * missing space turns "cannot join" into "cannotjoin" (a confidently wrong
 	 * error message is worse than none).
 	 */
-	const executorErr = createExecutorErrorAssembler();
 	let executorError: (ExecutorErrorMessage & { at: number }) | null = null;
 	const executorProgress = createExecutorProgress();
 	/**
@@ -319,10 +318,9 @@ export function makeSignalHub(refs: SignalHubRefs): SignalHub {
 					// on-change every ~20 ticks). Replaces the company-name regex
 					// decode retired in A3.
 					if (p.kind === "exec") {
-						// Reassemble a chunked exception before anything else looks at
-						// the phase: an incomplete run must not be shown as a message.
-						const assembled = executorErr.push(String(p.raw ?? ""), Date.now());
-						if (assembled) executorError = { ...assembled, at: Date.now() };
+						// P1-1a：错误**全文**随类型化事件到达（31 字符分块协议已删除）。
+						const errText = typeof p.error === "string" && p.error.trim() !== "" ? p.error : null;
+						if (errText) executorError = { message: errText, truncated: false, complete: true, at: Date.now() };
 						const stage = String(p.stage);
 						const job = Number(p.job);
 						if (stage === "done" && job >= 0) {
@@ -335,7 +333,7 @@ export function makeSignalHub(refs: SignalHubRefs): SignalHub {
 						// they carry `#n s<seg>` and are the only signal while the
 						// pathfinder is searching (no stage change to report).
 						{
-							const d = decodeExecutorPhase(String(p.raw));
+							const d = decodeExecutorPhase(String(p.note ?? p.raw ?? ""));
 							executorProgress.observe({
 								gameDay: gameDayNow(),
 								job: d.job ?? Number(p.job ?? -1),

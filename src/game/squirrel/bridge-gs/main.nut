@@ -8,6 +8,1306 @@
  * 禁止: 不做施工决策 (Executor AI 的活); 不碰其它公司。
  */
 
+/* 贪心路径节点：PathFinder.Road 节点的最小形状（GetTile/GetParent），
+ * 这样 LayPath/LastTileOf 原样复用，不为回退写第二套铺路代码。 */
+class GreedyNode {
+    _t = -1;
+    _p = null;
+    constructor(t, p) { this._t = t; this._p = p; }
+    function GetTile() { return this._t; }
+    function GetParent() { return this._p; }
+}
+
+/* 贪心分段寻路（探针 road 阶段同款：直线优先，左右侧步，走不动即停）。
+ * 返回节点链（尾是 from）或 null（一步都走不动）。部分链 = 可推进的部分进度，
+ * 调用方按 _lastLaid 推进前沿。 */
+function GreedyPath(from, to) {
+    local head = GreedyNode(from, null);
+    local cur = from;
+    local steps = 0;
+    local tx = GSMap.GetTileX(to);
+    local ty = GSMap.GetTileY(to);
+    while (cur != to && steps < 64) {
+        steps++;
+        local cx = GSMap.GetTileX(cur);
+        local cy = GSMap.GetTileY(cur);
+        local nx = cx;
+        local ny = cy;
+        if (cx != tx) nx = (tx > cx) ? cx + 1 : cx - 1;
+        else if (cy != ty) ny = (ty > cy) ? cy + 1 : cy - 1;
+        else break;
+        local cands = [[nx, ny], [cx, cy + 1], [cx, cy - 1]];
+        local moved = false;
+        foreach (c in cands) {
+            local gx = c[0];
+            local gy = c[1];
+            if (gx < 1 || gy < 1) continue;
+            if (gx >= GSMap.GetMapSizeX() - 1 || gy >= GSMap.GetMapSizeY() - 1) continue;
+            local nxt = GSMap.GetTileIndex(gx, gy);
+            if (nxt == cur) continue;
+            // 只走上得去的瓦片（BestPaxCandidate 同款判据）：水/建筑/不可建 = 换候选。
+            if (GSTile.IsWaterTile(nxt)) continue;
+            if (!GSTile.IsBuildable(nxt) && !GSRoad.IsRoadTile(nxt)) continue;
+            head = GreedyNode(nxt, head);
+            cur = nxt;
+            moved = true;
+            break;
+        }
+        if (!moved) break;
+    }
+    if (cur == from) return null;
+    return head;
+}
+
+class ExecCore {
+    _gs = null;
+    _company = -1;
+    _queue = [];        // 待建线路 FIFO: {company, job, siteA, fA, siteB, fB, fleet}
+    _fleetReqs = [];    // 车队请求: {job, want}
+    _retireReqs = [];   // 退役请求: job
+    _lastPh = "";
+    _hbSeq = 0;
+    _failStreak = 0;    // 同一 job 连续异常次数（有界：超过上限放弃该 job）
+    _lastFailJob = -1;
+
+    constructor(gs, company) {
+        this._gs = gs;
+        this._company = company;
+    }
+
+    /* ---- 入口（BridgeV1.Dispatch 直调；标牌邮箱已废） ---- */
+    function Enqueue(company, job, siteA, fA, siteB, fB, fleet) {
+        this._queue.append({ company = company, job = job, siteA = siteA, fA = fA,
+                             siteB = siteB, fB = fB, fleet = (fleet == null ? -1 : fleet) });
+        this._gs.ReportExec({ kind = "exec", job = job, stage = "queued" });
+    }
+    function FleetRequest(job, want) {
+        this._fleetReqs.append({ job = job, want = want });
+        this._gs.ReportExec({ kind = "exec", job = job, stage = "fleet_req", note = "want " + want });
+    }
+    function RetireRequest(job) {
+        this._retireReqs.append(job);
+        this._gs.ReportExec({ kind = "exec", job = job, stage = "retire_req" });
+    }
+
+    /* ---- 上报出口（唯一）：错误**全文**，31 字符分块协议就此退役 ---- */
+    function Report(ev) { this._gs.ReportExec(ev); }
+    function Ph(p, hold = null) {
+        if (p == this._lastPh) return;   // 同相位不重发（旧通道的指纹抑制，现在一行）
+        this._lastPh = p;
+        this._phase = p;
+        this.Report({ kind = "exec", job = this._job, stage = this._stage, note = p });
+    }
+    function Fail(msg) {
+        // 异常兜底：**全文**上报，状态机保持存活（历史教训：catch 里的 bug 会让脚本彻底静默）。
+        try {
+            this._errMsg = "" + msg;
+            this.Report({ kind = "exec", job = this._job, stage = this._stage,
+                          error = this._errMsg });
+            if (this._lastFailJob == this._job) this._failStreak++;
+            else { this._lastFailJob = this._job; this._failStreak = 1; }
+            // 有界：同一个 job 连续异常 50 轮还不健康 → 放弃它，别堵住 FIFO。
+            if (this._failStreak >= 50) {
+                this._doneJobs.append(this._job);
+                this.Report({ kind = "exec", job = this._job, stage = "abandoned",
+                              error = this._errMsg });
+                this._failStreak = 0;
+                this._job = -1;
+            }
+        } catch (e) {}
+    }
+    function ReportDone() {
+        local ids = [];
+        foreach (v in this._fleetOwned) { if (v != null && v >= 0) ids.append(v); }
+        if (this._vehicle >= 0 && this._fleetOwned.len() == 0) ids.append(this._vehicle);
+        this.Report({ kind = "exec", job = this._job, stage = "done",
+                      fleet = { owned = ids.len(), ids = ids, applied = this._fleetApplied } });
+    }
+
+    /* ---- 每个 GS 主循环调用一次 ---- */
+    /* GSController.Sleep 的代理（ExecCore 不继承 GSController）。 */
+    function Sleep(n) { GSController.Sleep(n); }
+
+    function Tick() {
+        try {
+        if (!this._pfTried) {
+            this._pfTried = true;
+            try { this._PF = import("pathfinder.road", "Road", 4); } catch (e) { this._PF = null; }
+        }
+        if (this._job < 0) {
+            local next = this.FindNextJob();
+            if (next == null) {
+                this._loopSeq++;
+                return;
+            }
+            this._job = next.job;
+            this._company = next.company;
+            this._slotA = { label = "A", bp = [next.siteA, next.fA], tried = 0 };
+            this._slotB = { label = "B", bp = [next.siteB, next.fB], tried = 0 };
+            this._slotD = { label = "D", bp = null, tried = 0 };
+            this._pf = null; this._pfFrom = -1; this._pfTo = -1;
+            this._reportDone = false; this._vehicle = -1; this._paxCargo = -1;
+            this._radius = -1; this._fleetApplied = next.fleet;
+            this._fleetOwned = []; this._fleetWaitAnnounced = "";
+            this._fleetSell = []; this._fleetRefused = "";
+            this._roadCur = -1; this._roadSeg = 0; this._roadSegStep = 0;
+            this._lastLaid = -1; this._layErr = ""; this._builtRoad = null;
+            this._stage = "buildA";
+            local m0 = GSCompanyMode(this._company);
+            if (GSCompanyMode.IsValid()) {
+                local maxLoan = GSCompany.GetMaxLoanAmount();
+                local cur = GSCompany.GetLoanAmount();
+                if (maxLoan > cur) GSCompany.SetLoanAmount(maxLoan);
+            }
+            this.Ph("work j" + this._job);
+        }
+        this._loopSeq++;
+        local mode = GSCompanyMode(this._company);
+        if (!GSCompanyMode.IsValid()) { this.Ph("cm_invalid"); return; }
+        if (this._stage == "buildA") { this.TryBuildStation(this._slotA); }
+        else if (this._stage == "buildB") { this.TryBuildStation(this._slotB); }
+        else if (this._stage == "road") { this.PhaseRoad(); }
+        else if (this._stage == "depot") { this.PhaseDepot(); }
+        else if (this._stage == "bus") { this.PhaseBus(); }
+        if (this._stage == "done" || this._loopSeq % 40 == 0) { this.CheckAddVehicles(); }
+        this.ProcessFleetSells();
+        this.CheckRetireRequests();
+        if (this._stage == "done" && !this._reportDone) {
+            this._reportDone = true;
+            this.ReportDone();
+        }
+        if (this._stage == "done" && this._reportDone) {
+            this._doneJobs.append(this._job);
+            this._routes[this._job] <- {
+                vehicles = this._fleetOwned, lead = this._vehicle,
+                depot = (this._slotD.bp == null ? -1 : this._slotD.bp[0]),
+                retired = false, applied = this._fleetApplied,
+            };
+            this._job = -1;   // 下一轮取队列里的下一个（字段整套复位）
+        }
+        } catch (e) { this.Fail(e); }
+    }
+
+    /* 队列 FIFO：最旧的未完成任务（命令按提交顺序建——语义与旧 FindNextJob 相同）。 */
+    function FindNextJob() {
+        local best = null;
+        foreach (q in this._queue) {
+            if (q.job == this._job) continue;
+            if (this.IsDoneJob(q.job)) continue;
+            if (best == null || q.job < best.job) best = q;
+        }
+        return best;
+    }
+
+    _phase = "boot";
+    _job = -1;
+    _doneJobs = [];   // jobs this executor has completed (FIFO bookkeeping)
+    _stage = "boot";   // boot -> buildA -> buildB -> road -> done
+    _slotA = { label = "A", bp = null, tried = 0 };
+    _slotB = { label = "B", bp = null, tried = 0 };
+    _lastBeat = -1;
+    _loopSeq = 0;
+    _pf = null;      // persisted pathfinder (see FindSegment)
+    _pfFrom = -1;
+    _pfTo = -1;
+    _reportDone = false;
+    _slotD = { label = "D", bp = null, tried = 0 };
+    _vehicle = -1;
+    _paxCargo = -1;
+    _radius = -1;
+    _fleetApplied = -1;  // last applied fleet size from a V sign
+    _fleetOwned = [];    // vehicles cloned for the CURRENT job (per-route accounting, G3)
+    _fleetWaitAnnounced = ""; // last deferred request we announced (M3-1b: one phase per request)
+    _fleetSell = [];     // clones told to go to the depot, waiting to be sold (M3-1b)
+    _fleetRefused = "";  // last "job:want" refused for being another job's request
+    /* 按线路登记（M3-2a，SPEC §10.86）。
+     * 为什么必须存在：`_fleetOwned` / `_vehicle` 在切 job 时被重置，于是执行器
+     * **不记得旧线路的车队**——"关掉一条正在亏钱的旧线路"（真实场景恰恰是先建的线）
+     * 就永远做不到。`_routes[job]` 是**跨 job 保留**的唯一目的地：
+     *   vehicles = 该线路的车（含头车）；lead = 头车；depot = 车库瓦片；retired = 已退役
+     */
+    _routes = {};        // job -> { vehicles = [], lead = -1, depot = -1, retired = false }
+    _retiredJobs = {};   // job -> true：已退役的线路（table 集合；array 没有 rawin/in）
+    _roadCur = -1;       // segmented-road: current front reached
+    _roadSeg = 0;
+    _roadSegStep = 0;
+    _lastLaid = -1;      // tile reached by the most recent LayPath (contiguous)
+    _layErr = "";        // why the last LayPath stopped early
+    _dumpSeq = 0;
+    _hbSeq = 0;
+    _errMsg = null;        // 最后一次上报的错误原文（同一错误每轮重抛一次，不能重启队列）
+    // Pathfinder.Road class (library, imported once at load). Local sandbox
+    // has v4 (needs graph.aystar v6); arena used v3 — API is compatible:
+    //  pf = Road(); pf.cost.*; pf.InitializePath([from],[to]); pf.FindPath(n)
+    //  -> node with GetTile()/GetParent(), or false (more iterations), null (none).
+    // pathfinder.road 在 **GS 上下文**不可用（2026-10-08 真机实测：import 报
+    // "couldn't find library"，库只对 AI 上下文可见）。能装载就用，装载失败走
+    // 贪心分段回退（GreedyPath，与探针同款算法）。绝不能在这里抛——抛 = 整个 GS 静默。
+    _PF = null;
+    _pfTried = false;
+    _builtRoad = null;   // list of [from,to] road pairs built
+
+
+
+    /* One loop iteration of the build state machine. */
+
+
+    /* 错误文本 → 公司名单行文本：控制字符转空格、连续空白折叠成一个、去掉首尾空白。
+     * 为什么：`"" + e` 常带换行/制表符，写进公司名后 harness 会把它们读成噪音，而且白白
+     * 吃掉 31 字符的预算（分块的宽度必须可预测）。
+     * 注：字符串索引在 OpenTTD 的 Squirrel 里是整数，所以一律 slice 后按字符串比较。 */
+
+
+    /* 写出当前那一块。marker 由“是不是末块”与“有没有被截断”决定（见 ReportError）。
+     * 每块都粘滞 5 轮：GS 约每 20 script ticks（≈每 4 轮）轮询一次，不粘滞的话末块会被
+     * 下一轮的施工相位盖掉，harness 永远拼不完整。错误相位由此**抢占**普通粘滞窗口。 */
+
+
+    /* 每 5 轮推进一块错误分块（Sleep(5) ⇒ 约 1.4 s），保证 GS 的轮询采样到每一块。 */
+
+
+
+
+    /* Short error text for the phase channel. SetPhase truncates at 31 chars, so
+     * keep only the first token of the engine's error string ("Flat land
+     * required" -> "Flat"). The full string is useless if it gets cut mid-word. */
+
+
+    /* How many NUTZ: signs THIS AI can see via AISignList().
+     * Separate from the GS's own count: the GS reports what it PLACED, this
+     * reports what the executor can READ, and the difference between the two is
+     * exactly the failure we could not previously observe. */
+
+
+    /* SetPhase: 公司名编码汇报; ≤31 字符 (OpenTTD 公司名上限). */
+    /* 公司名是**单值、被采样**的通道：harness 每 500ms 轮询，而执行器每轮都改写它。
+     * 于是稀疏但重要的事件（退役、卖出、推迟）会被施工相位（`R45 d0 a0 #2`）**盖掉**——
+     * 动作生效了，归因信号却随机丢失（SPEC §10.86，真机 /tmp/m32c）。
+     *
+     * 因此按**消费者**分两个入口：
+     *   SetPhase(p)        —— "现在在做什么"（要新鲜）：可以覆盖任何东西。
+    /* ⚠️ `hold` 必须给**默认值**：Squirrel 对调用时的参数个数强校验，
+     * 单参调用会抛 `wrong number of parameters`——而且是在**动作已执行、相位未发出**的位置，
+     * 症状与 §10.86 的两个缺陷完全一样（`/tmp/m32d`：三次操作全部生效、相位一条没进日志）。 */
+
+
+
+
+    /* 扫描 GS 放的 NUTZ:bp:<job>: 标牌 (arena 语法); 命中后借贷 + 进施工阶段. */
+
+
+    /* Build one bus station from its blueprint sign.
+     *  slot: state table {label, bp=null, tried=0} — mutated in place.
+     *  "A" uses the S sign (site at sign location), "B" the E sign;
+     *  front comes from `fr=<tile>` in the sign name. Uses the arena-verified
+     *  pattern: clear both tiles then GSRoad.BuildRoadStation (a normal stop
+     *  needs no prebuilt road; the connecting road lands on `front` in the S3
+     *  road phase). If the exact sign site is blocked (town ownership,
+     *  terrain, cost), scan a small ring for an alternative pair nearby. */
+    /* Build one bus station near its blueprint sign. Two attempts:
+     *  1. Pax scan: walk a 7x7 grid around the sign anchor, rank candidates
+     *     by passenger PRODUCTION in the stop's catchment (GSTile
+     *     GetCargoProduction — arena's proven profitability gate), try to
+     *     build in descending order. This is what makes the route earn.
+     *  2. Plain fallback: any buildable pair near the anchor (route still
+     *     builds, may not carry passengers).
+     * Arena's TryBuildStation also enforced MIN_PROD and aborted the pair —
+     * here we keep it soft (fall back) so the skeleton still completes. */
+    function TryBuildStation(slot) {
+        if (slot.bp == null) {
+            // GS-only：站点由 Enqueue 预填（标牌邮箱已废）。
+            this.Ph("st" + slot.label + "_noslot");
+            return;
+        }
+        local anchor = slot.bp[0];  // sign tile = original station site
+        local anchorF = slot.bp[1];
+        // 1. Pax-ranked scan (try up to 12 candidates per tick slice).
+        if (slot.tried < 24) {
+            local cand = this.BestPaxCandidate(anchor, anchorF, slot.tried);
+            if (cand != null) {
+                slot.bp = cand;
+                if (this.TryPlaceStop(cand[0], cand[1])) {
+                    this.Ph("st" + slot.label + "_ok");
+                    if (slot.label == "A") { this._stage = "buildB"; }
+                    else { this._stage = "road"; }
+                    return;
+                }
+            }
+            slot.tried++;
+            this.Ph("st" + slot.label + "_scan");
+            return;
+        }
+        // 2. Plain fallback: any buildable pair (bounded).
+        if (slot.tried > 24) {
+            this.Ph("st" + slot.label + "_giveup");
+            return;
+        }
+        local alt = this.FindAltSite(anchor, anchorF, 1 + (slot.tried % 6), 4);
+        slot.tried++;
+        if (alt != null) slot.bp = alt;
+        else this.Ph("st" + slot.label + "_retry");
+    }
+
+    /* Next pax-ranked candidate for a station anchored at `anchor`. Returns
+     * [tile, front] or null when the (bounded) candidate list is exhausted.
+     * Ring order: step outward from the anchor; within each ring prefer the
+     * neighbour that points toward the town centre is unnecessary — the
+     * anchor already sits near the town — so we just take the best
+     * production tile in each ring slice and let the caller advance. */
+    function BestPaxCandidate(anchor, anchorF, step) {
+        local pax = this.GetPaxCargoId();
+        if (pax < 0) return null;
+        local ax = GSMap.GetTileX(anchor);
+        local ay = GSMap.GetTileY(anchor);
+        // Keep the GS-chosen front DIRECTION (front - tile offset). The GS
+        // picked a pair on flat terrain; translating both tiles together
+        // stays on compatible terrain, so the later road connect won't hit
+        // ERR_LAND_SLOPED (the bug that stranded the first bus).
+        local fdx = 1; local fdy = 0; // default east
+        if (anchorF >= 0 && GSMap.IsValidTile(anchorF)) {
+            fdx = GSMap.GetTileX(anchorF) - ax;
+            fdy = GSMap.GetTileY(anchorF) - ay;
+            if (fdx < -1 || fdx > 1 || fdy < -1 || fdy > 1) { fdx = 1; fdy = 0; }
+        }
+        local r = this.StationRadius();
+        local ring = step % 5;
+        local best = null;
+        local bestProd = -1;
+        for (local dy = -ring; dy <= ring; dy++) {
+            for (local dx = -ring; dx <= ring; dx++) {
+                if (ring > 0 && (dx != -ring && dx != ring && dy != -ring && dy != ring)) continue;
+                local x = ax + dx; local y = ay + dy;
+                if (x < 0 || y < 0) continue;
+                if (x >= GSMap.GetMapSizeX() || y >= GSMap.GetMapSizeY()) continue;
+                local tile = GSMap.GetTileIndex(x, y);
+                if (GSTile.IsWaterTile(tile)) continue;
+                if (!GSTile.IsBuildable(tile)) continue;
+                // front must also be valid/buildable (translated direction)
+                local fx = x + fdx; local fy = y + fdy;
+                if (fx < 0 || fy < 0) continue;
+                if (fx >= GSMap.GetMapSizeX() || fy >= GSMap.GetMapSizeY()) continue;
+                local front = GSMap.GetTileIndex(fx, fy);
+                if (GSTile.IsWaterTile(front)) continue;
+                if (!GSTile.IsBuildable(front)) continue;
+                // production within the catchment this stop would cover
+                local prod = GSTile.GetCargoProduction(tile, pax, 1, 1, r);
+                if (prod > bestProd) {
+                    bestProd = prod;
+                    best = tile;
+                }
+            }
+        }
+        if (best == null) return null;
+        local bfx = GSMap.GetTileX(best) + fdx;
+        local bfy = GSMap.GetTileY(best) + fdy;
+        return [best, GSMap.GetTileIndex(bfx, bfy)];
+    }
+
+    /* Station coverage radius (cached); bus stops normally cover 4 (or 3
+     * with modified_catchment). Ask the game. */
+    function StationRadius() {
+        if (this._radius > 0) return this._radius;
+        this._radius = GSStation.GetCoverageRadius(GSStation.STATION_BUS_STOP);
+        if (this._radius <= 0) this._radius = 3;
+        return this._radius;
+    }
+
+    /* True when this job id has already been completed by this executor. */
+    function IsDoneJob(job) {
+        foreach (j in this._doneJobs) {
+            if (j == job) return true;
+        }
+        return false;
+    }
+
+    /* OLDEST pending blueprint not yet completed, or -1 (FIFO).
+     *
+     * Why FIFO and not newest-wins: the queue semantics are part of the action
+     * contract the agent plans against ("commands are built in submission
+     * order"). Newest-wins silently discards a submitted plan with no feedback,
+     * which breaks action->outcome causality - and it was a policy the harness
+     * chose FOR the agent, based on a guess about its intent. cal2 measured the
+     * guess being wrong: four commands meant FOUR wanted routes, not "supersede
+     * the old one". Every submitted plan is now built, in order.
+     *
+     * (A done-SET, not a monotonic id check: the agent may pass explicit job
+     * ids, so ids are NOT guaranteed to increase - cal2 sent "job 2".) */
+
+
+    /* S3: build a road between station A's front and station B's front using
+     * the Pathfinder.Road library (imported as _PF). Mirrors arena PhaseRoad:
+     * cost tuning + FindPath(50) loop, walk path emitting BuildRoad both
+     * directions per segment, then connect both stops to their fronts.
+     * Runs once per tick slice; stage advances to "done" only when the road
+     * and both stop connections are in place (or abort after bounded retries).
+     * Report every road action via SetPhase so the runner sees progress. */
+    /* S3: build a road from station A's front to station B's front in
+     * GREEDY SEGMENTS. Pathfinder.Road v4 + AyStar v6 (2012) deadlocks on
+     * long single searches (>~60 manhattan; probe: FindPath(1000) never
+     * returns for a 111-tile gap while a 25-tile one returns instantly).
+     * So each PhaseRoad tick searches only a SHORT segment (~18 tiles)
+     * toward B with a small probe-goal, lays it, and advances _roadCur.
+     * The probe auto-retreats on failure so we always make progress or
+     * abort cleanly. Final segment (<~25 tiles) goes straight to fB. */
+    function PhaseRoad() {
+        // 1. Initialize per-route state once.
+        if (this._roadCur < 0) {
+            if (this._slotA.bp == null || this._slotB.bp == null) {
+                this.Ph("road_nofront");
+                this._stage = "done";
+                return;
+            }
+            this._builtRoad = [];
+            GSRoad.SetCurrentRoadType(GSRoad.ROADTYPE_ROAD);
+            this._roadCur = this._slotA.bp[1]; // station A front
+            this._roadSeg = 0;
+            this.Ph("road_start");
+        }
+        local fB = this._slotB.bp[1];
+        local dist = GSMap.DistanceManhattan(this._roadCur, fB);
+        if (dist <= 0) {
+            // Already at B (degenerate); just connect stops.
+            this.FinishRoad();
+            return;
+        }
+        // 2. Pick this segment's probe goal (retreating on failure). When the
+        //    remaining distance is short, aim straight at fB so the final
+        //    segment terminates ON the destination (never past it).
+        local step = this._roadSegStep;
+        local segLen = (dist <= 22) ? dist : 20;
+        local direct = (dist <= 22);
+        // Count probe failures so the give-up message can say WHICH half of the
+        // search failed: "could not pick a goal tile" (terrain/water around us)
+        // versus "picked a goal but no path reaches it" (blocked/bridge needed).
+        // Without this the operator and the agent only saw the search spinning.
+        local probeFails = 0;
+        while (segLen >= 4) {
+            local goal = direct ? fB : this.SegmentProbe(this._roadCur, fB, segLen);
+            if (!direct && goal < 0) { probeFails++; segLen -= 4; continue; }
+            local path = this.FindSegment(this._roadCur, goal);
+            if (path == null) {
+                // No route to this probe: shorten and retry (rate-limited).
+                if (step >= 3) {
+                    segLen -= 4;
+                    if (direct && segLen < dist) { direct = false; segLen = 20; }
+                    step = 0;
+                } else {
+                    this._roadSegStep = step + 1;
+                    this.Ph("rd retry" + (step + 1));
+                    return;
+                }
+                continue;
+            }
+            if (path == false) {
+                this._roadSegStep = step + 1;
+                // 40 chunks x 50 iterations = the same ~2000-iteration budget the
+                // old single-tick loop had, but spread over 40 ticks so the AI
+                // yields between them and stays observable.
+                if (step > 40) { segLen -= 4; step = 0; }
+                // d<dist> = tiles still to go, p<fails> = goal tiles we could not
+                // find. "EX rd s0 r7 d42 p0 j100" is 25 chars, inside the 31 limit.
+                this.Ph("rd s" + this._roadSeg + " r" + step + " d" + dist + " p" + probeFails);
+                return; // more search iterations next tick
+            }
+            // 3. Lay this segment's path.
+            local built = this.LayPath(path);
+            if (built <= 0) {
+                // Lay failure (terrain/funds): retry a shorter probe next
+                // tick instead of aborting the whole route.
+                if (step >= 6) {
+                    // Report WHY: without the reason the agent (and the operator)
+                    // cannot tell terrain from funds from obstruction, so it
+                    // cannot learn anything from the failure (SPEC §10.20).
+                    this.Ph("road_stuck:" + this.ShortErr());
+                    this._stage = "done";
+                    return;
+                }
+                this._roadSegStep = step + 1;
+                this.Ph("rd layr" + (step + 1));
+                return;
+            }
+            // Advance to the tile we actually reached, NOT to the path's goal.
+            // If only part of the path was laid, claiming the goal would skip the
+            // unbuilt middle. _lastLaid is always contiguous with _roadCur now
+            // that LayPath builds away from us.
+            this._roadCur = this._lastLaid >= 0 ? this._lastLaid : this._roadCur;
+            this._roadSeg++;
+            this._roadSegStep = 0;
+            local nd = GSMap.DistanceManhattan(this._roadCur, fB);
+            this.Ph("road seg" + this._roadSeg + " d" + nd);
+            // 4. Route complete when the last segment ended on fB.
+            if (this._roadCur == fB) {
+                this.FinishRoad();
+            }
+            return;
+        }
+        // Probe could not advance even at short range -> give up cleanly, and
+        // SAY WHY: distance still to go + how many probe goals we could not find.
+        this.Ph("rd_stuck " + this._roadSeg + " d" + dist + " p" + probeFails);
+        this._stage = "done";
+    }
+
+    /* Pick a probe tile ~`len` tiles from `cur` in the direction of `goal`,
+     * preferring buildable non-water land. Returns tile or -1. */
+    function SegmentProbe(cur, goal, len) {
+        local cx = GSMap.GetTileX(cur); local cy = GSMap.GetTileY(cur);
+        local gx = GSMap.GetTileX(goal); local gy = GSMap.GetTileY(goal);
+        local dx = 0; local dy = 0;
+        if (gx > cx) dx = 1; else if (gx < cx) dx = -1;
+        if (gy > cy) dy = 1; else if (gy < cy) dy = -1;
+        // walk outward up to len along the primary axis, then relax on failure
+        local tries = [ [dx,dy], [dx,0], [0,dy], [dx,-dy] ];
+        for (local t = 0; t < 4; t++) {
+            local px = cx + tries[t][0] * len;
+            local py = cy + tries[t][1] * len;
+            // keep in bounds
+            if (px < 0) px = 0; if (py < 0) py = 0;
+            if (px >= GSMap.GetMapSizeX()) px = GSMap.GetMapSizeX() - 1;
+            if (py >= GSMap.GetMapSizeY()) py = GSMap.GetMapSizeY() - 1;
+            local tile = GSMap.GetTileIndex(px, py);
+            if (GSTile.IsWaterTile(tile)) continue;
+            if (GSRoad.IsRoadTile(tile)) return tile; // existing road is fine
+            if (!GSTile.IsBuildable(tile)) continue;
+            // also check we're actually closer than current
+            if (GSMap.DistanceManhattan(tile, goal) >=
+                GSMap.DistanceManhattan(cur, goal)) continue;
+            return tile;
+        }
+        return -1;
+    }
+
+    /* Run Pathfinder.Road from `from` to a single probe `to`. Returns a
+     * path node, false (needs more iterations) or null (no path). */
+    /* 短错误文本（相位 note 用；完整错误走 error 字段）。取错误串的首个词。 */
+    function ShortErr() {
+        local e = this._layErr;
+        if (e == null || e == "") e = "" + GSError.GetLastErrorString();
+        if (e == null || e == "" || e == "(null)") return "unknown";
+        local sp = e.find(" ");
+        return (sp == null || sp <= 0) ? e : e.slice(0, sp);
+    }
+
+    function FindSegment(from, to) {
+        // ONE search chunk per call, with the pathfinder PERSISTED across calls.
+        //
+        // Was: up to 40 x FindPath(50) in a single tick - 2000 iterations inside
+        // one Tick(). This file already documents that Pathfinder.Road v4 hangs
+        // on long searches ("FindPath(1000) never returns"). Because the search
+        // runs INSIDE Tick(), a hang freezes the entire AI: no heartbeat, no
+        // phase change, no further construction. From the outside that is
+        // indistinguishable from "the executor is dead", which is exactly the
+        // undiagnosable stall in ROADMAP 4b/5 (2026-09-12).
+        //
+        // Yielding between chunks means the AI always gets back to its loop, so
+        // the heartbeat keeps reporting and a slow search is visible as slow
+        // rather than as silence.
+        if (this._PF == null) {
+            // 无库：贪心分段（一次性返回节点链或 null；调用方的 node/false/null
+            // 契约里 false=“还要迭代”，这里永远一次做完，故不产生 false）。
+            return GreedyPath(from, to);
+        }
+        if (this._pf == null || this._pfFrom != from || this._pfTo != to) {
+            local pf = this._PF();
+            pf.cost.tile = 100;
+            pf.cost.turn = 50;
+            pf.cost.no_existing_road = 120;
+            pf.cost.slope = 200;
+            pf.cost.bridge_per_tile = 100;
+            pf.cost.tunnel_per_tile = 100;
+            pf.cost.coast = 20;
+            pf.cost.max_bridge_length = 12;
+            pf.cost.max_tunnel_length = 10;
+            pf.InitializePath([from], [to]);
+            this._pf = pf;
+            this._pfFrom = from;
+            this._pfTo = to;
+        }
+        return this._pf.FindPath(50); // node, false (more to do), or null
+    }
+
+    /* Build road/bridge/tunnel along a path node chain. Returns count of
+     * segments laid. */
+    function LayPath(path) {
+        // Flatten the parent chain first. FindPath returns the GOAL node and
+        // GetParent() walks back toward the source, so the chain is
+        // [goal, ..., source].
+        local chain = [];
+        local n = path;
+        while (n != null) { chain.append(n.GetTile()); n = n.GetParent(); }
+
+        // Build SOURCE -> GOAL, i.e. walk the chain backwards.
+        //
+        // Why the direction matters (fixed 2026-09-12): building goal->source
+        // meant a partial failure left a road island near the goal that was NOT
+        // connected to the tile we were standing on, while the caller still
+        // advanced the front all the way to the goal. The route then had an
+        // invisible hole in the middle. Building away from where we already are
+        // keeps every laid segment contiguous with the road behind us, so a
+        // partial failure is always a safe place to stop and retry.
+        local segs = 0;
+        this._lastLaid = -1;
+        for (local i = chain.len() - 1; i > 0; i--) {
+            local from = chain[i];
+            local to = chain[i - 1];
+            if (GSMap.DistanceManhattan(from, to) == 1) {
+                local ok1 = GSRoad.BuildRoad(from, to);
+                // 探针同款清障重试（真机：树/岩石挡住是常态，road_stuck:ERR_AREA_NOT_CLEAR）。
+                if (!ok1) {
+                    GSTile.DemolishTile(to);
+                    ok1 = GSRoad.BuildRoad(from, to);
+                }
+                if (!ok1 && GSError.GetLastError() != GSError.ERR_ALREADY_BUILT) {
+                    this._layErr = "" + GSError.GetLastErrorString();
+                    return segs > 0 ? segs : -1;
+                }
+                GSRoad.BuildRoad(to, from);
+                this._builtRoad.append([from, to]);
+                segs++;
+                this._lastLaid = to;
+            } else if (!GSBridge.IsBridgeTile(from) && !GSTunnel.IsTunnelTile(from)) {
+                if (GSRoad.IsRoadTile(from)) GSTile.DemolishTile(from);
+                if (GSTunnel.GetOtherTunnelEnd(from) == to) {
+                    if (!GSTunnel.BuildTunnel(GSVehicle.VT_ROAD, from)) {
+                        this._layErr = "" + GSError.GetLastErrorString();
+                        return segs > 0 ? segs : -1;
+                    }
+                } else {
+                    local bl = GSBridgeList_Length(GSMap.DistanceManhattan(from, to) + 1);
+                    bl.Valuate(GSBridge.GetMaxSpeed);
+                    bl.Sort(GSList.SORT_BY_VALUE, false);
+                    if (!GSBridge.BuildBridge(GSVehicle.VT_ROAD, bl.Begin(), from, to)) {
+                        this._layErr = "" + GSError.GetLastErrorString();
+                        return segs > 0 ? segs : -1;
+                    }
+                }
+                this._builtRoad.append([from, to]);
+                segs++;
+                this._lastLaid = to;
+            } else {
+                this._lastLaid = to;
+            }
+        }
+        return segs;
+    }
+
+    /* Tile at the far end of a path chain. FindPath returns the GOAL node
+     * whose GetParent() chain walks back to the source; the goal tile is the
+     * returned node's own tile (the head), not the tail. */
+    function LastTileOf(path) {
+        if (path == null) return -1;
+        return path.GetTile();
+    }
+
+    /* Called when the full route is laid: connect both stops to their
+     * fronts and move to the depot stage. */
+    function FinishRoad() {
+        local tA = this._slotA.bp[0];
+        local fA = this._slotA.bp[1];
+        local tB = this._slotB.bp[0];
+        local fB = this._slotB.bp[1];
+        this.Ph("road_built");
+        this.ConnectStop(tA, fA);
+        this.ConnectStop(tB, fB);
+        this._stage = "depot";
+    }
+
+
+    function PhaseDepot() {
+        if (this._slotD.bp == null) {
+            // No D sign (GS best-effort) -> find near station A's front.
+            if (this._slotA.bp != null) {
+                local site = this.FindAltSite(this._slotA.bp[0], this._slotA.bp[1], 3, 6);
+                if (site != null) this._slotD.bp = site;
+            }
+        }
+        if (this._slotD.bp == null) {
+            this.Ph("dpt_nowhere");
+            this._stage = "done";
+            return;
+        }
+        local tile = this._slotD.bp[0];
+        local front = this._slotD.bp[1];
+        if (!this.TryPlaceDepot(tile, front)) {
+            if (this._slotD.tried > 20) {
+                this.Ph("dpt_giveup");
+                this._stage = "done";
+                return;
+            }
+            local alt = this.FindAltSite(tile, front, 1 + (this._slotD.tried % 5), 6);
+            this._slotD.tried++;
+            if (alt != null) this._slotD.bp = alt;
+            else this.Ph("dpt_retry");
+            return;
+        }
+        // Depot built. Ensure the depot tile connects to its own front
+        // (a depot whose door faces an unconnected front strands the bus
+        // forever inside - seen live), then road from that front to the
+        // nearer station front.
+        this.Ph("dpt_ok");
+        this.ConnectStop(tile, front);
+        if (!GSRoad.AreRoadTilesConnected(front, tile)) {
+            this.Ph("dpt_door_e");
+            this._stage = "done";
+            return;
+        }
+        this.ConnectDepotToStation(tile, front);
+        this._stage = "bus";
+    }
+
+    /* One BuildRoadDepot attempt (clear land first). */
+    function TryPlaceDepot(tile, front) {
+        GSTile.DemolishTile(tile);
+        GSTile.DemolishTile(front);
+        if (!GSTile.IsBuildable(tile)) return false;
+        GSRoad.SetCurrentRoadType(GSRoad.ROADTYPE_ROAD);
+        local ok = GSRoad.BuildRoadDepot(tile, front);
+        if (!ok) {
+            local es = GSError.GetLastErrorString();
+            if (es == null) es = "" + GSError.GetLastError();
+            if (es.len() > 14) es = es.slice(0, 14);
+            this.Ph("dpt_e" + es);
+        }
+        return ok;
+    }
+
+    /* Road from the depot front to the nearer station front so buses can
+     * actually drive out. Bidirectional BuildRoad per segment. */
+    function ConnectDepotToStation(depotTile, depotFront) {
+        local near = null;
+        local tA = this._slotA.bp == null ? -1 : this._slotA.bp[1];
+        local tB = this._slotB.bp == null ? -1 : this._slotB.bp[1];
+        local dA = (tA < 0) ? 999999 : GSMap.DistanceManhattan(depotFront, tA);
+        local dB = (tB < 0) ? 999999 : GSMap.DistanceManhattan(depotFront, tB);
+        near = (dA <= dB) ? tA : tB;
+        if (near < 0) return;
+        local dpath = null;
+        if (this._PF == null) {
+            dpath = GreedyPath(depotFront, near);
+        } else {
+            local pf = this._PF();
+            pf.cost.tile = 100;
+            pf.cost.turn = 50;
+            pf.cost.no_existing_road = 40;
+            pf.cost.slope = 200;
+            pf.InitializePath([depotFront], [near]);
+            dpath = false;
+            local di = 0;
+            while (dpath == false && di < 300) {
+                dpath = pf.FindPath(1000);
+                di++;
+                if (di % 10 == 0) this.Sleep(1);
+            }
+        }
+        if (dpath == null || dpath == false) {
+            this.Ph("dpt_noconn");
+            return;
+        }
+        local okSegs = 0;
+        while (dpath != null) {
+            local par = dpath.GetParent();
+            if (par != null) {
+                local from = dpath.GetTile();
+                local to = par.GetTile();
+                if (GSMap.DistanceManhattan(from, to) == 1) {
+                    GSRoad.BuildRoad(from, to);
+                    GSRoad.BuildRoad(to, from);
+                    this._builtRoad.append([from, to]);
+                    okSegs++;
+                }
+            }
+            dpath = par;
+        }
+        if (okSegs > 0) this.Ph("dpt_conn");
+    }
+
+    /* S4b: buy a passenger road vehicle at the depot, refit, give it orders
+     * A -> B -> A, and start it. Mirrors arena PhaseBus (engine pick by
+     * CC_PASSENGERS + ROADTYPE_ROAD, best speed). */
+    function PhaseBus() {
+        local cl = GSCargoList();
+        cl.Valuate(GSCargo.HasCargoClass, GSCargo.CC_PASSENGERS);
+        cl.KeepValue(1);
+        if (cl.IsEmpty()) {
+            this.Ph("bus_nocargo");
+            this._stage = "done";
+            return;
+        }
+        local cargo = cl.Begin();
+        local engine = this.PickBusEngine(cargo);
+        if (engine < 0) {
+            this.Ph("bus_noeng");
+            this._stage = "done";
+            return;
+        }
+        local depotTile = this._slotD.bp[0];
+        local v = GSVehicle.BuildVehicle(depotTile, engine);
+        if (GSVehicle.IsValidVehicle(v)) {
+            // 头车也是这条线路的车队成员（`V:N` 现在表示"线路应有 N 辆车"）。
+            // 不把它计入会让 `cur` 永远比真实车队少 1，于是"设为 1"会克隆出 2 辆。
+            this._fleetOwned.append(v);
+            this.RegisterRoute(this._job);
+        }
+        if (!GSVehicle.IsValidVehicle(v)) {
+            local es = GSError.GetLastErrorString();
+            if (es == null) es = "" + GSError.GetLastError();
+            if (es.len() > 14) es = es.slice(0, 14);
+            this.Ph("bus_buy_e" + es);
+            this._stage = "done";
+            return;
+        }
+        this._vehicle = v;
+        GSVehicle.RefitVehicle(v, cargo);
+        local stA = this._slotA.bp[0];
+        local stB = this._slotB.bp[0];
+        GSOrder.AppendOrder(v, stA, GSOrder.OF_NON_STOP_INTERMEDIATE);
+        GSOrder.AppendOrder(v, stB, GSOrder.OF_NON_STOP_INTERMEDIATE);
+        if (!GSVehicle.StartStopVehicle(v)) {
+            this.Ph("bus_start_e");
+        }
+        // Fleet scaling (arena-verified): one bus cannot clear the queue a
+        // healthy route builds; clone to 3 sharing the same orders.
+        for (local i = 1; i < 3; i++) {
+            local cv = GSVehicle.CloneVehicle(this._slotD.bp[0], v, true);
+            if (!GSVehicle.IsValidVehicle(cv)) break;
+            GSVehicle.StartStopVehicle(cv);
+        }
+        this.Ph("bus_live");
+        this._stage = "done";
+    }
+
+    /* Pick the fastest buildable passenger road vehicle available. */
+    function PickBusEngine(cargo) {
+        local el = GSEngineList(GSVehicle.VT_ROAD);
+        el.Valuate(GSEngine.IsBuildable);          el.KeepValue(1);
+        el.Valuate(GSEngine.GetRoadType);          el.KeepValue(GSRoad.ROADTYPE_ROAD);
+        el.Valuate(GSEngine.CanRefitCargo, cargo); el.KeepValue(1);
+        el.Valuate(GSEngine.GetMaxSpeed);
+        el.Sort(GSList.SORT_BY_VALUE, false);
+        if (el.IsEmpty()) return -1;
+        return el.Begin();
+    }
+
+    /* Connect a bus stop tile to its front with a road stub (bidirectional),
+     * unless already connected. */
+    function ConnectStop(stop_tile, front_tile) {
+        if (stop_tile == null || front_tile == null) return;
+        if (GSRoad.AreRoadTilesConnected(front_tile, stop_tile)) return;
+        GSRoad.SetCurrentRoadType(GSRoad.ROADTYPE_ROAD);
+        local ok = GSRoad.BuildRoad(front_tile, stop_tile);
+        if (!ok && GSError.GetLastError() == GSError.ERR_ALREADY_BUILT) ok = true;
+        if (!ok) {
+            ok = GSRoad.BuildRoad(stop_tile, front_tile);
+            if (!ok && GSError.GetLastError() == GSError.ERR_ALREADY_BUILT) ok = true;
+        }
+        if (ok && this._builtRoad != null) this._builtRoad.append([front_tile, stop_tile]);
+    }
+
+    /* Run a fresh pathfinder with huge no_existing_road penalty: if it finds
+     * a route it means the tiles we built form a connected road. */
+    /* Locate the blueprint sign for station `label` ("A"/"B" -> sign slot
+     * "S"/"E"). Returns [tile, front] or null. */
+
+
+    /* One BuildRoadStation attempt on cleared land. Reports via SetPhase on
+     * failure so we can see the engine error code from the admin port. */
+    function TryPlaceStop(tile, front) {
+        GSTile.DemolishTile(tile);
+        GSTile.DemolishTile(front);
+        GSRoad.SetCurrentRoadType(GSRoad.ROADTYPE_ROAD); // precondition (pre-15 defaults vary)
+        local ok = GSRoad.BuildRoadStation(tile, front,
+                                           GSRoad.ROADVEHTYPE_BUS,
+                                           GSStation.STATION_NEW);
+        if (ok) {
+            // Best-effort immediate connection; report-only on failure. The
+            // real fix for sloped pairs is keeping the GS-chosen front
+            // direction during the pax scan (BestPaxCandidate), which stays
+            // on the same terrain as the anchor the GS validated.
+            GSRoad.SetCurrentRoadType(GSRoad.ROADTYPE_ROAD);
+            if (!GSRoad.AreRoadTilesConnected(front, tile)) {
+                local c1 = GSRoad.BuildRoad(front, tile);
+                if (!c1 && GSError.GetLastError() == GSError.ERR_ALREADY_BUILT) c1 = true;
+                if (!c1) c1 = GSRoad.BuildRoad(tile, front);
+                if (!c1 && GSError.GetLastError() == GSError.ERR_ALREADY_BUILT) c1 = true;
+                if (!c1) this.Ph("st_slope_warn");
+            }
+            return true;
+        }
+        local es = GSError.GetLastErrorString();
+        if (es == null) es = "" + GSError.GetLastError();
+        if (es.len() > 14) es = es.slice(0, 14);
+        this.Ph("st_place_e" + es);
+        return false;
+    }
+
+    /* Scan a square ring of radius `radius` around `center` for an alternative
+     * buildable [tile, front] pair. Shifts by multiples of 3 so repeated calls
+     * walk outward. */
+    function FindAltSite(center, _front, ring, _maxR) {
+        local cx = GSMap.GetTileX(center);
+        local cy = GSMap.GetTileY(center);
+        local dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+        local r = ring;
+        for (local dx = -r; dx <= r; dx++) {
+            for (local dy = -r; dy <= r; dy++) {
+                if (dx != -r && dx != r && dy != -r && dy != r) continue;
+                local x = cx + dx; local y = cy + dy;
+                if (x < 0 || y < 0) continue;
+                if (x >= GSMap.GetMapSizeX() || y >= GSMap.GetMapSizeY()) continue;
+                local tile = GSMap.GetTileIndex(x, y);
+                if (GSTile.IsWaterTile(tile)) continue;
+                if (!GSTile.IsBuildable(tile)) continue;
+                foreach (d in dirs) {
+                    local fx = x + d[0]; local fy = y + d[1];
+                    if (fx < 0 || fy < 0) continue;
+                    if (fx >= GSMap.GetMapSizeX() || fy >= GSMap.GetMapSizeY()) continue;
+                    local front = GSMap.GetTileIndex(fx, fy);
+                    if (GSTile.IsWaterTile(front)) continue;
+                    if (!GSTile.IsBuildable(front)) continue;
+                    return [tile, front];
+                }
+            }
+        }
+        return null;
+    }
+
+    /* Parse a `key=value` token; -1 if key mismatch or malformed. */
+    function ParseKV(pair, key) {
+        local pfx = key + "=";
+        if (pair == null || pair.len() <= pfx.len()) return -1;
+        if (pair.slice(0, pfx.len()) != pfx) return -1;
+        return this.ToInt(pair.slice(pfx.len()));
+    }
+
+    /* Split via find/slice — s[i] returns an integer in OpenTTD's Squirrel,
+     * single-quoted literals are integers; use double quotes + find/slice. */
+    function Split(s, sep) {
+        local out = [];
+        for (;;) {
+            local idx = s.find(sep);
+            if (idx == null || idx < 0) { out.push(s); break; }
+            out.push(s.slice(0, idx));
+            s = s.slice(idx + sep.len());
+            if (s.len() == 0) { out.push(""); break; }
+        }
+        return out;
+    }
+
+    /* Parse a decimal integer; -1 if malformed.
+     * NOTE: "7".tointeger() == 7 (numeric), NOT ASCII 55. */
+    function ToInt(s) {
+        if (s == null || s.len() == 0) return -1;
+        local neg = false;
+        if (s.slice(0, 1) == "-") { neg = true; s = s.slice(1); }
+        local v = 0;
+        for (local i = 0; i < s.len(); i++) {
+            local ch = s.slice(i, i + 1);
+            if (ch < "0" || ch > "9") return -1; // not 0-9
+            v = v * 10 + ch.tointeger();
+        }
+        return neg ? -v : v;
+    }
+
+    /* Find the passenger cargo id (cached). */
+    function GetPaxCargoId() {
+        if (this._paxCargo >= 0) return this._paxCargo;
+        local cl = GSCargoList();
+        foreach (c, _ in cl) {
+            if (GSCargo.HasCargoClass(c, GSCargo.CC_PASSENGERS)) {
+                this._paxCargo = c;
+                return c;
+            }
+        }
+        return -1;
+    }
+
+    /* Live bus diagnostic encoded into the company name (31 chars):
+     *   EX [R|S|D|@|B|X]<speed> a<waitA> b<waitB> j<job>
+     * R=running, S=stopped, D=depot, @=at station, B=broken, X=crashed.
+     * a/b = passengers waiting at station A/B — distinguishes a working
+     * route from one where nobody boards. */
+    /* S6: apply a `NUTZ:bp:<job>:V:<count>` fleet-size sign from the GS
+     * (placed by the agent's add_vehicles tool). Grows by cloning the lead
+     * vehicle (clones share orders); shrinks by selling the newest vehicles.
+     * Acts only when the requested count differs from what we last applied. */
+    /* 解析所有 `V:` 请求（**任意 job**，不只当前 job）。
+     *
+     * G3 时代这里只找"当前 job"的标牌，其他 job 一律回 `fleet_otherjob`。
+     * 后果有实测（D20）：agent 在建 job 102 时给 job 101 调车队被拒，
+     * **同一个请求重发 8 次**、车队始终不变 —— 它学到的因果是"请求车队没用"。
+     * M3-2a 的 `_routes` 登记表已经能提供旧线路的车队，所以现在：
+     * **认识的线路就应用，不认识的才拒绝**，且拒绝必须具名（SPEC §10.88）。 */
+    function FleetRequests() {
+        // GS-only：车队请求由 Dispatch 直接入队（V: 标牌已废）。
+        local out = this._fleetReqs;
+        this._fleetReqs = [];
+        return out;
+    }
+
+    /* 一个 job 的车队目标状态：当前 job 用活字段，旧 job 用登记表。 */
+    function FleetTarget(job) {
+        if (job == this._job) {
+            return { known = true, retired = false, vehicles = this._fleetOwned,
+                     lead = this._vehicle,
+                     depot = (this._slotD.bp == null ? -1 : this._slotD.bp[0]),
+                     applied = this._fleetApplied };
+        }
+        if (this._routes.rawin(job)) {
+            local r = this._routes[job];
+            return { known = true, retired = (r.retired == true), vehicles = r.vehicles,
+                     lead = r.lead, depot = r.depot,
+                     applied = (r.rawin("applied") ? r.applied : -1) };
+        }
+        return { known = false, retired = false, vehicles = null, lead = -1, depot = -1, applied = -1 };
+    }
+
+    /* 把目标状态写回（当前 job 或登记表），保证下次读到同一份账。 */
+    function SaveFleetTarget(job, vehicles, applied) {
+        if (job == this._job) {
+            this._fleetOwned = vehicles;
+            this._fleetApplied = applied;
+            return;
+        }
+        local r = this._routes[job];
+        this._routes[job] <- {
+            vehicles = vehicles,
+            lead = r.lead,
+            depot = r.depot,
+            retired = (r.retired == true),
+            applied = applied,
+        };
+    }
+
+    function CheckAddVehicles() {
+        local reqs = this.FleetRequests();
+        foreach (req in reqs) {
+            local job = req.job;
+            local want = req.want;
+            if (want < 1) continue; // "无请求"，不是"清零"
+            local t = this.FleetTarget(job);
+            if (!t.known) {
+                this.Ph("fleet_unknown" + job);
+                continue;
+            }
+            if (t.retired) {
+                this.Ph("fleet_retired" + job);
+                continue;
+            }
+            if (want == t.applied) continue; // 已满足（真正的"无事发生"）
+            local cur = 0;
+            foreach (vid in t.vehicles) {
+                if (GSVehicle.IsValidVehicle(vid)) cur++;
+            }
+            // 推迟通报（事件通道，要粘住）：说出"我看到了、现在还不能做"。
+            local waitKey = job + ":" + want;
+            if (waitKey != this._fleetWaitAnnounced) {
+                this._fleetWaitAnnounced = waitKey;
+                this.Ph("fleet_wait" + want + "j" + job + "c" + cur + "L" + t.vehicles.len());
+            }
+            if (cur < want) {
+                if (!GSVehicle.IsValidVehicle(t.lead)) {
+                    this.Ph("fleet_noveh" + job);
+                    continue;
+                }
+                if (t.depot < 0) {
+                    this.Ph("fleet_nodepot" + job);
+                    continue;
+                }
+                while (cur < want) {
+                    local cv = GSVehicle.CloneVehicle(t.depot, t.lead, true);
+                    if (!GSVehicle.IsValidVehicle(cv)) break;
+                    GSVehicle.StartStopVehicle(cv);
+                    t.vehicles.append(cv);
+                    cur++;
+                }
+                this.SaveFleetTarget(job, t.vehicles, want);
+                this.Ph("fleetg" + cur + "j" + job + "L" + t.vehicles.len() +
+                                    "C" + this.CountOwnVehicles());
+            } else if (cur > want) {
+                local toSell = cur - want;
+                local pending = [];
+                local i = t.vehicles.len() - 1;
+                while (i >= 0 && toSell > 0) {
+                    local vid = t.vehicles[i];
+                    i--;
+                    if (!GSVehicle.IsValidVehicle(vid)) continue;
+                    if (vid == t.lead) continue; // 头车永不卖：缩编不是退役
+                    if (GSVehicle.SendVehicleToDepot(vid)) { pending.append(vid); toSell--; }
+                }
+                foreach (vid in pending) this._fleetSell.append(vid);
+                this.SaveFleetTarget(job, t.vehicles, want);
+                this.Ph("fleetsend" + pending.len() + "j" + job + "C" + this.CountOwnVehicles());
+            } else {
+                this.SaveFleetTarget(job, t.vehicles, want);
+                this.Ph("fleetok" + want + "j" + job + "C" + this.CountOwnVehicles());
+            }
+        }
+    }
+
+    /* 推进"送回车库 → 卖出"：每轮尝试一次，直到车库里的车被卖掉。
+     * 单独成函数是因为卖车跨多个游戏 tick（车要开回车库），不能在一个循环里等。 */
+    function ProcessFleetSells() {
+        if (this._fleetSell.len() == 0) return;
+        local waiting = [];
+        local sold = 0;
+        local blocked = 0;
+        local gone = 0;
+        foreach (vid in this._fleetSell) {
+            // 车辆"不在了"必须**单独计数**：真机上 `fleetsend8` 只卖出 4 辆就 `w0`，
+            // 其余 4 辆是**静默消失**的（它们没被卖，却也不存在了）。把"消失"与"卖出"
+            // 分开报，才不会把一次删除读成一次成功的卖出（D20 同源）。
+            if (!GSVehicle.IsValidVehicle(vid)) { gone++; continue; }
+            if (!GSVehicle.IsStoppedInDepot(vid)) { waiting.append(vid); continue; }
+            if (GSVehicle.SellVehicle(vid)) sold++; else { blocked++; waiting.append(vid); }
+        }
+        this._fleetSell = waiting;
+        if (this._fleetSell.len() == 0) {
+            // 清掉已卖掉的条目（失效 id 会被计数忽略，但留着会让人误解车队规模）。
+            // M3-2c：**每条线路的列表都要清**——旧线路的车现在也会被送去车库卖掉。
+            local live = [];
+            foreach (vid in this._fleetOwned) {
+                if (GSVehicle.IsValidVehicle(vid)) live.append(vid);
+            }
+            this._fleetOwned = live;
+            foreach (job, r in this._routes) {
+                local live2 = [];
+                foreach (vid in r.vehicles) {
+                    if (GSVehicle.IsValidVehicle(vid)) live2.append(vid);
+                }
+                this._routes[job] <- {
+                    vehicles = live2,
+                    lead = r.lead,
+                    depot = r.depot,
+                    retired = (r.retired == true),
+                    applied = (r.rawin("applied") ? r.applied : -1),
+                };
+            }
+        }
+        if (sold > 0 || gone > 0 || (blocked > 0 && this._fleetSell.len() == 0)) {
+            this.Ph(
+                "fleetsold" + sold + "g" + gone + "w" + this._fleetSell.len() +
+                    "b" + blocked + "C" + this.CountOwnVehicles()
+            );
+        }
+    }
+
+    /* 把当前线路的状态写进登记表（幂等）。切 job 时也会调用同一份逻辑。 */
+    function RegisterRoute(job) {
+        local prev = this._routes.rawin(job) ? this._routes[job] : null;
+        this._routes[job] <- {
+            vehicles = this._fleetOwned,
+            lead = this._vehicle,
+            depot = (this._slotD.bp == null ? -1 : this._slotD.bp[0]),
+            retired = (prev != null && prev.retired == true),
+            applied = this._fleetApplied,
+        };
+    }
+
+    /* 该线路的车队（当前线路用活字段，旧线路用登记表）。 */
+    function RouteVehicles(job) {
+        if (job == this._job) return this._fleetOwned;
+        if (this._routes.rawin(job)) return this._routes[job].vehicles;
+        return null;
+    }
+
+    /* 退役：把一条线路的**全部**车辆（含头车）送回车库并卖掉。
+     *
+     * 与普通缩编的区别只有两点，但两点都关键：
+     *   ① 下限 1 不适用——头车也要卖，否则线路永远留着一辆车在跑；
+     *   ② 退役是**终态**：标牌要清掉、job 要记入 `_retiredJobs`，
+     *      否则 FindNextJob 会把它当成待建工作再建一遍。
+     * 车辆本身仍然必须"停在车库内"才能卖（引擎前置条件，见 §10.84）。
+     */
+    function RetireRoute(job) {
+        local list = this.RouteVehicles(job);
+        if (list == null) {
+            // 未知线路必须具名拒绝：静默会让模型以为退役生效了（D20）。
+            this.Ph("retire_unknown" + job);
+            return;
+        }
+        local queued = 0;
+        foreach (vid in list) {
+            if (!GSVehicle.IsValidVehicle(vid)) continue;
+            local already = false;
+            foreach (q in this._fleetSell) if (q == vid) already = true;
+            if (already) { queued++; continue; }
+            if (GSVehicle.SendVehicleToDepot(vid)) {
+                this._fleetSell.append(vid);
+                queued++;
+            }
+        }
+        this._routes[job] <- {
+            vehicles = list,
+            lead = (job == this._job ? this._vehicle : this._routes[job].lead),
+            depot = (job == this._job ? (this._slotD.bp == null ? -1 : this._slotD.bp[0]) : this._routes[job].depot),
+            retired = true,
+        };
+        // table 集合：`in` 判断存在、`<-` 新建槽位（array 没有 rawin，用错就是运行时异常）
+        if (!(job in this._retiredJobs)) this._retiredJobs[job] <- true;
+        this.Ph("retire" + queued + "C" + this.CountOwnVehicles());
+    }
+
+    /* 清掉某个 job 的 NUTZ 标牌（退役后必须清：否则会被重新捡起来重建）。 */
+
+
+    /* 已登记的线路里有没有待处理的退役（X:1）请求。 */
+    function CheckRetireRequests() {
+        // GS-only：退役请求由 Dispatch 直接入队（X: 标牌已废）。
+        local out = this._retireReqs;
+        this._retireReqs = [];
+        foreach (job in out) {
+            if (job in this._retiredJobs) continue;
+            this.RetireRoute(job);
+        }
+    }
+
+    function CountOwnVehicles() {
+        local n = 0;
+        foreach (vid, _ in GSVehicleList()) n++;
+        return n;
+    }
+
+    function DumpBus() {
+        if (!GSVehicle.IsValidVehicle(this._vehicle)) return;
+        local stA = this._slotA.bp == null ? -1 : this._slotA.bp[0];
+        local stB = this._slotB.bp == null ? -1 : this._slotB.bp[0];
+        local st = GSVehicle.GetState(this._vehicle);
+        local ch = "?";
+        if      (st == GSVehicle.VS_RUNNING)  ch = "R";
+        else if (st == GSVehicle.VS_STOPPED)  ch = "S";
+        else if (st == GSVehicle.VS_IN_DEPOT) ch = "D";
+        else if (st == GSVehicle.VS_AT_STATION) ch = "@";
+        else if (st == GSVehicle.VS_BROKEN)   ch = "B";
+        else if (st == GSVehicle.VS_CRASHED)  ch = "X";
+        local sp = GSVehicle.GetCurrentSpeed(this._vehicle);
+        local loc = GSVehicle.GetLocation(this._vehicle);
+        local dA = GSMap.DistanceManhattan(loc, stA);
+        // On every 3rd dump, also report the bus tile coords + whether the
+        // road continues from the bus tile toward station A (for stuck debug).
+        if (this._dumpSeq % 3 == 0) {
+            local lx = GSMap.GetTileX(loc) % 1000;
+            local ly = GSMap.GetTileY(loc) % 1000;
+            local rd = GSRoad.IsRoadTile(loc);
+            local dep = GSRoad.IsRoadDepotTile(loc);
+            local sta = GSRoad.IsRoadStationTile(loc);
+            local obj = "?";
+            if (dep) obj = "depot";
+            else if (sta) obj = "station";
+            else if (rd) obj = "road";
+            else obj = "other";
+            this.Ph("@" + lx + "," + ly + " " + obj + " d" + dA);
+            this._dumpSeq++;
+            return;
+        }
+        local pax = this.GetPaxCargoId();
+        local sa = GSStation.GetStationID(stA);
+        local wA = (pax >= 0 && GSStation.IsValidStation(sa))
+            ? GSStation.GetCargoWaiting(sa, pax) : -1;
+        this._dumpSeq++;
+        // "R37 d6 a3 #4" - running 37, 6 tiles from A, 3 waiting at A.
+        this.Ph(ch + sp + " d" + dA + " a" + wA + " #" + this._dumpSeq);
+    }
+}
+
 class BridgeV1 extends GSController {
     _last_send = 0;
     _admin_seen = 0;
@@ -33,6 +1333,7 @@ class BridgeV1 extends GSController {
     //（D44：未建的键会让整个 GS 静默不加载），所以载荷永远是同一个字面量形状。
     _facts = null;
     _facts_tick = 0;
+    _core = null;   // ExecCore（P1-1a：施工状态机，标牌邮箱已废）
 
     /**
      * Parse an executor company-name phase string into a typed event payload.
@@ -56,77 +1357,7 @@ class BridgeV1 extends GSController {
         return s;
     }
 
-    function ParseExecPhase(name) {
-        local s = "" + name;
-        if (s.len() > 3 && s.slice(0, 3) == "EX ") s = s.slice(3);
-        if (s.len() < 3 || s.slice(0, 6) == "(null ") return null;
 
-        local stage = "unknown";
-        local hb = false;
-        local job = -1;
-        // 错误相位的内容指纹（2026-09-25）。ExecEventKey 只比 stage/job/hb，于是
-        // **连续两条同样块数的错误**（典型：两条单块错误）会算出同一个键，第二条
-        // 被指纹抑制 —— 页面继续显示上一条，而真实错误早换了（实测隐患）。
-        // 这里用**整段相位文本**当指纹（不是哈希：31 字符上限下没有长度问题，
-        // 也不存在碰撞），且只对错误相位生效：心跳的 raw 每轮都变（#n / s<数>），
-        // 把它算进指纹会把心跳刷成事件风暴。相同错误仍然去重（这正是想要的）。
-        local fp = "";
-        if (stage.slice(0, 5) == "error") fp = s;
-
-        local jPos = null;
-        // 作业号后缀由 WritePhase **追加在末尾**，所以从后往前找最后一个" j"+整数。
-        // 原来的 find(" j") 取**首次**命中：块文本里只要出现 " j"（例如
-        // "can't join …"）就会把块切错、作业号变垃圾。切错还会顺带截断 s，
-        // 让 stage 判定看到半句话。tail 全是数字才认，否则宁可不切。
-        local i = s.len() - 2;
-        while (i >= 0) {
-            if (s.slice(i, i + 2) == " j") {
-                local tail = s.slice(i + 2);
-                local k = 0;
-                if (tail.len() > 0 && tail.slice(0, 1) == "-") k = 1;
-                local ok = (k > 0 && k < tail.len());
-                while (ok && k < tail.len()) {
-                    try { tail.slice(k, k + 1).tointeger(); } catch (e2) { ok = false; break; }
-                    k++;
-                }
-                if (ok) { jPos = i; break; }
-            }
-            i--;
-        }
-        if (jPos != null) {
-            try { job = s.slice(jPos + 2).tointeger(); } catch (e) {}
-            s = Trim(s.slice(0, jPos));
-        }
-
-        if (s == "boot") stage = "boot";
-        else if (s == "work") stage = "work";
-        else if (s.slice(0, 4) == "done") stage = "done"; // real: "EX done stN4 r81 bus j101"
-        else if (s.slice(0, 2) == "st") stage = "station";
-        else if (s.slice(0, 4) == "road") stage = "road";
-        else if (s.slice(0, 3) == "dpt" || s.slice(0, 5) == "depot") stage = "depot";
-        else if (s.slice(0, 3) == "bus") stage = "fleet";
-        // 错误分块（2026-09-25）：`exc<seq><marker><chunk>`（`: `后续还有块 / `=` 末块 / `~` 末块且被生产端截断）。
-        // stage 必须带上序号：ExecEventKey 只比较 stage/job/hb，若每一块都是同一个 "error"，
-        // 第 2..N 块会被指纹抑制、永远发不出去，harness 就拼不出完整消息。
-        // `raw` 保持原样（harness 用它重建文本）。
-        else if (s.len() > 4 && s.slice(0, 3) == "exc"
-                 && s.slice(3, 4) >= "1" && s.slice(3, 4) <= "9"
-                 && (s.slice(4, 5) == ":" || s.slice(4, 5) == "=" || s.slice(4, 5) == "~")) {
-            stage = "error" + s.slice(3, 4);
-        }
-        else if (s.slice(0, 3) == "exc") stage = "error";
-        else if (s.slice(0, 3) == "hb ") { hb = true; stage = "heartbeat"; }
-        else if (s.slice(0, 2) == "rd") stage = "road";
-        else if (s.len() > 0 && s[0] == "@") stage = "vehicle";
-        else if (s.len() > 1) {
-            local cls = s[0];
-            if (cls == "R" || cls == "S" || cls == "D" || cls == "B" || cls == "X" || cls == "?") {
-                stage = "vehicle";
-            }
-        }
-
-        return { stage = stage, job = job, hb = hb, fp = fp };
-    }
 
 /** Fingerprint = stage+job+hb+detail keys; values change => new event.
      *  We include only KEYS (not values) in the key, then compare the
@@ -135,45 +1366,14 @@ class BridgeV1 extends GSController {
      *  the harness. On-change emission already happens at the consumer
      *  side (stage gate), so we only NEED to gate on stage/job/hb.
      */
-    function ExecEventKey(ev) {
-        if (ev == null) return "";
-        // 形状恒定：fp 对非错误相位是空串，于是老行为逐字不变。
-        return ev.stage + "|" + ev.job + "|" + (ev.hb ? "1" : "0") + "|" + (ev.fp == null ? "" : ev.fp);
-    }
+
 
     /**
      * Poll the executor company name and emit a typed event on change.
      * Called EVERY loop iteration (~20 ticks, ~0.6 s) so phase changes reach
      * the harness without the 200-tick summary latency. Heartbeat = "no event".
      */
-    function EmitExecPhase() {
-        // -- Executor phase event (A2/A3) -------------------------------------
-        // Reads the executor AI company name; emits a typed event on change.
-        // Heartbeat = "no event". The harness A3 will drop its regex decode.
-        try {
-            local execName = "" + GSCompany.GetName(0);
-            local ev = this.ParseExecPhase(execName);
-            if (ev != null) {
-                local key = this.ExecEventKey(ev);
-                if (key != this._last_exec_key) {
-                    this._last_exec_key = key;
-                    GSAdmin.Send({
-                        kind = "exec",
-                        stage = ev.stage,
-                        job = ev.job,
-                        hb = ev.hb,
-                        raw = execName,
-                    });
-                }
-            }
-        } catch (e) {
-            // Emitter failure must not break the GS tick loop; surface it.
-            GSAdmin.Send({
-                kind = "err", cmd = "exec_emit",
-                reason = e.tostring(),
-            });
-        }
-    }
+
 
     /**
      * Resolve the station a route's endpoint actually got (N2-1).
@@ -843,11 +2043,17 @@ class BridgeV1 extends GSController {
         };
     }
 
+    /* ExecCore 的唯一上报出口（类型化 exec 事件；错误全文）。 */
+    function ReportExec(ev) {
+        try { GSAdmin.Send(ev); } catch (e) {}
+    }
+
     function Start() {
+        if (this._core == null) this._core = ExecCore(this, 0);
         while (true) {
             this.HandleEvents();
+            if (this._core != null) this._core.Tick();
             this.ProcessProbeRoute();
-            this.EmitExecPhase();
             if (GSController.GetTick() > this._last_stats + 200) {
                 this._last_stats = GSController.GetTick();
                 this.EmitRouteStats();
@@ -943,7 +2149,12 @@ class BridgeV1 extends GSController {
                 this._admin_seen++;
                 if (obj != null && obj.rawin("cmd")) {
                     this._last_cmd = "" + obj["cmd"];
-                    this.Dispatch(obj);
+                    try {
+                this.Dispatch(obj);
+            } catch (e) {
+                // 护栏：一条命令的异常不许杀死整个 GS（否则世界事实也随之断流）。
+                try { this.ReportExec({ kind = "exec", stage = "dispatch_error", error = "" + e }); } catch (e2) {}
+            }
                 } else {
                     GSAdmin.Send({ kind = "err", cmd = "admin_port",
                                    reason = "no cmd key",
@@ -1193,7 +2404,9 @@ class BridgeV1 extends GSController {
         } else if (cmd == "retire_route") {
             this.RetireRoute(obj);
         } else if (cmd == "blueprint") {
-            this.PlaceBlueprint(obj);
+            // 邮箱已废（P1-1a）：标牌中继被 ExecCore 直调取代。明确拒绝而不是假装成功。
+            GSAdmin.Send({ kind = "err", cmd = "blueprint",
+                           reason = "sign mailbox retired (P1-1); use build_bus_route" });
         } else if (cmd == "status") {
             GSAdmin.Send({ kind = "status", ok = true,
                            signs = this._sign_count,
@@ -1213,89 +2426,8 @@ class BridgeV1 extends GSController {
         }
     }
 
-    /* Place NUTZ blueprint signs for the Executor AI (arena grammar):
-     *   NUTZ:bp:<job>:S:fr=<front>:eg=<engine>   station A
-     *   NUTZ:bp:<job>:E:fr=<front>               station B
-     *   NUTZ:bp:<job>:D:fr=<front>               depot
-     *   NUTZ:bp:<job>:W:<i>                      waypoints (path tiles)
-     * Obj shape mirrors src/types.ts Blueprint + job. */
-    function PlaceBlueprint(obj) {
-        if (!obj.rawin("job"))      { GSAdmin.Send({ kind = "err", cmd = "blueprint", reason = "no job" }); return; }
-        if (!obj.rawin("stations")) { GSAdmin.Send({ kind = "err", cmd = "blueprint", reason = "no stations" }); return; }
-        if (!obj.rawin("path"))     { GSAdmin.Send({ kind = "err", cmd = "blueprint", reason = "no path" }); return; }
-        if (!obj.rawin("depot"))    { GSAdmin.Send({ kind = "err", cmd = "blueprint", reason = "no depot" }); return; }
-        local job = obj["job"];
-        local job_str = "" + job;
-        local stations = obj["stations"];
-        local path = obj["path"];
-        local depot = obj["depot"];
-        local engine = -1;
-        if (!obj.rawin("engine")) { /* optional */ } else { engine = obj["engine"]; }
-        // Build signs in the executor's company mode so its AISignList can see
-        // them. Company id comes from the command (GS can't enumerate companies).
-        local exec = GSCompany.COMPANY_INVALID;
-        if (obj.rawin("company")) exec = obj["company"];
-        local mode = null;
-        if (exec != GSCompany.COMPANY_INVALID) mode = GSCompanyMode(exec);
-        local placed = 0;
-        local sa = stations[0]; local sb = stations[1];
-        local tA = sa[0]; local fA = sa[1];
-        local tB = sb[0]; local fB = sb[1];
-        local tD = depot[0]; local fD = depot[1];
-        // Clear any stale signs for this job first.
-        local sl = GSSignList();
-        foreach (s, _ in sl) {
-            local n = GSSign.GetName(s);
-            if (n != null && n.len() > (7 + job_str.len()) && n.slice(0, 8) == "NUTZ:bp:" + job_str + ":") {
-                GSSign.RemoveSign(s);
-            }
-        }
-        // NOTE: GSSign.BuildSign returns the new SignID (0 is valid & the first
-        // sign!) — using it as a boolean miscounts. Count by checking existence
-        // via GSSignList afterwards instead.
-        local countBefore = this.CountSignsWithPrefix("NUTZ:bp:" + job_str + ":");
-        GSSign.BuildSign(tA, "NUTZ:bp:" + job_str + ":S:fr=" + fA + ":eg=" + engine);
-        GSSign.BuildSign(tB, "NUTZ:bp:" + job_str + ":E:fr=" + fB);
-        GSSign.BuildSign(tD, "NUTZ:bp:" + job_str + ":D:fr=" + fD);
-        for (local i = 0; i < path.len() && i < 200; i++) {
-            GSSign.BuildSign(path[i], "NUTZ:bp:" + job_str + ":W:" + i);
-        }
-        local countAfter = this.CountSignsWithPrefix("NUTZ:bp:" + job_str + ":");
-        placed = countAfter - countBefore;
-        GSAdmin.Send({ kind = "ack", cmd = "blueprint", job = job, placed = placed });
-    }
 
-    /* Count signs whose name starts with `prefix`. */
-    function CountSignsWithPrefix(prefix) {
-        local sl = GSSignList();
-        local n = 0;
-        foreach (s, _ in sl) {
-            local nm = GSSign.GetName(s);
-            if (nm != null && nm.len() >= prefix.len() && nm.slice(0, prefix.len()) == prefix) n++;
-        }
-        return n;
-    }
 
-    /* Find a sign-placable free land tile near `center` within `radius` tiles.
-     * Signs can only be built on valid, empty (sign-able) tiles. */
-    function FindFreeTileNear(center, radius) {
-        local cx = GSMap.GetTileX(center);
-        local cy = GSMap.GetTileY(center);
-        for (local r = 0; r <= radius; r++) {
-            // scan square ring at distance r
-            for (local dx = -r; dx <= r; dx++) {
-                for (local dy = -r; dy <= r; dy++) {
-                    if (dx != -r && dx != r && dy != -r && dy != r) continue; // ring only
-                    local x = cx + dx; local y = cy + dy;
-                    if (x < 0 || y < 0) continue;
-                    if (x >= GSMap.GetMapSizeX() || y >= GSMap.GetMapSizeY()) continue;
-                    local t = GSMap.GetTileIndex(x, y);
-                    if (GSTile.IsBuildable(t)) return t;
-                }
-            }
-        }
-        return center;
-    }
 
     /* S1: v0.2 decision-loop — plan a bus route between two towns.
      * Picks the two most-populated towns (or explicit town ids from the
@@ -1346,45 +2478,23 @@ class BridgeV1 extends GSController {
         local tA = siteA[0]; local fA = siteA[1];
         local tB = siteB[0]; local fB = siteB[1];
         local job_str = "" + job;
-        // S4: find a depot site roughly midway between the two stations so the
-        // bus has a short hop to either stop. Best-effort: if no site is
-        // found we still place S/E (executor can build a depot itself later).
+        // S4: depot site midway（尽力而为；core 的 PhaseDepot 也能自建）。
         local siteD = this.FindDepotSite(tA, tB);
-        local mode = GSCompanyMode(exec);
-        // Clear stale signs for this job first.
-        this.ClearJobSigns(job_str);
-        local countBefore = this.CountSignsWithPrefix("NUTZ:bp:" + job_str + ":");
-        GSSign.BuildSign(tA, "NUTZ:bp:" + job_str + ":S:fr=" + fA + ":eg=-1");
-        GSSign.BuildSign(tB, "NUTZ:bp:" + job_str + ":E:fr=" + fB);
-        if (siteD != null) {
-            GSSign.BuildSign(siteD[0], "NUTZ:bp:" + job_str + ":D:fr=" + siteD[1]);
-        }
-        // N2-1: remember where this job's endpoints are. The executor builds the
-        // stations on these tiles, so later reads can turn tiles -> station ids
-        // -> the vehicles on them (exact attribution, no heuristics).
+        // P1-1a：施工状态机在 GS 里（ExecCore）。标牌邮箱已废——直接入队。
+        // N2-1：记下端点 tile（站 id -> 站上的车，精确归因用）。
         if (this._routes == null) this._routes = {};
         local rec = {};
         rec.rawset("tA", tA);
         rec.rawset("tB", tB);
         this._routes.rawset(job_str, rec);
-        // Recount INSIDE company mode (deity GSSignList hides co-owned signs).
-        local names = [];
-        local sl = GSSignList();
-        local company_signs = 0;
-        foreach (sid, _ in sl) {
-            local nm = GSSign.GetName(sid);
-            if (nm != null && nm.len() >= 5 && nm.slice(0, 5) == "NUTZ:") {
-                company_signs++;
-                if (names.len() < 4) names.push(nm);
-            }
-        }
+        if (siteD != null) this._core.Enqueue(exec, job, tA, fA, tB, fB, -1);
+        else this._core.Enqueue(exec, job, tA, fA, tB, fB, -1);
         GSAdmin.Send({ kind = "ack", cmd = "build_bus_route", job = job,
                        townA = townA, townB = townB, popA = GSTown.GetPopulation(townA),
                        popB = GSTown.GetPopulation(townB),
                        tileA = tA, frontA = fA, tileB = tB, frontB = fB,
                        depot = (siteD == null ? -1 : siteD[0]),
-                       company = exec, company_signs = company_signs,
-                       names = names });
+                       company = exec, queued = 1 });
     }
 
     /* Find a depot site between station tiles `ta` and `tb`: scans around
@@ -1426,6 +2536,25 @@ class BridgeV1 extends GSController {
      * `count` vehicles. Placed as a `NUTZ:bp:<job>:V:<count>` sign in the
      * executor's company mode (same mailbox as S/E/D). job defaults to the
      * most recent route job this GS issued. */
+    /* 找中心附近可放东西的空瓦片（通用 helper；demo 路径在用）。 */
+    function FindFreeTileNear(center, radius) {
+        local cx = GSMap.GetTileX(center);
+        local cy = GSMap.GetTileY(center);
+        for (local r = 0; r <= radius; r++) {
+            for (local dy = -r; dy <= r; dy++) {
+                for (local dx = -r; dx <= r; dx++) {
+                    if (dx != r && dx != -r && dy != r && dy != -r) continue;
+                    local x = cx + dx; local y = cy + dy;
+                    if (x < 1 || y < 1) continue;
+                    if (x >= GSMap.GetMapSizeX() - 1 || y >= GSMap.GetMapSizeY() - 1) continue;
+                    local t = GSMap.GetTileIndex(x, y);
+                    if (GSTile.IsBuildable(t)) return t;
+                }
+            }
+        }
+        return -1;
+    }
+
     /* 退役一条线路（M3-2a）：放 `X:1` 标牌，执行器卖掉该线路全部车辆。
      * 与 add_vehicles 一样，ack 只说"请求已送达信箱"，不谎报结果。 */
     function RetireRoute(obj) {
@@ -1435,22 +2564,11 @@ class BridgeV1 extends GSController {
         }
         local exec = obj["company"];
         local job = obj.rawin("job") ? obj["job"] : (100 + this._route_seq - 1);
-        local job_str = "" + job;
-        local mode = GSCompanyMode(exec);
-        local sl = GSSignList();
-        foreach (s, _ in sl) {
-            local n = GSSign.GetName(s);
-            if (n != null && n.len() > (7 + job_str.len()) &&
-                n.slice(0, 8) == "NUTZ:bp:" + job_str + ":X:") {
-                GSSign.RemoveSign(s);
-            }
-        }
-        local anchor = this.FindFreeTileNear(GSTown.GetLocation(GSTownList().Begin()), 10);
-        local sign_placed = 0;
-        if (GSSign.BuildSign(anchor, "NUTZ:bp:" + job_str + ":X:1")) sign_placed = 1;
+        // P1-1a：退役请求直入 ExecCore（X: 标牌已废）。
+        this._core.RetireRequest(job);
         GSAdmin.Send({ kind = "ack", cmd = "retire_route", job = job, company = exec,
-                       signPlaced = sign_placed,
-                       note = "retirement requested; the executor sells the route's vehicles "
+                       queued = 1,
+                       note = "retirement requested; the core sells the route's vehicles "
                             + "once they are parked in a depot" });
     }
 
@@ -1464,44 +2582,14 @@ class BridgeV1 extends GSController {
         if (count < 1) count = 1;
         if (count > 20) count = 20;
         local job = obj.rawin("job") ? obj["job"] : (100 + this._route_seq - 1);
-        local job_str = "" + job;
-        local mode = GSCompanyMode(exec);
-        // Clear any previous V sign for this job, then place the new one.
-        local sl = GSSignList();
-        foreach (s, _ in sl) {
-            local n = GSSign.GetName(s);
-            if (n != null && n.len() > (7 + job_str.len()) &&
-                n.slice(0, 8) == "NUTZ:bp:" + job_str + ":V:") {
-                GSSign.RemoveSign(s);
-            }
-        }
-        // Anchor the sign on any free tile near company 0's first station area.
-        local anchor = this.FindFreeTileNear(GSTown.GetLocation(GSTownList().Begin()), 10);
-        local sign_placed = 0;
-        if (GSSign.BuildSign(anchor, "NUTZ:bp:" + job_str + ":V:" + count)) sign_placed = 1;
-        // `signPlaced` is named explicitly on purpose. It used to be `placed`, which
-        // reads as "placed N vehicles" and was mistaken for exactly that in a live
-        // run's logs (the agent kept asking for vehicles while the fleet stayed at
-        // zero). This ack only reports that the REQUEST was delivered to the
-        // executor's mailbox; whether the fleet changes is decided later, by the
-        // executor, and is observable only via company stats.
+        // P1-1a：车队请求直入 ExecCore（V: 标牌已废）。
+        this._core.FleetRequest(job, count);
         GSAdmin.Send({ kind = "ack", cmd = "add_vehicles", job = job,
-                       count = count, company = exec, signPlaced = sign_placed,
-                       note = "request delivered; the executor applies fleet changes, "
+                       count = count, company = exec, queued = 1,
+                       note = "request queued; the core applies fleet changes, "
                             + "and only once the route has a lead vehicle" });
     }
 
-    /* Remove all NUTZ signs carrying job `job_str`. */
-    function ClearJobSigns(job_str) {
-        local sl = GSSignList();
-        foreach (s, _ in sl) {
-            local n = GSSign.GetName(s);
-            if (n != null && n.len() > (7 + job_str.len()) &&
-                n.slice(0, 8) == "NUTZ:bp:" + job_str + ":") {
-                GSSign.RemoveSign(s);
-            }
-        }
-    }
 
     /* Pick a viable town pair for a first bus route. Pathfinder.Road v4 +
      * AyStar v6 (2012) dead-locks on long searches (>~60 tile manhattan in

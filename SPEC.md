@@ -957,3 +957,29 @@ unfinished action (simulated 2026-09-25)`（72 字符）⇒ 真实事件流按�
    `connectAuthed()` 有界重试直到收到 `ServerWelcome`（半开连接丢弃重试；
    socket close 即结束本轮等待，不空转）。
 4. 症状指纹：`'' () has disconnected`（JOIN 从未被服务端解析）+ `write EPIPE`（对端已关）。
+
+### 10.107 P1-1a：执行器搬进 GS（2026-10-08 真机实测）
+
+**类型化反馈取代公司名通道**：施工状态机移植为 `ExecCore`（`bridge-gs/main.nut`），
+逐 tick 在 `GSCompanyMode(company)` 作用域内施工。反馈是类型化 `exec` 事件：
+`{kind:"exec", job, stage, note?, error?, fleet?}`——**错误全文**（`error` 字段），
+31 字符分块协议（W3）与公司名中继已**删除**（分块装配器与其测试一并删除）。
+`done` 事件带车队真值 `fleet:{owned, ids, applied}`。
+
+**真机流水线实测**（offline demo，seed 11）：`queued → work j100 → stA_ok → stB_ok
+→ road_start → road seg1 d54 → … → road_stuck:ERR_AREA_NOT_CLEAR → done`
+——具名失败与全文错误（`the index 'ShortErr' does not exist` 被 Fail() 捕获并送达）
+都进了事件流；有界失败（同 job 连续异常 50 轮 → `abandoned`，FIFO 不堵）。
+
+**新事实（勿再试）**：
+1. **`import("pathfinder.road")` 在 GS 上下文不可用**：真机报 `couldn't find library`
+   （同一 import 在 AI 上下文可解析）。GS 侧寻路只能用贪心分段（`GreedyPath`，
+   探针同款走法 + 可建性过滤 + 清障重试）。**贪心寻路的完成率低于 Pathfinder.Road**
+   （seed 11 的 55 格线路在地形处收摊）——已知缺口，P1-1b。
+2. **公司由 AI 创建**：没有"GS 创建公司"的 API ⇒ 执行器保留为**公司外壳**
+   （建公司、命名、保活；施工一行不做）。删公司 ≠ 删脚本。
+3. `ExecCore` 必须有构造器：`ExecCore(this, 0)` 在无构造器时**不报错但也不赋值**，
+   `_gs` 为 null ⇒ 首次 Enqueue 抛穿 `Start()` ⇒ 整个 GS 静默死亡（一处失败连坐全通道）。
+   现在 `Dispatch` 调用点有护栏：命令异常 → `dispatch_error` 全文事件，GS 继续跑。
+4. Squirrel 类里 `this.Sleep` 来自 `AIController`/`GSController` 继承：
+   `ExecCore` 不继承 ⇒ 需要自备代理（`GSController.Sleep` 存在）。

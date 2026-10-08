@@ -94,11 +94,11 @@ describe("Squirrel packs: no calls to API that does not exist", () => {
  * 恰恰是**源码结构**就能钉住的事实——这正是本次返工的根因形态，所以值得守卫。
  */
 describe("Squirrel 执行器：车队请求的调用点不得被阶段门控", () => {
-	const src = stripComments(readFileSync(path.join("src/game/squirrel/executor-ai/main.nut"), "utf8"));
+	const src = stripComments(readFileSync(path.join("src/game/squirrel/bridge-gs/main.nut"), "utf8"));
 
-	it("TickInner 在非 done 阶段也会尝试（节流），而不是只在 done", () => {
+	it("Tick 在非 done 阶段也会尝试（节流），而不是只在 done", () => {
 		// 有节流的尝试：形如 `this._loopSeq % N == 0` 且其分支里调用 CheckAddVehicles
-		expect(src).toMatch(/TickInner[\s\S]*?%\s*\d+\s*==\s*0[\s\S]{0,200}?CheckAddVehicles\(\)/);
+		expect(src).toMatch(/function Tick\(\)[\s\S]*?%\s*\d+\s*==\s*0[\s\S]{0,200}?CheckAddVehicles\(\)/);
 	});
 
 	it("调用不再要求 `_vehicle >= 0`（否则无头车时静默消失）", () => {
@@ -142,7 +142,7 @@ describe("Squirrel packs: array 上的 foreach 不得使用双变量形式", () 
 	});
 
 	it("车队会计用单变量形式（值），并包含头车", () => {
-		const src = stripComments(readFileSync(path.join("src/game/squirrel/executor-ai/main.nut"), "utf8"));
+		const src = stripComments(readFileSync(path.join("src/game/squirrel/bridge-gs/main.nut"), "utf8"));
 		expect(src).toContain("foreach (vid in this._fleetOwned)");
 		// 头车必须计入本线路车队，否则 `V:N` 永远比真实车队少 1
 		expect(src).toMatch(/this\._fleetOwned\.append\(v\)/);
@@ -158,17 +158,17 @@ describe("Squirrel packs: array 上的 foreach 不得使用双变量形式", () 
  * `SellVehicle`，11 次全部被拒绝，车队一辆没少。所以"缩编"只能是一个多轮动作。
  */
 describe("Squirrel 执行器：缩编必须先送回车库", () => {
-	const src = stripComments(readFileSync(path.join("src/game/squirrel/executor-ai/main.nut"), "utf8"));
+	const src = stripComments(readFileSync(path.join("src/game/squirrel/bridge-gs/main.nut"), "utf8"));
 
 	it("卖出前使用 SendVehicleToDepot，并用 IsStoppedInDepot 判断时机", () => {
-		expect(src).toContain("AIVehicle.SendVehicleToDepot(vid)");
-		expect(src).toContain("AIVehicle.IsStoppedInDepot(vid)");
+		expect(src).toContain("GSVehicle.SendVehicleToDepot(vid)");
+		expect(src).toContain("GSVehicle.IsStoppedInDepot(vid)");
 	});
 
 	it("卖车是个跨 tick 的过程，不是当场循环（否则必然静默失败）", () => {
 		expect(src).toContain("function ProcessFleetSells()");
-		// 必须在 TickInner 里每轮推进（否则待卖的车永远等不到下一次检查）
-		expect(src).toMatch(/TickInner\(\)[\s\S]*?this\.ProcessFleetSells\(\);/);
+		// 必须在 Tick 里每轮推进（否则待卖的车永远等不到下一次检查）
+		expect(src).toMatch(/Tick\(\)[\s\S]*?this\.ProcessFleetSells\(\);/);
 	});
 
 	it("待卖列表在换 job 时被清空（否则会去卖上一份工作的车）", () => {
@@ -187,7 +187,7 @@ describe("Squirrel 执行器：缩编必须先送回车库", () => {
  * Squirrel 只在 OpenTTD 里跑，但"有没有按线路记住车队"是**源码结构**就能钉住的事实。
  */
 describe("Squirrel 执行器：按线路登记 + 退役", () => {
-	const src = stripComments(readFileSync(path.join("src/game/squirrel/executor-ai/main.nut"), "utf8"));
+	const src = stripComments(readFileSync(path.join("src/game/squirrel/bridge-gs/main.nut"), "utf8"));
 
 	it("存在按 job 键控的线路登记表（而不是只有当前 job 的字段）", () => {
 		// Squirrel 用 `<-` 新建槽位、`=` 覆盖已有槽位，两者都算
@@ -197,7 +197,7 @@ describe("Squirrel 执行器：按线路登记 + 退役", () => {
 
 	it("切 job 时把当前线路存进登记表（否则旧线路的车队丢失）", () => {
 		// 顺序是「先登记再重置」（否则旧线路的车队会先被清空）：
-		expect(src).toMatch(/this\._routes\[this\._job\] <- \{[\s\S]{0,400}?this\._job = next;/);
+		expect(src).toMatch(/this\._routes\[this\._job\] <- \{[\s\S]{0,400}?this\._job = -1;/);
 	});
 
 	it("退役必须能卖掉**头车**（普通缩编的下限 1 对退役不适用）", () => {
@@ -220,7 +220,7 @@ describe("Squirrel 执行器：按线路登记 + 退役", () => {
  *
  * 真机证据（`/tmp/m32`，相位 `EX exc:the index 'rawin' does n…`）：
  * 我把 `_retiredJobs` 当 table 用（`.rawin(job)`），却把它初始化成 array `[]`，
- * 于是每一轮 `TickInner` 都抛异常——**车照样被卖掉了（8→2），但退役/卖出的相位
+ * 于是每一轮 `Tick` 都抛异常——**车照样被卖掉了（8→2），但退役/卖出的相位
  * 一条都没发出来**。也就是说：动作生效了、信号却全丢了，harness 只能看到"莫名少了几辆车"。
  *
  * 这正是 D28 的机械版：**披露必须真的能发出来**。守卫在这里的价值是：
@@ -266,7 +266,7 @@ describe("Squirrel packs: 一个标识符不能既当 array 又当 table 用", (
 	});
 
 	it("车队/线路登记用 table，车队列表用 array（各自用法一致）", () => {
-		const src = stripComments(readFileSync(path.join("src/game/squirrel/executor-ai/main.nut"), "utf8"));
+		const src = stripComments(readFileSync(path.join("src/game/squirrel/bridge-gs/main.nut"), "utf8"));
 		expect(src).toMatch(/_routes = \{\}/);
 		expect(src).toMatch(/_retiredJobs = \{\}/);
 		expect(src).toMatch(/_fleetOwned = \[\]/);
@@ -369,80 +369,52 @@ describe("Squirrel packs: 局部变量不得先用后声明", () => {
 });
 
 /**
- * M3-2b：披露必须**粘住**才可能被采样到（SPEC §10.86 未结案 → §10.87）。
+ * P1-1a（2026-10-08）：执行器搬进 GS（ExecCore）。反馈走**类型化事件**，
+ * 错误**全文**进 `error` 字段 —— 31 字符公司名通道与分块协议就此退役。
  *
- * 通道性质：公司名是**单值、被采样**的（harness 每 500 ms 轮询），而执行器每轮都改写它。
- * 真机 `/tmp/m32c`：退役**生效了**（车队 8→2），但 `retire…`/`fleetsend…`/`fleetg…`
- * 相位**一条都没进日志**——被施工相位盖掉了。动作生效 + 信号丢失 = 工具无法观测自身效果。
- *
- * 修法：事件相位走上带粘滞的入口（保持 N 轮不被普通活动相位覆盖），诊断类（`exc:`）可抢占。
+ * 这组守卫锁两件事：新通道是真的（全文、不重发、有界失败），旧协议**真的死了**
+ * （不是弃用：两个 .nut 里都不许再有分块/粘滞/公司名中继的痕迹）。
  */
-describe("Squirrel 执行器：事件披露必须粘滞", () => {
-	// 注意：这里**不能** stripStrings——要检查的关键字本身就是字符串字面量（`"fleet_wait" 等），
-	// 去掉字符串等于把被测对象删掉（第一版就是这么写的，于是必然误报）。
-	const src = stripComments(readFileSync(path.join("src/game/squirrel/executor-ai/main.nut"), "utf8"));
+describe("ExecCore：类型化反馈（错误全文），31 字符协议已死", () => {
+	const gs = stripComments(readFileSync(path.join("src/game/squirrel/bridge-gs/main.nut"), "utf8"));
+	const shell = stripComments(readFileSync(path.join("src/game/squirrel/executor-ai/main.nut"), "utf8"));
 
-	it("存在粘滞入口，且普通 SetPhase 在粘滞期内不覆盖", () => {
-		expect(src).toContain("function SetPhaseSticky(");
-		expect(src).toMatch(/function SetPhase\(p\)\s*\{[\s\S]{0,300}?_phaseHoldUntil/);
+	it("错误全文进类型化事件（error 字段带原文，不分块、不预截断）", () => {
+		expect(gs).toMatch(/function Fail\(msg\)/);
+		expect(gs).toMatch(/error = this\._errMsg/);
+		expect(gs).not.toMatch(/es\.slice\(0, 24\)/); // 旧 bug 形状（预截断错误），城镇名截断不受限
 	});
 
-	it("所有车队/退役事件都走粘滞入口（漏一个 = 那条披露又会被盖掉）", () => {
-		for (const kind of ["fleet_wait", "fleetg", "fleetsend", "fleetsold", "fleetok", "retire"]) {
-			const direct = src.includes('SetPhaseSticky("' + kind);
-			const wrapped = new RegExp('SetPhaseSticky\\(\\s*\\n?\\s*"' + kind).test(src);
-			expect(direct || wrapped, kind + " 必须用 SetPhaseSticky，否则会被施工相位盖掉").toBe(true);
+	it("分块/粘滞协议必须不存在（两个文件都查）", () => {
+		for (const [name, f] of [["bridge-gs", gs], ["executor-ai", shell]] as const) {
+			expect(f, name).not.toMatch(/WriteErrorChunk|AdvanceErrorChunks|_errChunks/);
+			expect(f, name).not.toMatch(/SetPhaseSticky|_phaseHoldUntil/);
+			expect(f, name).not.toMatch(/exc<|exc:/);
 		}
 	});
 
-	it("诊断相位（exc:）绕过粘滞：错误不能被事件埋掉", () => {
-		expect(src).toContain('WritePhase("exc:"');
+	it("公司名中继已删（typed 事件是 exec 的唯一通道）", () => {
+		expect(gs).not.toMatch(/EmitExecPhase|ParseExecPhase|ExecEventKey/);
 	});
 
-	/**
-	 * W3（2026-09-25）：错误改为**分块**上报 `exc<seq><marker><chunk>`，因为公司名
-	 * 上限 31 字符（真机实测 31 接受 / 32+ 静默拒绝），而引擎异常放不进一个名字。
-	 * 旧的 `WritePhase("exc:"` 只剩兜底路径，所以这里锁住**真正的主路径**：
-	 * 序列号 + 末块标记 + 宽度来自真实预算 + 每块粘滞 5 轮（否则 GS 的采样会漏块）。
-	 */
-	it("完整错误走分块协议：seq + 末块标记 + 真实预算宽度 + 分块粘滞", () => {
-		expect(src).toMatch(/function ReportError\(/);
-		expect(src).toMatch(/function WriteErrorChunk\(/);
-		expect(src).toMatch(/function AdvanceErrorChunks\(/);
-		// marker 三态：还有后续 / 末块完整 / 末块但被 5 块上限截断
-		expect(src).toMatch(/last \? \(this\._errTruncated \? "~" : "="\) : ":"/);
-		// 宽度必须由 31 字符的真实预算算出来，而不是拍一个常数
-		expect(src).toMatch(/31 - 3 - 3 - 1 - 1 - \(2 \+ \("" \+ this\._job\)\.len\(\)\)/);
-		// 生产端不得再预截断（旧代码的 es.slice(0, 24) 就是现场那句 `…` 的来源）
-		expect(src).not.toMatch(/es\.slice\(0, 24\)/);
-		// 分块必须粘滞，否则末块会被下一轮施工相位盖掉，harness 拼不完整
-		expect(src).toMatch(/_phaseHoldUntil = this\._loopSeq \+ 5/);
+	it("同相位不重发；但 Fail 每次都发（错误不能互相抑制）", () => {
+		expect(gs).toMatch(/if \(p == this\._lastPh\) return;/);
+		expect(gs).toMatch(/function Fail\(msg\)[\s\S]{0,400}?this\.Report\(/);
 	});
 
-	/**
-	 * 指纹漏洞（2026-09-25，worker 复核时发现）：ExecEventKey 原本只比
-	 * stage|job|hb，于是**连续两条单块错误**算出同一个键，第二条永远发不出去。
-	 * 指纹只对错误相位生效 —— 心跳的 raw 每轮都变，算进去会刷成事件风暴。
-	 */
-	it("错误相位带内容指纹（连续两条错误不能互相抑制），心跳不变", () => {
-		const bridge = readFileSync(path.join(process.cwd(), "src/game/squirrel/bridge-gs/main.nut"), "utf8");
-		expect(bridge).toMatch(/if \(stage\.slice\(0, 5\) == "error"\) fp = s;/);
-		expect(bridge).toMatch(/\(ev\.hb \? "1" : "0"\) \+ "\|" \+ \(ev\.fp == null \? "" : ev\.fp\)/);
+	it("公司外壳不做施工（shell 只提供公司身份；施工 API 出现 = 边界破了）", () => {
+		expect(shell).not.toMatch(/BuildRoad|BuildVehicle|GSRoad\.|AIRoad\./);
+		expect(shell).not.toMatch(/GSSign\.|AISign\./);
+		expect(shell).toMatch(/while \(true\) AIController\.Sleep/);
 	});
 
-	/**
-	 * 作业号后缀在**末尾**（WritePhase 追加）。原来的 find(" j") 取首次命中，
-	 * 块文本里出现 " j"（例如 "can't join …"）就会切错并顺带截断相位文本。
-	 */
-	it("作业号从后往前找，且尾部必须全是数字（否则宁可不切）", () => {
-		const bridge = readFileSync(path.join(process.cwd(), "src/game/squirrel/bridge-gs/main.nut"), "utf8");
-		expect(bridge).not.toMatch(/local jPos = s\.find\(" j"\);/);
-		expect(bridge).toMatch(/while \(i >= 0\)/);
-		expect(bridge).toMatch(/tail\.slice\(k, k \+ 1\)\.tointeger\(\)/);
+	it("施工动作在 company mode 作用域内（阶段一实测：钱从公司账上扣）", () => {
+		expect(gs).toMatch(/local mode = GSCompanyMode\(this\._company\);/);
 	});
 
-	it("SetPhaseSticky 的 hold 必须有默认值（Squirrel 强校验参数个数，单参调用会炸）", () => {
-		expect(src).toMatch(/function SetPhaseSticky\(p, hold = null\)/);
+	it("有界失败：同一 job 连续异常必须放弃它，不许堵住 FIFO", () => {
+		expect(gs).toMatch(/_failStreak >= 50/);
+		expect(gs).toMatch(/"abandoned"/);
 	});
 });
 
@@ -455,7 +427,7 @@ describe("Squirrel 执行器：事件披露必须粘滞", () => {
  * 所以现在：**认识的线路就应用，不认识的才具名拒绝**。
  */
 describe("Squirrel 执行器：车队请求对已登记线路生效", () => {
-	const src = stripComments(readFileSync(path.join("src/game/squirrel/executor-ai/main.nut"), "utf8"));
+	const src = stripComments(readFileSync(path.join("src/game/squirrel/bridge-gs/main.nut"), "utf8"));
 
 	it("解析所有 V 请求的 job（而不是只认当前 job）", () => {
 		expect(src).toContain("function FleetRequests()");
