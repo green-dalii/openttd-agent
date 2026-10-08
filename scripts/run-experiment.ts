@@ -16,7 +16,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, openSync } from "node:fs";
 import { join } from "node:path";
 import { evolutionView } from "../src/evolution/web-view.js";
-import { degradationStats, deliveredOutcome, formatMetricStat, horizonIsComparable, MIN_COMPARABLE_HORIZON_DAYS , powerVerdict } from "../src/evolution/metrics.js";
+import { degradationStats, deliveredOutcome, formatMetricStat, horizonIsComparable, MIN_COMPARABLE_HORIZON_DAYS , powerVerdict, learningCurve } from "../src/evolution/metrics.js";
 import { reflectionStats } from "../src/evolution/reflection-stats.js";
 
 interface Args {
@@ -34,6 +34,10 @@ interface Args {
 	effect?: number;
 	/** P2-3 预登记：假定 CV（保守默认 1.0）。 */
 	cv?: number;
+	/** P2-1/M5：ab（两臂对照，默认）/ sequential（同一 agent 连续 N 局、记忆累积）。 */
+	mode: "ab" | "sequential";
+	/** sequential 模式的局数（M5 预登记上限 10）。 */
+	sessions?: number;
 }
 
 function parseArgs(argv: string[]): Args {
@@ -44,7 +48,7 @@ function parseArgs(argv: string[]): Args {
 	const dir = get("--dir");
 	if (!dir) {
 		console.error(
-		"usage: tsx scripts/run-experiment.ts --dir <dataDir> [--n 3] (--game-days 400 | --demo-seconds 900) [--scenario freeform|prebuilt] [--seed 7] [--vary memory|freeze]",
+		"usage: tsx scripts/run-experiment.ts --dir <dataDir> [--n 3] (--game-days 400 | --demo-seconds 900) [--scenario freeform|prebuilt (default prebuilt)] [--mode ab|sequential --sessions N]] [--seed 7] [--vary memory|freeze]",
 	);
 		process.exit(2);
 	}
@@ -58,7 +62,7 @@ function parseArgs(argv: string[]): Args {
 	// horizon=30 的 19 局 deliveredRun **全部为 0**，horizon=300 的 6 局全部非 0。
 	// 所以在短于 2 个季度的 horizon 上做 A/B，测的是一个**恒为常数**的判据——
 	// 那不是"样本不足"，是"这个比较什么都测不出来"。真机时间很贵，不能这样花。
-	const hz = get("--game-days") ? Number(get("--game-days")) : undefined;
+	const hz = get("--game-days") ? Number(get("--game-days")) : 300; // P2-1 预登记默认
 	if (!horizonIsComparable(hz)) {
 		console.error(
 			`ERROR: --game-days ${hz ?? "(unset)"} cannot support a comparison.\n` +
@@ -72,7 +76,9 @@ function parseArgs(argv: string[]): Args {
 
 	// P2-3 统计预登记：跑前拒绝不够 n 的比较（G7 同型）。默认声明效应 +20%、
 	// 假定 CV=100%（保守）。`--effect`/`--cv` 改的是**预登记**，不是事后口径。
-	{
+	// sequential（M5）不受这道闸：它的预登记设计**接受**「该设计下不可判定」为
+	// 正当结论（N 上限 10），拒绝开跑反而堵死学习曲线实验。
+	if ((get("--mode") ?? "ab") !== "sequential") {
 		const effect = Number(get("--effect") ?? 0.2);
 		const cv = Number(get("--cv") ?? 1.0);
 		const plannedN = Number(get("--n") ?? 3);
@@ -88,15 +94,19 @@ function parseArgs(argv: string[]): Args {
 		n: Number(get("--n") ?? 3),
 		// G1 (SPEC §10.68): prefer a SIMULATED horizon. `--demo-seconds` stays as
 		// the wall-clock safety cap so a stalled world cannot hang the round.
-		gameDays: get("--game-days") ? Number(get("--game-days")) : undefined,
+		// P2-1 预登记默认：300 游戏日短局（≥ MIN_COMPARABLE_HORIZON_DAYS=180，G7 可比）。
+		gameDays: get("--game-days") ? Number(get("--game-days")) : 300,
 		seconds: Number(get("--demo-seconds") ?? 900),
-		scenario: (get("--scenario") ?? undefined) as "freeform" | "prebuilt" | undefined,
+		// P2-1 预登记默认：预建场景（方差更小；两臂同场景是可比性前提）。
+		scenario: (get("--scenario") ?? "prebuilt") as "freeform" | "prebuilt" | undefined,
 		seed: Number(get("--seed") ?? 7),
 		// 自变量（2026-09-17）：memory = 记忆注入（默认）；freeze = 决策期冻结世界。
 		// 两个臂必须只差这一个变量，否则比较又在撒谎。
 		vary: (get("--vary") ?? "memory") as "memory" | "freeze",
 		...(get("--effect") !== undefined ? { effect: Number(get("--effect")) } : {}),
 		...(get("--cv") !== undefined ? { cv: Number(get("--cv")) } : {}),
+		mode: (get("--mode") ?? "ab") as "ab" | "sequential",
+		...(get("--sessions") !== undefined ? { sessions: Number(get("--sessions")) } : {}),
 	};
 }
 
@@ -143,6 +153,36 @@ function runOne(
 
 const args = parseArgs(process.argv.slice(2));
 const codes: { control: number[]; treatment: number[] } = { control: [], treatment: [] };
+
+// P2-2/M5（ROADMAP R5 预登记）：`--mode sequential --sessions N` = 同一 dataDir、
+// 同一 seed、同一预建场景、固定 horizon，记忆随局累积（evolution 库在同一目录里
+// 自然增长）。N 上限 10 是预登记；分析（Spearman + 斜率 + bootstrap CI）在
+// src/evolution/metrics.ts `learningCurve`。
+if (args.mode === "sequential") {
+	const sessions = Math.min(args.sessions ?? args.n, 10);
+	const seqCodes: number[] = [];
+	for (let i = 1; i <= sessions; i++) {
+		spawnSync("pkill", ["-f", "OpenTTD.app/Contents/MacOS/openttd"]);
+		spawnSync("sleep", ["2"]);
+		seqCodes.push(runOne(`seq${i}`, args.dir, args.seed, args.seconds, args.gameDays, args.scenario, []));
+	}
+	spawnSync("pkill", ["-f", "OpenTTD.app/Contents/MacOS/openttd"]);
+	const view = evolutionView(args.dir, "memory");
+	const ordered = [...view.metrics]
+		.filter((m) => Number.isFinite(Number(m.deliveredRun)) && m.blockedByPause !== true)
+		.sort((a, b) => Number(a.startedAt ?? 0) - Number(b.startedAt ?? 0));
+	const curve = learningCurve(ordered.map((m, i) => ({ index: i, delivered: Number(m.deliveredRun) })));
+	console.log("");
+	console.log(`=== sequential verdict (${args.dir}) ===`);
+	console.log(`runs rc: ${seqCodes.join(", ")}`);
+	console.log(
+		`learning curve: n=${curve.n} spearman=${curve.spearman?.toFixed(2) ?? "—"} ` +
+			`slope=${curve.slopePerRun?.toFixed(2) ?? "—"}/run -> ${curve.verdict}`,
+	);
+	console.log(`  ${curve.message}`);
+	process.exit(curve.verdict === "not determinable" ? 0 : 0);
+}
+
 for (let i = 1; i <= args.n; i++) {
 	// cleanup between runs: the game must die or the next one can't bind the port
 	spawnSync("pkill", ["-f", "OpenTTD.app/Contents/MacOS/openttd"]);

@@ -32,6 +32,8 @@ import {
 	type GameMetric,
 	requiredSampleSize,
 	powerVerdict,
+	learningCurve,
+	experienceOutcomes,
 } from "../../src/evolution/metrics.js";
 import type { SessionMeta } from "../../src/agent/session-store.js";
 
@@ -930,5 +932,68 @@ describe("统计预登记：requiredSampleSize / powerVerdict", () => {
 		const v = powerVerdict({ declaredEffect: 0.2, observedCv: null, actualN: 50 });
 		expect(v.detectable).toBeNull();
 		expect(v.message).toContain("CV");
+	});
+});
+
+/**
+ * P2-2 预登记分析核（M5 学习曲线 + M4b 经验成绩分布）。
+ *
+ * M5 预登记（ROADMAP R5）：同一 agent 连续 N 局、记忆累积，检验 deliveredRun 随
+ * 局序号的趋势 —— Spearman ρ + 线性斜率 + bootstrap CI。**CI 含 0 = 「该设计下
+ * 不可判定」**，不是"没有趋势"；并给出 CV 与 +40% 效应所需样本。N 上限 10。
+ * M4b：观测性（**不做因果主张**）——哪条经验被用过、用过它的局的成绩分布。
+ */
+describe("learningCurve（M5 预登记检验）", () => {
+	it("上升趋势：斜率 > 0 且 CI 不含 0 → rising", () => {
+		const pts = [10, 14, 19, 25, 32, 40].map((delivered, index) => ({ index, delivered }));
+		const c = learningCurve(pts);
+		expect(c.verdict).toBe("rising");
+		expect(c.slopePerRun).toBeGreaterThan(0);
+		expect(c.slopeCi95![0]).toBeGreaterThan(0);
+		expect(c.spearman).toBeGreaterThan(0.9);
+	});
+
+	it("CI 含 0 →「不可判定」并给出 +40% 所需样本（不是「没趋势」）", () => {
+		const pts = [20, 12, 28, 15, 22].map((delivered, index) => ({ index, delivered }));
+		const c = learningCurve(pts);
+		expect(c.verdict).toBe("not determinable");
+		expect(c.message).toContain("40%");
+		expect(c.message).toMatch(/need|required/i);
+	});
+
+	it("N<3 → 不可判定（点太少不是趋势）", () => {
+		const c = learningCurve([{ index: 0, delivered: 10 }, { index: 1, delivered: 12 }]);
+		expect(c.verdict).toBe("not determinable");
+	});
+
+	it("N 超过预登记上限 10 → 用前 10 局并在 message 里说明", () => {
+		const pts = Array.from({ length: 14 }, (_, index) => ({ index, delivered: 10 + index }));
+		const c = learningCurve(pts);
+		expect(c.n).toBe(10);
+		expect(c.message).toContain("10");
+	});
+});
+
+describe("experienceOutcomes（M4b 观测性：哪条经验、成绩分布）", () => {
+	it("按经验分组：局数 + 成绩分布（均值/中位）", () => {
+		const rows = experienceOutcomes([
+			{ runId: "r1", recalledIds: ["L1", "L2"], outcome: 100 },
+			{ runId: "r2", recalledIds: ["L1"], outcome: 200 },
+			{ runId: "r3", recalledIds: [], outcome: 300 },
+		]);
+		const l1 = rows.find((x) => x.experienceId === "L1")!;
+		expect(l1.runs).toBe(2);
+		expect(l1.mean).toBe(150);
+		expect(l1.median).toBe(150);
+		expect(rows.find((x) => x.experienceId === "L2")!.runs).toBe(1);
+		// 没被任何经验覆盖的局不冒充"某经验的效果"（观测性边界）
+		expect(rows.every((x) => x.experienceId !== "")).toBe(true);
+	});
+
+	it("成绩缺失 → mean/median 为 null（未计量 ≠ 0 分）", () => {
+		const rows = experienceOutcomes([{ runId: "r1", recalledIds: ["L1"], outcome: null }]);
+		expect(rows[0]!.runs).toBe(1);
+		expect(rows[0]!.mean).toBeNull();
+		expect(rows[0]!.median).toBeNull();
 	});
 });

@@ -1099,3 +1099,26 @@ headless 持续超时）——布局正确性由 DOM 文本断言 + smoke 的元
 **双向自证（真跑脚本）**：`--n 3 --effect 0.2 --cv 1.0` →
 `!! UNDERPOWERED: detecting +20% at CV 100% needs 400 run(s)/arm; this comparison has 3` + 拒绝；
 `--n 64 --effect 0.5` → 放行开跑。缺 CV/效应量 → `detectable: null`（不可判 ≠ 放行）。
+
+### 10.113 P2-1/P2-2 代码侧：实验 runner 默认 + 学习曲线分析核（2026-10-08）
+
+**P2-1 预登记默认**（`scripts/run-experiment.ts`）：
+- `--scenario` 默认 **prebuilt**（方差更小；两臂同场景是可比性前提）
+- `--game-days` 默认 **300**（≥ G7 的 180 天可比线；G7 检查与默认同源）
+- A/B 模式保留 P2-3 功效闸门（不够 n 拒绝开跑）；**sequential 模式不受该闸**——
+  它的预登记设计**接受**「该设计下不可判定」为正当结论（N 上限 10）。
+
+**M5 学习曲线分析核**（`learningCurve`，纯函数 + 单测）——预登记（ROADMAP R5）：
+- 同一 agent 连续 N 局、记忆累积；`deliveredRun` 对**局序号**：
+  **Spearman ρ + 线性斜率 + bootstrap CI**（固定种子，CI 可复现）
+- **CI 含 0 → 「该设计下不可判定」**（不叫"没有趋势"），并报实测 CV 与 +40%
+  效应所需样本（预登记效应量）；CI 不含 0 → rising/falling
+- N 上限 10（超出取前 10 并在 message 里声明）；n<3 不可判定
+
+**M4b 经验成绩分布**（`experienceOutcomes`，纯函数 + 单测）——**观测性，不做因果主张**：
+哪条经验被 recall 过、用过它的局的 delivered 分布（同局用多条经验时成绩重复计入各条
+的分布——"用过之后的分布"的字面语义）。未计量成绩 → mean/median 为 null。
+
+**runner 新模式**：`--mode sequential --sessions N`（同 dataDir/seed/预建场景/固定
+horizon，记忆随局累积；判决打印学习曲线）。m3-verdict 同步打印 M5 曲线 + M4b 分布
++ P2-3 功效行。空态自证：n=0 → "only 0 run(s) - a trend needs >= 3"。

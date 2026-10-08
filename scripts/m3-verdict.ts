@@ -15,7 +15,9 @@
  * 收尾时实测过。交接文档里的命令必须是**跑得通**的，所以落成文件。
  */
 import { evolutionView, type EvolutionView } from "../src/evolution/web-view.js";
-import { degradationStats, deliveredOutcome, formatMetricStat, powerVerdict } from "../src/evolution/metrics.js";
+import { degradationStats, deliveredOutcome, formatMetricStat, powerVerdict, learningCurve, experienceOutcomes } from "../src/evolution/metrics.js";
+import { readFileSync, existsSync } from "node:fs";
+import { join } from "node:path";
 import { reflectionStats } from "../src/evolution/reflection-stats.js";
 
 const dataDir = process.argv[2];
@@ -106,6 +108,66 @@ console.log(`income delta  : ${arms.incomeDelta?.toFixed(0) ?? "—"}`);
 		const v = powerVerdict({ declaredEffect: Number.isFinite(effect) ? effect : null, observedCv: cv, actualN: nPerArm });
 		console.log(`power: ${v.message}`);
 		if (v.detectable === false) process.exitCode = 1;
+	}
+	// P2-2 M5：学习曲线（预登记检验——CI 含 0 = 「该设计下不可判定」）。
+	// 局按 startedAt 排序，deliveredRun 对局序号。
+	{
+		const ordered = [...view.metrics]
+			.filter((m) => Number.isFinite(Number(m.deliveredRun)) && m.blockedByPause !== true)
+			.sort((a, b) => Number(a.startedAt ?? 0) - Number(b.startedAt ?? 0));
+		const curve = learningCurve(ordered.map((m, i) => ({ index: i, delivered: Number(m.deliveredRun) })));
+		console.log(
+			`learning curve (M5): n=${curve.n} spearman=${curve.spearman?.toFixed(2) ?? "—"} ` +
+				`slope=${curve.slopePerRun?.toFixed(2) ?? "—"}/run -> ${curve.verdict}`,
+		);
+		console.log(`  ${curve.message}`);
+	}
+	// P2-2 M4b：哪条经验被用过、用过它的局的成绩分布（**观测性**，不做因果主张）。
+	// 数据源：audit 的 recall 记录（ids）× 该局结果（时间窗 join）。
+	{
+		const auditPath = join(dataDir, "agent-audit.jsonl");
+		if (existsSync(auditPath)) {
+			type RecallHit = { ts: number; ids: string[] };
+			const hits: RecallHit[] = [];
+			for (const line of readFileSync(auditPath, "utf8").split("\n")) {
+				if (!line.trim()) continue;
+				try {
+					const rec = JSON.parse(line);
+					if (rec.type === "recall" && Array.isArray(rec.ids) && rec.ids.length) {
+						hits.push({ ts: Number(rec.ts) || 0, ids: rec.ids.map(String) });
+					}
+				} catch {
+					/* 行损坏不致命（观测性数据） */
+				}
+			}
+			const rows = view.metrics;
+			const runs = rows.map((m) => {
+				const start = Number(m.startedAt ?? 0);
+				const end = start + Number(m.durationMs ?? 0);
+				const ids = new Set<string>();
+				for (const h of hits) {
+					if (h.ts >= start && (end === 0 || h.ts <= end)) for (const id of h.ids) ids.add(id);
+				}
+				return {
+					runId: String(m.id ?? start),
+					recalledIds: [...ids],
+					outcome: Number.isFinite(Number(m.deliveredRun)) ? Number(m.deliveredRun) : null,
+				};
+			});
+			const dist = experienceOutcomes(runs);
+			if (dist.length === 0) {
+				console.log("experience use (M4b): no recall recorded - nothing was ever retrieved.");
+			} else {
+				console.log(`experience use (M4b): ${dist.length} experience(s) recalled at least once (observational, not causal):`);
+				for (const x of dist.slice(0, 12)) {
+					console.log(
+						`  ${x.experienceId}: used in ${x.runs} run(s), delivered mean ${x.mean ?? "—"} median ${x.median ?? "—"}`,
+					);
+				}
+			}
+		} else {
+			console.log("experience use (M4b): no audit file - usage not measurable in this data dir.");
+		}
 	}
 	// G7：判据能不能动，必须先于"有无效果"的主张（SPEC §10.85）。
 	{

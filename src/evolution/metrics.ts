@@ -1107,3 +1107,202 @@ export function powerVerdict(args: {
 			"Pre-registered rule: refuse, do not report a p-value.",
 	};
 }
+
+/* ============================================================
+ * P2-2 预登记分析核：M5 学习曲线 + M4b 经验成绩分布
+ * ============================================================
+ *
+ * M5 预登记（ROADMAP R5）：同一 agent 连续 N 局、记忆累积，检验 deliveredRun
+ * 随局序号的趋势 —— Spearman ρ + 线性斜率 + bootstrap CI（种子固定，可复现）。
+ * **CI 含 0 = 「该设计下不可判定」**，不是"没有趋势"；并给出实测 CV 与 +40%
+ * 效应所需样本（预登记效应量）。N 上限 10（预登记）。
+ *
+ * M4b：**观测性**，不做因果主张（因果要 A/B）：哪条经验被用过、用过它的局的
+ * 成绩分布。没被任何经验覆盖的局不冒充"某经验的效果"。
+ */
+
+const M5_MAX_N = 10;
+const M5_DECLARED_EFFECT = 0.4; // 预登记：+40%
+
+/** 固定种子的 LCG（bootstrap 可复现——CI 不许每次跑都变）。 */
+function lcg(seed: number): () => number {
+	let s = seed >>> 0 || 1;
+	return () => {
+		s = (s * 1664525 + 1013904223) >>> 0;
+		return s / 4294967296;
+	};
+}
+
+/** Spearman ρ（并列取平均秩）。 */
+function spearman(xs: number[], ys: number[]): number | null {
+	const n = xs.length;
+	if (n < 3) return null;
+	const ranks = (v: number[]): number[] => {
+		const idx = v.map((val, i) => [val, i] as const).sort((a, b) => a[0] - b[0]);
+		const r = new Array<number>(n);
+		let i = 0;
+		while (i < n) {
+			let j = i;
+			while (j + 1 < n && idx[j + 1]![0] === idx[i]![0]) j++;
+			const avg = (i + j) / 2 + 1;
+			for (let k = i; k <= j; k++) r[idx[k]![1]] = avg;
+			i = j + 1;
+		}
+		return r;
+	};
+	const rx = ranks(xs);
+	const ry = ranks(ys);
+	const mx = rx.reduce((a, b) => a + b, 0) / n;
+	const my = ry.reduce((a, b) => a + b, 0) / n;
+	let num = 0;
+	let dx = 0;
+	let dy = 0;
+	for (let i = 0; i < n; i++) {
+		num += (rx[i]! - mx) * (ry[i]! - my);
+		dx += (rx[i]! - mx) * (rx[i]! - mx);
+		dy += (ry[i]! - my) * (ry[i]! - my);
+	}
+	if (dx === 0 || dy === 0) return null;
+	return num / Math.sqrt(dx * dy);
+}
+
+export interface LearningCurvePoint {
+	index: number;
+	delivered: number;
+	memorySize?: number;
+}
+
+export interface LearningCurve {
+	n: number;
+	spearman: number | null;
+	slopePerRun: number | null;
+	slopeCi95: [number, number] | null;
+	/** "rising" | "falling" | "not determinable"（预登记：CI 含 0 不叫 flat）。 */
+	verdict: "rising" | "falling" | "not determinable";
+	message: string;
+}
+
+export function learningCurve(points: LearningCurvePoint[]): LearningCurve {
+	const capped = points.slice(0, M5_MAX_N);
+	const over = points.length > M5_MAX_N;
+	const ys = capped.map((p) => p.delivered);
+	const xs = capped.map((p) => p.index);
+	const n = ys.length;
+	const base = { n, spearman: spearman(xs, ys) };
+	if (n < 3) {
+		return {
+			...base,
+			slopePerRun: null,
+			slopeCi95: null,
+			verdict: "not determinable",
+			message: `only ${n} run(s) - a trend needs >= 3${over ? ` (analysis uses the first ${M5_MAX_N}, pre-registered cap)` : ""}`,
+		};
+	}
+	const meanY = ys.reduce((a, b) => a + b, 0) / n;
+	const meanX = xs.reduce((a, b) => a + b, 0) / n;
+	let num = 0;
+	let den = 0;
+	for (let i = 0; i < n; i++) {
+		num += (xs[i]! - meanX) * (ys[i]! - meanY);
+		den += (xs[i]! - meanX) * (xs[i]! - meanX);
+	}
+	const slope = den === 0 ? null : num / den;
+	// bootstrap CI（种子固定；重采样点对，保留 x-y 配对）
+	const rnd = lcg(20261008);
+	const B = 1000;
+	const slopes: number[] = [];
+	for (let b = 0; b < B; b++) {
+		const sx: number[] = [];
+		const sy: number[] = [];
+		for (let i = 0; i < n; i++) {
+			const j = Math.floor(rnd() * n);
+			sx.push(xs[j]!);
+			sy.push(ys[j]!);
+		}
+		const mY = sy.reduce((a, c) => a + c, 0) / n;
+		const mX = sx.reduce((a, c) => a + c, 0) / n;
+		let nn = 0;
+		let dd = 0;
+		for (let i = 0; i < n; i++) {
+			nn += (sx[i]! - mX) * (sy[i]! - mY);
+			dd += (sx[i]! - mX) * (sx[i]! - mX);
+		}
+		if (dd !== 0) slopes.push(nn / dd);
+	}
+	slopes.sort((a, b) => a - b);
+	const ci: [number, number] | null =
+		slopes.length >= 100
+			? [slopes[Math.floor(slopes.length * 0.025)]!, slopes[Math.floor(slopes.length * 0.975)]!]
+			: null;
+	const sd = Math.sqrt(ys.reduce((a, b) => a + (b - meanY) * (b - meanY), 0) / n);
+	const cv = meanY !== 0 ? Math.abs(sd / meanY) : null;
+	const need = cv !== null ? requiredSampleSize(cv, M5_DECLARED_EFFECT) : null;
+	const overNote = over ? ` (first ${M5_MAX_N} of ${points.length} runs used, pre-registered cap)` : "";
+	if (slope === null || ci === null) {
+		return {
+			...base,
+			slopePerRun: slope,
+			slopeCi95: ci,
+			verdict: "not determinable",
+			message: `slope not estimable from ${n} run(s)${overNote}`,
+		};
+	}
+	if (ci[0] > 0 || ci[1] < 0) {
+		const dir = ci[0] > 0 ? "rising" : "falling";
+		return {
+			...base,
+			slopePerRun: slope,
+			slopeCi95: ci,
+			verdict: dir,
+			message: `slope ${slope.toFixed(2)}/run, 95% CI [${ci[0].toFixed(2)}, ${ci[1].toFixed(2)}] excludes 0${overNote}`,
+		};
+	}
+	return {
+		...base,
+		slopePerRun: slope,
+		slopeCi95: ci,
+		verdict: "not determinable",
+		message:
+			`slope ${slope.toFixed(2)}/run, 95% CI [${ci[0].toFixed(2)}, ${ci[1].toFixed(2)}] includes 0 - ` +
+			`this design cannot decide${overNote}. Observed CV ${cv !== null ? (cv * 100).toFixed(0) + "%" : "unknown"}; ` +
+			`detecting +${M5_DECLARED_EFFECT * 100}% needs ${need !== null ? need + " run(s)" : "an unknown n"} (pre-registered effect).`,
+	};
+}
+
+export interface ExperienceOutcome {
+	experienceId: string;
+	runs: number;
+	outcomes: number[];
+	mean: number | null;
+	median: number | null;
+}
+
+/**
+ * M4b 观测性：哪条经验被用过、用过它的局的成绩分布。
+ *
+ * 边界（预登记）：只陈述共现，**不做因果主张**；同一局用过多条经验时，
+ * 该局的成绩**重复计入**每条经验的分布（这是"用过之后的分布"的字面语义）。
+ */
+export function experienceOutcomes(
+	runs: { runId: string; recalledIds: string[]; outcome: number | null }[],
+): ExperienceOutcome[] {
+	const byId = new Map<string, (number | null)[]>();
+	for (const r of runs) {
+		for (const id of new Set(r.recalledIds)) {
+			if (!byId.has(id)) byId.set(id, []);
+			byId.get(id)!.push(r.outcome);
+		}
+	}
+	const out: ExperienceOutcome[] = [];
+	for (const [experienceId, list] of byId) {
+		const measured = list.filter((v): v is number => v !== null && Number.isFinite(v)).sort((a, b) => a - b);
+		const mean = measured.length ? measured.reduce((a, b) => a + b, 0) / measured.length : null;
+		const median = measured.length
+			? measured.length % 2
+				? measured[(measured.length - 1) / 2]!
+				: (measured[measured.length / 2 - 1]! + measured[measured.length / 2]!) / 2
+			: null;
+		out.push({ experienceId, runs: list.length, outcomes: measured, mean, median });
+	}
+	return out.sort((a, b) => b.runs - a.runs || a.experienceId.localeCompare(b.experienceId));
+}

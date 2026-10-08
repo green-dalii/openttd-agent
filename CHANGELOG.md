@@ -11,6 +11,19 @@
 
 ### Added
 
+- **The experiment runner now defaults to the pre-registered short-run design (P2-1)**
+  and gains the learning-curve mode (M5). `--scenario` defaults to `prebuilt` and
+  `--game-days` to 300 (above the G7 comparability line); `--mode sequential --sessions N`
+  runs one agent for N sequential games with memory accumulating in the same data dir.
+  The verdict prints the pre-registered analysis: Spearman rho, slope per run, and a
+  deterministic bootstrap CI - "CI includes 0" reports **not determinable** with the
+  observed CV and the sample size needed for +40%, never "no trend". An observational
+  experience table (which experiences were recalled, and the outcome distribution of
+  the runs that used them) is printed with an explicit non-causal note.
+
+
+### Added
+
 - **Statistical pre-registration is enforced before runs, not after (P2-3).** The
   detectable effect and the required sample size are fixed before data collection:
   `n ~= 16 * (CV / effect)^2` per arm, default declared effect +20%. Both verdict
