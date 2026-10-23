@@ -12,7 +12,7 @@
 <!--
   Sessions page.
 
-  呈现层由 Alpine.js 声明式驱动（见 docs/FRONTEND-DEPENDENCIES-AUDIT.md §3.4）:
+  呈现层由 Alpine.js 声明式驱动（见 docs/FRONTEND.md §3.4）:
   模板只负责"把状态画出来"，所有判断都在 sessions-view.js 的可测纯函数里。
   时间戳一类相对时间（"5 分钟前"）会随时间变化，因此由定时器打一个 tick，
   而不是靠手工在每处重新渲染。

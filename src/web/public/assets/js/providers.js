@@ -5,7 +5,7 @@
  *   2) 挂载必须命令式创建的部件：两个搜索下拉（provider / model）与分段开关
  *   所有"该显示什么"的判断在 providers-view.js 里（可单测）。
  *
- * 为什么下拉仍是命令式的（docs/FRONTEND-DEPENDENCIES-AUDIT.md §3.2）:
+ * 为什么下拉仍是命令式的（docs/FRONTEND.md §3.2）:
  *   provider/model 选择器是 `U.combobox`（本仓库自带的搜索下拉）。阶段 3 曾尝试换成
  *   Tom Select 但集成后下拉渲染为空，已回退；这里沿用**已验证可用**的实现。
  *   Alpine 负责页面其余部分，两者通过 `$refs` 挂载点衔接。

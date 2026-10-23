@@ -5,7 +5,7 @@
  *   （`{series, labels, format}` / `{items, series, maxBars}`），以及
  *   "uPlot 不在场时不能把页面弄崩" 这一降级要求。
  *
- * 为什么需要适配层（docs/FRONTEND-DEPENDENCIES-AUDIT.md §3.1）:
+ * 为什么需要适配层（docs/FRONTEND.md §3.1）:
  *   页面调用的是本项目的图表配置，不是 uPlot 的原生配置。适配层是唯一的翻译点，
  *   所以它必须能脱离浏览器/不加载 uPlot 单测 —— 否则又是一层无法验证的手搓代码
  *   （这正是阶段 1 之前 3735 行前端踩坑的模式）。

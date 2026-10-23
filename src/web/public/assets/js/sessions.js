@@ -6,7 +6,7 @@
  *   3) 暴露模板用到的少量派生函数
  *   其余一切展示逻辑在 `sessions-view.js` 的纯函数里（可单测）。
  *
- * 为什么这样分层（docs/FRONTEND-DEPENDENCIES-AUDIT.md §3.4 阶段 4）:
+ * 为什么这样分层（docs/FRONTEND.md §3.4 阶段 4）:
  *   Alpine 负责"状态 → DOM"，但 canvas 绘制与既有分段控件是命令式的。
  *   把这些副作用集中在 `init()` / `drawDonut()`，规则仍留在可测的纯函数里。
  *

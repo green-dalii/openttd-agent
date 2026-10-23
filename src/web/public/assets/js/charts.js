@@ -328,7 +328,7 @@
 
   /* ======================================================================
    * line / bars / stackedBars now delegate to the vendored uPlot adapter
-   * (assets/js/ucharts.js). See docs/FRONTEND-DEPENDENCIES-AUDIT.md §3.1.
+   * (assets/js/ucharts.js). See docs/FRONTEND.md §3.1.
    *
    * The page-facing config shape is unchanged, so pages did not have to move:
    *   line(el, { series, labels, format, area, height })

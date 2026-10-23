@@ -3,7 +3,7 @@
  *
  * 职责: 锁定 `assets/vendor/**` 与上游发布物的**逐字节一致**，以及清单本身有效。
  *
- * 为什么重要（docs/FRONTEND-DEPENDENCIES-AUDIT.md §6）: vendored 依赖的前提是
+ * 为什么重要（docs/FRONTEND.md §6）: vendored 依赖的前提是
  *   "文件等于上游产物、版本由 lockfile 锁定"。若有人为了应急直接改 vendor 文件，
  *   下次 `pnpm run vendor` 会静默覆盖，而评审也看不出来 —— 这类漂移必须在
  *   gate 里失败。`scripts/verify-vendor.ts` 负责比对，这里确保它真的会失败。

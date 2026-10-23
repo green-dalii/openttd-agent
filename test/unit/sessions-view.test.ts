@@ -4,7 +4,7 @@
  * 职责: 在 `node:vm` 里加载**真实的页面组件模块**，断言其状态推导与格式化，
  *   不依赖浏览器、不依赖 Alpine 运行时。
  *
- * 为什么这样测（docs/FRONTEND-DEPENDENCIES-AUDIT.md §3.4 阶段 4）:
+ * 为什么这样测（docs/FRONTEND.md §3.4 阶段 4）:
  *   迁移到 Alpine 的最大风险不是"指令写错"，而是**把已有的业务规则弄丢**
  *   （例如 interrupted 与 running 必须区分、对比表的 Δ 方向、只统计 completed 的成功率）。
  *   因此组件把可推导的部分抽成纯函数（`sessionsModel`），由本文件锁住；

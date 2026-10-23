@@ -5,7 +5,7 @@
  *   让仪表盘保持**离线可用**（无 CDN），同时保持**可复现**（版本由
  *   `package.json` 的 devDependency 锁定，复制来源可审计）。
  *
- * 为什么是 vendored 而不是 CDN（docs/FRONTEND-DEPENDENCIES-AUDIT.md §6）:
+ * 为什么是 vendored 而不是 CDN（docs/FRONTEND.md §6）:
  *   本项目连的是本机 OpenTTD，可能在**无外网**环境运行；CDN 会成为单点故障，
  *   也让"这个文件到底是哪个版本"变得不可追溯。
  *
@@ -38,7 +38,7 @@ export interface VendorEntry {
  *
  * `uplot` is used for line/bar charts. It is MIT, has zero dependencies, and
  * ships a plain IIFE build, so no bundler is involved (measured: 22 KB gzip for
- * the JS + 0.8 KB for the CSS - see docs/FRONTEND-DEPENDENCIES-AUDIT.md §2).
+ * the JS + 0.8 KB for the CSS - see docs/FRONTEND.md §2).
  */
 export const VENDOR: VendorEntry[] = [
 	{ pkg: "uplot", from: "dist/uPlot.iife.min.js", to: "uPlot.iife.min.js" },
@@ -47,7 +47,7 @@ export const VENDOR: VendorEntry[] = [
 	// our usage of the global `uPlot` (see tsconfig.frontend.json).
 	{ pkg: "uplot", from: "dist/uPlot.d.ts", to: "uPlot.d.ts" },
 
-	// Alpine.js: the rendering layer (see docs/FRONTEND-DEPENDENCIES-AUDIT.md §3.4).
+	// Alpine.js: the rendering layer (see docs/FRONTEND.md §3.4).
 	// `cdn.min.js` is a self-contained IIFE with @vue/reactivity inlined (verified:
 	// zero require() calls), so it needs no build step - unlike the ESM builds.
 	{ pkg: "alpinejs", from: "dist/cdn.min.js", to: "alpine.min.js" },

@@ -5,7 +5,7 @@
  *   - `$fmt` magic：模板里高频用到的格式化函数（避免模板里写长链）
  *   - 共用组件：状态徽章、KPI 卡等跨页面复用的小块
  *
- * 为什么用 Alpine（docs/FRONTEND-DEPENDENCIES-AUDIT.md §3.4）:
+ * 为什么用 Alpine（docs/FRONTEND.md §3.4）:
  *   手写 `renderX()` + `innerHTML` 的问题是**状态与 DOM 手工同步** —— 每加一个
  *   字段就要在 3 处（state、渲染、事件绑定）同时改，漏一处就出现"点了没反应"
  *   这类静默 bug。Alpine 让 DOM 成为状态的函数，且**不需要构建链**

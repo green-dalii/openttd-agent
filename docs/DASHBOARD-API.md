@@ -197,7 +197,24 @@ interface SessionCheckpoint {
 }
 ```
 
-### 2.6 Provider catalog
+### 2.6 快照里的经济曲线（`snapshot.companies[id].history`）
+
+```ts
+interface CompanyHistoryPoint {
+  at: number;          // epoch ms
+  year: number | null; // 游戏历法；首个日期事件前为 null
+  month: number | null;
+  money: number;
+  loan: number;
+  income: number;
+}
+```
+
+- 曲线由**服务端**持有并随快照下发（有界 600 点），页面刷新不丢曲线。
+  理由：曲线此前只存在页面内存里，刷新即清空——"服务端是真源"的规则要求它跟着快照走。
+- 与 `checkpoint` 帧一样，这是**契约**：本文件是唯一权威，UI 文档只引用不再复述。
+
+### 2.7 Provider catalog
 
 ```ts
 interface CatalogProvider {

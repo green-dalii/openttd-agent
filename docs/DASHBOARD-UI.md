@@ -155,6 +155,8 @@ window.Charts = {
 
 ## 6b. 浏览器实测发现并修复的问题（v0.4.0 真机）
 
+> 这些修复已进入 `CHANGELOG.md`；本表保留作**回归清单**（避免回退），不是现状描述。
+
 前端**没有构建链也没有 DOM 单测**，所以这一层的问题只能靠真机 + CDP 发现。
 记录在此，避免回退：
 
@@ -194,13 +196,15 @@ window.Charts = {
 
 **超量要说明**：堆叠柱最多 24 根，超出时在图上标注 "…earlier turns hidden"，不静默截断。
 
-## 7. WS 帧补充（与 `DASHBOARD-API.md` §4 同步）
-新增 `{ type: "checkpoint", data: SessionCheckpoint }`：阶段性总结**在运行中**产生时推送。
-`snapshot` 载荷增加 `checkpoints: SessionCheckpoint[]`，使刷新/晚订阅者也能看到历史。
-理由：原实现只在 shutdown 写 checkpoint，导致 Live 页的总结面板在整局运行期间恒为空。
+## 7. WS 帧补充（**已上移至 `DASHBOARD-API.md` §4**）
 
-`snapshot.companies[id].history` 同样携带**有界**经济序列（`WorldState` 持有），
-理由：曲线此前只存在于页面内存，刷新即清空。
+本节原有内容（`checkpoint` 帧、`snapshot.checkpoints` 全量 backlog、
+`snapshot.companies[id].history`）是**前后端契约**，权威在
+`docs/DASHBOARD-API.md` §4（WS 协议）与 §2.6（快照形状）。本文件不再复述，
+避免同一契约两份表述。
+
+UI 侧只保留与**呈现**有关的结论：checkpoint 是"阶段性总结"卡片的数据源；
+`history` 让现金曲线在刷新后不空。
 
 ---
 

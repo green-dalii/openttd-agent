@@ -5,7 +5,7 @@
  *   - `stackedBars(el, {items, series, format, height, maxBars})`
  *   页面继续用原来的配置形状，迁移到 uPlot 不需要改页面逻辑。
  *
- * 为什么用 uPlot（docs/FRONTEND-DEPENDENCIES-AUDIT.md §3.1）:
+ * 为什么用 uPlot（docs/FRONTEND.md §3.1）:
  *   坐标轴、刻度、DPR、resize、十字光标、图例、触摸都是"任何合格开发者写得差不多"
  *   的商品代码，却是我手搓时出 bug 最多的地方。uPlot 是 MIT、**零依赖**、
  *   22 KB gzip、且发布 IIFE 构建 —— **不需要构建链**，符合本项目的硬约束。

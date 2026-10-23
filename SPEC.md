@@ -167,7 +167,7 @@ OpenTTD 有**两个动作面**，能力完全不同：
 | `AgentMessage` 声明合并 | 引入 `game_observation` `agent_plan` `action_result` 等自定义消息类型（UI/审计可见，经 `convertToLlm` 过滤） |
 | `convertToLlm` | 只把对 LLM 有意义的 message 转出去（观察/结果摘要），避免上下文爆炸 |
 | `transformContext` | 注入 lessons/策略库检索结果；剪枝历史 |
-| `tools` (AgentTool) | 实际工具集（**9 个**，权威列表见 §4.3 与 `src/agent/tools/index.ts`）。`reflection` **已实现**（§10.77/§10.78）；`train`/`orders` 仍未实现 |
+| `tools` (AgentTool) | 实际工具集（**11 个**，权威列表见 §4.3 与 `src/agent/tools/index.ts`）。`reflection` **已实现**（§10.77/§10.78）；`train`/`orders` 仍未实现 |
 | `beforeToolCall` | 动作合法性预检（钱/状态/冷却），拒绝非法动作并给原因 |
 | `afterToolCall` | 记录指标、审计、结果反馈给进化引擎 |
 | `shouldStopAfterTurn` | 「这一 turn 结束就停」——执行器完成一轮动作后让出 |
@@ -175,6 +175,10 @@ OpenTTD 有**两个动作面**，能力完全不同：
 | session | 由本仓库的 `src/agent/session-store.ts` 持久化（每局一份）；跨局 lessons 独立存。**注意**：pi-agent-core 的 `AgentHarness` 层**未被使用**（§10.82） |
 
 ### 4.2 决策循环（细粒度）
+> **脚手架对模型的完整承诺**（观测面/反馈面/动作面/协议，以及"单机游玩 vs 模型基准"
+> 两种模式如何共用同一套脚手架）见 `docs/SCAFFOLD-CONTRACT.md`。
+> 本节只写**循环本身**；两处若有冲突，以契约为准（契约是唯一权威）。
+
 每局定义「决策点」（阶段变化 / 事件 / 间隔 / 模型 `wait_until`）。循环:
 1. Runner 在决策点**采集 rich state（不暂停，见 §1.1）** → 构造 `game_observation` 消息
 2. Agent `prompt()`; LLM 产出 计划（JSON: `goal / plan[] / immediate_action / wait_until / rationale`）
@@ -182,7 +186,7 @@ OpenTTD 有**两个动作面**，能力完全不同：
 4. executor 按计划施工（可能跨月）；Bridge GS 汇报每步结果
 5. 到达下一决策点或「等待条件满足」，回 1
 
-### 4.3 高层动作集（**9 个工具，唯一权威列表**）
+### 4.3 高层动作集（**11 个工具，唯一权威列表**）
 以 `src/agent/tools/index.ts` 为准（`capabilities` 由 `src/agent/tools/catalog.ts` 派生，
 并有"目录必须等于活工具数组"的防漂移断言）：
 
@@ -192,6 +196,8 @@ OpenTTD 有**两个动作面**，能力完全不同：
 | `estimate_route` / `inspect_route` | 线路收益估算 / 现状查询 | 否 |
 | `build_bus_route` | 站 A/站 B/路网/车库蓝图 → Executor 施工 | **是** |
 | `set_route_vehicles` | 车队规模（`V:N` = 本线路应有 N 辆；可扩容/缩编/设为 N） | **是** |
+| `set_route_cargo` | 线路货物（改装到库中车辆；P1-2，§10.110） | **是** |
+| `set_route_engine` | 线路车型（先买后卖换车；P1-2，§10.110） | **是** |
 | `retire_route` | 退役整条线路（卖车 + 注销登记） | **是** |
 | `recall` | 按需检索经验库（词级匹配 + 重叠排序） | 否 |
 | `set_pause` | 暂停/恢复游戏 | **是** |
@@ -716,11 +722,11 @@ inst.__zoomedByUser = true;       // 让数据帧走 setData(data, false)，视�
 
 **规则**：同一面板里"产业利用率"与"本公司运量"必须**分块并各自标注口径**；
 所有这类字段都是**上月经济月**口径（`ScriptEconomyTime`），不是实时值，必须标注。
-具体选型与呈现方案见 `docs/DATA-CHANNELS-EVALUATION.md`；实施计划见 `ROADMAP.md` §6d。
+具体选型与呈现方案见 `docs/archive/DATA-CHANNELS-EVALUATION.md`；实施计划见 `ROADMAP.md` §6d。
 
 ### 10.100 P1+P2 实测：产业/货种/公司交付量（2026-09-25 真机）
 
-按 `docs/DATA-CHANNELS-EVALUATION.md` 的选型落地的**线上形状**与真机读数
+按 `docs/archive/DATA-CHANNELS-EVALUATION.md` 的选型落地的**线上形状**与真机读数
 （自建 agent 运行，隔离端口 + 数据目录，offline demo）：
 
 | 事实 | 证据 |

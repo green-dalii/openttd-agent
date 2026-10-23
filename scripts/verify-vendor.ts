@@ -4,7 +4,7 @@
  * 职责: 防止 `assets/vendor/**` 被手工编辑（或漏跑 `pnpm run vendor`）而与
  *   `node_modules` 的上游发布物不一致 —— 那会让"版本可审计"这个保证失效。
  *
- * 为什么需要（docs/FRONTEND-DEPENDENCIES-AUDIT.md §6）: vendored 依赖的整个前提是
+ * 为什么需要（docs/FRONTEND.md §6）: vendored 依赖的整个前提是
  *   "文件逐字节等于上游发布物，版本由 lockfile 锁定"。一旦有人为了改个 bug 直接
  *   编辑 vendor 文件，下次 `pnpm run vendor` 会静默覆盖他的改动，而 CI 也不会发现。
  *   本脚本让这种漂移**在提交前失败**。

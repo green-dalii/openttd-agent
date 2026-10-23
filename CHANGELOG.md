@@ -9,6 +9,21 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **The documentation set is consolidated so the same topic has exactly one
+  authority** (docs/ went from 17 files to 13). `docs/README.md` is now the map:
+  every remaining document states the single question it answers, what it is
+  authoritative for, and what it deliberately does not contain. The frontend
+  documents (dependency audit, library evaluation, UnoCSS plan, frontend
+  architecture) merged into `docs/FRONTEND.md`; the signal architecture merged
+  into `docs/SCAFFOLD-CONTRACT.md`; the two completed evaluations moved to
+  `docs/archive/` with a frozen banner; the WS-frame and checkpoint contract
+  moved out of the UI document into the API contract, where it belongs. A
+  repository-hygiene test now fails when a document is added without being
+  registered in the map.
+
+
 ### Added
 
 - **The experiment runner now defaults to the pre-registered short-run design (P2-1)**
@@ -307,7 +322,7 @@
   · `uplot.d.ts` / `uplot.min.css` 大小写错（Linux/CI 会失效）→ 改为 `uPlot.*`。
 - **删除** `CHANGELOG.md` 里第二个（过时的）`## [Unreleased]` 规划块——它给早已发版的 v0.1–v0.4
   写着"规划中"，且与 `ROADMAP.md` 重复。
-- **`docs/FRONTEND-DEPENDENCIES-AUDIT.md`**：阶段 4 是**提案**却读起来像现状（4 个从未创建的文件名）
+- **`docs/FRONTEND.md`**：阶段 4 是**提案**却读起来像现状（4 个从未创建的文件名）
   → 补记实际结局（拆成 `live.js` + `live-view.js`）。
 - **`ROADMAP.md`**：把已消失的 `/tmp/s0-v*` 从"仍可查"清单里去掉，并注明 `/tmp` 是临时证据目录。
 - **新增 `AGENTS.md` §5.2-6**：症状是"变化/闪烁/往复"时**断言必须是时间序列**，

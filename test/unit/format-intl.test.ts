@@ -23,7 +23,7 @@
  *   因此: **Intl 只负责数字部分**（千分位、四舍五入、小数位），
  *   **单位阶梯是本项目的显式约定**（与 charts.js 一致：k/M/B/T）。
  *
- * 事实来源: docs/FRONTEND-DEPENDENCIES-AUDIT.md §3.3/§4 阶段 1。
+ * 事实来源: docs/FRONTEND.md §3.3/§4 阶段 1。
  * 禁止: 断言具体 locale 之外的实现细节；不要为了让旧字符串继续通过而放宽断言。
  *   两个例外是刻意保留手写的——`fmtDuration`（`Intl.DurationFormat` 尚未普遍可用）
  *   与 `fmtGameDate`（游戏历法，非真实日期）。

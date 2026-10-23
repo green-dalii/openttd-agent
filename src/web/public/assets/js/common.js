@@ -23,7 +23,7 @@ function esc(s) {
 /*
  * 数字由平台 `Intl` 渲染；**单位阶梯是本项目的显式约定**。
  *
- * 为什么换（2026-09-11，docs/FRONTEND-DEPENDENCIES-AUDIT.md §3.3）: 手写实现要自己维护
+ * 为什么换（2026-09-11，docs/FRONTEND.md §3.3）: 手写实现要自己维护
  * 小数位与稀有量级回退，而且硬编了 en-US。
  *
  * 为什么不直接用 `notation:"compact"`（同一轮实测踩到的坑）:

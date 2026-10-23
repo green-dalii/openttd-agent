@@ -178,3 +178,54 @@ describe("typecheck 覆盖面守卫（D62）", () => {
 		expect(uncovered, `这些 .ts 不在任何 tsc 项目里（D62）: ${uncovered.join(", ")}`).toEqual([]);
 	});
 });
+
+/**
+ * 文档地图守卫（2026-10-08，docs/ 合并后）。
+ *
+ * 漂移的机制不是"谁写错了"，而是"同一主题有两份文档、各自被引用"，
+ * 于是改一处忘一处。所以守卫钉住**登记**：docs/ 下每份文档都必须在
+ * `docs/README.md` 的地图里出现；地图里列的文档必须真的存在。
+ */
+describe("文档地图守卫（docs/README.md）", () => {
+	function docFiles(): string[] {
+		return execFileSync("git", ["ls-files", "docs/*.md"], { encoding: "utf8" })
+			.split("\n")
+			.filter(Boolean)
+			// archive/ 是历史快照，不登记在地图里（地图只列"现在的权威"）
+			.filter((f) => !f.startsWith("docs/archive/"))
+			.sort();
+	}
+
+	it("docs/ 下的每份文档都在文档地图里登记", () => {
+		const map = readFileSync(join(ROOT, "docs/README.md"), "utf8");
+		const missing = docFiles().filter((f) => {
+			// 地图自己不用登记自己。
+			if (f === "docs/README.md") return false;
+			const name = f.slice("docs/".length);
+			return !map.includes(name);
+		});
+		expect(
+			missing,
+			`这些文档没有登记在 docs/README.md 的地图里（新增文档必须登记，否则就是漂移的入口）:\n` +
+				missing.map((f) => `  - ${f}`).join("\n"),
+		).toEqual([]);
+	});
+
+	it("地图里列出的文档都存在", () => {
+		const map = readFileSync(join(ROOT, "docs/README.md"), "utf8");
+		const linked = [...map.matchAll(/\]\(([^)]+\.md)\)/g)].map((m) => `docs/${m[1]}`);
+		const missing = linked.filter((f) => !existsSync(join(ROOT, f)));
+		expect(missing, `地图指向了不存在的文档: ${missing.join(", ")}`).toEqual([]);
+	});
+
+	it("归档文档带冻结横幅（不得被当成现状权威）", () => {
+		const archived = execFileSync("git", ["ls-files", "docs/archive/*.md"], { encoding: "utf8" })
+			.split("\n")
+			.filter(Boolean);
+		for (const f of archived) {
+			const text = readFileSync(join(ROOT, f), "utf8");
+			expect(text, `${f} 缺少归档横幅`).toMatch(/归档/);
+			expect(text, `${f} 缺少"不是当前权威"的声明`).toMatch(/不是当前权威|不是现状/);
+		}
+	});
+});
