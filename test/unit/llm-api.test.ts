@@ -290,3 +290,33 @@ it("只有文件（无 env）时 appliedFrom 必须是 file，而不是 env", ()
 		rmSync(dir, { recursive: true, force: true });
 	}
 });
+
+/**
+ * D63 同型守卫：`applyLlmSettingsFile` 重建 LlmConfig 时必须把**所有**字段带过来。
+ * 漏一个字段的后果是静默的——真机传了 --thinking low 却按 off 跑。
+ */
+describe("applyLlmSettingsFile 保留 scaffold 旋钮（D4/D63）", () => {
+	it("已解析的 scaffold 经过文件合并后不丢", async () => {
+		const { mkdtemp, writeFile } = await import("node:fs/promises");
+		const { tmpdir } = await import("node:os");
+		const { join } = await import("node:path");
+		const { applyLlmSettingsFile } = await import("../../src/agent/llm-settings.js");
+		const dir = await mkdtemp(join(tmpdir(), "ottd-llm-"));
+		await writeFile(join(dir, "llm.json"), JSON.stringify({ model: "from-file" }));
+		const base = {
+			dataDir: dir,
+			llm: {
+				providerId: "p",
+				baseUrl: "",
+				apiKey: "",
+				model: "from-env",
+				api: "openai-completions",
+				contextWindow: 1000,
+				maxTokens: 10,
+				scaffold: { thinkingLevel: "low" as const, toolBudget: 5 },
+			},
+		};
+		const out = applyLlmSettingsFile(base as never);
+		expect(out.llm.scaffold).toEqual({ thinkingLevel: "low", toolBudget: 5 });
+	});
+});

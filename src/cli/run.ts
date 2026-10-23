@@ -64,6 +64,12 @@ interface CliArgs {
 	llmApiKey?: string;
 	llmModel?: string;
 	llmApi?: string;
+	/** D4/S6: provider id (catalog) - was env-only before. */
+	llmProvider?: string;
+	/** D4/S6: thinking level (off|minimal|low|medium|high|xhigh|max). */
+	thinking?: string;
+	/** D4/S6: per-decision tool-call budget. */
+	toolBudget?: number;
 	/** Explicitly allow the scripted (non-LLM) demo brain in agent mode. */
 	offlineDemo?: boolean;
 	/** Seed the agent with cross-game memory. Default: on (self-evolution). */
@@ -76,6 +82,10 @@ export function parseArgs(argv: string[]): CliArgs {
 	let mode: CliArgs["mode"] = "help";
 	let year: number | undefined;
 	let seed: number | undefined;
+	/** D4/S6: scaffold knobs, applied as env overrides (validated at config load). */
+	let llmProvider: string | undefined;
+	let thinking: string | undefined;
+	let toolBudget: number | undefined;
 	let timeoutMs = 15_000;
 	let aiName: string | undefined;
 	let webPort: number | undefined;
@@ -161,6 +171,15 @@ export function parseArgs(argv: string[]): CliArgs {
 			case "--llm-api":
 				llmApi = argv[++i];
 				break;
+			case "--llm-provider":
+				llmProvider = argv[++i];
+				break;
+			case "--thinking":
+				thinking = argv[++i];
+				break;
+			case "--tool-budget":
+				toolBudget = parseIntNum(argv[++i], "--tool-budget");
+				break;
 			case "--offline-demo":
 				offlineDemo = true;
 				break;
@@ -210,7 +229,7 @@ export function parseArgs(argv: string[]): CliArgs {
 		// written, because the change was checked with `tsc` instead of the guard.
 		// Run test/unit/cli-v02.test.ts after touching any flag, not tsc.
 		mode, year, seed, timeoutMs, aiName, webPort, demoSeconds, gameDays, scenario, addVehicles, shrinkTo, retireJob, secondRoute, freeze, probeGsBuy, probeGsRoute,
-		llmBaseUrl, llmApiKey, llmModel, llmApi, offlineDemo, skipPreflight,
+		llmBaseUrl, llmApiKey, llmModel, llmApi, llmProvider, thinking, toolBudget, offlineDemo, skipPreflight,
 		injectMemory,
 	};
 }
@@ -253,6 +272,9 @@ Usage:
   --llm-key K        agent: API key (also LLM_API_KEY / OPENAI_API_KEY)
   --llm-model M      agent: model id (e.g. gpt-4o-mini, deepseek-chat)
   --llm-api A        agent: streaming API (openai-completions|anthropic-messages)
+  --llm-provider P   agent: provider id (pi-ai catalog, e.g. openai)
+  --thinking L       agent: thinking level off|minimal|low|medium|high|xhigh|max (default off)
+  --tool-budget N    agent: tool calls allowed per decision (default 12)
   --version, -V      print the version and exit
   --help             this help
 
@@ -288,6 +310,10 @@ async function main(): Promise<number> {
 	if (args.llmApiKey !== undefined) overrides.LLM_API_KEY = args.llmApiKey;
 	if (args.llmModel !== undefined) overrides.LLM_MODEL = args.llmModel;
 	if (args.llmApi !== undefined) overrides.LLM_API = args.llmApi;
+	// D4/S6: scaffold knobs (resolveScaffoldKnobs validates; bad values throw).
+	if (args.llmProvider !== undefined) overrides.LLM_PROVIDER = args.llmProvider;
+	if (args.thinking !== undefined) overrides.LLM_THINKING = args.thinking;
+	if (args.toolBudget !== undefined) overrides.LLM_TOOL_BUDGET = String(args.toolBudget);
 	const cfg = applyLlmSettingsFile(loadConfig({ ...process.env, ...overrides }));
 
 	if (args.mode === "dry-run") {

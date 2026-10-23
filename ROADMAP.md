@@ -48,7 +48,7 @@
 | **D2** | **脚手架降噪**：S2 同一事实多套实现 → **唯一 canonical 投影**（上下文与 `observe()` 同源同序；transcript 不留第二份全量状态） | 上下文与 `observe()` 同字段同序（单测）；真机实测 observe() -17.4%、prompt +0.8%（新增 loan） | ✅（`SPEC.md` §10.117） |
 | **D3a** | **反馈成对（连接点）**：S4 相位→`job`→**订下它的动作**（GS ack 为唯一真源，run 级连接） | 真机：相位事实带 `job` + `action`（实测 payload） | ✅（`SPEC.md` §10.118） |
 | **D3b** | **run manifest + 结果分类**：S9 served model / 旋钮 / 脚手架指纹；S8 0 分必带成因（派生不存盘） | 度量行含 manifest（真机实测）；0 分记录经分类得具名成因 | ✅（`SPEC.md` §10.119） |
-| **D4** | **旋钮与成熟度**：S6 思考档位 / 工具预算 / provider 进 CLI+config；S9 脚手架指纹 | `--thinking` / `--tool-budget` / `--llm-provider` 可用；两模型 prompt 指纹可比 | ⬜ (#5 #6) |
+| **D4** | **旋钮与成熟度**：S6 思考档位 / 工具预算 / provider 进 CLI+config；S9 脚手架指纹（D3b 已落地） | 真机：`--thinking low --tool-budget 5` 生效并进 manifest；非法值报错 | ✅（`SPEC.md` §10.120） |
 | **D5** | **评测面**：固定世界 + 每格独立目录 + run manifest + 配对统计 + 分数卡 + 机器可读报告 | 2×2 矩阵冒烟跑通；报告含分数/成本/失败分类；功效不足拒绝出结论 | ⬜ (#6 #9 #10 #11) |
 | **D6** | **harness 迁移**（分层可回退）：会话/事件 → hook（预算+指纹）→ usage 台账/OTel | 每局产出可回放 JSONL 会话；旧路径 feature flag 可退 | ⬜ (#12) |
 | **P3** | 卫生：删 `v02-runner` 死代码（380 行）、DOM churn 降噪（12.5k/s 实测）、orphan 规则修、`AdminProbeClient` 审查 | gate 绿；DOM churn 显著下降并实测 | ⬜ |

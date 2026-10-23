@@ -10,6 +10,7 @@
 import { describe, expect, it } from "vitest";
 import { classifyOutcome } from "../../src/evolution/outcome.js";
 import { scaffoldHash } from "../../src/agent/scaffold-fingerprint.js";
+import { resolveScaffoldKnobs } from "../../src/agent/scaffold-knobs.js";
 
 function row(over: Record<string, unknown> = {}) {
 	return {
@@ -90,5 +91,28 @@ describe("scaffoldHash（脚手架指纹）", () => {
 
 	it("工具顺序变了 → 指纹也变（顺序是契约的一部分）", () => {
 		expect(scaffoldHash("prompt", tools)).not.toBe(scaffoldHash("prompt", [...tools].reverse()));
+	});
+});
+
+/**
+ * D4 / S6：这三个旋钮以前在代码里写死（thinking 永远 "off"、工具预算永远是 12、
+ * provider 只能走环境变量）。基准评测必须能把它们当变量扫描。
+ */
+describe("旋钮解析（D4/S6）", () => {
+	it("thinking 档位从配置解析，缺省 off", () => {
+		expect(resolveScaffoldKnobs({}).thinkingLevel).toBe("off");
+		expect(resolveScaffoldKnobs({ LLM_THINKING: "low" }).thinkingLevel).toBe("low");
+		expect(resolveScaffoldKnobs({ LLM_THINKING: "high" }).thinkingLevel).toBe("high");
+	});
+
+	it("非法 thinking 值直接报错（不静默回退）", () => {
+		expect(() => resolveScaffoldKnobs({ LLM_THINKING: "ultra" })).toThrow(/LLM_THINKING/);
+	});
+
+	it("工具预算从配置解析，缺省 12；必须为正整数", () => {
+		expect(resolveScaffoldKnobs({}).toolBudget).toBe(12);
+		expect(resolveScaffoldKnobs({ LLM_TOOL_BUDGET: "20" }).toolBudget).toBe(20);
+		expect(() => resolveScaffoldKnobs({ LLM_TOOL_BUDGET: "0" })).toThrow(/LLM_TOOL_BUDGET/);
+		expect(() => resolveScaffoldKnobs({ LLM_TOOL_BUDGET: "abc" })).toThrow(/LLM_TOOL_BUDGET/);
 	});
 });

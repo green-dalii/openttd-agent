@@ -10,6 +10,21 @@
 ## [Unreleased]
 ### Added
 
+- **The thinking level, the per-decision tool budget, and the provider are now
+  configurable (phase D4).** They were hard-coded (thinking always `off`, budget
+  always 12) and the provider could only come from an environment variable, so a
+  benchmark could not scan the two knobs with the most influence on model
+  behaviour. `--thinking`, `--tool-budget` and `--llm-provider` (plus
+  `LLM_THINKING` / `LLM_TOOL_BUDGET`) set them, unknown values are rejected
+  instead of silently falling back, and the applied values go into the run
+  manifest.
+
+  This also fixed a silent field-drop: rebuilding the LLM config while applying
+  the settings file lost the scaffold knobs, so `--thinking low --tool-budget 5`
+  ran as `off`/12 without a word. Found by running it; guarded by a unit test now.
+
+### Added
+
 - **Every run records what it was, and a zero score names its cause (phase D3b).**
   The metric row now carries a run manifest: the model the provider actually
   served (not the one requested), the thinking level and tool budget that were

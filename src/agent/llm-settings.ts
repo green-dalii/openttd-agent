@@ -73,6 +73,10 @@ export function applyLlmSettingsFile(cfg: Config): Config {
 		source: cfg.llm.source ?? file.source,
 		contextWindow: cfg.llm.contextWindow || file.contextWindow || 128_000,
 		maxTokens: cfg.llm.maxTokens || file.maxTokens || 4096,
+		// D63 的教训：重建对象是丢字段的惯犯。`scaffold` 是 D4 的旋钮，
+		// 这里少拷一次，CLI 的 --thinking/--tool-budget 就会被静默丢掉
+		// （真机实测过一次：传 low/5 却仍按 off/12 跑）。
+		...(cfg.llm.scaffold ? { scaffold: cfg.llm.scaffold } : {}),
 	};
 	const envProvided = Boolean(
 		cfg.llm.providerId || cfg.llm.baseUrl || cfg.llm.model || cfg.llm.apiKey,
