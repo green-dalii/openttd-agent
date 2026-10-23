@@ -8,6 +8,7 @@
 
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { resolveScaffoldKnobs } from "./agent/scaffold-knobs.js";
 
 export class ConfigError extends Error {
 	constructor(message: string) {
@@ -64,6 +65,8 @@ export interface LlmConfig {
 	source?: LlmSource;
 	contextWindow: number;
 	maxTokens: number;
+	/** D4/S6: run-shape knobs (validated; see scaffold-knobs.ts). */
+	scaffold?: { thinkingLevel: import("./agent/scaffold-knobs.js").ThinkingLevelName; toolBudget: number };
 }
 
 /** Which provider path is in use. */
@@ -181,5 +184,8 @@ export function loadLlmConfig(env: NodeJS.ProcessEnv): LlmConfig {
 		source: sourceRaw ? (sourceRaw as LlmSource) : undefined,
 		contextWindow: intEnv(env, "LLM_CONTEXT_WINDOW", 128_000, { min: 1024, max: 10_000_000 }, "LLM context window"),
 		maxTokens: intEnv(env, "LLM_MAX_TOKENS", 4096, { min: 16, max: 1_000_000 }, "LLM max tokens"),
+		// D4/S6: the two knobs that used to be hard-coded. Resolved (and
+		// validated) in one place; unknown values throw instead of falling back.
+		scaffold: resolveScaffoldKnobs(env as Record<string, string | undefined>),
 	};
 }

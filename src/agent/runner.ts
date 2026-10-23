@@ -337,10 +337,10 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 				web?.publishRun({
 					state: paused ? "paused" : "running",
 					sessionId: session.id,
-		// D3b: the RESOLVED knobs (not the requested ones) so the manifest can
+		// D3b/D4: the RESOLVED knobs (not the requested ones) so the manifest can
 		// record what actually drove the run.
-		thinkingLevel: "off",
-		maxToolCallsPerDecision: DEFAULT_MAX_TOOL_CALLS_PER_DECISION,
+		thinkingLevel: scaffold.thinkingLevel,
+		maxToolCallsPerDecision: scaffold.toolBudget,
 					mode: "agent",
 					pausedBy: paused ? "agent" : null,
 					pausedAt: paused ? at : null,
@@ -710,6 +710,9 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 	// outlive a decision window (construction spans many decisions), so it
 	// lives at run level, not in the per-window tracker.
 	const jobActions: Record<number, string> = {};
+	// D4/S6: the knobs actually applied to this run (validated at config load;
+	// defaults keep the historical behaviour).
+	const scaffold = cfg.llm.scaffold ?? { thinkingLevel: "off" as const, toolBudget: DEFAULT_MAX_TOOL_CALLS_PER_DECISION };
 
 	const runtime = createAgent({
 		deps,
@@ -781,8 +784,8 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 	// D3b/S9: the scaffold fingerprint - the prompt and the tool set that are
 	// actually sent to the model. Two runs with the same fingerprint saw the
 	// same scaffold; without it a benchmark cannot claim that.
-	const scaffold = scaffoldHash(SYSTEM_PROMPT, runtime.tools as unknown as FingerprintableTool[]);
-	console.log(`[agent] scaffold: thinking=${"off"} toolBudget=${DEFAULT_MAX_TOOL_CALLS_PER_DECISION} hash=${scaffold}`);
+	const fingerprint = scaffoldHash(SYSTEM_PROMPT, runtime.tools as unknown as FingerprintableTool[]);
+	console.log(`[agent] scaffold: thinking=${scaffold.thinkingLevel} toolBudget=${scaffold.toolBudget} hash=${fingerprint}`);
 
 	// Feed every agent event into telemetry (token usage, thinking, tool steps).
 	agent.subscribe((event) => {
@@ -970,9 +973,9 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 		scenario,
 		scenarioReason: prebuiltReason,
 		manifest: {
-			thinkingLevel: "off",
-			toolBudget: DEFAULT_MAX_TOOL_CALLS_PER_DECISION,
-			scaffoldHash: scaffold,
+			thinkingLevel: scaffold.thinkingLevel,
+			toolBudget: scaffold.toolBudget,
+			scaffoldHash: fingerprint,
 		},
 		deliveredAtReady,
 		episode: {
