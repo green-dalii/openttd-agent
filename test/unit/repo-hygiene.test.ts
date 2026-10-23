@@ -229,3 +229,51 @@ describe("文档地图守卫（docs/README.md）", () => {
 		}
 	});
 });
+
+/**
+ * 文档正交性守卫（AGENTS.md §9.1a）。
+ *
+ * 背景：SPEC 曾有 118 条 §10.x（一个阶段一条，等于把变更日志写进事实文档），
+ * ROADMAP 曾有 654 行且大半是已完成叙事。膨胀的机制不是"谁写错了"，
+ * 而是**默认允许只增不减**。这三个断言把默认改掉。
+ */
+describe("文档正交性守卫（§9.1a）", () => {
+	const SPEC_MAX_ENTRIES = 120; // §10 条目数上限：新增一条就要合并/删掉一条
+	const ROADMAP_MAX_LINES = 240; // ROADMAP 只留未完成
+	const ROADMAP_BANNED = ["历史", "已解决", "完成史", "开发纪律"];
+
+	it("SPEC §10 的每一条都在 §10 索引里登记（索引 = 落位面）", () => {
+		const spec = doc("SPEC.md");
+		const ids = [...spec.matchAll(/^### (10\.[0-9.]+) /gm)].map((m) => m[1]!);
+		expect(ids.length).toBeGreaterThan(20);
+		const indexStart = spec.indexOf("### 索引（按主题");
+		expect(indexStart, "SPEC 缺少 §10 索引（AGENTS.md §9.1a）").toBeGreaterThan(-1);
+		const indexEnd = spec.indexOf("### 10.", indexStart + 10);
+		const index = spec.slice(indexStart, indexEnd === -1 ? undefined : indexEnd);
+		const missing = ids.filter((id) => !index.includes(id));
+		expect(missing, `这些 §10 条目没在索引里登记: ${missing.join(", ")}`).toEqual([]);
+	});
+
+	it("SPEC §10 条目数不超预算（不允许只增不减）", () => {
+		const spec = doc("SPEC.md");
+		const ids = [...spec.matchAll(/^### (10\.[0-9.]+) /gm)].map((m) => m[1]!);
+		expect(
+			ids.length,
+			`SPEC §10 有 ${ids.length} 条（上限 ${SPEC_MAX_ENTRIES}）：新增一条就要合并或删掉一条旧的`,
+		).toBeLessThanOrEqual(SPEC_MAX_ENTRIES);
+	});
+
+	it("ROADMAP 只留未完成：无历史章节，且在行数预算内", () => {
+		const roadmap = doc("ROADMAP.md");
+		const lines = roadmap.split("\n").length;
+		expect(lines, `ROADMAP 有 ${lines} 行（上限 ${ROADMAP_MAX_LINES}）`).toBeLessThanOrEqual(ROADMAP_MAX_LINES);
+		for (const word of ROADMAP_BANNED) {
+			// 只查二级标题（## …），正文里提到这些词是允许的。
+			const offenders = roadmap
+				.split("\n")
+				.filter((l) => l.startsWith("## ") && l.includes(word))
+				.map((l) => l.trim());
+			expect(offenders, `ROADMAP 不该有「${word}」章节（§9.2：已完成的内容进 CHANGELOG）: ${offenders.join(" | ")}`).toEqual([]);
+		}
+	});
+});

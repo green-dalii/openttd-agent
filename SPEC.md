@@ -318,6 +318,22 @@ OpenTTD 有**两个动作面**，能力完全不同：
 > 依据一律写**代码 / 测试 / 上游源码**，不写 `/tmp/...`（临时目录，环境重建即失效）。
 > **编号保持不变**，其它文档里的 `§10.x` 指针继续有效。
 
+### 索引（按主题；**编号不变**，其它文档的 `§10.x` 指针继续有效）
+
+> 落位规则（AGENTS.md §9.1）：**一个阶段最多贡献一条**；实施流水进 `CHANGELOG.md`，
+> 未完成的事进 `ROADMAP.md`，本节只收"今天仍为真"的事实。
+
+| 主题 | 条目 | 数 |
+|---|---|---|
+| **A 通信与协议事实** | 10.2 观察信号 · 10.4 命令下发链路 · 10.13 OpenTTD Squirrel… · 10.24 第二条 admin 连接不能给 … · 10.25 GS 可对公司施工并扣公司钱 · 10.25.1 两条附带实测事实 · 10.66 GS 通道的部分失效：`GSSt… · 10.99 数据的唯一来源边界：admin … · 10.106 事实通道补全与 admin 握手… | 9 |
+| **B 执行器与施工** | 10.3 GS-only 施工候选 · 10.10 v0.2 spike: 自定义 … · 10.11 v0.2 spike: Brid… · 10.12 v0.2 实现: 标牌邮箱可见性… · 10.14 v0.2 实现: Executo… · 10.15 v0.2.1: 分段贪心铺路解除… · 10.23 执行器阶段的解码契约 · 10.26 决策循环的 freeze/tha… · 10.27 执行器"假死"的真正根因：路径搜… · 10.28 控制台 `pause` 是单向的… · 10.29 执行器跑通完整公交线 · 10.39 NEXT-4 最小切片：执行器队… · 10.39.1 修正：FIFO + done 集… · 10.40 FIFO 队列真机验证通过 · 10.45 Phase A2：GS 侧类型化… · 10.46 Phase A3：harness… · 10.90 决定性事实：Bridge GS … · 10.92 AB-4a：GS 自建 + 自运… · 10.103 执行器异常：完整文本进事件流 · 10.107 P1-1a：执行器搬进 GS · 10.108 P1-1b：GS 寻路库入库 · 10.109 P1-1b 尾巴 + P1-3 … · 10.110 P1-2：动作面扩——选货 / … · 10.111 P1-3 收尾：FLEET 归因… | 24 |
+| **C 决策循环与运行时** | 10.16 v0.2.1 实现: Pi Ag… · 10.18 v0.5.0 实现: 启动门禁 … · 10.19 v0.6.0 实现: 决策循环对… · 10.20 `add_vehicles` 的… · 10.21 两个 runner 的事件转发契… · 10.30 `seconds` 从未限制运行… · 10.35 心跳被当成「变化」—— 决策循环… · 10.35.1 修复的实测结果与尚未解决的问题 · 10.36 新闻门：phase 按阶段门控，… · 10.37 新闻门之后的第一次校准跑 · 10.38 校准跑 #2：session h… · 10.47 Phase B-3：signal… · 10.48 Phase B-4a：决策循环纯… · 10.49 Phase B-4b：决策循环体… · 10.50 Phase C：结构化记忆 + … · 10.60 已验证的冻结：重新引入暂停，但这… · 10.61 冻结 vs 不冻结：机制成立，但… · 10.68 测量单元本身不可比：墙钟预算 →… · 10.69 G1 落地：局以模拟时间结束 · 10.74 与 pi-agent-core … · 10.75 R1 实施结果：执行顺序 / 工… · 10.83 G6 实测：单次请求峰值 5–7… · 10.93 `--serve` 的 Star… · 10.101 僵尸局取证：用户看到的那句告警，… · 10.102 世界时钟：一个事实、一个写者、一… | 25 |
+| **D 观测面与测量** | 10.1 动作面 · 10.53 NEXT-2 N2-1：线路经济… · 10.54 NEXT-2 N2-2/N2-3… · 10.55 NEXT-2 N2-4：主指标换… · 10.59 工具必须能观测自己的效果：rco… · 10.65 流量指标的测量缺陷：`deliv… · 10.67 校准 #2：仪器缺陷不是方差来源… · 10.71 G2 落地：把"决定结局的那个过… · 10.72 S0 oracle 梯度：杠杆存… · 10.73 S1/G4 落地：预建场景 · 10.98 城镇与存档：两条"数据一直在、只… · 10.100 P1+P2 实测：产业/货种/公… · 10.105 车队数必须跨线路去重：同屏两个"… · 10.114 D1a：模型看得见自己这局的分 | 14 |
+| **E 记忆与进化** | 10.22 RL Harness 范围 · 10.31 M3 对照实验结果 · 10.34 M3 第二次 A/B：把决策权交… · 10.41 决策→结果账本接入反思 · 10.42 M3 A/B 第三次重跑：手眼账… · 10.43 为什么记忆无收益：全链路审计 · 10.76 R2 实施结果：经验 = 带实测… · 10.77 R2b 实施结果：反思改走 Ag… · 10.78 M1：反思产出率变成可诊断、可重… · 10.79 M2：把计分规则作为事实写进提示… · 10.80 M3 能力盘点：环境到底允许 a… · 10.82 第一性原理复检：能力面、空缺与协… · 10.84 M3-1b：车队杠杆真正的两处缺… · 10.85 第一性原理复审：离"自主 + 自… · 10.86 M3-2a：每线路登记表 + 退… · 10.87 M3-2b：披露粘滞——让事件相… · 10.88 M3-2c：车队请求对已登记的旧… · 10.89 M4a：`recall` 按需检… · 10.91 AB-1：`capabiliti… | 19 |
+| **F 实验方法与统计** | 10.32 第一性原理：M3 测不出差异，是… · 10.33 把决策权交还 agent：城镇对… · 10.51 M3 第四次重跑：首次有效分臂 · 10.52 每局存档+ M3 第五/六次重跑 · 10.56 N2-5 首轮 A/B 判废：臂… · 10.57 N2-5 有效轮次与两个结论 · 10.58 N2-5 oracle 探测：任… · 10.62 NEXT-2 收尾：首个干净判据… · 10.63 校准轮：窗口是方差的主因，实验设… · 10.64 顺序检验 block #1：CI… · 10.70 G3 落地：车队请求的静默无效变… · 10.81 M3-1 真机结果：车队杠杆被阶… · 10.112 P2-3：统计预登记 · 10.113 P2-1/P2-2 代码侧：实验… | 14 |
+| **G 产品面与前端** | 10.17 v0.3.0 实现: Dashb… · 10.94 Live 页面运行期的滚动失控与… · 10.95 图表渲染路径：三个真因与"图表健… · 10.96 长跑实测 · 10.97 uPlot 1.6.32 的交互… · 10.104 图表手势、区间读数与列表索引 | 6 |
+| **H 里程碑与实施流水** | 10.5 待 M0/M1 spike 实测… · 10.6 M0 实测结果 · 10.7 M1 实测结果 · 10.8 里程碑进度 · 10.9 M1.5 崩溃调查 | 5 |
+
 ### 10.1 动作面（回答"Admin Port 做不到的操作怎么办"）
 **仍为真**：动作面（agent 能做什么）以 §4.3 的工具集为准；环境侧的施工原语见 §10.25。
 
@@ -722,7 +738,7 @@ inst.__zoomedByUser = true;       // 让数据帧走 setData(data, false)，视�
 
 **规则**：同一面板里"产业利用率"与"本公司运量"必须**分块并各自标注口径**；
 所有这类字段都是**上月经济月**口径（`ScriptEconomyTime`），不是实时值，必须标注。
-具体选型与呈现方案见 `docs/archive/DATA-CHANNELS-EVALUATION.md`；实施计划见 `ROADMAP.md` §6d。
+具体选型与呈现方案见 `docs/archive/DATA-CHANNELS-EVALUATION.md`；剩余的取数缺口见 `docs/SCAFFOLD-CONTRACT.md` §4 的 S7 与 Issue #13。
 
 ### 10.100 P1+P2 实测：产业/货种/公司交付量（2026-09-25 真机）
 
@@ -1129,70 +1145,37 @@ headless 持续超时）——布局正确性由 DOM 文本断言 + smoke 的元
 horizon，记忆随局累积；判决打印学习曲线）。m3-verdict 同步打印 M5 曲线 + M4b 分布
 + P2-3 功效行。空态自证：n=0 → "only 0 run(s) - a trend needs >= 3"。
 
-### 10.114 D1a：模型看得见自己这局的分（`score` 块，2026-10-23）
+### 10.114 D1：模型看得见自己的成绩、诚实的增量、历局的成绩（2026-10-23）
 
-**问题**：系统提示词告诉模型"一局按每游戏日交付量计分"（`runtime.ts` 的 Scoring 段），
-但决策上下文里**没有分**：世界状态有 `deliveredRun`（`world-state.ts`），而
-`toNumbers()` 只给 money/income/vehicles/stations。⇒ 模型无法自我评估，信用分配没有起点
-（契约 §5.2 的 Reward / Credit assignment 两行）。
+**背景**：系统提示词告诉模型"一局按每游戏日交付量计分"，却从不告诉它自己考了多少；
+跨局记忆注入的是 lesson 文本，也没有成绩。于是模型无法自我评估，信用分配没有起点
+（`docs/SCAFFOLD-CONTRACT.md` §5.2 的 Reward / Credit assignment 两行长期是 ❌）。
 
-**实现**（`src/agent/score.ts` 纯函数 + 接线）：
-- `projectScore()` → `ScoreFact{delivered, deliveredPerGameDay, elapsedGameDays,
-  horizonDays, scoredFromGameDay, windowOpened}`，进决策上下文的 `score` 段。
-- **`delivered` 与度量同源同值**：取世界状态的 `deliveredRun.total`，即该局度量行
-  `deliveredRun` 的同一个数（§10.65）——模型看到的分与最终被记的分不会分叉。
-- 速率分母是**本局已历游戏日**（`elapsedGameDays`）；`delivered` 或分母未知时
-  `deliveredPerGameDay` 为 `null`（缺失不折零，D60）。
-- 计分窗口是**条件**不是评价：`scoredFromGameDay`（预建场景 = 路线能运货那天；
-  freeform = `null`，整局都是窗口）、`windowOpened`。
-- 运行日志打印 `[agent] score: ...`（MEMORY A7：事实必须可核对，不能只"相信"）。
+**事实（三条，同一阶段一次落地）**
 
-**真机实测**（seed 11，offline-demo，150 游戏日 horizon）：4 次决策各打印一行
-`delivered=0 perGameDay=0 elapsedGameDays=11 horizon=150 scoredFromDay=run start window=open`；
-局终度量行 `deliveredRun=0, simulatedDays=121, status=completed` ⇒ **模型看到的 0 与
-被记的 0 是同一个数**（"未计量"路径由单测覆盖：`deliveredTotal=null → delivered=null`）。
+1. **成绩可见**（S1）：每个决策上下文带 `score` 块（`delivered` / `deliveredPerGameDay` /
+   `elapsedGameDays` / `horizonDays` / `scoredFromGameDay` / `windowOpened`）。`delivered`
+   取世界状态的 `deliveredRun.total`，**与该局度量行 `deliveredRun` 是同一个数**（§10.65）
+   ——模型看到的分与被记的分不会分叉。未知读数为 `null`，**不折零**（D60）。
+   计分窗口是**条件**不是评价（预建场景 = 路线能运货那天；freeform = 整局）。
+   形状与语义见 `docs/SCAFFOLD-CONTRACT.md` §2.1。
+2. **增量诚实**（S3）：`null` 读数曾被折成 0，于是第一次决策向模型报出
+   `moneyDelta=0`——"没变化"伪装成"没变化过"。现在基线保留 `null`，任一侧未知则该项增量为
+   `null`，并由 `sinceLastDecision.baselineEstablished=false` 明说"还没有基线"。
+   `loop-control.ts` 里重复声明的 `NumbersBaseline` 删除，改用唯一定义（C1）。
+3. **历局成绩作为事实注入**（S5）：`src/evolution/score-history.ts` 只收**可比**的局
+   （同 scenario、同 horizon、未被 `metricExclusion` 排除——被人停/世界冻结的局不是
+   "没学会"），被排除的局**报出数量与原因**；每局给 `deliveredRun / simulatedDays`。
+   无可比历史时**不注入**（空块会被读成"你以前考 0 分"）。`--no-memory` 对照臂同样关闭
+   （对照臂必须是零记忆，否则 A/B 无效）。
 
-### 10.115 D1b：delta 不再说谎（2026-10-23）
-
-**问题**：`numbersOf()` 把 `null` 读数折成 0 再算增量，于是**第一次决策**向模型报出
-`moneyDelta=0 / vehiclesDelta=0`——真实含义是"还没读到"，被说成了"没变化"。
-`baselineOf()` 同样把缺失折零。⇒ 模型可能基于一个**编造的零**做决策（D60）。
-
-**改法**：
-- `NumbersBaseline` 的四个量改为 `number | null`；`baselineOf()` 保留缺失；
-  `summarizeDelta()` 任一侧未知即该项为 `null`；
-  第一次决策（无基线）⇒ 全部增量为 `null`，并由 `sinceLastDecision.baselineEstablished=false`
-  明确说明"还没有基线"。
-- `loop-control.ts` 里重复声明的 `NumbersBaseline` 删除，改用 `decision-context.ts`
-  的唯一定义（C1：同一概念两份实现会静默漂移）。
-- 运行日志打印 `[agent] deltas: ...`，使"未知 ≠ 没变化"可核对（MEMORY A7）。
-
-**真机实测**（seed 11，offline-demo，60 游戏日 horizon）：
-第一次决策 `baseline=none money=unknown income=unknown vehicles=unknown stations=unknown
-elapsedGameDays=unknown`；第二次 `baseline=established money=199214 income=-786
-vehicles=unknown stations=unknown elapsedGameDays=3`——**有读数的给数，没读数的给 unknown**。
-
-### 10.116 D1c：agent 看得见自己历局的成绩（2026-10-23）
-
-**问题**：跨局记忆注入的是 lesson 文本（"某次发生了什么"），**没有成绩**——
-于是模型不知道自己是在变好还是变坏（`ROADMAP.md` 对齐检查表第 10 行，2026-09-18 起未修）。
-
-**改法**：
-- 新模块 `src/evolution/score-history.ts`（纯函数 + 渲染）：
-  `pastRunScores()` 只收**可比**的局——同 scenario、同 horizon、未被 `metricExclusion`
-  排除（被人停/世界冻结的局不是"没学会"，是被停了，SPEC §10.101/§10.102）；
-  被排除的局**必须报出来**（数量 + 原因），不静默丢弃。
-  每局给出 `deliveredRun / simulatedDays`（cargo per game day）；无读数 → `null`。
-- 注入：`pruningTransformContext` 新增 `scoreHistoryProvider`，在 lessons 之前注入
-  一块**事实**（数字 + 测量条件 + 排除统计）；无可比历史时**不注入**（空块会被读成
-  "你以前考 0 分"）。
-- **`--no-memory` 对照臂同样关闭**该注入：对照臂必须是"零记忆"，否则 A/B 无效。
-
-**真机实测**（llm-stub 真实 HTTP 路径，第一局 seed 11 → 第二局 seed 22 同一 data dir）：
-第二局实际发给模型的 payload 含
+**真机实测**：① 决策日志打印 `[agent] score: delivered=0 ... horizon=150`（seed 11），
+局终度量行 `deliveredRun=0` ⇒ **模型看到的 0 与被记的 0 同值**；② 第一次决策
+`baseline=none money=unknown ...`，第二次 `baseline=established money=199214 income=-786
+vehicles=unknown`；③ 用 llm-stub 真实 HTTP 跑两局，第二局实际发给模型的 payload 含
 ```
 Your own measured scores in earlier comparable games (cargo delivered per game day):
 - seed 11: 0 cargo per game day (horizon 40 game days, 41 days measured)
 Measurement conditions: scenario=freeform, horizon=40 game days.
 ```
-（抓包用一次性代理放在 `.scratch/`，用完删除。）
+（抓包用一次性代理置于 `.scratch/`，用完删除。）
