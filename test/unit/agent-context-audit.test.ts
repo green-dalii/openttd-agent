@@ -29,7 +29,9 @@ describe("pruningTransformContext", () => {
 		expect((out[0] as { content: string }).content).toBe("m7");
 	});
 
-	it("re-attaches the latest game_observation when it falls outside the window", async () => {
+	it("keeps the tail only - no observation is re-attached any more (D2/S2)", async () => {
+		// D2: the world snapshot is no longer appended as a `game_observation`
+		// message (it never reached the model), so there is nothing to pin.
 		const t = pruningTransformContext({ keepRecent: 2 });
 		const input: AgentMessage[] = [
 			{ role: "game_observation", date: "1950-01", state: {}, timestamp: 1 } as unknown as AgentMessage,
@@ -39,8 +41,8 @@ describe("pruningTransformContext", () => {
 			msg("assistant", 4),
 		];
 		const out = await t(input);
-		expect((out[0] as { role: string }).role).toBe("game_observation");
-		expect(out).toHaveLength(3); // observation + last 2
+		expect(out).toHaveLength(2);
+		expect((out[0] as { content: string }).content).toBe("m3");
 	});
 
 	it("injects lessons when the provider returns some", async () => {

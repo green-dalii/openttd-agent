@@ -15,8 +15,8 @@ import {
 	inspectRouteTool,
 	observeTool,
 	setPauseTool,
-	summarizeState,
 } from "../../src/agent/tools/index.js";
+import { auditState } from "../../src/agent/world-facts.js";
 import type { AgentDeps, CommandSink, StateReader } from "../../src/agent/types.js";
 import type { WorldSnapshot } from "../../src/game/world-state.js";
 
@@ -60,9 +60,9 @@ function deps(over: Partial<AgentDeps> = {}): AgentDeps {
 	return { sink, state: fakeState(), ...over };
 }
 
-describe("summarizeState", () => {
+describe("auditState（审计侧世界快照）", () => {
 	it("formats date and empty companies", () => {
-		const out = summarizeState({
+		const out = auditState({
 			date: { raw: 0, year: 1950, month: 3, day: 1 },
 			companies: new Map(),
 			recent: [],
@@ -81,7 +81,7 @@ describe("summarizeState", () => {
 
 	it("decodes signed income from u64 (negatives must not show as huge u64)", () => {
 		const negIncome = BigInt.asUintN(64, -21583n); // stored as u64
-		const out = summarizeState({
+		const out = auditState({
 			date: null,
 			companies: new Map([
 				[

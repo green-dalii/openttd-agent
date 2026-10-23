@@ -12,8 +12,8 @@ import { Type, type TSchema } from "typebox";
 import { capabilitiesTool, requireRecall, requireRouteStats } from "./catalog.js";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { ActionResult, AgentDeps } from "../types.js";
+import { worldFacts } from "../world-facts.js";
 import { formatRouteStats } from "../route-stats.js";
-import type { WorldSnapshot } from "../../game/world-state.js";
 import { estimateRoute } from "../estimate.js";
 
 /** Executor AI's company id on a fresh map (first company = 0). */
@@ -35,44 +35,6 @@ function toResult(r: ActionResult): {
  * ranking beyond population - the ORDER is a fact about the world, the CHOICE is
  * the agent's.
  */
-function townSummary(snap: WorldSnapshot): { id: number; pop: number | null; x: number; y: number }[] {
-	// Sorted here rather than trusting the caller: the order the model sees must
-	// be deterministic, and a plain snapshot (tests, replays) may not have gone
-	// through WorldState.setTowns. Population descending is a fact about the
-	// world; which of them to connect is the agent's call.
-	return (snap.towns ?? [])
-		// pop 允许 null：缺失 ≠ 0（D60）。模型看到 null 而不是一个假的 0 人口。
-		.map((t) => ({ id: t.id, pop: t.population ?? null, x: t.x, y: t.y }))
-		.sort((a, b) => (b.pop ?? -1) - (a.pop ?? -1));
-}
-
-/**
- * Summarize a WorldSnapshot into a compact, JSON-safe, LLM-facing object.
- * Pure function — unit-testable without a game.
- */
-export function summarizeState(snap: WorldSnapshot): Record<string, unknown> {
-	const companies = [...snap.companies.values()].map((c) => ({
-		id: c.info?.id ?? null,
-		name: c.info?.name ?? null,
-		isAi: c.info?.isAi ?? null,
-		money: c.economy ? c.economy.money.toString() : null,
-		loan: c.economy ? c.economy.loan.toString() : null,
-		income: c.economy ? BigInt.asIntN(64, c.economy.income).toString() : null,
-		vehicles: c.stats?.vehicles ?? null,
-		stations: c.stats?.stations ?? null,
-	}));
-	return {
-		date: snap.date ? `${snap.date.year}-${String(snap.date.month).padStart(2, "0")}-${String(snap.date.day).padStart(2, "0")}` : null,
-		companies,
-		// Candidate towns, largest first. This is what makes the route choice a
-		// real decision instead of a single button press (SPEC §10.32): the agent
-		// can weigh population against distance and live with the result.
-		towns: (snap.towns ?? []).map((t) => ({ id: t.id, population: t.population, x: t.x, y: t.y })),
-		recentEventCount: snap.recent.length,
-		totalEvents: snap.totalEvents,
-	};
-}
-
 const ObserveSchema = Type.Object({});
 
 /** `observe` — return the current normalized state slice. */
@@ -85,7 +47,10 @@ export function observeTool(deps: AgentDeps): AgentTool<typeof ObserveSchema, Ac
 		parameters: ObserveSchema,
 		execute: async () => {
 			const snap = deps.state.snapshot();
-			const state = summarizeState(snap);
+			// D2/S2: the SAME canonical projection the decision context uses -
+			// same fields, same order (the model used to see the towns twice in
+			// two different shapes).
+			const facts = worldFacts(snap);
 			const r: ActionResult = {
 				ok: true,
 				// The towns MUST be in the summary, not only in `details`:
@@ -94,9 +59,9 @@ export function observeTool(deps: AgentDeps): AgentTool<typeof ObserveSchema, Ac
 				// candidates here is what turns "build a route" from a single
 				// button press into a choice (SPEC §10.32).
 				summary:
-					`date=${state.date ?? "?"} companies=${JSON.stringify(state.companies)} ` +
-					`towns=${JSON.stringify(townSummary(snap))}`,
-				data: state,
+					`date=${facts.date ?? "?"} companies=${JSON.stringify(facts.companies)} ` +
+					`towns=${JSON.stringify(facts.towns)}`,
+				data: facts,
 			};
 			return toResult(r);
 		},

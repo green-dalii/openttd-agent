@@ -251,12 +251,16 @@ describe("defaultConvertToLlm", () => {
 });
 
 describe("runDecision / runDecisionLoop", () => {
-	it("prepends a game_observation and prompts the agent", async () => {
+	it("does NOT append a second copy of the world state (D2/S2)", async () => {
 		const { deps } = fakeDeps();
 		const { agent } = fauxAgent(deps, [fauxAssistantMessage([fauxText("nothing to do")])]);
 		const { state, plan } = await runDecision(agent, deps, { trigger: "start", tracker: emptyTracker() });
 		expect(state.date).toBe("1950-03-01");
-		expect(agent.state.messages[0]!.role).toBe("game_observation");
+		// D2: the world snapshot used to be appended as a `game_observation`
+		// message. It never reached the model (convertToLlm filters it out) and
+		// the audit trail records the same snapshot per decision - so it was a
+		// third copy of the same facts. The prompt carries them instead.
+		expect(agent.state.messages.some((m) => (m as { role?: string }).role === "game_observation")).toBe(false);
 		// A prose-only reply has no structured plan; that must be tolerated.
 		expect(plan).toBeNull();
 	});

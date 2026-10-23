@@ -77,7 +77,7 @@ describe("决策上下文携带 score 块", () => {
 	it("score 块出现在上下文里（否则模型看不到自己的分）", () => {
 		const ctx = buildDecisionContext({
 			trigger: "interval",
-			now: { date: "1950-05-01", companies: [{ id: 0, money: 100, income: -5, vehicles: 2, stations: 2 }] },
+			now: { date: "1950-05-01", companies: [{ id: 0, money: 100, loan: null, income: -5, vehicles: 2, stations: 2 }] },
 			since: emptyTracker(),
 			gameDay: 50,
 			score: {

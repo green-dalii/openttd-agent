@@ -29,13 +29,6 @@ export interface PruningOptions {
 	scoreHistoryProvider?: () => string | null | Promise<string | null>;
 }
 
-/** Messages that must never be pruned away (they carry the current decision). */
-function isPinned(msg: AgentMessage): boolean {
-	const role = (msg as { role?: string }).role;
-	// Keep the most recent observation/result chain visible to the model.
-	return role === "game_observation";
-}
-
 /**
  * Build a transformContext function: prune to the recent window and inject
  * lessons (when a provider is configured). Pure given inputs — unit-testable.
@@ -47,14 +40,11 @@ export function pruningTransformContext(
 	return async (messages: AgentMessage[]): Promise<AgentMessage[]> => {
 		const lessons = opts.lessonsProvider ? await opts.lessonsProvider() : [];
 		const scoreHistory = opts.scoreHistoryProvider ? await opts.scoreHistoryProvider() : null;
-		let recent = messages;
-		if (messages.length > keepRecent) {
-			// Keep the tail; re-attach any pinned observation inside the window.
-			recent = messages.slice(messages.length - keepRecent);
-			const pinned = messages.slice(0, messages.length - keepRecent).filter(isPinned);
-			// Only the LAST pinned observation matters (current state).
-			if (pinned.length > 0) recent = [pinned[pinned.length - 1]!, ...recent];
-		}
+		// Keep the tail. D2/S2: there is no pinned observation any more - the
+		// world snapshot used to be appended as a `game_observation` message that
+		// never reached the model, while the audit trail recorded the same
+		// snapshot. The prompt carries the facts, and it is in the tail.
+		const recent = messages.length > keepRecent ? messages.slice(messages.length - keepRecent) : messages;
 		const reminders: AgentMessage[] = [];
 		// The agent's own trajectory first (S5): the most concrete self-assessment
 		// fact there is. Facts only - no verdict about them.
