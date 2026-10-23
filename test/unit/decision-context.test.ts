@@ -339,3 +339,67 @@ describe("delta 诚实性（S3）", () => {
 		expect(d.elapsedGameDays).toBe(10);
 	});
 });
+
+/**
+ * D3a / S4：相位必须能接回"是哪个动作造成的"。
+ *
+ * 现象：执行器相位里带着 job id（`j<N>`），工具回执里也有 job，但两者之间没有
+ * 连接——模型看到"施工到了 stA_ok"，不知道这是**它自己哪一次**下令的结果。
+ * 信用分配（契约 §5.2）就断在这里。
+ */
+describe("相位↔动作的连接（D3a/S4）", () => {
+	it("相位带上 job id，并接回订下它的那次动作", () => {
+		const tracker = emptyTracker();
+		tracker.actions.push({ tool: "build_bus_route", ok: true, summary: "sent build_bus_route (job=100)", job: 100 });
+		recordPhase(tracker, "EX stA_ok j100");
+
+		const ctx = buildDecisionContext({
+			trigger: "phase_change",
+			now: { date: "1950-06-01", companies: [] },
+			since: tracker,
+			gameDay: 120,
+		});
+
+		const p = ctx.sinceLastDecision.phases[0]!;
+		expect(p.job).toBe(100);
+		// 关键：这条相位是哪个工具造成的，模型不必去猜 summary 里的 job=。
+		expect(p.action).toBe("build_bus_route");
+	});
+
+	it("没有对应动作时，job 仍在、action 缺席（不编造）", () => {
+		const tracker = emptyTracker();
+		recordPhase(tracker, "EX work j999");
+		const ctx = buildDecisionContext({
+			trigger: "phase_change",
+			now: { date: "1950-06-01", companies: [] },
+			since: tracker,
+			gameDay: 120,
+		});
+		const p = ctx.sinceLastDecision.phases[0]!;
+		expect(p.job).toBe(999);
+		expect(p.action).toBeUndefined();
+	});
+
+	it("动作记录本身带 job（否则无从连接）", () => {
+		const tracker = emptyTracker();
+		recordAction(tracker, { tool: "set_route_vehicles", ok: true, summary: "sent set_route_vehicles job=101", job: 101 });
+		expect(tracker.actions[0]!.job).toBe(101);
+	});
+});
+
+describe("相位↔动作连接跨窗口（D3a/S4）", () => {
+	it("动作在上一个窗口下过时，run 级映射仍能接回相位", () => {
+		// 施工跨多个决策窗口：下令在窗口 A，相位在窗口 B 到达。
+		const tracker = emptyTracker();
+		recordPhase(tracker, "EX stB_ok j100");
+		const ctx = buildDecisionContext({
+			trigger: "phase_change",
+			now: { date: "1950-07-01", companies: [] },
+			since: tracker,
+			gameDay: 150,
+			jobActions: { 100: "build_bus_route" },
+		});
+		expect(ctx.sinceLastDecision.phases[0]!.action).toBe("build_bus_route");
+		expect(ctx.sinceLastDecision.phases[0]!.job).toBe(100);
+	});
+});

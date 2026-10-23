@@ -701,6 +701,11 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 	 * accounting with a call that is not a decision.
 	 */
 
+	// D3a/S4: which of the agent's own actions ordered which job. It must
+	// outlive a decision window (construction spans many decisions), so it
+	// lives at run level, not in the per-window tracker.
+	const jobActions: Record<number, string> = {};
+
 	const runtime = createAgent({
 		deps,
 		streamFn,
@@ -755,7 +760,14 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 			console.log(`[agent] tool ${tool}: ok=${r.ok} ${r.summary}`);
 			// Failures are recorded too: the model must be able to see its own
 			// mistakes on the next decision (docs/AGENT-LOOP-AND-CONTROL §2.4).
-			pendingActions.push({ tool, ok: r.ok, summary: r.summary });
+			// D3a/S4: carry the ordered job id with the action, so the executor
+			// phases that follow can be joined back to the action that caused
+			// them (credit assignment needs that link).
+			const job = typeof (r.data as { job?: unknown } | undefined)?.job === "number"
+				? Number((r.data as { job: number }).job)
+				: undefined;
+			if (job !== undefined) jobActions[job] = tool;
+			pendingActions.push({ tool, ok: r.ok, summary: r.summary, ...(job !== undefined ? { job } : {}) });
 			audit.write({ type: "action_result", ts: Date.now(), tool, ok: r.ok, summary: r.summary, data: r.data });
 			session.appendAudit({ type: "action_result", ts: Date.now(), tool, ok: r.ok, summary: r.summary, data: r.data });
 		},
@@ -877,6 +889,9 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 		// (scoredFromGameDay = null); in the prebuilt scenario the window opens
 		// when the route can actually carry cargo, and until then the run's
 		// deliveries are setup, not performance.
+		// D3a/S4: which command ordered which job (from the GS acks).
+		routeActions: () =>
+			routeLedger.all().flatMap((l) => (l.order.command ? [{ job: l.order.job, command: l.order.command }] : [])),
 		measurementWindow: () => ({
 			scoredFromGameDay: scenario === "prebuilt" ? prebuiltWindowDay : null,
 			windowOpened: scenario === "prebuilt" ? prebuiltWindowDay !== null : true,

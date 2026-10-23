@@ -62,6 +62,8 @@ function makeCtx(over: Partial<DecisionLoopCtx> = {}): DecisionLoopCtx & {
 		executorFact: () => undefined,
 		// S1: the measurement window (the whole run in the freeform case).
 		measurementWindow: () => ({ scoredFromGameDay: null, windowOpened: true }),
+		// D3a: the ack-derived job -> command pairs (empty here; the join is unit-tested).
+		routeActions: () => [],
 		publishStage: vi.fn(),
 		runDecision: runDecisionFake as never,
 		now: () => Date.now(),
