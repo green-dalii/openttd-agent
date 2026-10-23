@@ -1,6 +1,6 @@
-import { describe, expect, it as it_, vi } from "vitest";
+import { describe, expect, it as it_, it, vi } from "vitest";
 // 本文件把 `it` 重命名为 it_（为了和 sandbox 里的 it 区分），新测试用回原名。
-import { makeSignalHub } from "../../src/agent/signal-hub.js";
+import { makeSignalHub, composePhaseText } from "../../src/agent/signal-hub.js";
 import type { GameEvent } from "../../src/types.js";
 
 /**
@@ -160,6 +160,9 @@ describe("signal-hub —— B-3 单元契约（golden from /tmp/calA3.log）", (
 		hub.onEvent({ kind: "gamescript", payload: ack } as unknown as GameEvent);
 		expect(ledger.record).toHaveBeenCalledWith({
 			job: 101, fromTown: 9, toTown: 12, decision: 7, orderedAt: expect.any(Number),
+			// D3a/S4: the GS assigns the job id, so the ack is the only place
+			// that knows which command this job is.
+			command: "build_bus_route",
 		});
 		expect(hub.getLastRoute()).toEqual(ack);
 	});
@@ -464,5 +467,33 @@ describe("route-stats 去重字段（vehiclesIds / endsA / endsB / waitA / waitB
 		expect(r!.vehiclesIds).toBeUndefined();
 		expect(r!.endsA).toBeUndefined();
 		expect(r!.fleetIds).toBeUndefined();
+	});
+});
+
+/**
+ * D3a：类型化 exec 事件没有 `raw` 字段（那属于已退役的公司名协议）——
+ * 相位串必须由 `note` + `job` 组装，否则模型看到的相位是 "undefined"。
+ */
+describe("composePhaseText（相位串组装）", () => {
+	it("用 note + job 组装成解码器认识的形状", () => {
+		expect(composePhaseText(undefined, "rd s0 r13 d55 p0", 100)).toBe("EX rd s0 r13 d55 p0 j100");
+	});
+
+	it("有 raw 时优先用它", () => {
+		expect(composePhaseText("EX stA_ok j7", "ignored", 7)).toBe("EX stA_ok j7");
+	});
+
+	it("raw 是字符串 'undefined' 时当作没有（那是旧协议的空洞字段）", () => {
+		expect(composePhaseText("undefined", "stA_ok", 3)).toBe("EX stA_ok j3");
+	});
+
+	it("没有 note 也没有 raw → 空串（不编造相位）", () => {
+		expect(composePhaseText(undefined, undefined, 5)).toBe("");
+	});
+});
+
+describe("composePhaseText（不重复 job 后缀）", () => {
+	it("note 里已有 job 后缀时不再追加", () => {
+		expect(composePhaseText(undefined, "work j100", 100)).toBe("EX work j100");
 	});
 });

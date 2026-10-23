@@ -70,6 +70,11 @@ export interface DecisionRequest {
 	 * Built by the decision loop from the world state at decision time.
 	 */
 	score?: ScoreFact;
+	/**
+	 * Run-level `job -> tool` map (D3a/S4): which action ordered each job, so
+	 * an executor phase can be joined back to the decision that caused it.
+	 */
+	jobActions?: Record<number, string>;
 }
 
 /**
@@ -91,6 +96,7 @@ export async function runDecision(
 		// scored and never sees what it scored - no self-assessment, no credit
 		// assignment. Facts only; the block carries nulls for unknowns.
 		...(req.score ? { score: req.score } : {}),
+		...(req.jobActions ? { jobActions: req.jobActions } : {}),
 		// Candidate towns ride along in EVERY decision context. §10.34 measured the
 		// alternative: towns reachable only via observe() meant the model sat through
 		// whole games without ever seeing its siting options.

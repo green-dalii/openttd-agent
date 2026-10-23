@@ -64,6 +64,12 @@ export interface ActionRecord {
 	tool: string;
 	ok: boolean;
 	summary: string;
+	/**
+	 * The blueprint job the action ordered (D3a/S4): the join key between what
+	 * the model asked for and the executor phases that follow. Absent when the
+	 * action did not order anything (a refusal, a read).
+	 */
+	job?: number;
 }
 
 /** Accumulates the window between two decisions. */
@@ -82,6 +88,13 @@ export interface DecisionContextInput {
 	 * the conditions it is measured under. Absent = not measured (never zero).
 	 */
 	score?: ScoreFact;
+	/**
+	 * Run-level map `job -> tool name` (D3a/S4): which of the agent's own
+	 * actions ordered each job. It must outlive a single decision window,
+	 * because construction spans many decisions - the order happened in one
+	 * window, the phases arrive in later ones.
+	 */
+	jobActions?: Record<number, string>;
 	/**
 	 * Candidate towns, largest first. Present in EVERY decision context, not
 	 * only inside observe(): the siting choice is the game's central decision
@@ -278,7 +291,15 @@ export function buildDecisionContext(input: DecisionContextInput): {
 		 * advice - the model still decides what a phase means for its plan.
 		 * src/game/executor-status.ts.
 		 */
-		phases: { phase: string; description: string; error: boolean }[];
+		phases: {
+			phase: string;
+			description: string;
+			error: boolean;
+			/** The blueprint job the phase belongs to (null = unknown). */
+			job?: number;
+			/** The tool that ordered that job - the cause of this effect. */
+			action?: string;
+		}[];
 		actions: ActionRecord[];
 		notableEvents: string[];
 	};
@@ -325,11 +346,24 @@ export function buildDecisionContext(input: DecisionContextInput): {
 			baselineEstablished: from !== null,
 			// Heartbeats are collapsed by decodePhaseWindow: 40 identical
 			// "still alive" lines would bury the one line that actually changed.
-			phases: decodePhaseWindow(input.since.phases).map((d) => ({
-				phase: d.phase,
-				description: d.description,
-				error: d.error,
-			})),
+			//
+			// D3a/S4: each phase keeps its job id and is joined back to the
+			// action that ordered it - otherwise the model sees "construction
+			// reached stA_ok" without knowing which of its own orders caused it
+			// (credit assignment needs that link; SPEC 10.118).
+			phases: decodePhaseWindow(input.since.phases).map((d) => {
+				const causeTool =
+					d.job !== null
+						? (input.jobActions?.[d.job] ?? input.since.actions.find((a) => a.job === d.job)?.tool)
+						: undefined;
+				return {
+					phase: d.phase,
+					description: d.description,
+					error: d.error,
+					...(d.job !== null ? { job: d.job } : {}),
+					...(causeTool ? { action: causeTool } : {}),
+				};
+			}),
 			actions: [...input.since.actions],
 			notableEvents: [...input.since.notableEvents],
 		},

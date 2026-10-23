@@ -18,6 +18,14 @@ export interface RouteOrder {
 	decision: number;
 	/** Wall-clock ms when the ack arrived. */
 	orderedAt: number;
+	/**
+	 * The command that ordered this job (e.g. "build_bus_route").
+	 *
+	 * D3a/S4: the job id is assigned by the GS, so the tool's own receipt does
+	 * not carry it - the ack does. Without this, an executor phase cannot be
+	 * joined back to the agent's action.
+	 */
+	command?: string;
 }
 
 export interface RouteOutcome {
@@ -52,6 +60,11 @@ export class RouteLedger {
 			o.completed = true;
 			if (doneDate) o.doneDate = doneDate;
 		}
+	}
+
+	/** The command that ordered this job (D3a/S4), if it was recorded. */
+	commandForJob(job: number): string | undefined {
+		return this.orders.get(job)?.command;
 	}
 
 	/** Factual lines for reflection evidence: order + what was observed after. */

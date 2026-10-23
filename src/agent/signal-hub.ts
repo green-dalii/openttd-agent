@@ -24,6 +24,26 @@ import type { WebServer } from "../web/server.js";
 import type { RouteStats } from "./route-stats.js";
 import type { SessionStore } from "./session-store.js";
 
+/**
+ * Compose the phase string the decoder understands from a typed exec event.
+ *
+ * The typed GS event carries `note` (e.g. "rd s0 r13 d55 p0") and `job`
+ * separately; the decoder expects the historical single string
+ * ("EX <note> j<job>"). Returns "" when there is nothing to report.
+ */
+export function composePhaseText(raw: unknown, note: unknown, job: number): string {
+	const rawText = typeof raw === "string" ? raw.trim() : "";
+	if (rawText !== "" && rawText !== "undefined") return rawText;
+	const noteText = typeof note === "string" ? note.trim() : "";
+	if (noteText === "") return "";
+	// Some notes already carry the job suffix ("work j100"); do not add it twice
+	// (the decoder strips only the trailing one, leaving "work j100" as the
+	// phase text).
+	const hasJob = /\s+j-?\d+\s*$/.test(noteText);
+	const jobSuffix = !hasJob && Number.isFinite(job) && job >= 0 ? ` j${job}` : "";
+	return `EX ${noteText}${jobSuffix}`;
+}
+
 export interface SignalHubRefs {
 	world: WorldState;
 	/** Lazy: web starts null (no dashboard yet during boot). */
@@ -364,10 +384,19 @@ export function makeSignalHub(refs: SignalHubRefs): SignalHub {
 						// Stage change or an error phase is news; a heartbeat never is.
 						if (!p.hb && (stage !== executorStage || stage === "error")) {
 							executorStage = stage;
-							executorPhase = String(p.raw);
+							// D3a: the typed exec event carries `note` + `job`
+							// (NOT a `raw` string - that field only existed in the
+							// retired company-name protocol). Composing the phase
+							// string here is what gives the decoder the job id, and
+							// the model the phase that says WHICH of its orders
+							// this is. Before this, the phase string was
+							// "undefined" and every phase fact reached the model
+							// as "executor reports: undefined".
+							const phaseText = composePhaseText(p.raw, p.note, job);
+							executorPhase = phaseText;
 							if (stage === "done") reachedDone = true;
-							console.log(`[agent] executor phase -> "${p.raw}"`);
-							refs.onPhaseChange(String(p.raw));
+							console.log(`[agent] executor phase -> "${phaseText}"`);
+							refs.onPhaseChange(phaseText);
 						}
 					}
 					// Route economics (N2-1): the first signal that lets a choice
@@ -421,6 +450,9 @@ export function makeSignalHub(refs: SignalHubRefs): SignalHub {
 							toTown: Number(p.townB),
 							decision: refs.getDecisionCount(),
 							orderedAt: Date.now(),
+							// D3a/S4: the GS assigns the job id, so the ack is the
+							// only place that knows which command this job is.
+							command: String(p.cmd),
 						});
 					}
 				}

@@ -8,6 +8,22 @@
 > 踩过的坑的复盘（→ `MEMORY.md`；此处只写"改了什么"，不写"我为什么犯错"）。
 
 ## [Unreleased]
+### Fixed
+
+- **Executor phases now name the action that caused them** (scaffold phase D3a).
+  A phase fact carries the job id and is joined back to the order the agent
+  itself placed (`action`), so the model can connect "construction reached
+  station B" to the decision that started it - the link credit assignment
+  needs. The join survives across decision windows, because construction spans
+  many of them, and the source of truth is the GS ack: the game assigns the job
+  id, so the tool's own receipt never had it.
+
+  This also fixed a real defect the phase payload had been hiding: the typed
+  executor event carries `note` and `job`, not the `raw` string of the retired
+  company-name protocol, so every phase fact reaching the model read
+  "executor reports: undefined". Only a real run with the actual request
+  payload captured showed it.
+
 ### Changed
 
 - **The world is projected once (scaffold phase D2).** The decision context and

@@ -53,7 +53,7 @@ export interface DecisionLoopCtx {
 	session: SessionStore;
 	getWeb(): WebServer | null;
 	/** Shared with the runner: drained by reflect-run at finalize. */
-	pendingActions: { tool: string; ok: boolean; summary: string }[];
+	pendingActions: { tool: string; ok: boolean; summary: string; job?: number }[];
 	opts: {
 		decisionTickMs?: number;
 		maxDecisions?: number;
@@ -83,6 +83,13 @@ export interface DecisionLoopCtx {
 	 * loop does not - so the runner supplies it.
 	 */
 	measurementWindow(): { scoredFromGameDay: number | null; windowOpened: boolean };
+	/**
+	 * Run-level `job -> command` pairs (D3a/S4): which command ordered each
+	 * job, so an executor phase can be joined back to the decision that
+	 * caused it. The GS assigns the job id, so the source of truth is the
+	 * ack, not the tool's own receipt.
+	 */
+	routeActions(): { job: number; command: string }[];
 	/** Optional verified freeze (SPEC §10.59); absent = never pause. */
 	freeze?: FreezeController;
 }
@@ -285,6 +292,8 @@ export function createDecisionLoop(ctx: DecisionLoopCtx): DecisionLoop {
 					// The agent's own score (S1): read at decision time, so the
 					// number is the same one the metric will record.
 					score: scoreFactOf(ctx, ctx.gameDay()),
+					// D3a/S4: phases are joined back to the actions that caused them.
+					jobActions: Object.fromEntries(ctx.routeActions().map((r) => [r.job, r.command])),
 				});
 				plan = out.plan;
 				ctx.telemetry.onActivity?.();
