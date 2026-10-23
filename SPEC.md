@@ -1171,3 +1171,28 @@ horizon，记忆随局累积；判决打印学习曲线）。m3-verdict 同步�
 第一次决策 `baseline=none money=unknown income=unknown vehicles=unknown stations=unknown
 elapsedGameDays=unknown`；第二次 `baseline=established money=199214 income=-786
 vehicles=unknown stations=unknown elapsedGameDays=3`——**有读数的给数，没读数的给 unknown**。
+
+### 10.116 D1c：agent 看得见自己历局的成绩（2026-10-23）
+
+**问题**：跨局记忆注入的是 lesson 文本（"某次发生了什么"），**没有成绩**——
+于是模型不知道自己是在变好还是变坏（`ROADMAP.md` 对齐检查表第 10 行，2026-09-18 起未修）。
+
+**改法**：
+- 新模块 `src/evolution/score-history.ts`（纯函数 + 渲染）：
+  `pastRunScores()` 只收**可比**的局——同 scenario、同 horizon、未被 `metricExclusion`
+  排除（被人停/世界冻结的局不是"没学会"，是被停了，SPEC §10.101/§10.102）；
+  被排除的局**必须报出来**（数量 + 原因），不静默丢弃。
+  每局给出 `deliveredRun / simulatedDays`（cargo per game day）；无读数 → `null`。
+- 注入：`pruningTransformContext` 新增 `scoreHistoryProvider`，在 lessons 之前注入
+  一块**事实**（数字 + 测量条件 + 排除统计）；无可比历史时**不注入**（空块会被读成
+  "你以前考 0 分"）。
+- **`--no-memory` 对照臂同样关闭**该注入：对照臂必须是"零记忆"，否则 A/B 无效。
+
+**真机实测**（llm-stub 真实 HTTP 路径，第一局 seed 11 → 第二局 seed 22 同一 data dir）：
+第二局实际发给模型的 payload 含
+```
+Your own measured scores in earlier comparable games (cargo delivered per game day):
+- seed 11: 0 cargo per game day (horizon 40 game days, 41 days measured)
+Measurement conditions: scenario=freeform, horizon=40 game days.
+```
+（抓包用一次性代理放在 `.scratch/`，用完删除。）
