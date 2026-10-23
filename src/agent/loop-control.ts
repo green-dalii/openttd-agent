@@ -7,6 +7,8 @@
  *   impure 层。
  */
 
+import { emptyTracker, type NumbersBaseline } from "./decision-context.js";
+
 /** Cap by run length (SPEC §10.30 教训：原来 `--demo-seconds` 没生效 → 28 分钟 251 次决策). */
 export interface LoopDeadline {
 	deadline: number | null;
@@ -61,13 +63,13 @@ export function isPhaseWorthRecording(
 	return raw.length > 0 && raw !== "unknown";
 }
 
-/** Baseline reset for a fresh causality window after a decision. */
-export interface NumbersBaseline { money: number; income: number; vehicles: number; stations: number; gameDay: number; }
+/**
+ * Baseline reset for a fresh causality window after a decision.
+ *
+ * The baseline TYPE lives in decision-context.ts (one definition - the C1
+ * lesson: two copies of the same concept drift silently). This is only the
+ * "start a new window from this reading" helper.
+ */
 export function emptyTrackerAfter(baseline: NumbersBaseline) {
-	return {
-		baseline,
-		phases: [],
-		actions: [],
-		notableEvents: [],
-	};
+	return emptyTracker(baseline);
 }

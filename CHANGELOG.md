@@ -8,6 +8,33 @@
 > 踩过的坑的复盘（→ `MEMORY.md`；此处只写"改了什么"，不写"我为什么犯错"）。
 
 ## [Unreleased]
+- **The agent now sees its own scores from earlier games.** A block of measured
+  numbers (cargo per game day per past run) is injected alongside the lessons,
+  together with the conditions it was measured under and how many earlier runs
+  were left out as not comparable. Runs that were stopped or frozen are never
+  counted as "you scored nothing"; with nothing comparable to report, nothing is
+  injected. The control arm (`--no-memory`) gets no history either, so the
+  memory experiment stays a real experiment.
+
+### Changed
+
+- **Deltas no longer claim "nothing changed" when nothing was measured.** The
+  first decision of a window used to report zero deltas for every quantity,
+  which reads as "no change" where the truth is "no reading yet"; a quantity
+  missing from the baseline now yields a null delta, and the payload states
+  explicitly that no baseline exists yet. The run log prints the delta block so
+  the difference is checkable.
+
+### Added
+
+- **The agent can now see its own score.** Every decision context carries a `score`
+  block: cargo delivered so far, the per-game-day rate, elapsed game days, the
+  horizon, and where the scoring window opened. The delivered figure is read from
+  the same world-state counter the metric records, so what the model sees and what
+  gets recorded cannot diverge; unknown values stay `null` instead of becoming zero,
+  and the window fields are conditions rather than verdicts. The run log prints the
+  block so it can be checked rather than believed.
+
 
 ### Changed
 

@@ -19,7 +19,9 @@
 import type { Agent } from "@earendil-works/pi-agent-core";
 import type { AgentDeps } from "./types.js";
 import type { ExecutorFact, RouteContextFact } from "./decision-context.js";
+import type { ScoreFact } from "./score.js";
 import { formatRouteStats } from "./route-stats.js";
+import { formatScoreFact } from "./score.js";
 import { summarizeState } from "./tools/index.js";
 import {
 	buildDecisionContext,
@@ -64,6 +66,11 @@ export interface DecisionRequest {
 	routes?: RouteContextFact[];
 	/** Construction facts (G2): the process that decides the episode. */
 	executor?: ExecutorFact;
+	/**
+	 * The agent's own score facts (S1): what this run has delivered so far.
+	 * Built by the decision loop from the world state at decision time.
+	 */
+	score?: ScoreFact;
 }
 
 /** One company's comparable numbers (as produced by summarizeState). */
@@ -108,6 +115,10 @@ export async function runDecision(
 	const context = buildDecisionContext({
 		trigger: req.trigger,
 		now: { date: (state.date as string | null) ?? null, companies: toNumbers(state) },
+		// The agent's own score (S1). Without it the model is told how runs are
+		// scored and never sees what it scored - no self-assessment, no credit
+		// assignment. Facts only; the block carries nulls for unknowns.
+		...(req.score ? { score: req.score } : {}),
 		// Candidate towns ride along in EVERY decision context. §10.34 measured the
 		// alternative: towns reachable only via observe() meant the model sat through
 		// whole games without ever seeing its siting options.
@@ -162,6 +173,26 @@ export async function runDecision(
 			`${e.jobsSeen} job(s) seen`,
 		];
 		console.log(`[agent] executor facts: ${parts.join(", ")}`);
+	}
+
+	// Same reason for the score facts (S1): the model must be able to check
+	// from the run log what it was shown, not merely believe it (MEMORY A7).
+	if (context.score) {
+		console.log(`[agent] score: ${formatScoreFact(context.score)}`);
+	}
+
+	// Deltas too (D1b/S3): the whole point of the change is that "not measured"
+	// is distinguishable from "no change" - and that is only checkable if the
+	// run log shows it.
+	{
+		const s = context.sinceLastDecision;
+		const show = (v: number | null): string => (v === null ? "unknown" : String(v));
+		console.log(
+			`[agent] deltas: baseline=${s.baselineEstablished ? "established" : "none"}` +
+				` money=${show(s.moneyDelta)} income=${show(s.incomeDelta)}` +
+				` vehicles=${show(s.vehiclesDelta)} stations=${show(s.stationsDelta)}` +
+				` elapsedGameDays=${show(s.elapsedGameDays)}`,
+		);
 	}
 
 	// The observation is kept in history so a later reader can replay the trail.

@@ -60,6 +60,8 @@ function makeCtx(over: Partial<DecisionLoopCtx> = {}): DecisionLoopCtx & {
 		isStopRequested: () => false,
 		requestStop: () => {},
 		executorFact: () => undefined,
+		// S1: the measurement window (the whole run in the freeform case).
+		measurementWindow: () => ({ scoredFromGameDay: null, windowOpened: true }),
 		publishStage: vi.fn(),
 		runDecision: runDecisionFake as never,
 		now: () => Date.now(),

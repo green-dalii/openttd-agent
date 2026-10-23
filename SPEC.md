@@ -1128,3 +1128,71 @@ headless 持续超时）——布局正确性由 DOM 文本断言 + smoke 的元
 **runner 新模式**：`--mode sequential --sessions N`（同 dataDir/seed/预建场景/固定
 horizon，记忆随局累积；判决打印学习曲线）。m3-verdict 同步打印 M5 曲线 + M4b 分布
 + P2-3 功效行。空态自证：n=0 → "only 0 run(s) - a trend needs >= 3"。
+
+### 10.114 D1a：模型看得见自己这局的分（`score` 块，2026-10-23）
+
+**问题**：系统提示词告诉模型"一局按每游戏日交付量计分"（`runtime.ts` 的 Scoring 段），
+但决策上下文里**没有分**：世界状态有 `deliveredRun`（`world-state.ts`），而
+`toNumbers()` 只给 money/income/vehicles/stations。⇒ 模型无法自我评估，信用分配没有起点
+（契约 §5.2 的 Reward / Credit assignment 两行）。
+
+**实现**（`src/agent/score.ts` 纯函数 + 接线）：
+- `projectScore()` → `ScoreFact{delivered, deliveredPerGameDay, elapsedGameDays,
+  horizonDays, scoredFromGameDay, windowOpened}`，进决策上下文的 `score` 段。
+- **`delivered` 与度量同源同值**：取世界状态的 `deliveredRun.total`，即该局度量行
+  `deliveredRun` 的同一个数（§10.65）——模型看到的分与最终被记的分不会分叉。
+- 速率分母是**本局已历游戏日**（`elapsedGameDays`）；`delivered` 或分母未知时
+  `deliveredPerGameDay` 为 `null`（缺失不折零，D60）。
+- 计分窗口是**条件**不是评价：`scoredFromGameDay`（预建场景 = 路线能运货那天；
+  freeform = `null`，整局都是窗口）、`windowOpened`。
+- 运行日志打印 `[agent] score: ...`（MEMORY A7：事实必须可核对，不能只"相信"）。
+
+**真机实测**（seed 11，offline-demo，150 游戏日 horizon）：4 次决策各打印一行
+`delivered=0 perGameDay=0 elapsedGameDays=11 horizon=150 scoredFromDay=run start window=open`；
+局终度量行 `deliveredRun=0, simulatedDays=121, status=completed` ⇒ **模型看到的 0 与
+被记的 0 是同一个数**（"未计量"路径由单测覆盖：`deliveredTotal=null → delivered=null`）。
+
+### 10.115 D1b：delta 不再说谎（2026-10-23）
+
+**问题**：`numbersOf()` 把 `null` 读数折成 0 再算增量，于是**第一次决策**向模型报出
+`moneyDelta=0 / vehiclesDelta=0`——真实含义是"还没读到"，被说成了"没变化"。
+`baselineOf()` 同样把缺失折零。⇒ 模型可能基于一个**编造的零**做决策（D60）。
+
+**改法**：
+- `NumbersBaseline` 的四个量改为 `number | null`；`baselineOf()` 保留缺失；
+  `summarizeDelta()` 任一侧未知即该项为 `null`；
+  第一次决策（无基线）⇒ 全部增量为 `null`，并由 `sinceLastDecision.baselineEstablished=false`
+  明确说明"还没有基线"。
+- `loop-control.ts` 里重复声明的 `NumbersBaseline` 删除，改用 `decision-context.ts`
+  的唯一定义（C1：同一概念两份实现会静默漂移）。
+- 运行日志打印 `[agent] deltas: ...`，使"未知 ≠ 没变化"可核对（MEMORY A7）。
+
+**真机实测**（seed 11，offline-demo，60 游戏日 horizon）：
+第一次决策 `baseline=none money=unknown income=unknown vehicles=unknown stations=unknown
+elapsedGameDays=unknown`；第二次 `baseline=established money=199214 income=-786
+vehicles=unknown stations=unknown elapsedGameDays=3`——**有读数的给数，没读数的给 unknown**。
+
+### 10.116 D1c：agent 看得见自己历局的成绩（2026-10-23）
+
+**问题**：跨局记忆注入的是 lesson 文本（"某次发生了什么"），**没有成绩**——
+于是模型不知道自己是在变好还是变坏（`ROADMAP.md` 对齐检查表第 10 行，2026-09-18 起未修）。
+
+**改法**：
+- 新模块 `src/evolution/score-history.ts`（纯函数 + 渲染）：
+  `pastRunScores()` 只收**可比**的局——同 scenario、同 horizon、未被 `metricExclusion`
+  排除（被人停/世界冻结的局不是"没学会"，是被停了，SPEC §10.101/§10.102）；
+  被排除的局**必须报出来**（数量 + 原因），不静默丢弃。
+  每局给出 `deliveredRun / simulatedDays`（cargo per game day）；无读数 → `null`。
+- 注入：`pruningTransformContext` 新增 `scoreHistoryProvider`，在 lessons 之前注入
+  一块**事实**（数字 + 测量条件 + 排除统计）；无可比历史时**不注入**（空块会被读成
+  "你以前考 0 分"）。
+- **`--no-memory` 对照臂同样关闭**该注入：对照臂必须是"零记忆"，否则 A/B 无效。
+
+**真机实测**（llm-stub 真实 HTTP 路径，第一局 seed 11 → 第二局 seed 22 同一 data dir）：
+第二局实际发给模型的 payload 含
+```
+Your own measured scores in earlier comparable games (cargo delivered per game day):
+- seed 11: 0 cargo per game day (horizon 40 game days, 41 days measured)
+Measurement conditions: scenario=freeform, horizon=40 game days.
+```
+（抓包用一次性代理放在 `.scratch/`，用完删除。）

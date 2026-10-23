@@ -37,6 +37,7 @@ import {
 } from "./loop-control.js";
 import { summarizeState } from "./tools/index.js";
 import type { ExecutorFact, RouteContextFact } from "./decision-context.js";
+import { projectScore, type ScoreFact } from "./score.js";
 import type { FreezeController } from "./freeze.js";
 import type { Episode } from "./episode.js";
 
@@ -76,6 +77,12 @@ export interface DecisionLoopCtx {
 	routesForContext(): RouteContextFact[];
 	/** Construction facts (G2) - never advice, only what the executor reports. */
 	executorFact(): ExecutorFact | undefined;
+	/**
+	 * The run's measurement window (S1/G4): where the scored part of the run
+	 * starts. The runner knows it (it owns the prebuilt scenario), the decision
+	 * loop does not - so the runner supplies it.
+	 */
+	measurementWindow(): { scoredFromGameDay: number | null; windowOpened: boolean };
 	/** Optional verified freeze (SPEC §10.59); absent = never pause. */
 	freeze?: FreezeController;
 }
@@ -89,6 +96,26 @@ export interface DecisionLoop {
 	handleNotable(summary: string): void;
 	/** The model asked to wait (SPEC §4.2 step 5) — record the wake-up. */
 	handlePlanWait(w: { game_days?: unknown; condition?: unknown }): void;
+}
+
+/**
+ * The agent's own score facts at this moment (S1).
+ *
+ * The delivered figure comes from the world state's cumulative counter - the
+ * SAME number the metric row records (`deliveredRun`, SPEC §10.65), so the model
+ * and the scorer never disagree about what the run scored.
+ */
+function scoreFactOf(ctx: DecisionLoopCtx, gameDay: number): ScoreFact {
+	const snap = ctx.deps.state.snapshot();
+	const company = snap.companies.get(0) ?? [...snap.companies.values()][0];
+	const win = ctx.measurementWindow();
+	return projectScore({
+		deliveredTotal: company?.deliveredRun?.total ?? null,
+		gameDay,
+		horizonDays: ctx.opts.episode?.plan.horizonDays ?? null,
+		scoredFromGameDay: win.scoredFromGameDay,
+		windowOpened: win.windowOpened,
+	});
 }
 
 export function createDecisionLoop(ctx: DecisionLoopCtx): DecisionLoop {
@@ -255,6 +282,9 @@ export function createDecisionLoop(ctx: DecisionLoopCtx): DecisionLoop {
 						: {}),
 					routes: ctx.routesForContext(),
 					executor: ctx.executorFact(),
+					// The agent's own score (S1): read at decision time, so the
+					// number is the same one the metric will record.
+					score: scoreFactOf(ctx, ctx.gameDay()),
 				});
 				plan = out.plan;
 				ctx.telemetry.onActivity?.();

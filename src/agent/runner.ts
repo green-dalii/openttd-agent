@@ -56,6 +56,8 @@ import {
 	type LoadedMemory,
 } from "../evolution/memory.js";
 import { routeFactsProviderFor } from "../evolution/route-facts.js";
+import { pastRunScores, renderScoreHistory } from "../evolution/score-history.js";
+import { readMetrics } from "../evolution/store.js";
 import { joinRoutesWithLedger, routeWireFacts, fleetDecomposition } from "./route-stats.js";
 import { makeFreezeController } from "./freeze.js";
 import { actionCatalog } from "./tools/catalog.js";
@@ -156,6 +158,9 @@ import { savegameName,
 
 /** Run one agent-driven session. Returns process exit code. */
 export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise<number> {
+	// When this run started: the score history (S5) must not list the current
+	// run's own row as a past run.
+	const runStartedAtMs = Date.now();
 	// Self-heal history left behind by a previous process that died without
 	// finalizing (SIGKILL / crash): those records would otherwise show as
 	// "running" in the dashboard forever.
@@ -729,6 +734,22 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 						]
 					: []),
 			],
+			// S5: the agent's own measured scores in earlier comparable games.
+			// Facts (numbers + the conditions they were measured under), never a
+			// verdict. OFF in the control arm like every other cross-game memory:
+			// `--no-memory` must mean "no memory at all", or the A/B is void.
+			scoreHistoryProvider: () => {
+				if (opts.injectMemory === false) return null;
+				const history = pastRunScores(readMetrics(cfg.dataDir), {
+					scenario: opts.scenario === "prebuilt" ? "prebuilt" : "freeform",
+					horizonDays: opts.gameDays ?? null,
+					sinceMs: runStartedAtMs,
+					limit: 10,
+				});
+				const text = renderScoreHistory(history);
+				if (text) console.log(`[agent] score history injected (${history.runs.length} comparable run(s))`);
+				return text;
+			},
 		}),
 		onActionResult: (tool, r) => {
 			console.log(`[agent] tool ${tool}: ok=${r.ok} ${r.summary}`);
@@ -782,6 +803,8 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 	const scenario: "freeform" | "prebuilt" = opts.scenario === "prebuilt" ? "prebuilt" : "freeform";
 	let prebuiltReason: string | null = null;
 	let deliveredAtReady: number | null = null;
+	/** S1: the game day the measurement window opened (prebuilt only). */
+	let prebuiltWindowDay: number | null = null;
 	if (scenario === "prebuilt") {
 		const r = await runPrebuiltScenario(
 			{
@@ -807,6 +830,10 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 		if (r.ready) {
 			const c = deps.state.snapshot().companies.get(0);
 			deliveredAtReady = c?.deliveredRun?.total ?? null;
+			// The day the window opened: the model is told when the scored part of
+			// the run began, so a pre-window zero is not read as "delivering
+			// nothing" (S1).
+			prebuiltWindowDay = gameDayNow();
 		} else {
 			// Honest refusal: the scenario is NOT set up, so this run cannot measure
 			// management decisions. It keeps running (useful to debug) but the metric
@@ -846,6 +873,14 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 		// (plus the controller's own watchdog). Uses rconAwait so a pause that was
 		// never acknowledged is reported instead of assumed.
 		freeze: freezeCtl,
+		// S1: the measurement window. In freeform the whole run is the window
+		// (scoredFromGameDay = null); in the prebuilt scenario the window opens
+		// when the route can actually carry cargo, and until then the run's
+		// deliveries are setup, not performance.
+		measurementWindow: () => ({
+			scoredFromGameDay: scenario === "prebuilt" ? prebuiltWindowDay : null,
+			windowOpened: scenario === "prebuilt" ? prebuiltWindowDay !== null : true,
+		}),
 		// N2-2b: the economics the GS reports are keyed by job; the ledger knows
 		// which towns that job was ordered for. Joining them here is what lets the
 		// model read "route 101 (9->12): 6 vehicles, 146 waiting, -308 profit".
