@@ -30,6 +30,8 @@ export interface RouteContextFact {
 	gameDate: number;
 }
 
+import type { ScoreFact } from "./score.js";
+
 /** One company's comparable numbers in the payload. */
 /** Model-visible town fact: identity, demand signal, position. */
 export interface TownSummary {
@@ -74,6 +76,11 @@ export interface DecisionTracker {
 export interface DecisionContextInput {
 	trigger: DecisionTrigger;
 	now: { date: string | null; companies: CompanyNumbers[] };
+	/**
+	 * The agent's own score facts (S1): what this run has delivered so far and
+	 * the conditions it is measured under. Absent = not measured (never zero).
+	 */
+	score?: ScoreFact;
 	/**
 	 * Candidate towns, largest first. Present in EVERY decision context, not
 	 * only inside observe(): the siting choice is the game's central decision
@@ -263,6 +270,11 @@ export function buildDecisionContext(input: DecisionContextInput): {
 	phase?: string;
 	routes?: RouteContextFact[];
 	/**
+	 * The agent's own score (S1). Present only when it was measured; the block
+	 * carries nulls for the parts that are unknown, never zeros.
+	 */
+	score?: ScoreFact;
+	/**
 	 * Construction facts from the executor (G2, SPEC §10.67 layer 3): tiles still
 	 * to go, measured tiles/game day, ETA in game days, and how long the road has
 	 * NOT advanced. The episode is decided by this process, so leaving it out left
@@ -278,6 +290,7 @@ export function buildDecisionContext(input: DecisionContextInput): {
 	return {
 		trigger: input.trigger,
 		now: input.now,
+		...(input.score ? { score: input.score } : {}),
 		...(input.towns ? { towns: input.towns } : {}),
 		...(input.routes && input.routes.length > 0 ? { routes: input.routes } : {}),
 		...(input.executor ? { executor: input.executor } : {}),

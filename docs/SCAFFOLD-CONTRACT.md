@@ -56,7 +56,28 @@
 | `executor` | 施工进度：剩余 tiles、tiles/game-day、ETA、停滞天数、已见 job 数 | GS 相位 |
 | `session` | 墙钟剩余、模拟日剩余、游戏日剩余（episode 边界） | 调度器 |
 | `since` | 自上次决策以来的世界增量、相位、已执行动作、值得注意的事件 | 决策追踪器 |
-| `score` | **本局累计交付、每游戏日、测量窗口起点** | world state（`deliveredRun`） |
+| `score` | **本局累计交付、每游戏日、测量窗口起点、horizon** | world state（`deliveredRun`） |
+
+**`score` 块的形状与语义**（S1，2026-10-08 定）
+
+```
+score: {
+  delivered: number | null,          // 本局累计交付（与度量行 deliveredRun 同一个数）
+  deliveredPerGameDay: number | null, // delivered / elapsedGameDays（两者任一未知则 null）
+  elapsedGameDays: number,            // 本局已经历的游戏日
+  horizonDays: number | null,         // 本局 horizon（未设则 null）
+  scoredFromGameDay: number | null,   // 计分窗口开启的那一天（null = 整局都是窗口）
+  windowOpened: boolean               // 计分窗口是否已开启
+}
+```
+
+- **与度量同一个数**：`delivered` 必须等于该局度量行的 `deliveredRun`（`SPEC.md` §10.65），
+  否则模型看到的分与最终被记的分不是同一个分。
+- **缺失不折零**：还没有交付读数时 `delivered` 是 `null`；`deliveredPerGameDay` 在
+  `delivered` 或 `elapsedGameDays` 未知时是 `null`。
+- **窗口是条件，不是评价**：`scoredFromGameDay` / `windowOpened` 只说"计分从哪天开始"，
+  不说"这算好还是不好"。
+
 
 **观测铁律**
 

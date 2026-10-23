@@ -8,6 +8,16 @@
 > 踩过的坑的复盘（→ `MEMORY.md`；此处只写"改了什么"，不写"我为什么犯错"）。
 
 ## [Unreleased]
+### Added
+
+- **The agent can now see its own score.** Every decision context carries a `score`
+  block: cargo delivered so far, the per-game-day rate, elapsed game days, the
+  horizon, and where the scoring window opened. The delivered figure is read from
+  the same world-state counter the metric records, so what the model sees and what
+  gets recorded cannot diverge; unknown values stay `null` instead of becoming zero,
+  and the window fields are conditions rather than verdicts. The run log prints the
+  block so it can be checked rather than believed.
+
 
 ### Changed
 

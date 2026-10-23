@@ -1128,3 +1128,26 @@ headless 持续超时）——布局正确性由 DOM 文本断言 + smoke 的元
 **runner 新模式**：`--mode sequential --sessions N`（同 dataDir/seed/预建场景/固定
 horizon，记忆随局累积；判决打印学习曲线）。m3-verdict 同步打印 M5 曲线 + M4b 分布
 + P2-3 功效行。空态自证：n=0 → "only 0 run(s) - a trend needs >= 3"。
+
+### 10.114 D1a：模型看得见自己这局的分（`score` 块，2026-10-23）
+
+**问题**：系统提示词告诉模型"一局按每游戏日交付量计分"（`runtime.ts` 的 Scoring 段），
+但决策上下文里**没有分**：世界状态有 `deliveredRun`（`world-state.ts`），而
+`toNumbers()` 只给 money/income/vehicles/stations。⇒ 模型无法自我评估，信用分配没有起点
+（契约 §5.2 的 Reward / Credit assignment 两行）。
+
+**实现**（`src/agent/score.ts` 纯函数 + 接线）：
+- `projectScore()` → `ScoreFact{delivered, deliveredPerGameDay, elapsedGameDays,
+  horizonDays, scoredFromGameDay, windowOpened}`，进决策上下文的 `score` 段。
+- **`delivered` 与度量同源同值**：取世界状态的 `deliveredRun.total`，即该局度量行
+  `deliveredRun` 的同一个数（§10.65）——模型看到的分与最终被记的分不会分叉。
+- 速率分母是**本局已历游戏日**（`elapsedGameDays`）；`delivered` 或分母未知时
+  `deliveredPerGameDay` 为 `null`（缺失不折零，D60）。
+- 计分窗口是**条件**不是评价：`scoredFromGameDay`（预建场景 = 路线能运货那天；
+  freeform = `null`，整局都是窗口）、`windowOpened`。
+- 运行日志打印 `[agent] score: ...`（MEMORY A7：事实必须可核对，不能只"相信"）。
+
+**真机实测**（seed 11，offline-demo，150 游戏日 horizon）：4 次决策各打印一行
+`delivered=0 perGameDay=0 elapsedGameDays=11 horizon=150 scoredFromDay=run start window=open`；
+局终度量行 `deliveredRun=0, simulatedDays=121, status=completed` ⇒ **模型看到的 0 与
+被记的 0 是同一个数**（"未计量"路径由单测覆盖：`deliveredTotal=null → delivered=null`）。

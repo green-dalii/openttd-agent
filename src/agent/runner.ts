@@ -782,6 +782,8 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 	const scenario: "freeform" | "prebuilt" = opts.scenario === "prebuilt" ? "prebuilt" : "freeform";
 	let prebuiltReason: string | null = null;
 	let deliveredAtReady: number | null = null;
+	/** S1: the game day the measurement window opened (prebuilt only). */
+	let prebuiltWindowDay: number | null = null;
 	if (scenario === "prebuilt") {
 		const r = await runPrebuiltScenario(
 			{
@@ -807,6 +809,10 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 		if (r.ready) {
 			const c = deps.state.snapshot().companies.get(0);
 			deliveredAtReady = c?.deliveredRun?.total ?? null;
+			// The day the window opened: the model is told when the scored part of
+			// the run began, so a pre-window zero is not read as "delivering
+			// nothing" (S1).
+			prebuiltWindowDay = gameDayNow();
 		} else {
 			// Honest refusal: the scenario is NOT set up, so this run cannot measure
 			// management decisions. It keeps running (useful to debug) but the metric
@@ -846,6 +852,14 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 		// (plus the controller's own watchdog). Uses rconAwait so a pause that was
 		// never acknowledged is reported instead of assumed.
 		freeze: freezeCtl,
+		// S1: the measurement window. In freeform the whole run is the window
+		// (scoredFromGameDay = null); in the prebuilt scenario the window opens
+		// when the route can actually carry cargo, and until then the run's
+		// deliveries are setup, not performance.
+		measurementWindow: () => ({
+			scoredFromGameDay: scenario === "prebuilt" ? prebuiltWindowDay : null,
+			windowOpened: scenario === "prebuilt" ? prebuiltWindowDay !== null : true,
+		}),
 		// N2-2b: the economics the GS reports are keyed by job; the ledger knows
 		// which towns that job was ordered for. Joining them here is what lets the
 		// model read "route 101 (9->12): 6 vehicles, 146 waiting, -308 profit".
