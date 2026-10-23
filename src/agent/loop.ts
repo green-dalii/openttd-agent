@@ -22,11 +22,10 @@ import type { ExecutorFact, RouteContextFact } from "./decision-context.js";
 import type { ScoreFact } from "./score.js";
 import { formatRouteStats } from "./route-stats.js";
 import { formatScoreFact } from "./score.js";
-import { summarizeState } from "./tools/index.js";
+import { worldFacts } from "./world-facts.js";
 import {
 	buildDecisionContext,
 	type ActionRecord,
-	type DecisionContextInput,
 	type DecisionTracker,
 	type DecisionTrigger,
 } from "./decision-context.js";
@@ -73,35 +72,6 @@ export interface DecisionRequest {
 	score?: ScoreFact;
 }
 
-/** One company's comparable numbers (as produced by summarizeState). */
-interface RawCompany {
-	id?: unknown;
-	money?: unknown;
-	income?: unknown;
-	vehicles?: unknown;
-	stations?: unknown;
-}
-
-function toTownSummaries(state: Record<string, unknown>): DecisionContextInput["towns"] {
-	const raw = state.towns;
-	if (!Array.isArray(raw)) return undefined;
-	return raw
-		.filter((t): t is { id: number; population: number; x: number; y: number } =>
-			Boolean(t && typeof t === "object" && "id" in t && "population" in t && "x" in t && "y" in t))
-		.map((t) => ({ id: t.id, pop: t.population, x: t.x, y: t.y }));
-}
-
-function toNumbers(state: Record<string, unknown>): DecisionContextInput["now"]["companies"] {
-	const raw = Array.isArray(state.companies) ? (state.companies as RawCompany[]) : [];
-	return raw.map((c) => ({
-		id: Number(c.id ?? 0),
-		money: c.money === null || c.money === undefined ? null : Number(c.money),
-		income: c.income === null || c.income === undefined ? null : Number(c.income),
-		vehicles: c.vehicles === null || c.vehicles === undefined ? null : Number(c.vehicles),
-		stations: c.stations === null || c.stations === undefined ? null : Number(c.stations),
-	}));
-}
-
 /**
  * Run one decision: build the context and prompt the agent.
  * The agent calls tools (observe/build_bus_route/...) as it sees fit.
@@ -111,10 +81,12 @@ export async function runDecision(
 	deps: AgentDeps,
 	req: DecisionRequest,
 ): Promise<{ state: Record<string, unknown>; plan: DecisionPlan | null }> {
-	const state = summarizeState(deps.state.snapshot());
+	// D2/S2: the world is projected ONCE, canonically (same fields, same order as
+	// observe()) - the model used to see the towns twice in two shapes.
+	const facts = worldFacts(deps.state.snapshot());
 	const context = buildDecisionContext({
 		trigger: req.trigger,
-		now: { date: (state.date as string | null) ?? null, companies: toNumbers(state) },
+		now: { date: facts.date, companies: facts.companies },
 		// The agent's own score (S1). Without it the model is told how runs are
 		// scored and never sees what it scored - no self-assessment, no credit
 		// assignment. Facts only; the block carries nulls for unknowns.
@@ -122,7 +94,7 @@ export async function runDecision(
 		// Candidate towns ride along in EVERY decision context. §10.34 measured the
 		// alternative: towns reachable only via observe() meant the model sat through
 		// whole games without ever seeing its siting options.
-		towns: toTownSummaries(state),
+		towns: facts.towns,
 		// Same lesson, new signal (N2-2b): the economics of the lines already
 		// ordered ride along too, so "is my route actually working" is visible
 		// without a tool call. A route with no reading yet is simply absent.
@@ -195,14 +167,13 @@ export async function runDecision(
 		);
 	}
 
-	// The observation is kept in history so a later reader can replay the trail.
-	const observation = {
-		role: "game_observation" as const,
-		date: String(state.date ?? "unknown"),
-		state,
-		timestamp: Date.now(),
-	};
-	agent.state.messages = [...agent.state.messages, observation];
+	// D2/S2: the world snapshot is NOT appended as a second message any more.
+	// It never reached the model (`convertToLlm` filters `game_observation` out),
+	// and the audit trail already records the same snapshot per decision - so
+	// every decision used to keep a third copy of the same facts.
+	//
+	// What the model reads is the prompt below: one canonical projection of the
+	// world (same fields and order as observe()).
 
 	// SPEC §4.2 step 2: the model returns a STRUCTURED decision.
 	// The framework specifies the *interface* (it must know when to wake the model
@@ -218,7 +189,7 @@ export async function runDecision(
 		`wait_until tells the framework when to ask you again; use null to accept the default beat.`;
 
 	await agent.prompt(prompt);
-	return { state, plan: extractPlan(agent) };
+	return { state: facts as unknown as Record<string, unknown>, plan: extractPlan(agent) };
 }
 
 /** A structured decision as defined by SPEC §4.2 step 2. */

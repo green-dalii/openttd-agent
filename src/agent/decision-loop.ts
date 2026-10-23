@@ -35,7 +35,7 @@ import {
 	waitConditionMatches,
 	emptyTrackerAfter,
 } from "./loop-control.js";
-import { summarizeState } from "./tools/index.js";
+import { auditState } from "./world-facts.js";
 import type { ExecutorFact, RouteContextFact } from "./decision-context.js";
 import { projectScore, type ScoreFact } from "./score.js";
 import type { FreezeController } from "./freeze.js";
@@ -229,7 +229,7 @@ export function createDecisionLoop(ctx: DecisionLoopCtx): DecisionLoop {
 				: null;
 
 			// Snapshot the window BEFORE acting, so the next decision can compare.
-			const preState = summarizeState(ctx.deps.state.snapshot());
+			const preState = auditState(ctx.deps.state.snapshot());
 			const preSnap = ctx.deps.state.snapshot();
 			const dayBeforeDecision = ctx.gameDay();
 			ctx.telemetry.decisionPoint();

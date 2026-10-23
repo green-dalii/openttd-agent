@@ -39,7 +39,7 @@ describe("decision context", () => {
 
 		const ctx = buildDecisionContext({
 			trigger: "interval",
-			now: { date: "1950-07-01", companies: [{ id: 0, money: 250000, income: -4000, vehicles: 3, stations: 2 }] },
+			now: { date: "1950-07-01", companies: [{ id: 0, money: 250000, loan: null, income: -4000, vehicles: 3, stations: 2 }] },
 			since: tracker,
 			gameDay: 180,
 		});
@@ -96,7 +96,7 @@ describe("decision context", () => {
 		// says so explicitly via `baselineEstablished`.
 		const ctx = buildDecisionContext({
 			trigger: "start",
-			now: { date: "1950-01-01", companies: [{ id: 0, money: 100000, income: 0, vehicles: 0, stations: 0 }] },
+			now: { date: "1950-01-01", companies: [{ id: 0, money: 100000, loan: null, income: 0, vehicles: 0, stations: 0 }] },
 			since: emptyTracker(),
 		});
 		expect(ctx.sinceLastDecision.moneyDelta).toBeNull();
@@ -109,7 +109,7 @@ describe("decision context", () => {
 	it("survives a company that has no economy data yet", () => {
 		const ctx = buildDecisionContext({
 			trigger: "start",
-			now: { date: null, companies: [{ id: 0, money: null, income: null, vehicles: null, stations: null }] },
+			now: { date: null, companies: [{ id: 0, money: null, loan: null, income: null, vehicles: null, stations: null }] },
 			since: emptyTracker(),
 		});
 		// Unknown, not NaN and not 0 (D1b/S3).
@@ -144,7 +144,7 @@ describe("decision context", () => {
 		// The framework must never steer: no "you should", no "try", no ordering.
 		const ctx = buildDecisionContext({
 			trigger: "interval",
-			now: { date: "1950-05-01", companies: [{ id: 0, money: 1, income: -9, vehicles: 0, stations: 0 }] },
+			now: { date: "1950-05-01", companies: [{ id: 0, money: 1, loan: null, income: -9, vehicles: 0, stations: 0 }] },
 			since: emptyTracker(),
 		});
 		const text = JSON.stringify(ctx).toLowerCase();
@@ -299,7 +299,7 @@ describe("delta 诚实性（S3）", () => {
 	it("没有基线（第一次决策）→ 增量是 null，不是 0", () => {
 		const ctx = buildDecisionContext({
 			trigger: "start",
-			now: { date: "1950-01-01", companies: [{ id: 0, money: 300000, income: -8000, vehicles: 0, stations: 0 }] },
+			now: { date: "1950-01-01", companies: [{ id: 0, money: 300000, loan: null, income: -8000, vehicles: 0, stations: 0 }] },
 			since: emptyTracker(),
 			gameDay: 0,
 		});
@@ -317,7 +317,7 @@ describe("delta 诚实性（S3）", () => {
 		tracker.baseline = { money: 300000, income: null, vehicles: 0, stations: 0, gameDay: 0 };
 		const ctx = buildDecisionContext({
 			trigger: "interval",
-			now: { date: "1950-03-01", companies: [{ id: 0, money: 250000, income: -4000, vehicles: 3, stations: 2 }] },
+			now: { date: "1950-03-01", companies: [{ id: 0, money: 250000, loan: null, income: -4000, vehicles: 3, stations: 2 }] },
 			since: tracker,
 			gameDay: 60,
 		});

@@ -31,23 +31,18 @@ export interface RouteContextFact {
 }
 
 import type { ScoreFact } from "./score.js";
+import type { CompanyFact, TownFact } from "./world-facts.js";
 
 /** One company's comparable numbers in the payload. */
-/** Model-visible town fact: identity, demand signal, position. */
-export interface TownSummary {
-	id: number;
-	pop: number;
-	x: number;
-	y: number;
-}
-
-export interface CompanyNumbers {
-	id: number;
-	money: number | null;
-	income: number | null;
-	vehicles: number | null;
-	stations: number | null;
-}
+/**
+ * Model-visible town / company facts.
+ *
+ * D2/S2: these are the CANONICAL shapes (src/agent/world-facts.ts) - the decision
+ * context and `observe()` read the same projection, so the model never sees the
+ * same fact in two shapes or two orders.
+ */
+export type TownSummary = TownFact;
+export type CompanyNumbers = CompanyFact;
 
 /**
  * Snapshot used as the baseline for the next delta.

@@ -8,6 +8,19 @@
 > 踩过的坑的复盘（→ `MEMORY.md`；此处只写"改了什么"，不写"我为什么犯错"）。
 
 ## [Unreleased]
+### Changed
+
+- **The world is projected once (scaffold phase D2).** The decision context and
+  `observe()` used to project the world separately, so the same facts had two
+  shapes and two ordering rules, and the two implementations could drift. They
+  now read one canonical projection (companies by id, towns by population with
+  unknown population last), the context also carries the loan the accounting
+  note talks about, and a decision no longer keeps a second full copy of the
+  world in its transcript - the snapshot message never reached the model and the
+  audit trail already records it. Measured on a real run: `observe()` output
+  580 -> 479 characters (-17.4%), the decision prompt 2653 -> 2673 (+0.8%, the
+  added loan), and one state copy per decision instead of two.
+
 
 ### Added
 
