@@ -165,8 +165,13 @@ describe("OpenTTDProcessManager lifecycle", () => {
 			await mgr.ensureSandboxConfig();
 			await mgr.start();
 			expect(mgr.isRunning()).toBe(true);
-			// wait for exit
-			await new Promise((res) => setTimeout(res, 800));
+			// wait for exit: poll the CONDITION, never a fixed sleep (MEMORY D70).
+			// A fixed 800ms was "usually enough" and flaked under parallel load,
+			// which spends the gate's credibility on a failure unrelated to the code.
+			const deadline = Date.now() + 10_000;
+			while (mgr.isRunning() && Date.now() < deadline) {
+				await new Promise((res) => setTimeout(res, 25));
+			}
 			expect(mgr.isRunning()).toBe(false);
 			expect(exitCode).toBe(3);
 			expect(mgr.getLogTail().join("\n")).toContain("hello-server");

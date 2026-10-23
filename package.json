@@ -11,7 +11,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.scripts.json --noEmit && tsc -p tsconfig.frontend.json",
-    "lint": "eslint .",
+    "lint": "eslint . --max-warnings 0",
     "test": "vitest --run",
     "test:watch": "vitest",
     "test:live": "LIVE_TESTS=1 vitest --run",
