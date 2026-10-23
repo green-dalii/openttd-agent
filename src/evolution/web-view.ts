@@ -12,6 +12,7 @@
  * 页面只负责显示服务端给出的结论。
  */
 
+import { classifyOutcome } from "./outcome.js";
 import { type CompareBy, compareArms, type GameMetric} from "./metrics.js";
 import { evaluatePromotion, type StrategyCard } from "./strategies.js";
 import { readLessons, readMetrics, readStrategies, setStrategyEnabled } from "./store.js";
@@ -54,7 +55,10 @@ export function evolutionView(dataDir: string, by: CompareBy = "memory"): Evolut
 		strategies = [];
 	}
 
-	return { metrics, lessons, strategies, arms: compareArms(metrics, by) };
+	// D3b/S8: derive the outcome class for every row. Derived, never stored -
+	// so it can never disagree with the facts it is computed from.
+	const withClass = metrics.map((m) => ({ ...m, outcomeClass: classifyOutcome(m) }));
+	return { metrics: withClass, lessons, strategies, arms: compareArms(metrics, by) };
 }
 
 export { setStrategyEnabled };

@@ -68,7 +68,17 @@ export interface TelemetrySnapshot {
 	};
 	totals: { decisions: number; messages: number; toolCalls: number; toolFailures: number };
 	recentThinking: { turn: number; ts: number; text: string }[];
-	brain: { provider: string | null; model: string | null; kind: "real" | "faux" | null };
+	brain: {
+		provider: string | null;
+		model: string | null;
+		kind: "real" | "faux" | null;
+		/**
+		 * The model the provider actually served (D3b/S9): a gateway may answer
+		 * with a different model than the one requested - the requested name is
+		 * not evidence.
+		 */
+		servedModel?: string | null;
+	};
 }
 
 export interface TelemetryOptions {
@@ -175,7 +185,12 @@ export class Telemetry {
 	private peakRequest: { tokens: number; turn: number | null } = { tokens: 0, turn: null };
 	private turnUsage = new Map<number, { usage: UsageView; steps: number }>();
 	private toolStats = new Map<string, { calls: number; failures: number; totalMs: number }>();
-	private brain: { provider: string | null; model: string | null; kind: "real" | "faux" | null } = {
+	private brain: {
+		provider: string | null;
+		model: string | null;
+		kind: "real" | "faux" | null;
+		servedModel?: string | null;
+	} = {
 		provider: null,
 		model: null,
 		kind: null,
@@ -236,8 +251,15 @@ export class Telemetry {
 					}
 					break;
 				}
-				case "message_end":
-					this.finishMessage((ev as { message?: AssistantMessage }).message);
+				case "message_end": {
+					const msg = (ev as { message?: AssistantMessage }).message;
+					// D3b/S9: the served model (what the provider answered with),
+					// which may differ from the requested one.
+					const served = msg?.responseModel ?? msg?.model;
+					if (typeof served === "string" && served !== "") this.brain.servedModel = served;
+					this.finishMessage(msg);
+					break;
+				}
 					break;
 				case "tool_execution_start": {
 					const e = ev as { toolCallId?: string; toolName?: string; args?: unknown };

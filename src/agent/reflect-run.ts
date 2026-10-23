@@ -77,6 +77,12 @@ export interface FinalizeAndReflectArgs {
 	 * Runs whose scenario never became ready must not be compared (G4).
 	 */
 	scenario: "freeform" | "prebuilt";
+	/**
+	 * D3b/S9: the resolved scaffold knobs. Recorded because a benchmark must be
+	 * able to prove two runs used the same scaffold - the requested values are
+	 * not evidence.
+	 */
+	manifest?: { thinkingLevel: string; toolBudget: number; scaffoldHash: string };
 	/** Why the prebuilt setup ended as it did ("ready" | "timeout" | "order_refused"). */
 	scenarioReason?: string | null;
 	/** Cargo delivered before the measurement window opened (prebuilt only). */
@@ -142,6 +148,15 @@ export async function runFinalizeAndReflect(args: FinalizeAndReflectArgs): Promi
 		status: reachedDone ? "completed" : "aborted",
 		arm,
 		freeze: freezeStats ?? null,
+		// D3b/S9: the run manifest. Served model comes from telemetry (what the
+		// provider actually answered with); the knobs come from the resolved
+		// options - requested values are not evidence.
+		manifest: {
+			servedModel: finalTelemetry.brain?.servedModel ?? null,
+			thinkingLevel: args.manifest?.thinkingLevel ?? null,
+			toolBudget: args.manifest?.toolBudget ?? null,
+			scaffoldHash: args.manifest?.scaffoldHash ?? null,
+		},
 		outcome: {
 			constructionDone: reachedDone,
 			phase: executorPhase || undefined,
