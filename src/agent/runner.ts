@@ -56,6 +56,8 @@ import {
 	type LoadedMemory,
 } from "../evolution/memory.js";
 import { routeFactsProviderFor } from "../evolution/route-facts.js";
+import { pastRunScores, renderScoreHistory } from "../evolution/score-history.js";
+import { readMetrics } from "../evolution/store.js";
 import { joinRoutesWithLedger, routeWireFacts, fleetDecomposition } from "./route-stats.js";
 import { makeFreezeController } from "./freeze.js";
 import { actionCatalog } from "./tools/catalog.js";
@@ -156,6 +158,9 @@ import { savegameName,
 
 /** Run one agent-driven session. Returns process exit code. */
 export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise<number> {
+	// When this run started: the score history (S5) must not list the current
+	// run's own row as a past run.
+	const runStartedAtMs = Date.now();
 	// Self-heal history left behind by a previous process that died without
 	// finalizing (SIGKILL / crash): those records would otherwise show as
 	// "running" in the dashboard forever.
@@ -729,6 +734,22 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 						]
 					: []),
 			],
+			// S5: the agent's own measured scores in earlier comparable games.
+			// Facts (numbers + the conditions they were measured under), never a
+			// verdict. OFF in the control arm like every other cross-game memory:
+			// `--no-memory` must mean "no memory at all", or the A/B is void.
+			scoreHistoryProvider: () => {
+				if (opts.injectMemory === false) return null;
+				const history = pastRunScores(readMetrics(cfg.dataDir), {
+					scenario: opts.scenario === "prebuilt" ? "prebuilt" : "freeform",
+					horizonDays: opts.gameDays ?? null,
+					sinceMs: runStartedAtMs,
+					limit: 10,
+				});
+				const text = renderScoreHistory(history);
+				if (text) console.log(`[agent] score history injected (${history.runs.length} comparable run(s))`);
+				return text;
+			},
 		}),
 		onActionResult: (tool, r) => {
 			console.log(`[agent] tool ${tool}: ok=${r.ok} ${r.summary}`);

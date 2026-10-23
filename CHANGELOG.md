@@ -8,6 +8,15 @@
 > 踩过的坑的复盘（→ `MEMORY.md`；此处只写"改了什么"，不写"我为什么犯错"）。
 
 ## [Unreleased]
+### Changed
+
+- **Deltas no longer claim "nothing changed" when nothing was measured.** The
+  first decision of a window used to report zero deltas for every quantity,
+  which reads as "no change" where the truth is "no reading yet"; a quantity
+  missing from the baseline now yields a null delta, and the payload states
+  explicitly that no baseline exists yet. The run log prints the delta block so
+  the difference is checkable.
+
 ### Added
 
 - **The agent can now see its own score.** Every decision context carries a `score`

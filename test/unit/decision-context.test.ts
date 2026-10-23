@@ -89,16 +89,21 @@ describe("decision context", () => {
 		expect(t.actions.length).toBeLessThanOrEqual(12);
 	});
 
-	it("treats a missing baseline as zero change rather than NaN", () => {
+	it("treats a missing baseline as unknown rather than NaN or a fake zero", () => {
 		// The first decision of a run has nothing to compare against.
+		// 2026-10-08 (D1b/S3): this used to assert 0 — "no change" — which is a
+		// different claim from "not measured". It is now null, and the block
+		// says so explicitly via `baselineEstablished`.
 		const ctx = buildDecisionContext({
 			trigger: "start",
 			now: { date: "1950-01-01", companies: [{ id: 0, money: 100000, income: 0, vehicles: 0, stations: 0 }] },
 			since: emptyTracker(),
 		});
-		expect(ctx.sinceLastDecision.moneyDelta).toBe(0);
-		expect(ctx.sinceLastDecision.elapsedGameDays).toBe(0);
-		expect(Number.isFinite(ctx.sinceLastDecision.incomeDelta)).toBe(true);
+		expect(ctx.sinceLastDecision.moneyDelta).toBeNull();
+		expect(ctx.sinceLastDecision.elapsedGameDays).toBeNull();
+		expect(ctx.sinceLastDecision.baselineEstablished).toBe(false);
+		// Still no NaN anywhere (the original concern of this test).
+		expect(Number.isNaN(Number(ctx.sinceLastDecision.incomeDelta))).toBe(false);
 	});
 
 	it("survives a company that has no economy data yet", () => {
@@ -107,7 +112,8 @@ describe("decision context", () => {
 			now: { date: null, companies: [{ id: 0, money: null, income: null, vehicles: null, stations: null }] },
 			since: emptyTracker(),
 		});
-		expect(Number.isFinite(ctx.sinceLastDecision.moneyDelta)).toBe(true);
+		// Unknown, not NaN and not 0 (D1b/S3).
+		expect(ctx.sinceLastDecision.moneyDelta).toBeNull();
 		expect(ctx.now.companies[0]!.id).toBe(0);
 	});
 
@@ -279,5 +285,57 @@ describe("buildDecisionContext —— routes 事实（N2-2b）", () => {
 		for (const w of ["should", "recommend", "better", "prefer", "avoid", "optimal"]) {
 			expect(low).not.toContain(w);
 		}
+	});
+});
+
+/**
+ * D1b / S3: deltas must not turn "not measured" into "no change".
+ *
+ * 现象: `numbersOf()` 曾把 `null` 读数折成 0 再算 delta，于是第一次决策向模型
+ * 报出 moneyDelta=0 / vehiclesDelta=0 —— 真实含义是"还没读到"，被说成了"没变化"。
+ * 规则: 缺失 ≠ 0（D60）；观测面铁律 O2。
+ */
+describe("delta 诚实性（S3）", () => {
+	it("没有基线（第一次决策）→ 增量是 null，不是 0", () => {
+		const ctx = buildDecisionContext({
+			trigger: "start",
+			now: { date: "1950-01-01", companies: [{ id: 0, money: 300000, income: -8000, vehicles: 0, stations: 0 }] },
+			since: emptyTracker(),
+			gameDay: 0,
+		});
+		expect(ctx.sinceLastDecision.moneyDelta).toBeNull();
+		expect(ctx.sinceLastDecision.incomeDelta).toBeNull();
+		expect(ctx.sinceLastDecision.vehiclesDelta).toBeNull();
+		expect(ctx.sinceLastDecision.stationsDelta).toBeNull();
+		expect(ctx.sinceLastDecision.elapsedGameDays).toBeNull();
+		// 明确告诉模型"还没有基线"，否则 null 会被当成"读到了 0"。
+		expect(ctx.sinceLastDecision.baselineEstablished).toBe(false);
+	});
+
+	it("基线里缺一个读数 → 那一个增量是 null，其余照常", () => {
+		const tracker = emptyTracker();
+		tracker.baseline = { money: 300000, income: null, vehicles: 0, stations: 0, gameDay: 0 };
+		const ctx = buildDecisionContext({
+			trigger: "interval",
+			now: { date: "1950-03-01", companies: [{ id: 0, money: 250000, income: -4000, vehicles: 3, stations: 2 }] },
+			since: tracker,
+			gameDay: 60,
+		});
+		expect(ctx.sinceLastDecision.moneyDelta).toBe(-50000);
+		expect(ctx.sinceLastDecision.vehiclesDelta).toBe(3);
+		// income 的基线没读到 → 增量不可知 → null（不是 4000 这种编出来的数）
+		expect(ctx.sinceLastDecision.incomeDelta).toBeNull();
+		expect(ctx.sinceLastDecision.baselineEstablished).toBe(true);
+	});
+
+	it("summarizeDelta：任一侧未知 → 该项增量为 null", () => {
+		const d = summarizeDelta(
+			{ money: 100, income: null, vehicles: 2, stations: 1, gameDay: 10 },
+			{ money: 150, income: 5, vehicles: 2, stations: 1, gameDay: 20 },
+		);
+		expect(d.moneyDelta).toBe(50);
+		expect(d.incomeDelta).toBeNull();
+		expect(d.vehiclesDelta).toBe(0);
+		expect(d.elapsedGameDays).toBe(10);
 	});
 });

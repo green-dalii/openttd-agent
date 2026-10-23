@@ -83,11 +83,13 @@ export function gameDaysSinceStart(deps: AgentDeps): number {
 /** Comparable numbers for the next decision's delta. */
 export function baselineOf(snap: ReturnType<AgentDeps["state"]["snapshot"]>, gameDay: number) {
 	const c = snap.companies.get(0) ?? [...snap.companies.values()][0];
+	// Missing readings stay null (D60): a baseline of 0 would make the next
+	// delta claim "nothing changed" about a quantity nobody read yet.
 	return {
-		money: Number(c?.economy?.money ?? 0) || 0,
-		income: c?.economy ? Number(BigInt.asIntN(64, c.economy.income)) || 0 : 0,
-		vehicles: c?.stats?.vehicles ?? 0,
-		stations: c?.stats?.stations ?? 0,
+		money: c?.economy ? Number(c.economy.money) : null,
+		income: c?.economy ? Number(BigInt.asIntN(64, c.economy.income)) : null,
+		vehicles: c?.stats ? c.stats.vehicles : null,
+		stations: c?.stats ? c.stats.stations : null,
 		gameDay,
 	};
 }

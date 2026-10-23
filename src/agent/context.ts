@@ -18,6 +18,15 @@ export interface PruningOptions {
 	 * system-ish reminder before the recent window. Absent = no injection.
 	 */
 	lessonsProvider?: () => string[] | Promise<string[]>;
+	/**
+	 * The agent's own measured scores in earlier comparable games (S5).
+	 *
+	 * A fact block (numbers + measurement conditions), returned as one string.
+	 * `null` = nothing comparable to report, and then nothing is injected - an
+	 * empty block would read as "you scored nothing before", which is a
+	 * different claim.
+	 */
+	scoreHistoryProvider?: () => string | null | Promise<string | null>;
 }
 
 /** Messages that must never be pruned away (they carry the current decision). */
@@ -37,6 +46,7 @@ export function pruningTransformContext(
 	const keepRecent = opts.keepRecent ?? 40;
 	return async (messages: AgentMessage[]): Promise<AgentMessage[]> => {
 		const lessons = opts.lessonsProvider ? await opts.lessonsProvider() : [];
+		const scoreHistory = opts.scoreHistoryProvider ? await opts.scoreHistoryProvider() : null;
 		let recent = messages;
 		if (messages.length > keepRecent) {
 			// Keep the tail; re-attach any pinned observation inside the window.
@@ -45,11 +55,19 @@ export function pruningTransformContext(
 			// Only the LAST pinned observation matters (current state).
 			if (pinned.length > 0) recent = [pinned[pinned.length - 1]!, ...recent];
 		}
-		if (lessons.length === 0) return recent;
-		const reminder: AgentMessage = {
-			role: "user",
-			content: `Recorded outcomes from your own previous games:\n- ${lessons.join("\n- ")}`,
-		} as AgentMessage;
-		return [reminder, ...recent];
+		const reminders: AgentMessage[] = [];
+		// The agent's own trajectory first (S5): the most concrete self-assessment
+		// fact there is. Facts only - no verdict about them.
+		if (scoreHistory) {
+			reminders.push({ role: "user", content: scoreHistory } as AgentMessage);
+		}
+		if (lessons.length > 0) {
+			reminders.push({
+				role: "user",
+				content: `Recorded outcomes from your own previous games:\n- ${lessons.join("\n- ")}`,
+			} as AgentMessage);
+		}
+		if (reminders.length === 0) return recent;
+		return [...reminders, ...recent];
 	};
 }

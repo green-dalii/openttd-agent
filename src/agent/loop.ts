@@ -181,6 +181,20 @@ export async function runDecision(
 		console.log(`[agent] score: ${formatScoreFact(context.score)}`);
 	}
 
+	// Deltas too (D1b/S3): the whole point of the change is that "not measured"
+	// is distinguishable from "no change" - and that is only checkable if the
+	// run log shows it.
+	{
+		const s = context.sinceLastDecision;
+		const show = (v: number | null): string => (v === null ? "unknown" : String(v));
+		console.log(
+			`[agent] deltas: baseline=${s.baselineEstablished ? "established" : "none"}` +
+				` money=${show(s.moneyDelta)} income=${show(s.incomeDelta)}` +
+				` vehicles=${show(s.vehiclesDelta)} stations=${show(s.stationsDelta)}` +
+				` elapsedGameDays=${show(s.elapsedGameDays)}`,
+		);
+	}
+
 	// The observation is kept in history so a later reader can replay the trail.
 	const observation = {
 		role: "game_observation" as const,

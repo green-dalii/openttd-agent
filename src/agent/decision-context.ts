@@ -49,12 +49,18 @@ export interface CompanyNumbers {
 	stations: number | null;
 }
 
-/** Snapshot used as the baseline for the next delta. */
+/**
+ * Snapshot used as the baseline for the next delta.
+ *
+ * `null` means "not observed yet" and must stay `null` all the way to the
+ * delta: folding it to 0 turns "we have not read this" into "nothing changed"
+ * (D60 / contract iron law O2).
+ */
 export interface NumbersBaseline {
-	money: number;
-	income: number;
-	vehicles: number;
-	stations: number;
+	money: number | null;
+	income: number | null;
+	vehicles: number | null;
+	stations: number | null;
 	gameDay: number;
 }
 
@@ -172,22 +178,31 @@ export function recordEvent(t: DecisionTracker, summary: string): void {
 }
 
 /** Signed changes between two sets of numbers. */
+/**
+ * Difference between two readings of the same quantities.
+ *
+ * A delta is `null` when either side of it is unknown - a number here would be
+ * invented (D60). The caller tells the model separately whether a baseline
+ * exists at all (`baselineEstablished`).
+ */
 export function summarizeDelta(
 	from: NumbersBaseline,
 	to: NumbersBaseline,
 ): {
-	moneyDelta: number;
-	incomeDelta: number;
-	vehiclesDelta: number;
-	stationsDelta: number;
-	elapsedGameDays: number;
+	moneyDelta: number | null;
+	incomeDelta: number | null;
+	vehiclesDelta: number | null;
+	stationsDelta: number | null;
+	elapsedGameDays: number | null;
 } {
+	const diff = (a: number | null, b: number | null): number | null =>
+		typeof a === "number" && typeof b === "number" ? b - a : null;
 	return {
-		moneyDelta: to.money - from.money,
-		incomeDelta: to.income - from.income,
-		vehiclesDelta: to.vehicles - from.vehicles,
-		stationsDelta: to.stations - from.stations,
-		elapsedGameDays: to.gameDay - from.gameDay,
+		moneyDelta: diff(from.money, to.money),
+		incomeDelta: diff(from.income, to.income),
+		vehiclesDelta: diff(from.vehicles, to.vehicles),
+		stationsDelta: diff(from.stations, to.stations),
+		elapsedGameDays: diff(from.gameDay, to.gameDay),
 	};
 }
 
@@ -198,11 +213,12 @@ function leadCompany(companies: CompanyNumbers[]): CompanyNumbers | undefined {
 
 function numbersOf(c: CompanyNumbers | undefined, gameDay: number): NumbersBaseline {
 	return {
-		// nulls mean "not observed yet" - treat as 0 so deltas stay finite.
-		money: Number(c?.money ?? 0) || 0,
-		income: Number(c?.income ?? 0) || 0,
-		vehicles: Number(c?.vehicles ?? 0) || 0,
-		stations: Number(c?.stations ?? 0) || 0,
+		// nulls mean "not observed yet" and stay null: a delta computed from a
+		// folded zero claims "no change" where the truth is "no reading" (D60).
+		money: c?.money ?? null,
+		income: c?.income ?? null,
+		vehicles: c?.vehicles ?? null,
+		stations: c?.stations ?? null,
 		gameDay,
 	};
 }
@@ -248,11 +264,16 @@ export function buildDecisionContext(input: DecisionContextInput): {
 		gameDaysRemaining?: number;
 	};
 	sinceLastDecision: {
-		elapsedGameDays: number;
-		moneyDelta: number;
-		incomeDelta: number;
-		vehiclesDelta: number;
-		stationsDelta: number;
+		elapsedGameDays: number | null;
+		moneyDelta: number | null;
+		incomeDelta: number | null;
+		vehiclesDelta: number | null;
+		stationsDelta: number | null;
+		/**
+		 * False on the first decision of a window: there is no earlier reading to
+		 * compare against, so the deltas above are `null` rather than 0.
+		 */
+		baselineEstablished: boolean;
 		/**
 		 * Executor phase changes since the last decision, DECODED.
 		 *
@@ -284,8 +305,17 @@ export function buildDecisionContext(input: DecisionContextInput): {
 } {
 	const gameDay = input.gameDay ?? 0;
 	const current = numbersOf(leadCompany(input.now.companies), gameDay);
-	const from = input.since.baseline ?? current; // first decision: no change yet
-	const delta = summarizeDelta(from, current);
+	// No baseline yet (first decision of the window): the deltas are unknown, not
+	// zero. Folding them to 0 would tell the model "nothing changed" about
+	// quantities nobody has read yet.
+	const from = input.since.baseline;
+	const delta = from ? summarizeDelta(from, current) : {
+		moneyDelta: null,
+		incomeDelta: null,
+		vehiclesDelta: null,
+		stationsDelta: null,
+		elapsedGameDays: null,
+	};
 
 	return {
 		trigger: input.trigger,
@@ -297,6 +327,7 @@ export function buildDecisionContext(input: DecisionContextInput): {
 		...(input.session ? { session: input.session } : {}),
 		sinceLastDecision: {
 			...delta,
+			baselineEstablished: from !== null,
 			// Heartbeats are collapsed by decodePhaseWindow: 40 identical
 			// "still alive" lines would bury the one line that actually changed.
 			phases: decodePhaseWindow(input.since.phases).map((d) => ({

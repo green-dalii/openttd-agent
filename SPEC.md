@@ -1151,3 +1151,23 @@ horizon，记忆随局累积；判决打印学习曲线）。m3-verdict 同步�
 `delivered=0 perGameDay=0 elapsedGameDays=11 horizon=150 scoredFromDay=run start window=open`；
 局终度量行 `deliveredRun=0, simulatedDays=121, status=completed` ⇒ **模型看到的 0 与
 被记的 0 是同一个数**（"未计量"路径由单测覆盖：`deliveredTotal=null → delivered=null`）。
+
+### 10.115 D1b：delta 不再说谎（2026-10-23）
+
+**问题**：`numbersOf()` 把 `null` 读数折成 0 再算增量，于是**第一次决策**向模型报出
+`moneyDelta=0 / vehiclesDelta=0`——真实含义是"还没读到"，被说成了"没变化"。
+`baselineOf()` 同样把缺失折零。⇒ 模型可能基于一个**编造的零**做决策（D60）。
+
+**改法**：
+- `NumbersBaseline` 的四个量改为 `number | null`；`baselineOf()` 保留缺失；
+  `summarizeDelta()` 任一侧未知即该项为 `null`；
+  第一次决策（无基线）⇒ 全部增量为 `null`，并由 `sinceLastDecision.baselineEstablished=false`
+  明确说明"还没有基线"。
+- `loop-control.ts` 里重复声明的 `NumbersBaseline` 删除，改用 `decision-context.ts`
+  的唯一定义（C1：同一概念两份实现会静默漂移）。
+- 运行日志打印 `[agent] deltas: ...`，使"未知 ≠ 没变化"可核对（MEMORY A7）。
+
+**真机实测**（seed 11，offline-demo，60 游戏日 horizon）：
+第一次决策 `baseline=none money=unknown income=unknown vehicles=unknown stations=unknown
+elapsedGameDays=unknown`；第二次 `baseline=established money=199214 income=-786
+vehicles=unknown stations=unknown elapsedGameDays=3`——**有读数的给数，没读数的给 unknown**。
