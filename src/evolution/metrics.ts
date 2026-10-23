@@ -36,6 +36,13 @@ export interface SessionMetaLike {
 	arm?: "treatment" | "control";
 	/** Verified-freeze stats (SPEC §10.60), recorded by the runner. */
 	freeze?: { confirmed: number; unconfirmed: number; failures: number; watchdogTrips: number; maxHoldMs: number } | null;
+	/** Run manifest (D3b/S9), recorded by the runner. */
+	manifest?: {
+		servedModel?: string | null;
+		thinkingLevel?: string | null;
+		toolBudget?: number | null;
+		scaffoldHash?: string | null;
+	};
 	outcome?: {
 		constructionDone?: boolean;
 		money?: string | number;
@@ -186,6 +193,22 @@ export interface GameMetric {
 	arm?: "treatment" | "control";
 	/** The experiment's independent variable: what memory was injected. */
 	memory: { lessonsInjected: number; strategiesInjected: number; routeFactsInjected: number };
+	/**
+	 * Run manifest (D3b/S9): what the model actually was and under which
+	 * scaffold. Legacy rows keep nulls - a missing record stays missing.
+	 */
+	manifest?: {
+		servedModel: string | null;
+		thinkingLevel: string | null;
+		toolBudget: number | null;
+		scaffoldHash: string | null;
+	};
+	/**
+	 * Why the run ended the way it did (D3b/S8): a zero score has several
+	 * different causes, and they mean different things. Derived, never stored
+	 * on the row by hand.
+	 */
+	outcomeClass?: string;
 }
 
 /** Minimum runs per arm before a difference is worth reporting (SPEC §5.3). */
@@ -438,6 +461,12 @@ export function toGameMetric(
 			lessonsInjected: num(memory && memory.lessonsInjected),
 			strategiesInjected: num(memory && memory.strategiesInjected),
 			routeFactsInjected: num(memory && memory.routeFactsInjected),
+		},
+		manifest: {
+			servedModel: meta.manifest?.servedModel ?? null,
+			thinkingLevel: meta.manifest?.thinkingLevel ?? null,
+			toolBudget: meta.manifest?.toolBudget ?? null,
+			scaffoldHash: meta.manifest?.scaffoldHash ?? null,
 		},
 	};
 }

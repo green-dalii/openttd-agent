@@ -8,6 +8,19 @@
 > 踩过的坑的复盘（→ `MEMORY.md`；此处只写"改了什么"，不写"我为什么犯错"）。
 
 ## [Unreleased]
+### Added
+
+- **Every run records what it was, and a zero score names its cause (phase D3b).**
+  The metric row now carries a run manifest: the model the provider actually
+  served (not the one requested), the thinking level and tool budget that were
+  applied, and a fingerprint of the scaffold (system prompt + tool set, in
+  order) so two runs can be proven to have seen the same scaffold. A derived
+  outcome class names why a run ended as it did - delivered, delivered nothing,
+  no construction, every tool refused, paused by the agent, world frozen, wall
+  clock cap, or unknown - with a fixed priority (a stopped run is not a run
+  that failed to learn) and `unknown` for missing readings. The class is derived
+  on read, never stored, so it cannot disagree with the facts it summarises.
+
 ### Fixed
 
 - **Executor phases now name the action that caused them** (scaffold phase D3a).

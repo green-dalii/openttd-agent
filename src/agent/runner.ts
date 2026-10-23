@@ -23,7 +23,8 @@ import {
 	EXECUTOR_AI_NAME,
 } from "../game/squirrel-deploy.js";
 import type { Config } from "../config.js";
-import { createAgent } from "./runtime.js";
+import { createAgent, SYSTEM_PROMPT, DEFAULT_MAX_TOOL_CALLS_PER_DECISION } from "./runtime.js";
+import { scaffoldHash, type FingerprintableTool } from "./scaffold-fingerprint.js";
 import type { AgentOptions } from "@earendil-works/pi-agent-core";
 import type { Model } from "@earendil-works/pi-ai";
 /** pi-agent-core's StreamFn, via AgentOptions. */
@@ -336,6 +337,10 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 				web?.publishRun({
 					state: paused ? "paused" : "running",
 					sessionId: session.id,
+		// D3b: the RESOLVED knobs (not the requested ones) so the manifest can
+		// record what actually drove the run.
+		thinkingLevel: "off",
+		maxToolCallsPerDecision: DEFAULT_MAX_TOOL_CALLS_PER_DECISION,
 					mode: "agent",
 					pausedBy: paused ? "agent" : null,
 					pausedAt: paused ? at : null,
@@ -773,6 +778,11 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 		},
 	});
 	const { agent } = runtime;
+	// D3b/S9: the scaffold fingerprint - the prompt and the tool set that are
+	// actually sent to the model. Two runs with the same fingerprint saw the
+	// same scaffold; without it a benchmark cannot claim that.
+	const scaffold = scaffoldHash(SYSTEM_PROMPT, runtime.tools as unknown as FingerprintableTool[]);
+	console.log(`[agent] scaffold: thinking=${"off"} toolBudget=${DEFAULT_MAX_TOOL_CALLS_PER_DECISION} hash=${scaffold}`);
 
 	// Feed every agent event into telemetry (token usage, thinking, tool steps).
 	agent.subscribe((event) => {
@@ -959,6 +969,11 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 		},
 		scenario,
 		scenarioReason: prebuiltReason,
+		manifest: {
+			thinkingLevel: "off",
+			toolBudget: DEFAULT_MAX_TOOL_CALLS_PER_DECISION,
+			scaffoldHash: scaffold,
+		},
 		deliveredAtReady,
 		episode: {
 			...episode.check({ gameDay: gameDayNow(), nowMs: Date.now() }),

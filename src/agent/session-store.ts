@@ -68,6 +68,21 @@ export interface SessionMeta {
 	 * (nothing existed to inject yet) and silently compared 4 vs 6.
 	 */
 	arm?: "treatment" | "control";
+	/**
+	 * Run manifest (D3b/S9): what the model actually was and under which
+	 * scaffold. Recorded by the runner because only it knows the resolved
+	 * values (requested vs served model, applied knobs, the tool set sent).
+	 */
+	manifest?: {
+		/** Model the provider actually served (may differ from the request). */
+		servedModel: string | null;
+		/** Thinking level actually applied ("off" when deliberation is off). */
+		thinkingLevel: string | null;
+		/** Per-decision tool-call budget actually applied. */
+		toolBudget: number | null;
+		/** sha256-based fingerprint of (system prompt + tool set), 16 hex chars. */
+		scaffoldHash: string | null;
+	};
 	/** Verified-freeze stats (SPEC §10.60); null when never frozen. */
 	freeze?: { confirmed: number; unconfirmed: number; failures: number; watchdogTrips: number; maxHoldMs: number } | null;
 	outcome?: {
