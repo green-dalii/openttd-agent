@@ -10,6 +10,21 @@
 ## [Unreleased]
 ### Added
 
+- **The harness backend now records what it actually sent, and what went wrong on
+  the wire.** The first provider request body is fingerprinted
+  (`manifest.payloadHash`, `manifest.payloadCount`); the bare-Agent path records
+  `null` rather than a number derived from its own source, because a claim is not
+  a measurement. Provider retries and runtime faults are counted in telemetry
+  (`totals.retries` / `totals.faults`) with the last few messages in
+  `recentRuntimeIssues`: a call that had to be retried carries the same tokens and
+  steps as a clean one, so without this a slow, expensive run cannot be attributed.
+  Verified on a real run with an injected 503 (`retries=1`,
+  `attempt 2/4: 503`), and the payload hash survives finalization - the manifest
+  is rebuilt field by field in `reflect-run.ts`, so a new field added in
+  `runner.ts` disappears unless it is listed there too.
+
+### Added
+
 - **The decision runtime has a second, interchangeable backend** (`AGENT_HARNESS=1`):
   the run loop can now drive a persistent `AgentHarness` session (one session and one
   lane per game, one `lane.prompt()` per decision) whose transcript is written under

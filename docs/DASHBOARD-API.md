@@ -136,7 +136,11 @@ interface TelemetrySnapshot {
     messages: number;                // assistant 消息数
     toolCalls: number;
     toolFailures: number;
+    retries: number;                 // 传输层重试次数（D6b；harness 路径可见）
+    faults: number;                  // 运行时故障数（D6b；harness 路径可见）
   };
+  // 最近的 retry/fault，最新在后，最多 10 条（只有消息，不含 payload）
+  recentRuntimeIssues: { ts: number; kind: "retry" | "fault"; message: string }[];
   recentThinking: { turn: number; ts: number; text: string }[];  // 最近 5 条
   brain: { provider: string | null; model: string | null; kind: "real" | "faux" | null };
 }

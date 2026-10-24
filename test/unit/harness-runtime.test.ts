@@ -61,13 +61,25 @@ async function makeRuntime(opts: {
 	onEvent?: (e: { type: string }) => void;
 	/** Receives the provider context actually handed to the stream function. */
 	onStreamContext?: (context: unknown) => void;
+	/** Emulate a real provider: report the serialized payload back to the harness. */
+	emitPayload?: boolean;
 }): Promise<HarnessRuntime> {
-	const streamSimple = opts.onStreamContext
-		? (model: never, context: never, options: never) => {
-				opts.onStreamContext!(context);
-				return opts.faux.streamSimple(model, context, options);
-			}
-		: opts.faux.streamSimple;
+	const base = opts.faux.streamSimple;
+	const streamSimple =
+		opts.onStreamContext || opts.emitPayload
+			? (model: never, context: never, options: never) => {
+					opts.onStreamContext?.(context);
+					if (opts.emitPayload) {
+						// Real providers call `onPayload` with the exact body they send;
+						// faux ignores it, so the hook would otherwise never fire.
+						(options as { onPayload?: (p: unknown, m: unknown) => void } | undefined)?.onPayload?.(
+							{ model: "stub", messages: (context as { messages?: unknown[] }).messages },
+							model,
+						);
+					}
+					return base(model, context, options);
+				}
+			: base;
 	return createHarnessRuntime({
 		dataDir: dir,
 		sessionId: `sess-${Math.random().toString(36).slice(2, 8)}`,
@@ -250,5 +262,46 @@ describe("harnessEnabled", () => {
 	it("turns on for exactly \"1\"", () => {
 		expect(harnessEnabled({ AGENT_HARNESS: "1" })).toBe(true);
 		expect(harnessEnabled({ AGENT_HARNESS: " 1 " })).toBe(true);
+	});
+});
+
+describe("payload digest (D6b)", () => {
+	it("records a stable hash of the first payload and the request count", async () => {
+		const faux = createFauxCore({});
+		faux.setResponses([
+			fauxAssistantMessage([fauxToolCall("observe", {})]),
+			fauxAssistantMessage([fauxText("done")]),
+		]);
+		const rt = await makeRuntime({ faux, emitPayload: true });
+		try {
+			expect(rt.getPayloadDigest()).toEqual({ payloadHash: null, payloadCount: 0 });
+			await laneDecisionAgent(rt.lane, rt.context).prompt("go");
+			const d = rt.getPayloadDigest();
+			expect(d.payloadHash).toMatch(/^[0-9a-f]{16}$/);
+			// The tool loop made two provider calls; the count is what proves the run
+			// actually talked to the model twice.
+			expect(d.payloadCount).toBe(2);
+		} finally {
+			await rt.close();
+		}
+	});
+
+	it("keeps the FIRST payload's hash even when later payloads differ", async () => {
+		const faux = createFauxCore({});
+		faux.setResponses([
+			fauxAssistantMessage([fauxToolCall("observe", {})]),
+			fauxAssistantMessage([fauxText("done")]),
+		]);
+		const rt = await makeRuntime({ faux, emitPayload: true });
+		try {
+			await laneDecisionAgent(rt.lane, rt.context).prompt("go");
+			const first = rt.getPayloadDigest().payloadHash;
+			await laneDecisionAgent(rt.lane, rt.context).prompt("again");
+			// History grew, so the 3rd request differs - the recorded hash must not.
+			expect(rt.getPayloadDigest().payloadHash).toBe(first);
+			expect(rt.getPayloadDigest().payloadCount).toBe(3);
+		} finally {
+			await rt.close();
+		}
 	});
 });

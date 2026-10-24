@@ -26,7 +26,9 @@ import { BACKGROUND_CONTEXT, withCancel } from "@earendil-works/pi-agent-core/ha
 import type { Context } from "@earendil-works/pi-agent-core/harness/context";
 import type { TSchema } from "typebox";
 import type { ActionResult } from "./types.js";
+import { createHash } from "node:crypto";
 import { ToolBudget } from "./tool-budget.js";
+import { stableStringify } from "./scaffold-fingerprint.js";
 import { toHarnessTools } from "./harness-tools.js";
 import { harnessEventToAgentEvents, type AgentEventLike } from "./harness-events.js";
 
@@ -73,6 +75,11 @@ export interface HarnessRuntime {
 	context: Context;
 	/** Tool calls refused by the budget (run-level health signal). */
 	getBudgetBlocks(): number;
+	/**
+	 * Fingerprint of the FIRST request body actually serialized (D6b), and how
+	 * many requests were made. Null until the first request leaves.
+	 */
+	getPayloadDigest(): { payloadHash: string | null; payloadCount: number };
 	/** Close the harness (flushes the transcript, releases the session). */
 	close(): Promise<void>;
 }
@@ -92,6 +99,9 @@ export async function createHarnessRuntime(opts: HarnessRuntimeOptions): Promise
 	const session = await repo.create({ cwd: opts.dataDir, id: opts.sessionId }, BACKGROUND_CONTEXT);
 
 	const budget = new ToolBudget(opts.maxToolCallsPerDecision);
+	let payloadHash: string | null = null;
+	let payloadCount = 0;
+
 	const harnessTools = toHarnessTools<undefined, ActionResult>(opts.tools);
 
 	const canceller = withCancel(BACKGROUND_CONTEXT);
@@ -122,6 +132,21 @@ export async function createHarnessRuntime(opts: HarnessRuntimeOptions): Promise
 	//    a single decision can span several turns).
 	harness.hooks.on("before_run", async () => {
 		budget.reset();
+		return undefined;
+	});
+
+	// 2. Real payload fingerprint (D6b): what the provider will actually see, not
+	//    what we believe we built. The FIRST request carries the whole scaffold
+	//    (system prompt + tool schemas + first world projection), so it is the
+	//    discriminator a benchmark needs; later requests differ by history.
+	harness.hooks.on("before_payload", async (event) => {
+		payloadCount += 1;
+		if (payloadHash === null) {
+			payloadHash = createHash("sha256")
+				.update(stableStringify(event.payload), "utf8")
+				.digest("hex")
+				.slice(0, 16);
+		}
 		return undefined;
 	});
 
@@ -162,6 +187,11 @@ export async function createHarnessRuntime(opts: HarnessRuntimeOptions): Promise
 		harness.events.on("message_end", (e) => emit(onEvent, e));
 		harness.events.on("tool_start", (e) => emit(onEvent, e));
 		harness.events.on("tool_end", (e) => emit(onEvent, e));
+		// D6b: transport retries and runtime faults become visible counters.
+		harness.events.on("retry_scheduled", (e) => emit(onEvent, e));
+		harness.events.on("retry_end", (e) => emit(onEvent, e));
+		harness.events.on("fault", (e) => emit(onEvent, e));
+		harness.events.on("handler_error", (e) => emit(onEvent, e));
 	}
 
 	const lane = await harness.lane(HARNESS_LANE_NAME, canceller.context);
@@ -171,6 +201,7 @@ export async function createHarnessRuntime(opts: HarnessRuntimeOptions): Promise
 		lane,
 		context: canceller.context,
 		getBudgetBlocks: () => budget.blocked,
+		getPayloadDigest: () => ({ payloadHash, payloadCount }),
 		close: async () => {
 			await harness.close(canceller.context);
 		},

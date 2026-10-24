@@ -89,7 +89,7 @@
 
 **回滚**：`AGENT_HARNESS=0`（默认）→ 完全走旧路径；旧代码不删。
 
-### D6b —— 真实 payload 与用量台账
+### D6b —— 真实 payload 与用量台账 ✅ 已实现（2026-10-24）
 
 | 改动 | 产出 |
 |---|---|
@@ -97,7 +97,11 @@
 | usage 台账（`harness/usage.jsonl`） | 分数卡效率轴可读它；仍是可选字段，缺失为 `null` |
 | `retry_*` / `fault` 事件 | 进 telemetry 步骤流（当前完全不可见） |
 
-**验收**：两模型的 `payloadHash` 可对比；人为断流（stub 返 500）能在步骤流里看到 retry；gate 绿。
+**结果**：真机注入 503 → `totals.retries=1`、消息 `attempt 2/4: 503`；
+`manifest.payloadHash=c4a214dc8d0dea46`、`payloadCount=5`。
+**「usage 台账供效率轴」这一条不需要新代码**：telemetry 已逐条消息记 usage，
+harness 落盘的 usage 条目是同一批数字——再建读取路径只会造出第二个可能分歧的真源。
+**新增的坑**：manifest 在 `reflect-run.ts` 是白名单重建，新字段不加进去就被静默丢弃。
 
 ### D6c —— **否决**
 

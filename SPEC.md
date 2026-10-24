@@ -1176,6 +1176,22 @@ lane；一次决策 = 一次 `lane.prompt()`。方案与不变量见 `docs/HARNE
 **为什么这值得记**：迁移的风险全在"库的接线细节"上——缓存键、消息回读、执行顺序、
 compaction 冲突都不报错，只会让两次运行看到的脚手架悄悄不同，而那正是基准评测的立身之本。
 
+**D6b：真实 payload 指纹与传输层可见性（同一节）**
+- `before_payload` 拿到的是**序列化后真正要发出的 body**，指纹取**第一份** payload
+  （system prompt + 11 个工具 schema + 首个世界投影）——后续请求因历史增长而必然不同。
+  真机：`payloadHash=c4a214dc8d0dea46`、`payloadCount=5`（3 次决策 + 1 次重试）；
+  另一次 2 决策的局是 `1a19e28b06ba2c37` / 3 次请求。
+- `manifest` 增 `payloadHash` / `payloadCount`；**裸 Agent 路径记 `null`**（没有 payload
+  hook，用源码算出来的数只是主张，不是测量）。
+- 传输层不再隐形：`retry_scheduled` → `totals.retries` + `recentRuntimeIssues`，
+  `fault`/`handler_error` → `totals.faults`。真机注入 503：
+  `retries=1`，消息 `attempt 2/4: 503: {"message":"injected 503"}`。
+- **坑（与 D3b 同型）**：manifest 在 `reflect-run.ts` 里是**按字段重建的白名单**，
+  在 `runner.ts` 新增的字段会被静默丢掉（真机第一次抓出：日志有 hash、文件里没有）。
+  已加单测锁住，并在该处写了警告注释。
+- 结论：使用量台账这条**不需要新代码** —— telemetry 已逐条消息记 usage，harness 落盘的
+  usage 条目是同一批数字；再建一条读取路径只会造出两个可能分歧的真源。
+
 ### 10.114 阶段 D：脚手架成熟化 + 评测面（2026-10-23/24）
 
 > 契约（模型看到什么/能做什么/动作后得到什么、两种模式的分界）见

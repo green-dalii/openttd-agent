@@ -24,10 +24,10 @@ export type AgentEventLike = { type: string; [k: string]: unknown };
 /**
  * Translate one harness event into the agent-shaped events telemetry consumes.
  *
- * @returns `[]` for events telemetry does not track (run lifecycle, retry,
- *   fault, queue/config updates). Dropping them is deliberate for D6a: the
- *   step stream keeps exactly the meaning it has today; surfacing retry/fault
- *   is D6b's job.
+ * @returns `[]` for events telemetry does not track (run lifecycle,
+ *   queue/config updates). Retry and fault are counted (D6b): a call that had to
+ *   be retried looks exactly like a clean one in tokens and steps, yet it is a
+ *   different experimental condition.
  */
 export function harnessEventToAgentEvents(ev: HarnessEventLike): AgentEventLike[] {
 	switch (ev.type) {
@@ -50,6 +50,25 @@ export function harnessEventToAgentEvents(ev: HarnessEventLike): AgentEventLike[
 					args: ev.args,
 				},
 			];
+		case "retry_scheduled":
+			// D6b: a provider call failed and will be retried. Before this, a retry
+			// was invisible: the run looked merely slower and more expensive.
+			return [
+				{
+					type: "retry",
+					attempt: ev.attempt,
+					maxAttempts: ev.maxAttempts,
+					delayMs: ev.delayMs,
+					message: ev.errorMessage,
+				},
+			];
+		case "fault":
+			return [{ type: "fault", code: ev.code, message: ev.message }];
+		case "handler_error":
+			// A hook/listener threw. The harness isolates it, but a run whose hooks
+			// are failing is not a clean run - surface it instead of hiding it.
+			const where = typeof ev.hook === "string" ? ev.hook : typeof ev.event === "string" ? ev.event : ev.kind;
+			return [{ type: "fault", message: `handler_error (${where}): ${ev.error}` }];
 		case "tool_end":
 			return [
 				{

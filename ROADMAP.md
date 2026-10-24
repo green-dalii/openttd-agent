@@ -50,7 +50,6 @@
 | **D3b** | **run manifest + 结果分类**：S9 served model / 旋钮 / 脚手架指纹；S8 0 分必带成因（派生不存盘） | 度量行含 manifest（真机实测）；0 分记录经分类得具名成因 | ✅（`SPEC.md` §10.114） |
 | **D4** | **旋钮与成熟度**：S6 思考档位 / 工具预算 / provider 进 CLI+config；S9 脚手架指纹（D3b 已落地） | 真机：`--thinking low --tool-budget 5` 生效并进 manifest；非法值报错 | ✅（`SPEC.md` §10.114） |
 | **D5** | **评测面**：矩阵规划（每格独立目录 + 预登记闸）/ 四轴分数卡 / 配对统计 / JSON+MD 报告 | 真机 2×1×1 矩阵跑通并出报告；预登记双向自证（拒绝/放行） | ✅（`SPEC.md` §10.114） |
-| **D6b** | **真实 payload 与用量台账**：`before_payload` → manifest `payloadHash`；usage 台账供效率轴；`retry_*`/`fault` 进步骤流 | 两模型 `payloadHash` 可对比；断流可见 retry | ⬜ (#12) |
 | ~~D6c~~ | 全量替换自研 `session-store`/`telemetry` | **否决**：对可比性零增益、回归面覆盖 5 页 + E2E | ❌ |
 | **D6d** | 反事实 fork（同存档同决策点换模型） | 待定：等 D5 真跑一轮真实模型后再评估 | ⏸ |
 | **P3** | 卫生：删 `v02-runner` 死代码（380 行）、DOM churn 降噪（12.5k/s 实测）、orphan 规则修、`AdminProbeClient` 审查 | gate 绿；DOM churn 显著下降并实测 | ⬜ |
@@ -116,11 +115,14 @@ pgrep -fl "bench.ts|run-experiment|cli/run.ts|llm-stub|OpenTTD.app"
 
 ### 2. 下一步做什么？
 
-**D6b**（D6a 已合并）：`docs/HARNESS-MIGRATION.md` §4 是唯一权威。要做的三件：
-① `before_payload` → manifest 记**真实 payload 指纹**（与 D3b 的源码指纹并列）
-② usage 台账（`harness/usage.jsonl`）供分数卡效率轴
-③ `retry_*` / `fault` 进 telemetry 步骤流（stub 返 500 应能看到 retry）。
-D6b 做完才评估是否把 `AGENT_HARNESS` 翻成默认。
+**D6b 完成后需要拍板的一件事**：`AGENT_HARNESS` 是否翻成默认。翻之前必须满足：
+① 用同一 seed 各跑 3 局，两后端 `payloadHash` 相同的局数 ≥ 2（世界随机性会让首份 payload
+的数值不同，这条需要一个"数值归一化后的 payload 哈希"才能真的可比——否则别翻）；
+② `test:live` 在两条后端上都绿（`observation.test.ts` 是已知红，见 #22，先修它）；
+③ 至少一局真实模型（非 stub）。
+
+**之后**：S7 世界事实补洞（Issue #13）→ P3 卫生。
+**D6d（反事实 fork）** 仍待定：等 D5 真跑过一轮真实模型后再评估。
 
 **三条不得违反的不变量**：harness 默认关（`AGENT_HARNESS=0`）；harness compaction 必须关；
 完成=§5.1 八条真机断言全绿（单测绿不算）。

@@ -31,7 +31,7 @@ export function scaffoldHash(systemPrompt: string, tools: readonly Fingerprintab
 }
 
 /** JSON with object keys sorted, so key order cannot change the fingerprint. */
-function stableStringify(value: unknown): string {
+export function stableStringify(value: unknown): string {
 	if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "null";
 	if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
 	const obj = value as Record<string, unknown>;
