@@ -154,8 +154,21 @@ describe.skipIf(live.skip)("live: the agent actually drives the game", () => {
 	afterAll(async () => {
 		if (child) {
 			child.kill("SIGINT");
-			await new Promise((r) => setTimeout(r, 3000));
-			if (!child.killed) child.kill("SIGKILL");
+			// WAIT for the child to actually be gone. A fixed sleep is not enough:
+			// with the harness backend the run flushes its session transcript while
+			// shutting down, so removing the temp dir mid-flush fails with ENOTEMPTY
+			// (observed on the harness path only, where the transcript is on disk).
+			await new Promise<void>((resolve) => {
+				if (child!.exitCode !== null || child!.signalCode !== null) return resolve();
+				const t = setTimeout(() => {
+					child!.kill("SIGKILL");
+					resolve();
+				}, 10_000);
+				child!.once("exit", () => {
+					clearTimeout(t);
+					resolve();
+				});
+			});
 		}
 		try {
 			execFileSync("pkill", ["-f", "OpenTTD.app/Contents/MacOS/openttd"], { stdio: "ignore" });
@@ -163,7 +176,8 @@ describe.skipIf(live.skip)("live: the agent actually drives the game", () => {
 			/* none running */
 		}
 		stub?.close();
-		if (dir) rmSync(dir, { recursive: true, force: true });
+		// maxRetries: filesystem flushes can still be settling right after exit.
+		if (dir) rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 	}, 60_000);
 
 	/**

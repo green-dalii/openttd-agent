@@ -8,6 +8,21 @@
 > 踩过的坑的复盘（→ `MEMORY.md`；此处只写"改了什么"，不写"我为什么犯错"）。
 
 ## [Unreleased]
+### Fixed
+
+- **The live observation test now passes, and its failures can no longer poison
+  the next gate.** It used a single-attempt admin connect while OpenTTD keeps the
+  admin port open during map generation, so the JOIN was routinely kicked and the
+  test then waited on a dead socket until the global timeout; it also failed to
+  stop the dedicated server when an assertion tripped, leaving ports 3977/3979
+  occupied - which silently makes `pnpm run gate` skip 13 preflight cases. It now
+  uses the bounded-retry handshake, budgets 90s for its 45s internal deadline,
+  and always stops the server and the client in `finally`.
+- **The live agent test waits for its child to exit before cleaning up.** With the
+  harness backend the run flushes its session transcript during shutdown, so the
+  fixed 3s sleep raced the flush and failed with `ENOTEMPTY` - on the harness path
+  only, which is exactly the path that writes a transcript.
+
 ### Added
 
 - **Comparability is now data and is visible.** The run manifest collapsed into a
