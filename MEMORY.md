@@ -43,15 +43,36 @@
 
 | 阶段 | 状态 | 事实位置 |
 |---|---|---|
-| **2026-09-26 审计后的 P0–P3（当前）**：P0 事实修复/门禁盲区/训练台 → P1 架构（执行器进 GS）→ P2 测量 | 🔵 P0-1 进行中 | `ROADMAP.md`「🔴 当前阶段」+ `docs/archive/HARNESS-AUDIT-2026-09-26.md` |
+| **阶段 D：scaffold 成熟化 + 评测面（当前）**：D0 契约/地图 → D1 成绩可见 → D2 单一投影 → D3 反馈成对 → D4 旋钮 → D5 评测面 | ✅ D0–D5 全部完成 | `ROADMAP.md`「当前阶段」；`docs/SCAFFOLD-CONTRACT.md`；SPEC §10.114 |
+| **D6：迁 pi-agent-core `AgentHarness`（下一步）** | 🔵 方案已定、待执行（compact 后接续） | `docs/HARNESS-MIGRATION.md`（CoDesign 唯一权威）+ Issue #12 |
 | R1 执行顺序 / 工具预算 / 披露路径 | ✅ | SPEC §10.75 |
 | R2a 经验 = 带实测读数的观察 + 可被推翻 | ✅ | SPEC §10.76 |
 | R2b 反思走 Agent + 记录工具 | ✅ | SPEC §10.77 |
 | **M-PLAY**：让"LLM 自主玩一局"成为**可辩护**的主张 | ✅（能力判定见 §0.1；后续并入阶段 D） | `ROADMAP.md`「当前阶段」 |
 | 早期阶段（Phase A–C 重构、NEXT-2 决策空间） | ✅ 已完成 | SPEC §10.45–§10.63 |
 
-**未测旋钮（不得声称已有效果）**：`sessionId` 缓存收益、`deliberation off-vs-low` 的质量-成本权衡、
+**未测旋钮（不得声称已有效果）**：`sessionId` 缓存收益（**旋钮现在可达**：`--thinking`/`--tool-budget`
+已落地，见 SPEC §10.114）、`deliberation off-vs-low` 的质量-成本权衡、
 反思**产出率**（同配置 1/2 局模型没调记录工具）。
+
+### 0.2a D6 决策（2026-10-24，所有者已批准）
+
+**范围：只做 D6a + D6b；否决 D6c；D6d 等真实 benchmark 跑过一轮再评估。**
+
+| 步骤 | 做什么 | 默认 |
+|---|---|---|
+| **D6a** | 一局 = 一个 harness session + 一个 lane；一次决策 = 一次 `lane.prompt()`；新增可回放 entry-tree 会话（写入 `<dataDir>/sessions/<id>/harness/`）；`before_tool` 接管预算、`transform_context` 接管剪枝与注入；事件适配器 | **默认关**（`AGENT_HARNESS=0`），旧路径保留 |
+| **D6b** | `before_payload` → 真实 payload 指纹进 manifest；usage 台账供效率轴；`retry_*`/`fault` 进步骤流 | 完成后**再评估翻默认** |
+| ~~D6c~~ | 全量替换 `session-store`/`telemetry` | **否决**：对可比性零增益、回归面大 |
+| D6d | 反事实 fork（同存档同决策点换模型） | 待定：等 D5 真跑一轮真实模型 |
+
+**三条不变量（执行时不得违反）**：① harness **默认关**，两条路径都必须能跑；
+② **关闭 harness 的 compaction**（`compaction:{enabled:false}`）——我们的剪枝不能被两套机制同时改；
+③ 验收含 **AGENTS §5.1 八条真机断言**，缺一不算完成。
+
+**已核实的事实（避免执行时再猜）**：见 `docs/HARNESS-MIGRATION.md` §3（会话缓存亲和由 harness 自己设、
+`lane.prompt` 只返回操作元数据、harness 忽略 per-tool `executionMode`、`NodeExecutionEnv`
+即 `FileSystem`、`Context` 用 `BACKGROUND_CONTEXT`/`withCancel`）。
 
 ### 0.3 不漂移协议（每阶段收尾必做，长期有效）
 

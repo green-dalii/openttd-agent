@@ -8,6 +8,19 @@
 > 踩过的坑的复盘（→ `MEMORY.md`；此处只写"改了什么"，不写"我为什么犯错"）。
 
 ## [Unreleased]
+### Documentation
+
+- **The pi-agent-core `AgentHarness` migration is designed and scoped**
+  (`docs/HARNESS-MIGRATION.md`). It will adopt the harness's replayable session
+  and hooks while leaving the bespoke run record and dashboard untouched, in two
+  reversible steps behind a flag that stays off by default; the full replacement
+  of those layers is explicitly rejected, and counterfactual forking is deferred
+  until a real benchmark round has run. The document records the verified
+  library facts (prompt-cache affinity is preserved by the harness itself,
+  `lane.prompt` returns only operation metadata, per-tool `executionMode` is
+  ignored, `NodeExecutionEnv` is a `FileSystem`) so execution does not have to
+  re-derive them.
+
 ### Added
 
 - **A benchmark surface: model matrix, scorecard, paired statistics (phase D5).**

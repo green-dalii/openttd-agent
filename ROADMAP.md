@@ -50,8 +50,13 @@
 | **D3b** | **run manifest + 结果分类**：S9 served model / 旋钮 / 脚手架指纹；S8 0 分必带成因（派生不存盘） | 度量行含 manifest（真机实测）；0 分记录经分类得具名成因 | ✅（`SPEC.md` §10.114） |
 | **D4** | **旋钮与成熟度**：S6 思考档位 / 工具预算 / provider 进 CLI+config；S9 脚手架指纹（D3b 已落地） | 真机：`--thinking low --tool-budget 5` 生效并进 manifest；非法值报错 | ✅（`SPEC.md` §10.114） |
 | **D5** | **评测面**：矩阵规划（每格独立目录 + 预登记闸）/ 四轴分数卡 / 配对统计 / JSON+MD 报告 | 真机 2×1×1 矩阵跑通并出报告；预登记双向自证（拒绝/放行） | ✅（`SPEC.md` §10.114） |
-| **D6** | **harness 迁移**（分层可回退）：会话/事件 → hook（预算+指纹）→ usage 台账/OTel | 每局产出可回放 JSONL 会话；旧路径 feature flag 可退 | ⬜ (#12) |
+| **D6a** | **可回放会话**：一局 = 一个 harness session + 一个 lane；一次决策 = 一次 `lane.prompt()`；`before_tool` 接管预算、`transform_context` 接管剪枝/注入；事件适配器 | gate 绿 + **§5.1 八条真机断言** + 会话可列回 + 上下文与旧路径逐字一致 | ⬜ (#12) |
+| **D6b** | **真实 payload 与用量台账**：`before_payload` → manifest `payloadHash`；usage 台账供效率轴；`retry_*`/`fault` 进步骤流 | 两模型 `payloadHash` 可对比；断流可见 retry | ⬜ (#12) |
+| ~~D6c~~ | 全量替换自研 `session-store`/`telemetry` | **否决**：对可比性零增益、回归面覆盖 5 页 + E2E | ❌ |
+| **D6d** | 反事实 fork（同存档同决策点换模型） | 待定：等 D5 真跑一轮真实模型后再评估 | ⏸ |
 | **P3** | 卫生：删 `v02-runner` 死代码（380 行）、DOM churn 降噪（12.5k/s 实测）、orphan 规则修、`AdminProbeClient` 审查 | gate 绿；DOM churn 显著下降并实测 | ⬜ |
+
+**D6 的方案（唯一权威）**：`docs/HARNESS-MIGRATION.md`（含已核实的库事实与三条不变量）。
 
 **依赖与顺序**：D1–D4 是**共用内核**（两种模式都受益），必须先于 D5；D6 与 D1–D5
 可并行但每步独立提交。S7（世界事实补洞：逐线交付/融资/样本外镇名）是 D1 的后续，
@@ -95,6 +100,45 @@
   `docs/STARTUP-AND-LIFECYCLE.md`（本文件曾复制过一份，重复即漂移——2026-10-23 删除）。
 - 本地测试 serve（8187）默认数据目录 `/tmp/openttd-agent-data`；其中的 demo 局是**旧代码**
   跑的贪心线路，不代表当前能力（新证据一律用隔离目录的局）。
+
+---
+
+## 🔴 COMPACT 后从这里接续（2026-10-24）
+
+> 给"compact 后的我自己"的恢复手册。**按顺序做，不必重新推导**。
+
+### 1. 现在有什么在跑？
+
+```bash
+pgrep -fl "bench.ts|run-experiment|cli/run.ts|llm-stub|OpenTTD.app"
+```
+
+无输出 = 没有实验（2026-10-24 收工时如此）。**不要**用宽泛 `pkill -f openttd`。
+
+### 2. 下一步做什么？
+
+**D6a**（用户已批准方案、未开始实现）：`docs/HARNESS-MIGRATION.md` §4 是唯一权威，
+Issue #12 有 11 条勾选清单。开工顺序：
+① `buildBrain` 返回 `{models, model}` ② `harness-runtime.ts` ③ 工具适配器 + `before_tool`
+④ `transform_context` ⑤ `runDecision` 双路径 ⑥ 事件适配器 ⑦ 真机两局 + §5.1 八条。
+
+**三条不得违反的不变量**：harness 默认关（`AGENT_HARNESS=0`）；harness compaction 必须关；
+完成=§5.1 八条真机断言全绿（单测绿不算）。
+
+### 3. 环境事实（易变，只写这里）
+
+- 门禁：`pnpm run gate`（typecheck + **eslint --max-warnings 0** + vendor 校验 + 单测）。
+  **只看它自己的退出码**：`pnpm run gate > .scratch/gate.log 2>&1; echo "gate=$?"`（MEMORY D68）。
+- 看板回归：`pnpm run dashboard:smoke`（真实 Chrome + 全部控制台级别）。
+- OpenTTD 二进制：`$HOME/Library/Application Support/Steam/steamapps/common/OpenTTD/OpenTTD.app/Contents/MacOS/openttd`。
+- 真机隔离模板：`OPENTTD_DATA_DIR=/tmp/pXX`、admin `3991`、game `3993`、`--web-port 8198`。
+- 无 CI workflow：本地 gate + PR 人工审核即门禁；**每阶段走分支 + PR**（用户 2026-10-23 要求）。
+- 一次性脚本一律放 `.scratch/` 并**用完删除**。
+
+### 4. 最近的交接点
+
+`main` = D0–D5 全部合并；gate 1486 绿；Issue #1 有阶段进度表。
+已完成阶段的实测数字在 `SPEC.md` §10.114（阶段 D 一条）。
 
 ---
 

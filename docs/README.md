@@ -21,6 +21,7 @@
 | [`STARTUP-AND-LIFECYCLE.md`](STARTUP-AND-LIFECYCLE.md) | **启动门禁**与 Session 生命周期 | preflight 检查项、LLM 可用性探测、CLI 行为、session 生命周期 | 决策循环（→ 循环文档）；协议字节（→ `SPEC.md`） |
 | [`RL-HARNESS-SCOPE-AUDIT.md`](RL-HARNESS-SCOPE-AUDIT.md) | **harness 边界的判据与逐条论证**（J1–J4） | 注入通道清单、违规项与修复、遗留 | 准则条文本身（→ `AGENTS.md` §2 铁律 7）；脚手架现状（→ 契约） |
 | [`ACTION-BUS-CODESIGN.md`](ACTION-BUS-CODESIGN.md) | 动作**如何被表示、分发、观测**（设计） | 动作信封三构件、与 pi-agent-core 的协同 | 模型侧动作面（→ 契约）；已执行结果（→ `SPEC.md`）；剩余计划（→ `ROADMAP.md` 阶段 D6） |
+| [`HARNESS-MIGRATION.md`](HARNESS-MIGRATION.md) | **迁到 pi-agent-core `AgentHarness` 的方案**（做哪些、不做哪些、每步验收与回滚） | 阻抗不匹配与解法、已核实的库事实（带坐标）、风险表 | 脚手架契约（→ `SCAFFOLD-CONTRACT.md`）；进度（→ `ROADMAP.md`） |
 | [`archive/`](archive/) | **历史快照**（已落地或已被取代的评估/审计） | 当时的证据与结论 | 任何现状判断——文件顶部有冻结横幅 |
 
 ## 2. 规则（执行清单）
