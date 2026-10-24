@@ -52,7 +52,7 @@
 | **D5** | **评测面**：矩阵规划（每格独立目录 + 预登记闸）/ 四轴分数卡 / 配对统计 / JSON+MD 报告 | 真机 2×1×1 矩阵跑通并出报告；预登记双向自证（拒绝/放行） | ✅（`SPEC.md` §10.114） |
 | ~~D6c~~ | 全量替换自研 `session-store`/`telemetry` | **否决**：对可比性零增益、回归面覆盖 5 页 + E2E | ❌ |
 | **D6d** | 反事实 fork（同存档同决策点换模型） | 待定：等 D5 真跑一轮真实模型后再评估 | ⏸ |
-| **P4** | **每次运行的用量/费用上限**：当前只有墙钟与工具预算，没有 token/费用闸；跑矩阵会失控 | 超限时以具名原因结束（新 outcome 类），并在报告里单列 | ⬜ |
+| **P4** | **每次运行的用量/费用上限**：现在只有墙钟与工具预算，矩阵会烧穿预算 | 超限以具名原因结束（`token_cap`/`cost_cap`）+ manifest 记 limits + 报告单列 | ⬜ #27 |
 | **P3** | 卫生：删 `v02-runner` 死代码（380 行）、DOM churn 降噪（12.5k/s 实测）、orphan 规则修、`AdminProbeClient` 审查 | gate 绿；DOM churn 显著下降并实测 | ⬜ |
 
 **D6 的方案（唯一权威）**：`docs/HARNESS-MIGRATION.md`（含已核实的库事实与三条不变量）。
@@ -116,14 +116,26 @@ pgrep -fl "bench.ts|run-experiment|cli/run.ts|llm-stub|OpenTTD.app"
 
 ### 2. 下一步做什么？
 
-**D6b 完成后需要拍板的一件事**：`AGENT_HARNESS` 是否翻成默认。翻之前必须满足：
-① 用同一 seed 各跑 3 局，两后端 `payloadHash` 相同的局数 ≥ 2（世界随机性会让首份 payload
-的数值不同，这条需要一个"数值归一化后的 payload 哈希"才能真的可比——否则别翻）；
-② `test:live` 在两条后端上都绿（已达成：2026-10-24 两条后端各 9/9，见 #22 的修复）；
-③ 至少一局真实模型（非 stub）。
+**① P4：每次运行的 token/费用上限**（下一件事，Issue #27）。计划已定，直接执行：
 
-**之后**：S7 世界事实补洞（Issue #13）→ P3 卫生。
-**D6d（反事实 fork）** 仍待定：等 D5 真跑过一轮真实模型后再评估。
+| 决策 | 内容 |
+|---|---|
+| 旋钮 | `LLM_TOKEN_LIMIT` / `LLM_COST_LIMIT`（正整数/正数；**非法值抛错**，与 scaffold 旋钮同规矩） |
+| 执行点 | **每个决策边界**检查；单次决策最多超出一个决策的用量（实测 3–9k tokens），文档写明，不假装精确 |
+| 费用闸的前提 | 只有 `costKnown=true` 才可执行；模型无价目表却设了费用上限 → **启动即报错**（静默不执行比报错更糟） |
+| 结束原因 | 新 outcome 类 `token_cap` / `cost_cap`；优先级：人为停止 > 环境事件 > **上限** > 结果读数 |
+| 记录 | manifest 增 `limits: {tokens, cost}`，度量行同步 ⇒ 该局为何停是可解释的 |
+| 验收 | 单测（解析/边界/分类/前提）+ 真机 `--llm-token-limit 5000` → `outcomeClass=token_cap` 且报告单列 + gate + `test:live` 一条后端 |
+
+**② #13 的 CoDesign（S7 世界事实补洞）——先出方案，等所有者审核再动手**：
+样本外镇名、逐线交付量、融资、未用信号源（`inspect_*` 族 / credit 账本 / GSEvent 推送 /
+`company_expenses`）。它会改变模型看到的东西，必须按"一次只改一类事实 + 前后可比"推进。
+
+**③ 之后**：真实基准一轮（需所有者定模型与预算）→ D6d fork 再评估 → P3 卫生。
+
+**AGENT_HARNESS 翻默认**（独立小改动）：前提已满足 ②（live 双绿）与 backend 已记录；
+还差**跨 seed 的数值归一化 payload 比对**（`payloadShapeHash`）——没有它，"请求相同"
+只在单 seed 内成立。
 
 **三条不得违反的不变量**：harness 默认关（`AGENT_HARNESS=0`）；harness compaction 必须关；
 完成=§5.1 八条真机断言全绿（单测绿不算）。
@@ -138,10 +150,13 @@ pgrep -fl "bench.ts|run-experiment|cli/run.ts|llm-stub|OpenTTD.app"
 - 无 CI workflow：本地 gate + PR 人工审核即门禁；**每阶段走分支 + PR**（用户 2026-10-23 要求）。
 - 一次性脚本一律放 `.scratch/` 并**用完删除**。
 
-### 4. 最近的交接点
+### 4. 最近的交接点（2026-10-24 收工）
 
-`main` = D0–D5 全部合并；gate 1486 绿；Issue #1 有阶段进度表。
-已完成阶段的实测数字在 `SPEC.md` §10.114（阶段 D 一条）。
+- `main` = **`2e0a90e`**：D0–D6（含 #22 修复与溯源/成本诚实）全部合并。
+- `pnpm run gate` = **1532 passed / 9 skipped**。
+- `LIVE_TESTS=1 vitest --run test/live`：**harness 9/9、裸 Agent 9/9**，跑完端口自动释放。
+- 开放 Issue：#13（世界事实）、#27（P4）、#1（跟踪）。
+- 已完成阶段的实测数字：`SPEC.md` §10.114（D1–D5）+ §10.115（D6）。
 
 ---
 
