@@ -10,6 +10,26 @@
 ## [Unreleased]
 ### Added
 
+- **A benchmark surface: model matrix, scorecard, paired statistics (phase D5).**
+  `pnpm run bench --root <dir> --models a,b --seeds 11,22 --repeats 3` runs every
+  (model, seed, repeat) cell in its own data dir, so memory can never cross
+  cells, and every cell shares one world (scenario, horizon, start year, map
+  size). The scorecard reports four orthogonal axes per model - ability,
+  efficiency, stability, growth - with the sample size and measurement
+  conditions next to the numbers, `not measured` instead of zero for missing
+  readings, and the excluded runs counted with their reasons. Comparisons pair
+  the models by (seed, repeat) and test the differences, because two models on
+  the same map are correlated; a missing side never counts as a zero difference,
+  and too few pairs report `not determinable` rather than "no difference".
+  Grouping follows the model the provider actually served, and when that
+  differs from the requested id the report says so - a gateway substitution is
+  visible instead of two "models" being silently merged.
+
+  A pre-registered matrix (`--effect`/`--cv`) is refused before any run when it
+  cannot detect its declared effect.
+
+### Added
+
 - **The thinking level, the per-decision tool budget, and the provider are now
   configurable (phase D4).** They were hard-coded (thinking always `off`, budget
   always 12) and the provider could only come from an environment variable, so a

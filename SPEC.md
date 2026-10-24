@@ -326,9 +326,9 @@ OpenTTD 有**两个动作面**，能力完全不同：
 | 主题 | 条目 | 数 |
 |---|---|---|
 | **A 通信与协议事实** | 10.2 观察信号 · 10.4 命令下发链路 · 10.13 OpenTTD Squirrel… · 10.24 第二条 admin 连接不能给 … · 10.25 GS 可对公司施工并扣公司钱 · 10.25.1 两条附带实测事实 · 10.66 GS 通道的部分失效：`GSSt… · 10.99 数据的唯一来源边界：admin … · 10.106 事实通道补全与 admin 握手… | 9 |
-| **B 执行器与施工** | 10.3 GS-only 施工候选 · 10.10 v0.2 spike: 自定义 … · 10.11 v0.2 spike: Brid… · 10.12 v0.2 实现: 标牌邮箱可见性… · 10.14 v0.2 实现: Executo… · 10.15 v0.2.1: 分段贪心铺路解除… · 10.23 执行器阶段的解码契约 · 10.26 决策循环的 freeze/tha… · 10.27 执行器"假死"的真正根因：路径搜… · 10.28 控制台 `pause` 是单向的… · 10.29 执行器跑通完整公交线 · 10.39 NEXT-4 最小切片：执行器队… · 10.39.1 修正：FIFO + done 集… · 10.40 FIFO 队列真机验证通过 · 10.45 Phase A2：GS 侧类型化… · 10.46 Phase A3：harness… · 10.90 决定性事实：Bridge GS … · 10.92 AB-4a：GS 自建 + 自运… · 10.103 执行器异常：完整文本进事件流 · 10.107 P1-1a：执行器搬进 GS · 10.108 P1-1b：GS 寻路库入库 · 10.109 P1-1b 尾巴 + P1-3 … · 10.110 P1-2：动作面扩——选货 / … · 10.111 P1-3 收尾：FLEET 归因… · 10.118 D3a：相位接回动作 | 25 |
-| **C 决策循环与运行时** | 10.16 v0.2.1 实现: Pi Ag… · 10.18 v0.5.0 实现: 启动门禁 … · 10.19 v0.6.0 实现: 决策循环对… · 10.20 `add_vehicles` 的… · 10.21 两个 runner 的事件转发契… · 10.30 `seconds` 从未限制运行… · 10.35 心跳被当成「变化」—— 决策循环… · 10.35.1 修复的实测结果与尚未解决的问题 · 10.36 新闻门：phase 按阶段门控，… · 10.37 新闻门之后的第一次校准跑 · 10.38 校准跑 #2：session h… · 10.47 Phase B-3：signal… · 10.48 Phase B-4a：决策循环纯… · 10.49 Phase B-4b：决策循环体… · 10.50 Phase C：结构化记忆 + … · 10.60 已验证的冻结：重新引入暂停，但这… · 10.61 冻结 vs 不冻结：机制成立，但… · 10.68 测量单元本身不可比：墙钟预算 →… · 10.69 G1 落地：局以模拟时间结束 · 10.74 与 pi-agent-core … · 10.75 R1 实施结果：执行顺序 / 工… · 10.83 G6 实测：单次请求峰值 5–7… · 10.93 `--serve` 的 Star… · 10.101 僵尸局取证：用户看到的那句告警，… · 10.102 世界时钟：一个事实、一个写者、一… · 10.120 D4：旋钮可配且记生效值 | 26 |
-| **D 观测面与测量** | 10.1 动作面 · 10.53 NEXT-2 N2-1：线路经济… · 10.54 NEXT-2 N2-2/N2-3… · 10.55 NEXT-2 N2-4：主指标换… · 10.59 工具必须能观测自己的效果：rco… · 10.65 流量指标的测量缺陷：`deliv… · 10.67 校准 #2：仪器缺陷不是方差来源… · 10.71 G2 落地：把"决定结局的那个过… · 10.72 S0 oracle 梯度：杠杆存… · 10.73 S1/G4 落地：预建场景 · 10.98 城镇与存档：两条"数据一直在、只… · 10.100 P1+P2 实测：产业/货种/公… · 10.105 车队数必须跨线路去重：同屏两个"… · 10.114 D1a：模型看得见自己这局的分 · 10.117 D2：世界事实只投影一次 · 10.119 D3b：run manifest + 结果分类 | 16 |
+| **B 执行器与施工** | 10.3 GS-only 施工候选 · 10.10 v0.2 spike: 自定义 … · 10.11 v0.2 spike: Brid… · 10.12 v0.2 实现: 标牌邮箱可见性… · 10.14 v0.2 实现: Executo… · 10.15 v0.2.1: 分段贪心铺路解除… · 10.23 执行器阶段的解码契约 · 10.26 决策循环的 freeze/tha… · 10.27 执行器"假死"的真正根因：路径搜… · 10.28 控制台 `pause` 是单向的… · 10.29 执行器跑通完整公交线 · 10.39 NEXT-4 最小切片：执行器队… · 10.39.1 修正：FIFO + done 集… · 10.40 FIFO 队列真机验证通过 · 10.45 Phase A2：GS 侧类型化… · 10.46 Phase A3：harness… · 10.90 决定性事实：Bridge GS … · 10.92 AB-4a：GS 自建 + 自运… · 10.103 执行器异常：完整文本进事件流 · 10.107 P1-1a：执行器搬进 GS · 10.108 P1-1b：GS 寻路库入库 · 10.109 P1-1b 尾巴 + P1-3 … · 10.110 P1-2：动作面扩——选货 / … · 10.111 P1-3 收尾：FLEET 归因… | 24 |
+| **C 决策循环与运行时** | 10.16 v0.2.1 实现: Pi Ag… · 10.18 v0.5.0 实现: 启动门禁 … · 10.19 v0.6.0 实现: 决策循环对… · 10.20 `add_vehicles` 的… · 10.21 两个 runner 的事件转发契… · 10.30 `seconds` 从未限制运行… · 10.35 心跳被当成「变化」—— 决策循环… · 10.35.1 修复的实测结果与尚未解决的问题 · 10.36 新闻门：phase 按阶段门控，… · 10.37 新闻门之后的第一次校准跑 · 10.38 校准跑 #2：session h… · 10.47 Phase B-3：signal… · 10.48 Phase B-4a：决策循环纯… · 10.49 Phase B-4b：决策循环体… · 10.50 Phase C：结构化记忆 + … · 10.60 已验证的冻结：重新引入暂停，但这… · 10.61 冻结 vs 不冻结：机制成立，但… · 10.68 测量单元本身不可比：墙钟预算 →… · 10.69 G1 落地：局以模拟时间结束 · 10.74 与 pi-agent-core … · 10.75 R1 实施结果：执行顺序 / 工… · 10.83 G6 实测：单次请求峰值 5–7… · 10.93 `--serve` 的 Star… · 10.101 僵尸局取证：用户看到的那句告警，… · 10.102 世界时钟：一个事实、一个写者、一… | 25 |
+| **D 观测面与测量** | 10.1 动作面 · 10.53 NEXT-2 N2-1：线路经济… · 10.54 NEXT-2 N2-2/N2-3… · 10.55 NEXT-2 N2-4：主指标换… · 10.59 工具必须能观测自己的效果：rco… · 10.65 流量指标的测量缺陷：`deliv… · 10.67 校准 #2：仪器缺陷不是方差来源… · 10.71 G2 落地：把"决定结局的那个过… · 10.72 S0 oracle 梯度：杠杆存… · 10.73 S1/G4 落地：预建场景 · 10.98 城镇与存档：两条"数据一直在、只… · 10.100 P1+P2 实测：产业/货种/公… · 10.105 车队数必须跨线路去重：同屏两个"… · 10.114 D1a：模型看得见自己这局的分 | 14 |
 | **E 记忆与进化** | 10.22 RL Harness 范围 · 10.31 M3 对照实验结果 · 10.34 M3 第二次 A/B：把决策权交… · 10.41 决策→结果账本接入反思 · 10.42 M3 A/B 第三次重跑：手眼账… · 10.43 为什么记忆无收益：全链路审计 · 10.76 R2 实施结果：经验 = 带实测… · 10.77 R2b 实施结果：反思改走 Ag… · 10.78 M1：反思产出率变成可诊断、可重… · 10.79 M2：把计分规则作为事实写进提示… · 10.80 M3 能力盘点：环境到底允许 a… · 10.82 第一性原理复检：能力面、空缺与协… · 10.84 M3-1b：车队杠杆真正的两处缺… · 10.85 第一性原理复审：离"自主 + 自… · 10.86 M3-2a：每线路登记表 + 退… · 10.87 M3-2b：披露粘滞——让事件相… · 10.88 M3-2c：车队请求对已登记的旧… · 10.89 M4a：`recall` 按需检… · 10.91 AB-1：`capabiliti… | 19 |
 | **F 实验方法与统计** | 10.32 第一性原理：M3 测不出差异，是… · 10.33 把决策权交还 agent：城镇对… · 10.51 M3 第四次重跑：首次有效分臂 · 10.52 每局存档+ M3 第五/六次重跑 · 10.56 N2-5 首轮 A/B 判废：臂… · 10.57 N2-5 有效轮次与两个结论 · 10.58 N2-5 oracle 探测：任… · 10.62 NEXT-2 收尾：首个干净判据… · 10.63 校准轮：窗口是方差的主因，实验设… · 10.64 顺序检验 block #1：CI… · 10.70 G3 落地：车队请求的静默无效变… · 10.81 M3-1 真机结果：车队杠杆被阶… · 10.112 P2-3：统计预登记 · 10.113 P2-1/P2-2 代码侧：实验… | 14 |
 | **G 产品面与前端** | 10.17 v0.3.0 实现: Dashb… · 10.94 Live 页面运行期的滚动失控与… · 10.95 图表渲染路径：三个真因与"图表健… · 10.96 长跑实测 · 10.97 uPlot 1.6.32 的交互… · 10.104 图表手势、区间读数与列表索引 | 6 |
@@ -1145,137 +1145,57 @@ headless 持续超时）——布局正确性由 DOM 文本断言 + smoke 的元
 horizon，记忆随局累积；判决打印学习曲线）。m3-verdict 同步打印 M5 曲线 + M4b 分布
 + P2-3 功效行。空态自证：n=0 → "only 0 run(s) - a trend needs >= 3"。
 
-### 10.114 D1：模型看得见自己的成绩、诚实的增量、历局的成绩（2026-10-23）
+### 10.114 阶段 D：脚手架成熟化 + 评测面（2026-10-23/24）
 
-**背景**：系统提示词告诉模型"一局按每游戏日交付量计分"，却从不告诉它自己考了多少；
-跨局记忆注入的是 lesson 文本，也没有成绩。于是模型无法自我评估，信用分配没有起点
-（`docs/SCAFFOLD-CONTRACT.md` §5.2 的 Reward / Credit assignment 两行长期是 ❌）。
+> 契约（模型看到什么/能做什么/动作后得到什么、两种模式的分界）见
+> `docs/SCAFFOLD-CONTRACT.md`——那是**契约**，本节是**实测事实**。
 
-**事实（三条，同一阶段一次落地）**
+**D1 成绩可见与诚实的增量**
+- 决策上下文带 `score` 块（`delivered`/`deliveredPerGameDay`/`elapsedGameDays`/
+  `horizonDays`/`scoredFromGameDay`/`windowOpened`）。`delivered` 取世界状态的
+  `deliveredRun.total`，**与该局度量行同一个数**（真机：模型看到 0、度量记 0）。
+- 增量不再折零：`null` 读数 → 该增量 `null` + `baselineEstablished=false`
+  （真机第一次决策 `money=unknown`，第二次 `money=199214`）。
+- 历局成绩作为事实注入（同 scenario/horizon、排除被停/冻结局，排除数报出）；
+  `--no-memory` 对照臂同样关闭。真机抓包见该块进了 payload。
 
-1. **成绩可见**（S1）：每个决策上下文带 `score` 块（`delivered` / `deliveredPerGameDay` /
-   `elapsedGameDays` / `horizonDays` / `scoredFromGameDay` / `windowOpened`）。`delivered`
-   取世界状态的 `deliveredRun.total`，**与该局度量行 `deliveredRun` 是同一个数**（§10.65）
-   ——模型看到的分与被记的分不会分叉。未知读数为 `null`，**不折零**（D60）。
-   计分窗口是**条件**不是评价（预建场景 = 路线能运货那天；freeform = 整局）。
-   形状与语义见 `docs/SCAFFOLD-CONTRACT.md` §2.1。
-2. **增量诚实**（S3）：`null` 读数曾被折成 0，于是第一次决策向模型报出
-   `moneyDelta=0`——"没变化"伪装成"没变化过"。现在基线保留 `null`，任一侧未知则该项增量为
-   `null`，并由 `sinceLastDecision.baselineEstablished=false` 明说"还没有基线"。
-   `loop-control.ts` 里重复声明的 `NumbersBaseline` 删除，改用唯一定义（C1）。
-3. **历局成绩作为事实注入**（S5）：`src/evolution/score-history.ts` 只收**可比**的局
-   （同 scenario、同 horizon、未被 `metricExclusion` 排除——被人停/世界冻结的局不是
-   "没学会"），被排除的局**报出数量与原因**；每局给 `deliveredRun / simulatedDays`。
-   无可比历史时**不注入**（空块会被读成"你以前考 0 分"）。`--no-memory` 对照臂同样关闭
-   （对照臂必须是零记忆，否则 A/B 无效）。
+**D2 世界只投影一次**
+- 唯一投影 `src/agent/world-facts.ts`：公司按 id、城镇按人口降序（缺失排最后、
+  同人口按 id）；决策上下文与 `observe()` 同源同序；上下文补 `loan`。
+- 不再每次决策留第二份全量状态（`game_observation` **从不进 LLM**，审计已有快照）。
+- 真机：`observe()` 580→479 字符（-17.4%），prompt 2653→2673（+0.8%，即新增 `loan`）。
 
-**真机实测**：① 决策日志打印 `[agent] score: delivered=0 ... horizon=150`（seed 11），
-局终度量行 `deliveredRun=0` ⇒ **模型看到的 0 与被记的 0 同值**；② 第一次决策
-`baseline=none money=unknown ...`，第二次 `baseline=established money=199214 income=-786
-vehicles=unknown`；③ 用 llm-stub 真实 HTTP 跑两局，第二局实际发给模型的 payload 含
-```
-Your own measured scores in earlier comparable games (cargo delivered per game day):
-- seed 11: 0 cargo per game day (horizon 40 game days, 41 days measured)
-Measurement conditions: scenario=freeform, horizon=40 game days.
-```
-（抓包用一次性代理置于 `.scratch/`，用完删除。）
+**D3a 相位接回动作**
+- 类型化 exec 事件只有 `note`+`job`（**没有 `raw`**，那是已退役协议），hub 曾用
+  `p.raw` 拼相位串 ⇒ 模型收到的每条相位是 `undefined`；`composePhaseText` 修复
+  （note 自带后缀时不重复）。
+- 相位事实带 `job`，并经 **GS ack**（job id 由 GS 分配）接回订下它的 `action`；
+  连接是 **run 级**（施工跨决策窗口）。真机 payload：
+  `{"phase":"stB_ok",...,"job":100,"action":"build_bus_route"}`。
 
-### 10.117 D2：世界事实只投影一次（canonical projection，2026-10-23）
+**D3b run manifest + 结果分类**
+- 度量行 `manifest = {servedModel, thinkingLevel, toolBudget, scaffoldHash}`：
+  `servedModel` 取 provider 实际作答（`responseModel ?? model`）；`scaffoldHash` =
+  sha256(系统提示词 + 工具集[name/description/schema]，按顺序) 前 16 位。
+  真机：`{"servedModel":"faux-1","thinkingLevel":"off","toolBudget":12,
+  "scaffoldHash":"7956ab6d8c86fa60"}`。
+- `classifyOutcome`（派生不存盘）：`delivered | delivered_nothing | no_construction |
+  refused | paused_by_agent | world_frozen | wall_clock_cap | unknown`；优先级
+  人为停止 > 环境事件 > 结果读数，缺失 → `unknown`。
 
-**背景**：决策上下文与 `observe()` 以前**各自投影一遍**世界状态，于是同一批事实有两套
-形状、两套排序规则（上下文按插入序、`observe()` 按人口降序）——两套实现会各自漂移
-（C1），且模型分不清哪个是权威。审计侧还每次决策存一份全量状态副本。
+**D4 旋钮可配且记录生效值**
+- `resolveScaffoldKnobs`：`LLM_THINKING`（缺省 off）/`LLM_TOOL_BUDGET`（缺省 12），
+  **非法值抛错**；CLI `--thinking`/`--tool-budget`/`--llm-provider`。
+- 顺带修：`applyLlmSettingsFile` 重建 `LlmConfig` 时漏拷 `scaffold` ⇒ CLI 旋钮被
+  静默丢弃（D63 同型）。真机：`thinking=low toolBudget=5` 进了 manifest。
 
-**事实**
-
-1. **唯一投影**（`src/agent/world-facts.ts`）：公司按 id、城镇按人口降序（缺失人口排最后，
-   同人口按 id 升序）；缺失读数为 `null`（D60）；决策上下文与 `observe()` 共用。
-   审计侧视图（`auditState`）= 同一批读数 + 显示字段（name/isAi）与事件计数，
-   **审计格式不变**（`scripts/loop-health.ts` 依赖 `money` 是字符串）。
-2. **上下文新增 `loan`**：系统提示词讲"贷款计息"，但模型此前在上下文里看不到贷款额
-   （只在 `observe()` 里有）。
-3. **transcript 不再留第二份全量状态**：`game_observation` 消息**从来不会进 LLM**
-   （`runtime.ts` 的 `convertToLlm` 过滤它），审计又逐决策记了同一份快照 ⇒ 每次决策
-   多存一份副本。已删除该消息与随之失效的 pin 逻辑。
-
-**真机实测**（llm-stub 真实 HTTP，seed 11，同 seed 对照 main 与本分支）：
-- `observe()` 结果：580 → 479 字符（**-17.4%**；少了 name/isAi，键名与数值更短）。
-- 决策 prompt：2653 → 2673 字符（**+0.8%**，唯一增量是新增的 `loan` 字段）。
-- 每次决策的模型可见状态副本：2 份 → 1 份。
-- **诚实更正**：原 Issue #3 写"同一事实三处出现"——实测是**模型可见两处**
-  （上下文 + `observe()` 结果），第三份（`game_observation`）**不进 LLM**；
-  且上下文里的城镇顺序**实测本来就是人口降序**（GS 就这么发），"顺序矛盾"是
-  **潜在的**而非已发生的。真正的缺陷是**两套实现**（会漂移），不是"顺序错了"。
-
-### 10.118 D3a：相位接回动作（信用分配的连接点，2026-10-23）
-
-**背景**：执行器相位带 job id（`j<N>`），GS 的 ack 也带 job，但两者之间没有连接——
-模型看到"施工到 stB_ok"，不知道这是**它自己哪一次**下令的结果；信用分配断在这里。
-
-**顺带修掉一个真缺陷**：类型化 exec 事件（GS 侧 `main.nut`）发的是
-`{kind, job, stage, note}`，**没有 `raw` 字段**（那是已退役的公司名协议的字段）。
-而 hub 用 `String(p.raw)` 拼相位串 ⇒ 相位串恒为 `"undefined"` ⇒ **模型看到的每条相位
-事实都是 "executor reports: undefined"**（真机抓 payload 才发现；单测与看板都没暴露）。
-
-**改法**
-1. `composePhaseText(raw, note, job)`：用 `note` + `job` 组装解码器认识的相位串
-   （`EX <note> j<job>`；note 自带后缀时不重复追加）。
-2. 相位事实进上下文时带 `job`，并接回**订下它的动作**（`action`）：
-   - job id 由 **GS 分配**，工具自己的回执里没有 ⇒ 连接的唯一真源是 **GS ack**
-     （`RouteOrder.command`，账本里新增字段）。
-   - 连接是 **run 级**的（施工跨多个决策窗口：下令在窗口 A，相位在窗口 B 到达），
-     不是 per-window。
-3. 无对应动作时只报 `job`、`action` **缺席**（不编造）。
-
-**真机实测**（llm-stub 真实 HTTP，seed 11，抓真实 payload）：模型收到的相位事实为
-```json
-{"phase": "stB_ok", "description": "building station B: station built.", "error": false, "job": 100, "action": "build_bus_route"}
-```
-（修复前同一位置是 `{"phase": "undefined", "description": "executor reports: undefined"}`。）
-
-### 10.119 D3b：每局都有清单，0 分必须有成因（2026-10-23）
-
-**两件事**（契约 §4 的 S8/S9）
-
-1. **run manifest**（每局"它是什么"）：`manifest = {servedModel, thinkingLevel,
-   toolBudget, scaffoldHash}` 落进 session meta 与度量行。
-   - `servedModel` 取 **provider 实际作答的模型**（`AssistantMessage.responseModel ??
-     model`，由 telemetry 在 `message_end` 记录）——请求的模型名不是证据（网关可能换模型）。
-   - `scaffoldHash` = sha256(系统提示词 + 工具集合[name/description/schema]，**按顺序**)
-     前 16 位，算的是**真正发给模型的东西**，不是仓库里某个文件。
-     **顺序是契约的一部分**（工具顺序变了就是另一套脚手架）。
-   - 旋钮记录的是**解析后**的值（`thinkingLevel`/`toolBudget`），不是请求值。
-   - 旧行 `manifest` 缺席 ⇒ 读取侧为 null（缺失不折零）。
-2. **结果分类**（`classifyOutcome`，**派生不存盘**，所以永不与事实矛盾）：
-   `delivered | delivered_nothing | no_construction | refused | paused_by_agent |
-   world_frozen | wall_clock_cap | unknown`。
-   优先级固定：**人为停止 > 环境事件 > 结果读数**（被停的局不是"没学会"）；缺失读数
-   一律 `unknown`（不猜）；一个局只报一个成因。
-
-**真机实测**（seed 11，offline-demo）：度量行含
-`{"servedModel":"faux-1","thinkingLevel":"off","toolBudget":12,"scaffoldHash":"7956ab6d8c86fa60"}`；
-同一条 0 分记录经 `classifyOutcome` 得 `wall_clock_cap`（墙钟先到，不是"没建成"）。
-
-### 10.120 D4：脚手架旋钮可配，且记录的是生效值（2026-10-23）
-
-**之前**：思考档位与每决策工具预算**写死在代码里**（`thinkingLevel` 恒 `"off"`、
-预算恒 12，`runtime.ts` 的默认值），provider 只能走环境变量 `LLM_PROVIDER`。
-⇒ 基准评测无法把"思考档位/工具预算"当变量扫描；"我们扫了 high 档"这句话不可证。
-
-**改法**：
-- `resolveScaffoldKnobs(env)`（`src/agent/scaffold-knobs.ts`，纯函数 + 单测）：
-  `LLM_THINKING`（off|minimal|low|medium|high|xhigh|max，缺省 off）与
-  `LLM_TOOL_BUDGET`（正整数，缺省 12）。**非法值直接抛错**——静默回退会让
-  "我们扫了 high 档"变成谎话。
-- CLI：`--thinking` / `--tool-budget` / `--llm-provider`（provider 此前只有 env）。
-- runner 用解析后的值构造 Agent，并把**生效值**写进 manifest
-  （`thinkingLevel` / `toolBudget`）。
-
-**顺带修掉一个 D63 同型缺陷**：`applyLlmSettingsFile()` 重建 `LlmConfig` 时没有拷贝
-`scaffold`，于是 CLI 传 `--thinking low --tool-budget 5` 会被**静默丢弃**，仍按
-off/12 跑（真机实测撞到）。已修 + 加守卫（`llm-api.test.ts`）。
-
-**真机实测**（seed 11，`--thinking low --tool-budget 5`）：
-`[agent] scaffold: thinking=low toolBudget=5 hash=7956ab6d8c86fa60`，
-度量行 manifest `{"thinkingLevel":"low","toolBudget":5,...}` —— 生效值进了记录。
-（修复前同一命令记录的是 `off/12`。）
+**D5 评测面**
+- `planMatrix`：模型 × seed × 重复，**每格独立 data dir**、世界逐字相同、
+  样本不足**跑前拒绝**（实测 4 局/模型 vs 需要 400 ⇒ 拒绝；+200% 需 4 ⇒ 放行）。
+- `buildScorecard` + `renderReportMarkdown`：能力/效率/稳定性/成长四轴；缺失写
+  `not measured`；分母 0 的比率是 `null`；被排除的局计数并报原因；分组用
+  `servedModel` 并列出 `requestedModels` ⇒ **网关替换可见**。
+- `pairedComparison`：按 (seed, repeat) 配对，对差异做确定性 bootstrap CI；
+  一侧缺失的配对不计入；配对 < 3 → `not determinable`。
+- 真机冒烟：2 格矩阵跑通并产出 JSON+MD 报告（两局都因墙钟未达 horizon 被排除，
+  报告如实写出 `horizon not reached x2`）。
