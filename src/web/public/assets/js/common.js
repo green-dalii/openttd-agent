@@ -142,6 +142,18 @@ function fmtTok(n) {
   return v === null || v === 0 ? "0" : compact(v, 1);
 }
 
+/**
+ * Format a run's cost, or "unknown" when the model had no price table.
+ *
+ * `costKnown === false` means the number is 0 for lack of pricing, not because
+ * the run was free (custom endpoints register zero prices). Printing "$0" there
+ * would make the efficiency axis lie.
+ */
+function fmtCostKnown(n, costKnown) {
+  if (costKnown === false) return "unknown";
+  return fmtCost(n);
+}
+
 function fmtCost(n) {
   const v = finite(n);
   if (v === null) return "—";
@@ -864,7 +876,7 @@ window.UI = {
   // dom
   $, esc,
   // format
-  fmtInt, fmtMoney, fmtTok, fmtCost, fmtDuration, fmtAgo, fmtClock, fmtPct, fmtGameDate,
+  fmtInt, fmtMoney, fmtTok, fmtCost, fmtCostKnown, fmtDuration, fmtAgo, fmtClock, fmtPct, fmtGameDate,
   deltaClass, deltaChip,
   // events
   categoryOf, categoryClass, categoryLabel, categoryCounts, eventMatches, briefOf,

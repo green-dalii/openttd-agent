@@ -44,6 +44,8 @@ export function totalsFromTelemetry(
 			reasoning: u.reasoning,
 			totalTokens: u.totalTokens,
 			costTotal: u.costTotal,
+			// Absent brain.costKnown (old snapshots) stays absent: unknown, not "free".
+			...(t.brain?.costKnown !== undefined ? { costKnown: t.brain.costKnown } : {}),
 			// G6：累计值回答不了"离上下文窗口还有多远"，峰值才能。
 			//
 			// 宽容读取是**有意**的：`telemetry.json` 可能是旧版本写的（没有 `peakRequest`），

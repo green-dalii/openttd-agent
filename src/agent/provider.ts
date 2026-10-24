@@ -40,6 +40,12 @@ export interface BuiltProvider {
 	models: Models;
 	/** Which path produced this provider (see docs §6.5). */
 	source: "catalog" | "custom";
+	/**
+	 * Whether this model has a price table. A custom endpoint is registered with
+	 * all-zero prices, so its `costTotal` is 0 for lack of pricing, not because
+	 * the run was free - reporting it as $0.00 makes the efficiency axis lie.
+	 */
+	costKnown: boolean;
 	/** streamFn compatible with pi-agent-core's StreamFn. */
 	streamFn: (model: unknown, context: never, options?: never) => ReturnType<ReturnType<typeof createModels>["stream"]>;
 }
@@ -95,6 +101,7 @@ async function buildCatalogBrain(llm: LlmConfig, opts: BuildBrainOptions): Promi
 		model: model as Model<string>,
 		models,
 		source: "catalog",
+		costKnown: hasPrice(model),
 		streamFn: streamFn as BuiltProvider["streamFn"],
 	};
 }
@@ -159,8 +166,17 @@ async function buildCustomBrain(llm: LlmConfig): Promise<BuiltProvider> {
 		model: model as Model<string>,
 		models,
 		source: "custom",
+		// Registered with zero prices: unknown, not free.
+		costKnown: hasPrice(model),
 		streamFn: streamFn as BuiltProvider["streamFn"],
 	};
+}
+
+/** Any non-zero price in the model's table means its cost is measurable. */
+function hasPrice(model: Model<string>): boolean {
+	const c = model.cost as { input?: number; output?: number; cacheRead?: number; cacheWrite?: number } | undefined;
+	if (!c) return false;
+	return [c.input, c.output, c.cacheRead, c.cacheWrite].some((v) => typeof v === "number" && v > 0);
 }
 
 /** Human-readable brain label for logs (never includes a key). */

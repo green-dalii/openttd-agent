@@ -99,7 +99,7 @@ window.EvolutionView = (function () {
               money: U.fmtMoney(m.money),
               decisions: U.fmtInt(m.decisions),
               tokens: U.fmtTok(m.totalTokens),
-              cost: U.fmtCost(m.costTotal),
+              cost: U.fmtCostKnown(m.costTotal, m.costKnown),
               memory: mem.lessonsInjected
                 ? `${U.fmtInt(mem.lessonsInjected)} lesson(s)`
                 : "none",

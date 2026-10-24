@@ -32,6 +32,11 @@ interface UiModule {
 	fmtMoney(v: any): string;
 	fmtTok(v: any): string;
 	fmtCost(v: any): string;
+	/**
+	 * Cost with honesty: `costKnown === false` → "unknown" (the model has no price
+	 * table, so 0 means unpriced, not free).
+	 */
+	fmtCostKnown(v: any, costKnown?: boolean): string;
 	fmtDuration(v: any): string;
 	fmtAgo(v: any): string;
 	fmtClock(v: any): string;
