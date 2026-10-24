@@ -82,7 +82,14 @@ export interface FinalizeAndReflectArgs {
 	 * able to prove two runs used the same scaffold - the requested values are
 	 * not evidence.
 	 */
-	manifest?: { thinkingLevel: string; toolBudget: number; scaffoldHash: string };
+	manifest?: {
+		thinkingLevel: string;
+		toolBudget: number;
+		scaffoldHash: string;
+		/** Harness-only (D6b): real payload fingerprint + request count. */
+		payloadHash?: string | null;
+		payloadCount?: number | null;
+	};
 	/** Why the prebuilt setup ended as it did ("ready" | "timeout" | "order_refused"). */
 	scenarioReason?: string | null;
 	/** Cargo delivered before the measurement window opened (prebuilt only). */
@@ -151,11 +158,16 @@ export async function runFinalizeAndReflect(args: FinalizeAndReflectArgs): Promi
 		// D3b/S9: the run manifest. Served model comes from telemetry (what the
 		// provider actually answered with); the knobs come from the resolved
 		// options - requested values are not evidence.
+		// NOTE: this rebuild is a whitelist - a field added to the manifest in
+		// runner.ts is silently dropped unless it is listed here too (D3b hit the
+		// same shape, one layer up).
 		manifest: {
 			servedModel: finalTelemetry.brain?.servedModel ?? null,
 			thinkingLevel: args.manifest?.thinkingLevel ?? null,
 			toolBudget: args.manifest?.toolBudget ?? null,
 			scaffoldHash: args.manifest?.scaffoldHash ?? null,
+			payloadHash: args.manifest?.payloadHash ?? null,
+			payloadCount: args.manifest?.payloadCount ?? null,
 		},
 		outcome: {
 			constructionDone: reachedDone,

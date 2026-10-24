@@ -808,6 +808,8 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 	let tools: AgentTool[];
 	let decisionAgent: DecisionAgent;
 	let getBudgetBlocks: () => number;
+	/** Harness only (D6b): real payload fingerprint + request count. */
+	let getPayloadDigest: (() => { payloadHash: string | null; payloadCount: number }) | null = null;
 	let closeBrain: (() => Promise<void>) | null = null;
 
 	tools = createTools(deps);
@@ -828,6 +830,7 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 		});
 		decisionAgent = laneDecisionAgent(hr.lane, hr.context);
 		getBudgetBlocks = hr.getBudgetBlocks;
+		getPayloadDigest = hr.getPayloadDigest;
 		closeBrain = hr.close;
 		console.log(`[agent] brain backend: harness (lane=${HARNESS_LANE_NAME} session=${session.id})`);
 	} else {
@@ -1006,6 +1009,13 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 
 	await loop.run();
 
+	// D6b: the payload fingerprint is only meaningful after at least one request
+	// left, so it is reported at the end (and recorded in the manifest).
+	if (getPayloadDigest) {
+		const d = getPayloadDigest();
+		console.log(`[agent] payload: hash=${d.payloadHash ?? "(none)"} requests=${d.payloadCount}`);
+	}
+
 	// D6a: flush the harness transcript and release the session. Done after the
 	// loop (no more decisions) and before finalize so the on-disk transcript is
 	// complete when the metric row is written.
@@ -1049,6 +1059,10 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 			thinkingLevel: scaffold.thinkingLevel,
 			toolBudget: scaffold.toolBudget,
 			scaffoldHash: fingerprint,
+			// D6b: only the harness can report the payload it actually sent. Absent
+			// on the bare path - a number derived from our own source would be a
+			// claim, and a null here is the honest "not measured".
+			...(getPayloadDigest ? getPayloadDigest() : {}),
 		},
 		deliveredAtReady,
 		episode: {

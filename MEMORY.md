@@ -45,7 +45,7 @@
 |---|---|---|
 | **阶段 D：scaffold 成熟化 + 评测面（当前）**：D0 契约/地图 → D1 成绩可见 → D2 单一投影 → D3 反馈成对 → D4 旋钮 → D5 评测面 | ✅ D0–D5 全部完成 | `ROADMAP.md`「当前阶段」；`docs/SCAFFOLD-CONTRACT.md`；SPEC §10.114 |
 | **D6a：可回放会话（已合并）** | ✅ 默认关（`AGENT_HARNESS=1` 开启），两条路径请求逐字相同 | SPEC §10.115 |
-| **D6b：真实 payload + usage 台账（下一步）** | 🔵 待做 | `docs/HARNESS-MIGRATION.md` §4 + Issue #12 |
+| **D6b：真实 payload + 传输层可见性（已合并）** | ✅ `payloadHash`/`payloadCount` 进 manifest；`retries`/`faults` 进 telemetry | SPEC §10.115 |
 | R1 执行顺序 / 工具预算 / 披露路径 | ✅ | SPEC §10.75 |
 | R2a 经验 = 带实测读数的观察 + 可被推翻 | ✅ | SPEC §10.76 |
 | R2b 反思走 Agent + 记录工具 | ✅ | SPEC §10.77 |

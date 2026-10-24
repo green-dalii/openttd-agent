@@ -70,8 +70,38 @@ describe("harnessEventToAgentEvents", () => {
 		]);
 	});
 
+	it("counts transport retries instead of letting them look like clean calls (D6b)", () => {
+		// A retried call has the same tokens and the same steps as a clean one, so
+		// without this mapping a slow run is unattributable.
+		expect(
+			harnessEventToAgentEvents({
+				type: "retry_scheduled",
+				attempt: 2,
+				maxAttempts: 4,
+				delayMs: 1500,
+				errorMessage: "502 upstream",
+			}),
+		).toEqual([
+			{ type: "retry", attempt: 2, maxAttempts: 4, delayMs: 1500, message: "502 upstream" },
+		]);
+	});
+
+	it("counts runtime faults, including a throwing hook", () => {
+		expect(harnessEventToAgentEvents({ type: "fault", code: "E_STORAGE", message: "disk full" })).toEqual([
+			{ type: "fault", code: "E_STORAGE", message: "disk full" },
+		]);
+		const handler = harnessEventToAgentEvents({
+			type: "handler_error",
+			kind: "hook",
+			hook: "transform_context",
+			error: "boom",
+		});
+		expect(handler[0]?.type).toBe("fault");
+		expect(String(handler[0]?.message)).toContain("transform_context");
+	});
+
 	it("drops untracked events instead of inventing a tracked one", () => {
-		for (const type of ["run_start", "run_end", "retry_scheduled", "fault", "entry_added", "unknown_future"]) {
+		for (const type of ["run_start", "run_end", "entry_added", "unknown_future"]) {
 			expect(harnessEventToAgentEvents({ type })).toEqual([]);
 		}
 		expect(harnessEventToAgentEvents({})).toEqual([]);

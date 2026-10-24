@@ -66,7 +66,23 @@ export interface TelemetrySnapshot {
 		byTurn: { turn: number; usage: UsageView; steps: number }[];
 		byTool: { tool: string; calls: number; failures: number; avgDurationMs: number }[];
 	};
-	totals: { decisions: number; messages: number; toolCalls: number; toolFailures: number };
+	totals: {
+		decisions: number;
+		messages: number;
+		toolCalls: number;
+		toolFailures: number;
+		/**
+		 * Provider retries and runtime faults (D6b).
+		 *
+		 * 为什么必须是独立计数：一次"重试后成功"的调用在 token 与步骤上看起来
+		 * 与一次顺利调用完全一样，但它是**不同的实验条件**。没有这两个数，
+		 * "这局很慢/很贵"就只能归因于模型，而无法排除传输层。
+		 */
+		retries: number;
+		faults: number;
+	};
+	/** Most recent retries/faults, newest last (bounded; messages only, no payloads). */
+	recentRuntimeIssues: { ts: number; kind: "retry" | "fault"; message: string }[];
 	recentThinking: { turn: number; ts: number; text: string }[];
 	brain: {
 		provider: string | null;
@@ -179,6 +195,10 @@ export class Telemetry {
 	private messages = 0;
 	private toolCalls = 0;
 	private toolFailures = 0;
+	private totalsRetries = 0;
+	private totalsFaults = 0;
+	/** Bounded list of retries/faults: the dashboard shows the last few, not all. */
+	private runtimeIssues: { ts: number; kind: "retry" | "fault"; message: string }[] = [];
 	private lastActivityAt = Date.now();
 
 	private totalUsage: UsageView = zeroUsage();
@@ -272,6 +292,24 @@ export class Telemetry {
 					});
 					break;
 				}
+				case "retry": {
+					// Harness `retry_scheduled` (D6b): a provider call failed and will
+					// be attempted again. Counted so "slow" stays attributable.
+					this.totalsRetries += 1;
+					const e = ev as { attempt?: number; maxAttempts?: number; message?: string };
+					this.pushRuntimeIssue(
+						"retry",
+						`attempt ${e.attempt ?? "?"}/${e.maxAttempts ?? "?"}: ${e.message ?? "provider error"}`,
+					);
+					break;
+				}
+				case "fault": {
+					// Harness `fault` / `handler_error`: the runtime itself broke.
+					this.totalsFaults += 1;
+					const e = ev as { message?: string; code?: string };
+					this.pushRuntimeIssue("fault", e.message ?? e.code ?? "runtime fault");
+					break;
+				}
 				case "tool_execution_end":
 					this.finishTool(ev as {
 						toolCallId?: string;
@@ -318,7 +356,10 @@ export class Telemetry {
 				messages: this.messages,
 				toolCalls: this.toolCalls,
 				toolFailures: this.toolFailures,
+				retries: this.totalsRetries,
+				faults: this.totalsFaults,
 			},
+			recentRuntimeIssues: this.runtimeIssues.map((i) => ({ ...i })),
 			recentThinking: this.recentThinking.map((r) => ({ ...r })),
 			brain: { ...this.brain },
 		};
@@ -404,6 +445,12 @@ export class Telemetry {
 		this.toolStats.set(tool, st);
 		this.push(rec);
 		this.onStep?.(rec);
+	}
+
+	/** Keep the newest few only: this is a health signal, not an audit log. */
+	private pushRuntimeIssue(kind: "retry" | "fault", message: string): void {
+		this.runtimeIssues.push({ ts: Date.now(), kind, message });
+		if (this.runtimeIssues.length > 10) this.runtimeIssues.shift();
 	}
 
 	private push(rec: StepRecord): void {

@@ -275,7 +275,8 @@ describe("session store", () => {
 					byTurn: [],
 					byTool: [],
 				},
-				totals: { decisions: 1, messages: 2, toolCalls: 0, toolFailures: 0 },
+				totals: { decisions: 1, messages: 2, toolCalls: 0, toolFailures: 0, retries: 0, faults: 0 },
+				recentRuntimeIssues: [],
 				recentThinking: [],
 				brain: { provider: "p", model: "m", kind: "real" },
 			});

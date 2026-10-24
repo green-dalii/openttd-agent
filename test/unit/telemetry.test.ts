@@ -308,3 +308,28 @@ describe("Telemetry — bookkeeping + robustness", () => {
 		expect(s.steps.map((x) => x.id)).toEqual(["s1", "s2"]);
 	});
 });
+
+describe("runtime issues (D6b)", () => {
+	it("counts retries and faults, and keeps the newest few", () => {
+		const t = new Telemetry();
+		const snap0 = t.snapshot();
+		expect(snap0.totals.retries).toBe(0);
+		expect(snap0.totals.faults).toBe(0);
+		expect(snap0.recentRuntimeIssues).toEqual([]);
+
+		t.ingestAgentEvent({ type: "retry", attempt: 1, maxAttempts: 3, message: "502" } as never);
+		t.ingestAgentEvent({ type: "fault", message: "storage fault" } as never);
+
+		const s1 = t.snapshot();
+		expect(s1.totals.retries).toBe(1);
+		expect(s1.totals.faults).toBe(1);
+		expect(s1.recentRuntimeIssues.map((i) => i.kind)).toEqual(["retry", "fault"]);
+		expect(s1.recentRuntimeIssues[0]?.message).toContain("1/3");
+		expect(s1.recentRuntimeIssues[1]?.message).toBe("storage fault");
+
+		// Bounded: this is a health signal, not an audit log.
+		for (let i = 0; i < 20; i++) t.ingestAgentEvent({ type: "fault", message: `f${i}` } as never);
+		expect(t.snapshot().recentRuntimeIssues).toHaveLength(10);
+		expect(t.snapshot().recentRuntimeIssues.at(-1)?.message).toBe("f19");
+	});
+});

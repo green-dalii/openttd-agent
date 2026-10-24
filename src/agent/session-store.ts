@@ -82,6 +82,17 @@ export interface SessionMeta {
 		toolBudget: number | null;
 		/** sha256-based fingerprint of (system prompt + tool set), 16 hex chars. */
 		scaffoldHash: string | null;
+		/**
+		 * Fingerprint of the FIRST provider request body, as actually serialized
+		 * (D6b). Null on the bare-Agent path: there is no payload hook there, and
+		 * a value derived from our own source would be a claim, not a measurement.
+		 */
+		payloadHash?: string | null;
+		/**
+		 * Provider requests ATTEMPTED (a request that was retried counts once per
+		 * attempt, so this is transport traffic, not logical turns).
+		 */
+		payloadCount?: number | null;
 	};
 	/** Verified-freeze stats (SPEC §10.60); null when never frozen. */
 	freeze?: { confirmed: number; unconfirmed: number; failures: number; watchdogTrips: number; maxHoldMs: number } | null;

@@ -79,6 +79,7 @@ async function runFinalize(
 	decisions: number,
 	session = fakeSession(),
 	agentPause?: { paused: boolean; at: number } | null,
+	manifest?: { thinkingLevel: string; toolBudget: number; scaffoldHash: string; payloadHash?: string | null; payloadCount?: number | null },
 ) {
 	return runFinalizeAndReflect({
 		cfg: { dataDir: dir, seed: 7 } as never,
@@ -93,6 +94,7 @@ async function runFinalize(
 		getRouteStats: () => [],
 		gsErrors: 0,
 		toolBudgetBlocks: 3,
+		...(manifest ? { manifest } : {}),
 		agentPause,
 		scenario: "freeform",
 		episode: { simulatedDays: 0, horizonDays: null, reachedHorizon: false, stopReason: null },
@@ -262,5 +264,49 @@ describe("W1: 暂停收场的局写进 outcome", () => {
 		expect(outcome.blockedByPause).toBeUndefined();
 		expect(outcome.pausedBy).toBeUndefined();
 		rmSync(dir, { recursive: true, force: true });
+	});
+});
+
+describe("D6b: the payload fingerprint must survive finalize", () => {
+	it("keeps payloadHash/payloadCount instead of dropping them at the whitelist", async () => {
+		// The manifest is REBUILT field by field in reflect-run.ts, so a new field
+		// added in runner.ts disappears here unless it is listed there too. D3b hit
+		// the same shape one layer up; this test is the guard that stops a third.
+		const dir = mkdtempSync(join(tmpdir(), "d6b-payload-"));
+		const ledger = new RouteLedger();
+		ledger.record({ job: 101, fromTown: 9, toTown: 17, decision: 1, orderedAt: 1 });
+		const session = fakeSession();
+		const seen: Array<{ manifest?: Record<string, unknown> }> = [];
+		(session as never as { finalize: (a: never) => void }).finalize = ((a: never) => {
+			seen.push(a);
+		}) as never;
+		await runFinalize(dir, ledger, 2, session, null, {
+			thinkingLevel: "off",
+			toolBudget: 12,
+			scaffoldHash: "abc123",
+			payloadHash: "1a19e28b06ba2c37",
+			payloadCount: 3,
+		});
+		const m = seen.at(-1)?.manifest;
+		expect(m?.payloadHash).toBe("1a19e28b06ba2c37");
+		expect(m?.payloadCount).toBe(3);
+		// Untouched fields keep their meaning.
+		expect(m?.scaffoldHash).toBe("abc123");
+	});
+
+	it("records null (not 0) when the path cannot measure a payload", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "d6b-payload-null-"));
+		const ledger = new RouteLedger();
+		ledger.record({ job: 101, fromTown: 9, toTown: 17, decision: 1, orderedAt: 1 });
+		const session = fakeSession();
+		const seen: Array<{ manifest?: Record<string, unknown> }> = [];
+		(session as never as { finalize: (a: never) => void }).finalize = ((a: never) => {
+			seen.push(a);
+		}) as never;
+		await runFinalize(dir, ledger, 2, session);
+		// The bare-Agent path has no payload hook: "not measured" must not look
+		// like "measured nothing" (MEMORY D60).
+		expect(seen.at(-1)?.manifest?.payloadHash).toBeNull();
+		expect(seen.at(-1)?.manifest?.payloadCount).toBeNull();
 	});
 });
