@@ -23,6 +23,31 @@
 (function () {
   const U = window.UI;
 
+  /**
+   * Transport headline (D6c): counts when known, "not measured" when absent.
+   *
+   * `undefined` is not zero: a backend that cannot report retries (the bare
+   * Agent path) must not be shown as "clean" - that would be a claim we did not
+   * measure. Only the harness reports these today.
+   */
+  function wireHeadline(totals) {
+    if (totals.retries === undefined && totals.faults === undefined) return "not measured";
+    const n = (Number(totals.retries) || 0) + (Number(totals.faults) || 0);
+    return n === 0 ? "clean" : `${n} issue(s)`;
+  }
+
+  /** Last retry/fault message, or the fact that there was none / no data. */
+  function wireHint(t) {
+    const issues = (t && t.recentRuntimeIssues) || [];
+    if (issues.length) {
+      const last = issues[issues.length - 1];
+      return `${last.kind}: ${last.message}`;
+    }
+    const known = !!(t && t.totals && t.totals.retries !== undefined);
+    return known ? "no retries or faults" : "backend reports no wire data";
+  }
+
+
   /** Bounded feeds: the page must not grow without limit over a long run. */
   const MAX_EVENTS_SHOWN = 160;
   const MAX_STEPS_SHOWN = 200;
@@ -368,6 +393,15 @@
             k: "Tool calls",
             v: U.fmtInt(totals.toolCalls),
             hint: totals.toolFailures ? `${U.fmtInt(totals.toolFailures)} failed (${U.fmtPct(failRate)})` : "none failed",
+          },
+          // D6c: transport health. A retried call carries the same tokens and the
+          // same steps as a clean one, so without this line "this run was slow and
+          // expensive" can only be blamed on the model. `undefined` means the
+          // backend cannot report it - that is not the same as "clean".
+          {
+            k: "Wire",
+            v: wireHeadline(totals),
+            hint: wireHint(this.telemetry),
           },
         ];
       },

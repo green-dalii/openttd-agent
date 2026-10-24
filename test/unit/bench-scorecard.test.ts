@@ -8,6 +8,7 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { projectManifest } from "../../src/agent/manifest.js";
 import { buildScorecard } from "../../src/evolution/scorecard.js";
 import { renderReportMarkdown } from "../../src/evolution/bench-report.js";
 import { pairedComparison } from "../../src/evolution/bench-stats.js";
@@ -202,8 +203,8 @@ describe("pairedComparison（同 seed 配对）", () => {
 describe("网关替换可见（D5b × S9）", () => {
 	it("两个请求被服务成同一个模型 → 合并，但把请求列表写出来（不静默合并）", () => {
 		const card = buildScorecard([
-			row({ llmModel: "req-a", manifest: { servedModel: "real-x", thinkingLevel: null, toolBudget: null, scaffoldHash: null } }),
-			row({ llmModel: "req-b", manifest: { servedModel: "real-x", thinkingLevel: null, toolBudget: null, scaffoldHash: null } }),
+			row({ llmModel: "req-a", manifest: projectManifest({ servedModel: "real-x" }) }),
+			row({ llmModel: "req-b", manifest: projectManifest({ servedModel: "real-x" }) }),
 		]);
 		expect(card.models).toHaveLength(1);
 		expect(card.models[0]!.model).toBe("real-x");

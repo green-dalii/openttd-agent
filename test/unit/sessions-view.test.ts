@@ -293,6 +293,46 @@ describe("sessions view model", () => {
 			}
 		});
 
+		it("shows the comparability facts (backend / scaffold / payload), D6c", () => {
+			// Two runs are only comparable when the runtime, the scaffold and the
+			// payload agree. The row must say "not measured" when the run did not
+			// record a payload (bare-Agent path) - not an empty string.
+			const withManifest = {
+				meta: {
+					...a.meta,
+					manifest: {
+						servedModel: "m",
+						backend: "harness",
+						thinkingLevel: "off",
+						toolBudget: 12,
+						scaffoldHash: "7956ab6d8c86fa60",
+						payloadHash: "c4a214dc8d0dea46",
+						payloadCount: 5,
+					},
+				},
+			};
+			const bare = {
+				meta: {
+					...b.meta,
+					manifest: {
+						servedModel: "m",
+						backend: "agent",
+						thinkingLevel: "off",
+						toolBudget: 12,
+						scaffoldHash: "7956ab6d8c86fa60",
+						payloadHash: null,
+						payloadCount: null,
+					},
+				},
+			};
+			const { model } = load([], withManifest, bare);
+			const rows = model.compareRows();
+			expect(rows.find((r) => r.key === "Backend")).toMatchObject({ a: "harness", b: "agent" });
+			// Same scaffold -> the same 8 chars on both sides; that is the point of the row.
+			expect(rows.find((r) => r.key === "Scaffold")).toMatchObject({ a: "7956ab6d", b: "7956ab6d" });
+			expect(rows.find((r) => r.key === "Payload")).toMatchObject({ a: "c4a214dc", b: "not measured" });
+		});
+
 		it("shows both runs' values", () => {
 			const { model } = load([], a, b);
 			const mode = model.compareRows().find((r) => r.key === "Mode")!;

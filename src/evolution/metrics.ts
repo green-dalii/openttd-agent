@@ -21,6 +21,7 @@
  */
 
 import type { SessionMeta } from "../agent/session-store.js";
+import { projectManifest, type RunManifest } from "../agent/manifest.js";
 
 /** Injectable subset for tests and callers that do not have the store handy. */
 export interface SessionMetaLike {
@@ -37,12 +38,7 @@ export interface SessionMetaLike {
 	/** Verified-freeze stats (SPEC §10.60), recorded by the runner. */
 	freeze?: { confirmed: number; unconfirmed: number; failures: number; watchdogTrips: number; maxHoldMs: number } | null;
 	/** Run manifest (D3b/S9), recorded by the runner. */
-	manifest?: {
-		servedModel?: string | null;
-		thinkingLevel?: string | null;
-		toolBudget?: number | null;
-		scaffoldHash?: string | null;
-	};
+	manifest?: RunManifest;
 	outcome?: {
 		constructionDone?: boolean;
 		money?: string | number;
@@ -197,12 +193,7 @@ export interface GameMetric {
 	 * Run manifest (D3b/S9): what the model actually was and under which
 	 * scaffold. Legacy rows keep nulls - a missing record stays missing.
 	 */
-	manifest?: {
-		servedModel: string | null;
-		thinkingLevel: string | null;
-		toolBudget: number | null;
-		scaffoldHash: string | null;
-	};
+	manifest?: RunManifest;
 	/**
 	 * Why the run ended the way it did (D3b/S8): a zero score has several
 	 * different causes, and they mean different things. Derived, never stored
@@ -462,12 +453,9 @@ export function toGameMetric(
 			strategiesInjected: num(memory && memory.strategiesInjected),
 			routeFactsInjected: num(memory && memory.routeFactsInjected),
 		},
-		manifest: {
-			servedModel: meta.manifest?.servedModel ?? null,
-			thinkingLevel: meta.manifest?.thinkingLevel ?? null,
-			toolBudget: meta.manifest?.toolBudget ?? null,
-			scaffoldHash: meta.manifest?.scaffoldHash ?? null,
-		},
+		// Same projection as the session record: the metric row must not be a
+		// narrower copy of the manifest (D6b's payloadHash was lost here).
+		manifest: projectManifest(meta.manifest),
 	};
 }
 
