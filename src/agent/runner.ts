@@ -25,6 +25,7 @@ import {
 import type { Config } from "../config.js";
 import { createAgent, SYSTEM_PROMPT, DEFAULT_MAX_TOOL_CALLS_PER_DECISION } from "./runtime.js";
 import { agentDecisionAgent, laneDecisionAgent } from "./decision-agent.js";
+import { readGameVersion } from "../game/version.js";
 import { createHarnessRuntime, harnessEnabled, HARNESS_LANE_NAME } from "./harness-runtime.js";
 import { scaffoldHash, type FingerprintableTool } from "./scaffold-fingerprint.js";
 import type { AgentOptions } from "@earendil-works/pi-agent-core";
@@ -362,6 +363,8 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 	 */
 	let models: Models | null = null;
 	let brainKind: "real" | "faux" = "faux";
+	/** Whether the model has a price table (custom endpoints: no). */
+	let brainCostKnown = false;
 	const mustServeDashboard = opts.webPort !== undefined;
 
 	// The credential store keeps dashboard-saved keys across restarts (pi-ai's
@@ -374,6 +377,7 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 		streamFn = built.streamFn as unknown as AgentOptionsStreamFn;
 		model = built.model;
 		models = built.models;
+		brainCostKnown = built.costKnown;
 		brainKind = "real";
 		console.log(
 			`[agent] brain: REAL ${built.source} provider ${describeBrainSelection(cfg)} key=${redactKey(cfg.llm.apiKey)}`,
@@ -444,8 +448,13 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 		provider: cfg.llm.providerId || (brainKind === "faux" ? "faux" : ""),
 		model: cfg.llm.model || (brainKind === "faux" ? "faux" : ""),
 		kind: brainKind,
+		costKnown: brainCostKnown,
 	});
 	session.saveTelemetry(telemetry.snapshot());
+	// Provenance: which OpenTTD build is producing this world. Same seed on a
+	// different build is a different world, and nothing else records it.
+	const gameVersion = await readGameVersion(cfg.openttdBinary);
+	console.log(`[agent] game: OpenTTD ${gameVersion ?? "(version unknown)"}`);
 	console.log(`[agent] session: ${session.id}`);
 
 	// Keep the record provably alive, and make a hard failure end it properly.
@@ -1055,6 +1064,7 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 		},
 		scenario,
 		scenarioReason: prebuiltReason,
+		gameVersion,
 		manifest: {
 			backend,
 			thinkingLevel: scaffold.thinkingLevel,

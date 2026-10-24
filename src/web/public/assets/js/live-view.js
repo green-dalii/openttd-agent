@@ -387,7 +387,11 @@
         const totals = (t && t.totals) || {};
         const failRate = totals.toolCalls ? totals.toolFailures / totals.toolCalls : 0;
         return [
-          { k: "Tokens used", v: U.fmtTok(u.totalTokens), hint: U.fmtCost(u.costTotal) },
+          {
+            k: "Tokens used",
+            v: U.fmtTok(u.totalTokens),
+            hint: U.fmtCostKnown(u.costTotal, t && t.brain ? t.brain.costKnown : undefined),
+          },
           { k: "Decisions", v: U.fmtInt(totals.decisions) },
           {
             k: "Tool calls",

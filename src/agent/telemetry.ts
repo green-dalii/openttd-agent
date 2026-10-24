@@ -89,6 +89,12 @@ export interface TelemetrySnapshot {
 		model: string | null;
 		kind: "real" | "faux" | null;
 		/**
+		 * Whether `usage.total.costTotal` is a measurement. False for custom
+		 * endpoints registered with zero prices - showing those as $0.00
+		 * would claim the run was free.
+		 */
+		costKnown?: boolean;
+		/**
 		 * The model the provider actually served (D3b/S9): a gateway may answer
 		 * with a different model than the one requested - the requested name is
 		 * not evidence.
@@ -209,6 +215,12 @@ export class Telemetry {
 		provider: string | null;
 		model: string | null;
 		kind: "real" | "faux" | null;
+		/**
+		 * Whether `usage.total.costTotal` is a measurement. False for custom
+		 * endpoints registered with zero prices - showing those as $0.00
+		 * would claim the run was free.
+		 */
+		costKnown?: boolean;
 		servedModel?: string | null;
 	} = {
 		provider: null,
@@ -229,8 +241,10 @@ export class Telemetry {
 	}
 
 	/** Record which brain drives this session (shown in the dashboard header). */
-	setBrain(b: { provider: string; model: string; kind: "real" | "faux" }): void {
-		this.brain = { provider: b.provider, model: b.model, kind: b.kind };
+	setBrain(b: { provider: string; model: string; kind: "real" | "faux"; costKnown?: boolean }): void {
+		// `costKnown === false` means "this model has no price table": the cost
+		// column must read as unknown, not as $0.00 (MEMORY D60).
+		this.brain = { provider: b.provider, model: b.model, kind: b.kind, costKnown: b.costKnown ?? false };
 		this.touch();
 	}
 

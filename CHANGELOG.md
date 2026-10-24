@@ -8,6 +8,19 @@
 > 踩过的坑的复盘（→ `MEMORY.md`；此处只写"改了什么"，不写"我为什么犯错"）。
 
 ## [Unreleased]
+### Added
+
+- **Runs record which OpenTTD build produced their world** (`meta.gameVersion`,
+  also on the metric row), read from the binary's `--version` line. The same seed
+  on a different build is not the same world, and nothing else in the record can
+  tell the two apart. Unknown reads as `null`, never as "same as last time".
+- **Cost is no longer reported as zero when it is simply unpriced.** Custom
+  endpoints are registered with an all-zero price table, so their `costTotal`
+  measured nothing; `brain.costKnown` / `usage.costKnown` now carry that
+  distinction. The scorecard's efficiency axis excludes unpriced runs (reporting
+  "not measured" when every run is unpriced) instead of averaging a fake $0.00
+  into the mean, and the dashboard prints `unknown` where it used to print `$0`.
+
 ### Fixed
 
 - **The live observation test now passes, and its failures can no longer poison

@@ -200,6 +200,23 @@ describe("pairedComparison（同 seed 配对）", () => {
 	});
 });
 
+describe("未定价的模型不得进入效率轴", () => {
+	it("excludes cost from runs whose model has no price table", () => {
+		// Without this, a custom endpoint's 0 would be averaged in as "$0.00 per
+		// run" - a claim about price that nobody measured.
+		const stated = row({ id: "a", costTotal: 2, costKnown: true });
+		const unpriced = row({ id: "b", costTotal: 0, costKnown: false });
+		const card = buildScorecard([stated, unpriced]);
+		const model = card.models[0]!;
+		expect(model.efficiency.costPerRun).toBeCloseTo(2, 6);
+	});
+
+	it("reports not measured when every run is unpriced", () => {
+		const card = buildScorecard([row({ id: "b", costTotal: 0, costKnown: false })]);
+		expect(card.models[0]!.efficiency.costPerRun).toBeNull();
+	});
+});
+
 describe("网关替换可见（D5b × S9）", () => {
 	it("两个请求被服务成同一个模型 → 合并，但把请求列表写出来（不静默合并）", () => {
 		const card = buildScorecard([

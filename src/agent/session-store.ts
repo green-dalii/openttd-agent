@@ -74,6 +74,14 @@ export interface SessionMeta {
 	 * scaffold. Field set + normalization live in `manifest.ts` (one source).
 	 */
 	manifest?: RunManifest;
+	/**
+	 * OpenTTD version this run actually used.
+	 *
+	 * Same seed on a different build is not the same world, and nothing else in
+	 * the record can tell them apart. `undefined`/`null` = unknown, not "same as
+	 * last time".
+	 */
+	gameVersion?: string | null;
 	/** Verified-freeze stats (SPEC §10.60); null when never frozen. */
 	freeze?: { confirmed: number; unconfirmed: number; failures: number; watchdogTrips: number; maxHoldMs: number } | null;
 	outcome?: {
@@ -170,6 +178,8 @@ export interface SessionTotals {
 		reasoning: number;
 		totalTokens: number;
 		costTotal: number;
+		/** False when the model has no price table (cost is unknown, not zero). */
+		costKnown?: boolean;
 		/**
 		 * G6: largest single request prompt (input+cacheRead+cacheWrite).
 		 *
@@ -494,6 +504,10 @@ export class SessionStore {
 				toolFailures: t.totals.toolFailures,
 				usage: {
 					...t.usage.total,
+					// Cost is only a measurement when the model has a price table:
+					// custom endpoints register zero prices, and $0.00 would read as
+					// "free". Kept next to the number it qualifies.
+					costKnown: t.brain?.costKnown ?? false,
 					// 旧版 telemetry.json 没有 peakRequest → 未测量（见 runner-helpers 的说明）
 					peakRequestTokens: t.usage.peakRequest?.tokens,
 					peakRequestTurn: t.usage.peakRequest?.turn ?? null,

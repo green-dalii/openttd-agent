@@ -48,6 +48,8 @@ function uiStub() {
 		fmtMoney: (v: unknown) => `£${Math.round(Number(v) || 0)}`,
 		fmtTok: (v: unknown) => `${v}t`,
 		fmtCost: (v: unknown) => `$${v}`,
+		// Faithful to common.js: unknown pricing must read as "unknown", not "$0".
+		fmtCostKnown: (v: unknown, known?: boolean) => (known === false ? "unknown" : `$${v}`),
 		fmtPct: (v: number, d?: number) => `${((Number(v) || 0) * 100).toFixed(d ?? 1)}%`,
 	};
 }

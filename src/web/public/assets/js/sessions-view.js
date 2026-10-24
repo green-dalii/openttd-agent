@@ -17,6 +17,30 @@
 (function () {
   const U = window.UI;
 
+  /** Cost cell: "unknown" when the model had no price table. */
+  function costText(meta, usage) {
+    // The flag lives next to the number (meta.totals.usage.costKnown); older
+    // sessions only had it in the full telemetry snapshot.
+    const known =
+      usage && usage.costKnown !== undefined
+        ? usage.costKnown
+        : meta && meta.telemetry && meta.telemetry.brain
+          ? meta.telemetry.brain.costKnown
+          : undefined;
+    return U.fmtCostKnown(usage && usage.costTotal, known);
+  }
+
+  /** A Δ is only meaningful when both sides measured a price. */
+  function costDelta(ma, mb, ua, ub) {
+    if (ua && ua.costKnown === false) return null;
+    if (ub && ub.costKnown === false) return null;
+    if (ma?.telemetry?.brain?.costKnown === false) return null;
+    if (mb?.telemetry?.brain?.costKnown === false) return null;
+    const a = ua && ua.costTotal;
+    const b = ub && ub.costTotal;
+    return Number.isFinite(a) && Number.isFinite(b) ? b - a : null;
+  }
+
   /** One manifest field, or undefined when the run did not record one. */
   function manifestField(meta, key) {
     const m = meta && meta.manifest;
@@ -284,7 +308,7 @@
           ["Tool failures", U.fmtInt(ta.toolFailures), U.fmtInt(tb.toolFailures),
             delta(num(ta.toolFailures), num(tb.toolFailures))],
           ["Tokens", U.fmtTok(ua.totalTokens), U.fmtTok(ub.totalTokens), delta(num(ua.totalTokens), num(ub.totalTokens))],
-          ["Cost", U.fmtCost(ua.costTotal), U.fmtCost(ub.costTotal), delta(num(ua.costTotal), num(ub.costTotal))],
+          ["Cost", costText(ma, ua), costText(mb, ub), costDelta(ma, mb, ua, ub)],
           ["Duration",
             Number.isFinite(dur(ma)) ? U.fmtDuration(dur(ma)) : "—",
             Number.isFinite(dur(mb)) ? U.fmtDuration(dur(mb)) : "—",

@@ -28,6 +28,8 @@ function uiStub() {
 		fmtMoney: (v: unknown) => `£${v}`,
 		fmtTok: (v: unknown) => `${v}t`,
 		fmtCost: (v: unknown) => `$${v}`,
+		// Faithful to common.js: unknown pricing must read as "unknown", not "$0".
+		fmtCostKnown: (v: unknown, known?: boolean) => (known === false ? "unknown" : `$${v}`),
 		fmtDuration: (v: unknown) => `${v}ms`,
 		fmtAgo: (v: unknown) => `${v}ago`,
 		fmtClock: (v: unknown) => `c${v}`,
@@ -295,6 +297,19 @@ describe("Live view model", () => {
 			const found = model.costKpis();
 			expect(found.some((k) => k.k === "Tokens used")).toBe(true);
 			expect(found.some((k) => k.k === "Tool calls")).toBe(true);
+		});
+
+		it("does not present an unpriced model as a free run", () => {
+			// Custom endpoints register zero prices. "$0" would claim the run was
+			// free; the truth is that we have no price table for it.
+			const { model } = load();
+			model.companies = { "0": company() };
+			model.telemetry = { ...TELEMETRY, brain: { ...TELEMETRY.brain, costKnown: false } };
+			const kpi = model.costKpis().find((k) => k.k === "Tokens used");
+			expect(kpi?.hint).toBe("unknown");
+
+			model.telemetry = { ...TELEMETRY, brain: { ...TELEMETRY.brain, costKnown: true } };
+			expect(model.costKpis().find((k) => k.k === "Tokens used")?.hint).toContain("$");
 		});
 
 		it("reports transport health, and says 'not measured' instead of 'clean'", () => {

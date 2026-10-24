@@ -1204,6 +1204,18 @@ compaction 冲突都不报错，只会让两次运行看到的脚手架悄悄不
   **Backend / Scaffold / Payload** 三行，用 8 位短哈希，缺失写 `not measured`。
 - 真机：`dashboard:smoke` 0 条控制台（error+warn），图表高度正常。
 
+**D6e：运行溯源与成本诚实（同一节）**
+- 新增 `meta.gameVersion`（取自 `openttd --version` 首行，实测 `OpenTTD 15.3`），
+  同时进度量行。**同一个 seed 在不同 build 上不是同一个世界**，而版本号无法从配置
+  推断（配置只有二进制路径）。
+- 成本不再假装是 0：自定义端点以**全零价格**注册，其 `costTotal=0` 是"没有价目表"
+  而不是"这一局免费"。新增 `brain.costKnown` / `usage.costKnown`，
+  分数卡的效率轴**排除**未定价的局（全部未定价 → `not measured`），
+  看板把 `$0` 显示成 `unknown`。真机：`costKnown=false`、`gameVersion=15.3`。
+- 一个自证的坑：`costKnown` 一开始只放在 telemetry snapshot 的 brain 上，
+  而会话 meta 的 `usage` 是按字段复制的 ⇒ 页面读不到。修法是把旗帜放到**它限定的
+  那个数字旁边**（`usage.costKnown`），而不是放在另一层。
+
 ### 10.114 阶段 D：脚手架成熟化 + 评测面（2026-10-23/24）
 
 > 契约（模型看到什么/能做什么/动作后得到什么、两种模式的分界）见

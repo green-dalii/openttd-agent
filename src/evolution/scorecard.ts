@@ -158,7 +158,12 @@ export function buildScorecard(
 				used.map((m) => (m.decisions > 0 ? m.totalTokens / m.decisions : null)),
 			),
 			secondsPerRun: mean(used.map((m) => (m.durationMs > 0 ? m.durationMs / 1000 : null))),
-			costPerRun: mean(used.map((m) => (typeof m.costTotal === "number" ? m.costTotal : null))),
+			// A run whose model has no price table reports 0 for lack of pricing, not
+			// because it was free - including it would drag the mean toward a fake
+			// $0.00. Such runs are reported separately, never silently averaged in.
+			costPerRun: mean(
+				used.map((m) => (m.costKnown === false ? null : typeof m.costTotal === "number" ? m.costTotal : null)),
+			),
 		};
 
 		const calls = used.reduce((a, m) => a + (m.toolCalls || 0), 0);

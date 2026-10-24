@@ -256,10 +256,10 @@ describe("Telemetry — bookkeeping + robustness", () => {
 		const t = new Telemetry();
 		t.decisionPoint();
 		t.decisionPoint();
-		t.setBrain({ provider: "openai", model: "gpt-5", kind: "real" });
+		t.setBrain({ provider: "openai", model: "gpt-5", kind: "real", costKnown: true });
 		const s = t.snapshot();
 		expect(s.totals.decisions).toBe(2);
-		expect(s.brain).toEqual({ provider: "openai", model: "gpt-5", kind: "real" });
+		expect(s.brain).toEqual({ provider: "openai", model: "gpt-5", kind: "real", costKnown: true });
 	});
 
 	it("emits onStep for both step kinds and pings onActivity", () => {

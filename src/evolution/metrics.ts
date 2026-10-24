@@ -25,6 +25,7 @@ import { projectManifest, type RunManifest } from "../agent/manifest.js";
 
 /** Injectable subset for tests and callers that do not have the store handy. */
 export interface SessionMetaLike {
+	gameVersion?: string | null;
 	id: string;
 	mode: string;
 	status: string;
@@ -88,6 +89,7 @@ export interface SessionMetaLike {
 		usage?: {
 			totalTokens?: number;
 			costTotal?: number;
+			costKnown?: boolean;
 			peakRequestTokens?: number;
 			peakRequestTurn?: number | null;
 		};
@@ -166,6 +168,17 @@ export interface GameMetric {
 	toolFailures: number;
 	totalTokens: number;
 	costTotal: number;
+	/**
+	 * Whether costTotal is a measurement. `false` = the model had no price table
+	 * (custom endpoint), so the efficiency axis must say "not measured" instead
+	 * of reading $0.00 as "free". Absent on legacy rows (unknown).
+	 */
+	costKnown?: boolean;
+	/**
+	 * OpenTTD build used by this run (null = unknown; part of comparability).
+	 * Optional because rows written before this field existed have no version.
+	 */
+	gameVersion?: string | null;
 	/** G6: largest single request prompt, or null when the run measured none. */
 	peakRequestTokens: number | null;
 	peakRequestTurn: number | null;
@@ -445,6 +458,8 @@ export function toGameMetric(
 		toolFailures: num(t && t.toolFailures),
 		totalTokens: num(u.totalTokens),
 		costTotal: num(u.costTotal),
+		gameVersion: meta.gameVersion ?? null,
+		...(typeof u.costKnown === "boolean" ? { costKnown: u.costKnown } : {}),
 		// G6：未知为 null（"没测到"≠"很小"）
 		peakRequestTokens: u.peakRequestTokens === undefined ? null : num(u.peakRequestTokens),
 		peakRequestTurn: typeof u.peakRequestTurn === "number" ? u.peakRequestTurn : null,

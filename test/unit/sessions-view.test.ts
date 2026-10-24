@@ -73,6 +73,8 @@ function load(
 		fmtMoney: (v: unknown) => `£${v}`,
 		fmtTok: (v: unknown) => `${v}t`,
 		fmtCost: (v: unknown) => `$${v}`,
+		// Faithful to common.js: unknown pricing must read as "unknown", not "$0".
+		fmtCostKnown: (v: unknown, known?: boolean) => (known === false ? "unknown" : `$${v}`),
 		fmtDuration: (v: unknown) => `${v}ms`,
 		fmtAgo: (v: unknown) => `${v}ago`,
 		fmtClock: (v: unknown) => `c${v}`,
@@ -291,6 +293,19 @@ describe("sessions view model", () => {
 				const row = model.compareRows().find((r) => r.key === key)!;
 				expect(row.delta, key).toBeNull();
 			}
+		});
+
+		it("marks an unpriced run's cost as unknown and refuses a Δ", () => {
+			const priced = {
+				meta: { ...a.meta, totals: { ...a.meta.totals, usage: { totalTokens: 1000, costTotal: 0.2, costKnown: true } } },
+			};
+			const unpriced = {
+				meta: { ...b.meta, totals: { ...b.meta.totals, usage: { totalTokens: 4000, costTotal: 0, costKnown: false } } },
+			};
+			const { model } = load([], priced, unpriced);
+			const cost = model.compareRows().find((r) => r.key === "Cost")!;
+			expect(cost.b).toBe("unknown");
+			expect(cost.delta).toBeNull();
 		});
 
 		it("shows the comparability facts (backend / scaffold / payload), D6c", () => {

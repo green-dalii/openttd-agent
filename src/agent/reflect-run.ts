@@ -84,6 +84,8 @@ export interface FinalizeAndReflectArgs {
 	 * not evidence.
 	 */
 	manifest?: Partial<RunManifest>;
+	/** OpenTTD build reported by the binary at run start (null = unknown). */
+	gameVersion?: string | null;
 	/** Why the prebuilt setup ended as it did ("ready" | "timeout" | "order_refused"). */
 	scenarioReason?: string | null;
 	/** Cargo delivered before the measurement window opened (prebuilt only). */
@@ -147,6 +149,8 @@ export async function runFinalizeAndReflect(args: FinalizeAndReflectArgs): Promi
 	);
 	session.finalize({
 		status: reachedDone ? "completed" : "aborted",
+		// Provenance: which build produced this world.
+		gameVersion: args.gameVersion ?? null,
 		arm,
 		freeze: freezeStats ?? null,
 		// D3b/S9: the run manifest. Served model comes from telemetry (what the
