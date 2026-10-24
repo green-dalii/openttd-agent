@@ -1192,6 +1192,18 @@ compaction 冲突都不报错，只会让两次运行看到的脚手架悄悄不
 - 结论：使用量台账这条**不需要新代码** —— telemetry 已逐条消息记 usage，harness 落盘的
   usage 条目是同一批数字；再建一条读取路径只会造出两个可能分歧的真源。
 
+**D6c：把"可比性"本身记进数据并显示出来（同一节）**
+- manifest 收敛为**一份投影** `src/agent/manifest.ts`（`projectManifest` + `MANIFEST_FIELDS`）。
+  此前它在三处按字段重建（session finalize、`toGameMetric`、reflect-run 入参），
+  新增字段必被其中一处静默丢掉 —— 真机两次：D3b 一次，D6b 的 `payloadHash`
+  只进了 `meta.json`，**没进 `metrics.jsonl`**（即分数卡看不到）。
+- 新增 `manifest.backend`（`agent` | `harness`）。没有它，"两次运行一模一样"是一句
+  无法证伪的话：请求可能相同，但持久化与失败路径不同。
+- 看板接线：Live 的 Cost 组新增 **Wire** KPI（`clean` / `N issue(s)` / **`not measured`**，
+  后者用于裸 Agent 路径——没有数据不等于干净）；Sessions 的对比表新增
+  **Backend / Scaffold / Payload** 三行，用 8 位短哈希，缺失写 `not measured`。
+- 真机：`dashboard:smoke` 0 条控制台（error+warn），图表高度正常。
+
 ### 10.114 阶段 D：脚手架成熟化 + 评测面（2026-10-23/24）
 
 > 契约（模型看到什么/能做什么/动作后得到什么、两种模式的分界）见

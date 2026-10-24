@@ -1056,6 +1056,7 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 		scenario,
 		scenarioReason: prebuiltReason,
 		manifest: {
+			backend,
 			thinkingLevel: scaffold.thinkingLevel,
 			toolBudget: scaffold.toolBudget,
 			scaffoldHash: fingerprint,

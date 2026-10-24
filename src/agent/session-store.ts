@@ -16,6 +16,7 @@ import { appendMetric } from "../evolution/store.js";
 import path from "node:path";
 import type { TelemetrySnapshot } from "./telemetry.js";
 import type { GameEvent } from "../types.js";
+import type { RunManifest } from "./manifest.js";
 
 /**
  * Lifecycle states. `interrupted` is never written by a *running* process — it
@@ -70,30 +71,9 @@ export interface SessionMeta {
 	arm?: "treatment" | "control";
 	/**
 	 * Run manifest (D3b/S9): what the model actually was and under which
-	 * scaffold. Recorded by the runner because only it knows the resolved
-	 * values (requested vs served model, applied knobs, the tool set sent).
+	 * scaffold. Field set + normalization live in `manifest.ts` (one source).
 	 */
-	manifest?: {
-		/** Model the provider actually served (may differ from the request). */
-		servedModel: string | null;
-		/** Thinking level actually applied ("off" when deliberation is off). */
-		thinkingLevel: string | null;
-		/** Per-decision tool-call budget actually applied. */
-		toolBudget: number | null;
-		/** sha256-based fingerprint of (system prompt + tool set), 16 hex chars. */
-		scaffoldHash: string | null;
-		/**
-		 * Fingerprint of the FIRST provider request body, as actually serialized
-		 * (D6b). Null on the bare-Agent path: there is no payload hook there, and
-		 * a value derived from our own source would be a claim, not a measurement.
-		 */
-		payloadHash?: string | null;
-		/**
-		 * Provider requests ATTEMPTED (a request that was retried counts once per
-		 * attempt, so this is transport traffic, not logical turns).
-		 */
-		payloadCount?: number | null;
-	};
+	manifest?: RunManifest;
 	/** Verified-freeze stats (SPEC §10.60); null when never frozen. */
 	freeze?: { confirmed: number; unconfirmed: number; failures: number; watchdogTrips: number; maxHoldMs: number } | null;
 	outcome?: {

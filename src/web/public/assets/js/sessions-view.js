@@ -17,6 +17,19 @@
 (function () {
   const U = window.UI;
 
+  /** One manifest field, or undefined when the run did not record one. */
+  function manifestField(meta, key) {
+    const m = meta && meta.manifest;
+    return m ? m[key] : undefined;
+  }
+
+  /** Hashes are 16 hex chars; show the first 8 and keep "not measured" distinct. */
+  function shortHash(v) {
+    if (v === null || v === undefined || v === "") return "not measured";
+    return String(v).slice(0, 8);
+  }
+
+
   /** Token donut: fixed order + colour so two runs are visually comparable. */
   const TOKEN_SLICES = [
     { label: "Input", key: "input", color: "#5fb3ff" },
@@ -278,6 +291,12 @@
             delta(dur(ma), dur(mb))],
           ["Mode", ma.mode, mb.mode, null],
           ["Model", (ma.llm && ma.llm.model) || "—", (mb.llm && mb.llm.model) || "—", null],
+          // D6c: comparability. Two runs are only comparable if the runtime, the
+          // scaffold and (when measured) the payload agree - putting these rows
+          // next to "Model" is what lets a human check it instead of trusting it.
+          ["Backend", manifestField(ma, "backend") ?? "—", manifestField(mb, "backend") ?? "—", null],
+          ["Scaffold", shortHash(manifestField(ma, "scaffoldHash")), shortHash(manifestField(mb, "scaffoldHash")), null],
+          ["Payload", shortHash(manifestField(ma, "payloadHash")), shortHash(manifestField(mb, "payloadHash")), null],
         ];
         return rows.map(([key, a, b, d]) => ({ key, a, b, delta: d }));
       },

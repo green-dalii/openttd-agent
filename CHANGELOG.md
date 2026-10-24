@@ -10,6 +10,19 @@
 ## [Unreleased]
 ### Added
 
+- **Comparability is now data and is visible.** The run manifest collapsed into a
+  single projection (`src/agent/manifest.ts`): it had been rebuilt field by field
+  in three places, so a new field was silently dropped by at least one of them -
+  D6b's `payloadHash` reached `meta.json` but never `metrics.jsonl`, which is the
+  file the scorecard reads. The manifest now also records `backend`
+  (`agent` | `harness`), because two manifests that look identical otherwise still
+  differ in persistence and failure paths. The dashboard surfaces both: a **Wire**
+  KPI on the Live page (clean / N issues / **not measured** on the bare-Agent
+  path, since no data is not the same as clean) and **Backend / Scaffold /
+  Payload** rows in the Sessions comparison table.
+
+### Added
+
 - **The harness backend now records what it actually sent, and what went wrong on
   the wire.** The first provider request body is fingerprinted
   (`manifest.payloadHash`, `manifest.payloadCount`); the bare-Agent path records

@@ -297,6 +297,40 @@ describe("Live view model", () => {
 			expect(found.some((k) => k.k === "Tool calls")).toBe(true);
 		});
 
+		it("reports transport health, and says 'not measured' instead of 'clean'", () => {
+			// D6c: a retried call costs the same tokens and produces the same steps as
+			// a clean one. If the page cannot tell them apart, "slow and expensive"
+			// can only be blamed on the model.
+			const { model } = load();
+			model.companies = { "0": company() };
+
+			// Old snapshot / bare-Agent backend: no wire data at all.
+			model.telemetry = TELEMETRY;
+			let wire = model.costKpis().find((k) => k.k === "Wire");
+			expect(wire?.v).toBe("not measured");
+			expect(wire?.hint).toContain("no wire data");
+
+			// Harness backend, clean run: 0 is a measurement.
+			model.telemetry = {
+				...TELEMETRY,
+				totals: { ...TELEMETRY.totals, retries: 0, faults: 0 },
+				recentRuntimeIssues: [],
+			};
+			wire = model.costKpis().find((k) => k.k === "Wire");
+			expect(wire?.v).toBe("clean");
+			expect(wire?.hint).toBe("no retries or faults");
+
+			// Harness backend after an injected 503.
+			model.telemetry = {
+				...TELEMETRY,
+				totals: { ...TELEMETRY.totals, retries: 1, faults: 0 },
+				recentRuntimeIssues: [{ ts: 1, kind: "retry", message: "attempt 2/4: 503" }],
+			};
+			wire = model.costKpis().find((k) => k.k === "Wire");
+			expect(wire?.v).toBe("1 issue(s)");
+			expect(wire?.hint).toContain("attempt 2/4: 503");
+		});
+
 		it("shows honest placeholders with no company yet", () => {
 			const { model } = load();
 			const kpis = model.resultKpis();
