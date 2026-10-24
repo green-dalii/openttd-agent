@@ -24,6 +24,8 @@ import {
 } from "../game/squirrel-deploy.js";
 import type { Config } from "../config.js";
 import { createAgent, SYSTEM_PROMPT, DEFAULT_MAX_TOOL_CALLS_PER_DECISION } from "./runtime.js";
+import { agentDecisionAgent, laneDecisionAgent } from "./decision-agent.js";
+import { createHarnessRuntime, harnessEnabled, HARNESS_LANE_NAME } from "./harness-runtime.js";
 import { scaffoldHash, type FingerprintableTool } from "./scaffold-fingerprint.js";
 import type { AgentOptions } from "@earendil-works/pi-agent-core";
 import type { Model } from "@earendil-works/pi-ai";
@@ -32,7 +34,11 @@ type AgentOptionsStreamFn = AgentOptions["streamFn"];
 import { DecisionScheduler } from "./scheduler.js";
 import { buildStageView } from "./stage-view.js";
 import { captureMinimap, MINIMAP_REL_PATH } from "../game/minimap.js";
-import type { AgentDeps } from "./types.js";
+import type { ActionResult, AgentDeps } from "./types.js";
+import type { Models } from "@earendil-works/pi-ai";
+import type { AgentTool } from "@earendil-works/pi-agent-core";
+import type { DecisionAgent } from "./decision-agent.js";
+import { createTools } from "./tools/index.js";
 import { fauxAssistantMessage, fauxToolCall, createFauxCore } from "@earendil-works/pi-ai";
 import { buildBrain, redactKey } from "./provider.js";
 import { Telemetry } from "./telemetry.js";
@@ -350,6 +356,11 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 	};
 	let streamFn: AgentOptionsStreamFn;
 	let model: Model<string>;
+	/**
+	 * Provider registry for the harness backend (D6a). The bare-Agent path only
+	 * needs `streamFn`; the harness streams through `models.streamSimple`.
+	 */
+	let models: Models | null = null;
 	let brainKind: "real" | "faux" = "faux";
 	const mustServeDashboard = opts.webPort !== undefined;
 
@@ -362,6 +373,7 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 		const built = await buildBrain(cfg.llm, { credentials });
 		streamFn = built.streamFn as unknown as AgentOptionsStreamFn;
 		model = built.model;
+		models = built.models;
 		brainKind = "real";
 		console.log(
 			`[agent] brain: REAL ${built.source} provider ${describeBrainSelection(cfg)} key=${redactKey(cfg.llm.apiKey)}`,
@@ -391,6 +403,12 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 		]);
 		streamFn = faux.streamSimple as unknown as AgentOptionsStreamFn;
 		model = faux.getModel() as unknown as Model<string>;
+		// Same shape the faux tests use: the harness needs `streamSimple` and
+		// `getModel` (the latter per checkpoint, even with compaction disabled).
+		models = {
+			streamSimple: faux.streamSimple,
+			getModel: () => faux.getModel(),
+		} as unknown as Models;
 		console.log("[agent] brain: FAUX provider (--offline-demo — NOT a real LLM)");
 	}
 	// Audit trail (SPEC §7): decisions + action results -> JSONL under dataDir.
@@ -714,83 +732,133 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 	// defaults keep the historical behaviour).
 	const scaffold = cfg.llm.scaffold ?? { thinkingLevel: "off" as const, toolBudget: DEFAULT_MAX_TOOL_CALLS_PER_DECISION };
 
-	const runtime = createAgent({
-		deps,
-		streamFn,
-		model,
-		// Provider prompt cache key (ADR §10.74): stable for the whole run, so a
-		// cache-aware provider can reuse the system prompt + tool schemas that are
-		// re-sent on every one of the run's decisions.
-		sessionId: session.id,
-		// Context hygiene + cross-game lesson injection (SPEC §4.1).
-		//
-		// `lessonsProvider` existed as an unfed hook since v0.2.1: every game ran in
-		// complete isolation because nothing ever supplied it. Loading the memory once
-		// here (rather than per LLM call) keeps the injected set stable for the whole
-		// run, and `setMemoryInjected` records what was ACTUALLY injected - that count
-		// is the independent variable of the M3 "with/without lessons" experiment.
-		transformContext: pruningTransformContext({
-			keepRecent: 40,
-			// C-1: route facts from PREVIOUS games join the injected context
-			// (snapshot taken once at boot - same stable-set semantics as memory,
-			// which is the M3 experiment's independent variable).
-			// 存在性事实（ADR §10.74 决策 4）：注入的是"选中的那几条"，而库里可能还有更多。
-			// 不说出来，模型就不知道自己还能查——`recall` 会永远不被调用，
-			// 而"记忆有没有被用"这个问题就永远没有答案（SPEC §10.89）。
-			lessonsProvider: () => [
-				...memoryProvider(),
-				...routeFactsProvider(),
-				...(memory.lessons.length > injected.lessonsInjected
-					? [
-							`${memory.lessons.length - injected.lessonsInjected} more recorded observation(s) from ` +
-								"earlier games are not shown here and can be listed or searched with recall().",
-						]
-					: []),
-			],
-			// S5: the agent's own measured scores in earlier comparable games.
-			// Facts (numbers + the conditions they were measured under), never a
-			// verdict. OFF in the control arm like every other cross-game memory:
-			// `--no-memory` must mean "no memory at all", or the A/B is void.
-			scoreHistoryProvider: () => {
-				if (opts.injectMemory === false) return null;
-				const history = pastRunScores(readMetrics(cfg.dataDir), {
-					scenario: opts.scenario === "prebuilt" ? "prebuilt" : "freeform",
-					horizonDays: opts.gameDays ?? null,
-					sinceMs: runStartedAtMs,
-					limit: 10,
-				});
-				const text = renderScoreHistory(history);
-				if (text) console.log(`[agent] score history injected (${history.runs.length} comparable run(s))`);
-				return text;
-			},
-		}),
-		onActionResult: (tool, r) => {
-			console.log(`[agent] tool ${tool}: ok=${r.ok} ${r.summary}`);
-			// Failures are recorded too: the model must be able to see its own
-			// mistakes on the next decision (docs/AGENT-LOOP-AND-CONTROL §2.4).
-			// D3a/S4: carry the ordered job id with the action, so the executor
-			// phases that follow can be joined back to the action that caused
-			// them (credit assignment needs that link).
-			const job = typeof (r.data as { job?: unknown } | undefined)?.job === "number"
-				? Number((r.data as { job: number }).job)
-				: undefined;
-			if (job !== undefined) jobActions[job] = tool;
-			pendingActions.push({ tool, ok: r.ok, summary: r.summary, ...(job !== undefined ? { job } : {}) });
-			audit.write({ type: "action_result", ts: Date.now(), tool, ok: r.ok, summary: r.summary, data: r.data });
-			session.appendAudit({ type: "action_result", ts: Date.now(), tool, ok: r.ok, summary: r.summary, data: r.data });
-		},
-	});
-	const { agent } = runtime;
+	/**
+	 * One handler for tool results, shared by both brain paths (D6a). Two copies
+	 * would let the audit trail diverge between them — and the audit trail is
+	 * what the run is judged on.
+	 */
+	const handleActionResult = (tool: string, r: ActionResult): void => {
+		console.log(`[agent] tool ${tool}: ok=${r.ok} ${r.summary}`);
+		// Failures are recorded too: the model must be able to see its own
+		// mistakes on the next decision (docs/AGENT-LOOP-AND-CONTROL §2.4).
+		// D3a/S4: carry the ordered job id with the action, so the executor
+		// phases that follow can be joined back to the action that caused
+		// them (credit assignment needs that link).
+		const job = typeof (r.data as { job?: unknown } | undefined)?.job === "number"
+			? Number((r.data as { job: number }).job)
+			: undefined;
+		if (job !== undefined) jobActions[job] = tool;
+		pendingActions.push({ tool, ok: r.ok, summary: r.summary, ...(job !== undefined ? { job } : {}) });
+		audit.write({ type: "action_result", ts: Date.now(), tool, ok: r.ok, summary: r.summary, data: r.data });
+		session.appendAudit({ type: "action_result", ts: Date.now(), tool, ok: r.ok, summary: r.summary, data: r.data });
+	};
+
+	// Context hygiene + cross-game lesson injection (SPEC §4.1).
+	// Built ONCE so both brain paths inject the identical set: a second copy of
+	// these options would be a silent scaffold difference (D6a).
+	//
+	// `lessonsProvider` existed as an unfed hook since v0.2.1: every game ran in
+	// complete isolation because nothing ever supplied it. Loading the memory once
+	// here (rather than per LLM call) keeps the injected set stable for the whole
+	// run, and `setMemoryInjected` records what was ACTUALLY injected - that count
+	// is the independent variable of the M3 "with/without lessons" experiment.
+	const transformContext = pruningTransformContext({
+		keepRecent: 40,
+		// C-1: route facts from PREVIOUS games join the injected context
+		// (snapshot taken once at boot - same stable-set semantics as memory,
+		// which is the M3 experiment's independent variable).
+		// 存在性事实（ADR §10.74 决策 4）：注入的是"选中的那几条"，而库里可能还有更多。
+		// 不说出来，模型就不知道自己还能查——`recall` 会永远不被调用，
+		// 而"记忆有没有被用"这个问题就永远没有答案（SPEC §10.89）。
+		lessonsProvider: () => [
+			...memoryProvider(),
+			...routeFactsProvider(),
+			...(memory.lessons.length > injected.lessonsInjected
+				? [
+						`${memory.lessons.length - injected.lessonsInjected} more recorded observation(s) from ` +
+							"earlier games are not shown here and can be listed or searched with recall().",
+					]
+				: []),
+		],
+		// S5: the agent's own measured scores in earlier comparable games.
+		// Facts (numbers + the conditions they were measured under), never a
+		// verdict. OFF in the control arm like every other cross-game memory:
+		// `--no-memory` must mean "no memory at all", or the A/B is void.
+		scoreHistoryProvider: () => {
+			if (opts.injectMemory === false) return null;
+			const history = pastRunScores(readMetrics(cfg.dataDir), {
+				scenario: opts.scenario === "prebuilt" ? "prebuilt" : "freeform",
+				horizonDays: opts.gameDays ?? null,
+				sinceMs: runStartedAtMs,
+				limit: 10,
+			});
+			const text = renderScoreHistory(history);
+			if (text) console.log(`[agent] score history injected (${history.runs.length} comparable run(s))`);
+		return text;
+	},
+});
+
+	// --- brain backend (D6a) ---
+	// Two interchangeable backends, same scaffold:
+	//   - "agent": bare pi-agent-core Agent (historical path, default)
+	//   - "harness": AgentHarness + a durable, replayable session transcript
+	// The flag exists so the migration is reversible by configuration, not by a
+	// revert: docs/HARNESS-MIGRATION.md §4.
+	const backend = harnessEnabled(process.env) ? "harness" : "agent";
+	let tools: AgentTool[];
+	let decisionAgent: DecisionAgent;
+	let getBudgetBlocks: () => number;
+	let closeBrain: (() => Promise<void>) | null = null;
+
+	tools = createTools(deps);
+
+	if (backend === "harness") {
+		const hr = await createHarnessRuntime({
+			dataDir: cfg.dataDir,
+			sessionId: session.id,
+			models: models as Models,
+			model,
+			systemPrompt: SYSTEM_PROMPT,
+			tools,
+			maxToolCallsPerDecision: scaffold.toolBudget,
+			thinkingLevel: scaffold.thinkingLevel,
+			transformContext,
+			onActionResult: handleActionResult,
+			onEvent: (event: unknown) => telemetry.ingestAgentEvent(event as never),
+		});
+		decisionAgent = laneDecisionAgent(hr.lane, hr.context);
+		getBudgetBlocks = hr.getBudgetBlocks;
+		closeBrain = hr.close;
+		console.log(`[agent] brain backend: harness (lane=${HARNESS_LANE_NAME} session=${session.id})`);
+	} else {
+		const runtime = createAgent({
+			deps,
+			streamFn,
+			model,
+			// Provider prompt cache key (ADR §10.74): stable for the whole run, so a
+			// cache-aware provider can reuse the system prompt + tool schemas that are
+			// re-sent on every one of the run's decisions.
+			sessionId: session.id,
+			transformContext,
+			onActionResult: handleActionResult,
+			maxToolCallsPerDecision: scaffold.toolBudget,
+			thinkingLevel: scaffold.thinkingLevel,
+		});
+		tools = runtime.tools;
+		decisionAgent = agentDecisionAgent(runtime.agent);
+		getBudgetBlocks = runtime.getBudgetBlocks;
+		console.log(`[agent] brain backend: agent (session=${session.id})`);
+
+		// Feed every agent event into telemetry (token usage, thinking, tool steps).
+		runtime.agent.subscribe((event) => {
+			telemetry.ingestAgentEvent(event);
+		});
+	}
 	// D3b/S9: the scaffold fingerprint - the prompt and the tool set that are
 	// actually sent to the model. Two runs with the same fingerprint saw the
 	// same scaffold; without it a benchmark cannot claim that.
-	const fingerprint = scaffoldHash(SYSTEM_PROMPT, runtime.tools as unknown as FingerprintableTool[]);
+	const fingerprint = scaffoldHash(SYSTEM_PROMPT, tools as unknown as FingerprintableTool[]);
 	console.log(`[agent] scaffold: thinking=${scaffold.thinkingLevel} toolBudget=${scaffold.toolBudget} hash=${fingerprint}`);
-
-	// Feed every agent event into telemetry (token usage, thinking, tool steps).
-	agent.subscribe((event) => {
-		telemetry.ingestAgentEvent(event);
-	});
 
 	// Polling must start BEFORE the decision loop: it is what discovers the
 	// executor's phase transitions and fresh economy numbers, which is exactly
@@ -876,7 +944,7 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 
 	const loop = createDecisionLoop({
 		deps,
-		agent,
+		agent: decisionAgent,
 		scheduler,
 		hub,
 		telemetry,
@@ -938,6 +1006,11 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 
 	await loop.run();
 
+	// D6a: flush the harness transcript and release the session. Done after the
+	// loop (no more decisions) and before finalize so the on-disk transcript is
+	// complete when the metric row is written.
+	if (closeBrain) await closeBrain();
+
 	clearInterval(obs);
 	clearInterval(heartbeatTimer);
 	process.off("uncaughtException", onCrash);
@@ -960,7 +1033,7 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 		executorPhase: hub.getPhase(), reachedDone: hub.getReachedDone(), scheduler, pendingActions, routeLedger,
 		getRouteStats: () => hub.getRouteStats(),
 		gsErrors: hub.getGsErrors(),
-		toolBudgetBlocks: runtime.getBudgetBlocks(),
+		toolBudgetBlocks: getBudgetBlocks(),
 		// 局是在**暂停中**结束的吗（agent 自己按的）？这是 outcome 的独立事实，
 		// 让统计能把这局从"完成/中止"里剔除（SPEC §10.101）。
 		agentPause,

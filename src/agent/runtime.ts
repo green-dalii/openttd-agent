@@ -21,9 +21,11 @@
 
 import { Agent } from "@earendil-works/pi-agent-core";
 import type { AgentMessage, AgentTool, BeforeToolCallResult } from "@earendil-works/pi-agent-core";
-import type { Model, ThinkingBudgets, ThinkingLevel } from "@earendil-works/pi-ai";
+import type { Model, ThinkingBudgets } from "@earendil-works/pi-ai";
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { AgentDeps, ActionResult } from "./types.js";
 import { createTools } from "./tools/index.js";
+import { DEFAULT_MAX_TOOL_CALLS_PER_DECISION, ToolBudget } from "./tool-budget.js";
 
 /**
  * System prompt: role, world mechanics, and the interaction protocol — nothing else.
@@ -90,8 +92,12 @@ export interface RuntimeOptions {
 	thinkingBudgets?: ThinkingBudgets;
 }
 
-/** Normal decisions use 2–3 tool calls; a runaway measured 17.5 per decision. */
-export const DEFAULT_MAX_TOOL_CALLS_PER_DECISION = 12;
+/**
+ * Re-exported so existing importers keep working; the value and the refusal
+ * text now live in `tool-budget.ts`, shared with the harness path (D6a) — two
+ * copies of the refusal sentence would let the paths diverge silently.
+ */
+export { DEFAULT_MAX_TOOL_CALLS_PER_DECISION };
 
 /** Convert agent messages → LLM messages: drop UI-only custom messages. */
 export function defaultConvertToLlm(messages: AgentMessage[]) {
@@ -118,9 +124,7 @@ export interface AgentRuntime {
 /** Build the tools + Agent for a run. */
 export function createAgent(opts: RuntimeOptions): AgentRuntime {
 	const tools = createTools(opts.deps);
-	const budget = opts.maxToolCallsPerDecision ?? DEFAULT_MAX_TOOL_CALLS_PER_DECISION;
-	let callsThisDecision = 0;
-	let budgetBlocks = 0;
+	const budget = new ToolBudget(opts.maxToolCallsPerDecision ?? DEFAULT_MAX_TOOL_CALLS_PER_DECISION);
 
 	const agent = new Agent({
 		streamFn: opts.streamFn,
@@ -146,18 +150,8 @@ export function createAgent(opts: RuntimeOptions): AgentRuntime {
 			// Per-decision budget. Blocking (not throwing) is the point: the reason
 			// is handed to the model as a tool error, so it can still decide with
 			// the observations it already has. Blocked calls do not consume budget.
-			if (budget > 0 && callsThisDecision >= budget) {
-				budgetBlocks += 1;
-				return {
-					block: true,
-					reason:
-						`tool budget for this decision is exhausted (${budget} calls used). ` +
-						"Further tool calls in this decision are refused. Answer with the " +
-						"observations you already have; you get a fresh budget next decision.",
-				};
-			}
-			callsThisDecision += 1;
-			return undefined;
+			const refusal = budget.admit();
+			return refusal === undefined ? undefined : { block: true, reason: refusal };
 		},
 		afterToolCall: async (ctx) => {
 			const details = ctx.result?.details as ActionResult | undefined;
@@ -172,8 +166,8 @@ export function createAgent(opts: RuntimeOptions): AgentRuntime {
 	// before any tool preflight, so the budget resets exactly at that boundary
 	// without the caller having to remember to do it.
 	agent.subscribe((event) => {
-		if (event.type === "agent_start") callsThisDecision = 0;
+		if (event.type === "agent_start") budget.reset();
 	});
 
-	return { agent, tools, getBudgetBlocks: () => budgetBlocks };
+	return { agent, tools, getBudgetBlocks: () => budget.blocked };
 }

@@ -50,7 +50,6 @@
 | **D3b** | **run manifest + 结果分类**：S9 served model / 旋钮 / 脚手架指纹；S8 0 分必带成因（派生不存盘） | 度量行含 manifest（真机实测）；0 分记录经分类得具名成因 | ✅（`SPEC.md` §10.114） |
 | **D4** | **旋钮与成熟度**：S6 思考档位 / 工具预算 / provider 进 CLI+config；S9 脚手架指纹（D3b 已落地） | 真机：`--thinking low --tool-budget 5` 生效并进 manifest；非法值报错 | ✅（`SPEC.md` §10.114） |
 | **D5** | **评测面**：矩阵规划（每格独立目录 + 预登记闸）/ 四轴分数卡 / 配对统计 / JSON+MD 报告 | 真机 2×1×1 矩阵跑通并出报告；预登记双向自证（拒绝/放行） | ✅（`SPEC.md` §10.114） |
-| **D6a** | **可回放会话**：一局 = 一个 harness session + 一个 lane；一次决策 = 一次 `lane.prompt()`；`before_tool` 接管预算、`transform_context` 接管剪枝/注入；事件适配器 | gate 绿 + **§5.1 八条真机断言** + 会话可列回 + 上下文与旧路径逐字一致 | ⬜ (#12) |
 | **D6b** | **真实 payload 与用量台账**：`before_payload` → manifest `payloadHash`；usage 台账供效率轴；`retry_*`/`fault` 进步骤流 | 两模型 `payloadHash` 可对比；断流可见 retry | ⬜ (#12) |
 | ~~D6c~~ | 全量替换自研 `session-store`/`telemetry` | **否决**：对可比性零增益、回归面覆盖 5 页 + E2E | ❌ |
 | **D6d** | 反事实 fork（同存档同决策点换模型） | 待定：等 D5 真跑一轮真实模型后再评估 | ⏸ |
@@ -117,10 +116,11 @@ pgrep -fl "bench.ts|run-experiment|cli/run.ts|llm-stub|OpenTTD.app"
 
 ### 2. 下一步做什么？
 
-**D6a**（用户已批准方案、未开始实现）：`docs/HARNESS-MIGRATION.md` §4 是唯一权威，
-Issue #12 有 11 条勾选清单。开工顺序：
-① `buildBrain` 返回 `{models, model}` ② `harness-runtime.ts` ③ 工具适配器 + `before_tool`
-④ `transform_context` ⑤ `runDecision` 双路径 ⑥ 事件适配器 ⑦ 真机两局 + §5.1 八条。
+**D6b**（D6a 已合并）：`docs/HARNESS-MIGRATION.md` §4 是唯一权威。要做的三件：
+① `before_payload` → manifest 记**真实 payload 指纹**（与 D3b 的源码指纹并列）
+② usage 台账（`harness/usage.jsonl`）供分数卡效率轴
+③ `retry_*` / `fault` 进 telemetry 步骤流（stub 返 500 应能看到 retry）。
+D6b 做完才评估是否把 `AGENT_HARNESS` 翻成默认。
 
 **三条不得违反的不变量**：harness 默认关（`AGENT_HARNESS=0`）；harness compaction 必须关；
 完成=§5.1 八条真机断言全绿（单测绿不算）。

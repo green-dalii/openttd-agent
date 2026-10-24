@@ -166,12 +166,27 @@ describe.skipIf(live.skip)("live: the agent actually drives the game", () => {
 		if (dir) rmSync(dir, { recursive: true, force: true });
 	}, 60_000);
 
+	/**
+	 * Newest session directory.
+	 *
+	 * Only directories are sessions: `<dataDir>/sessions/` also holds
+	 * `index.json` AND `events.jsonl` (events written before the session
+	 * directory exists). "events.jsonl" sorts after every timestamped id, so a
+	 * naive `sort().reverse()[0]` picked it and every assertion below failed
+	 * with ENOTDIR - on `main` as well as here.
+	 */
+	function latestSessionDir(): string {
+		const ids = readdirSync(path.join(dir, "sessions"), { withFileTypes: true })
+			.filter((e) => e.isDirectory())
+			.map((e) => e.name)
+			.sort();
+		const latest = ids[ids.length - 1];
+		if (!latest) throw new Error("no session directory was written");
+		return path.join(dir, "sessions", latest);
+	}
+
 	function meta(): SessionMeta {
-		const ids = readdirSync(path.join(dir, "sessions")).filter((f) => f !== "index.json");
-		const latest = ids.sort().reverse()[0]!;
-		return JSON.parse(
-			readFileSync(path.join(dir, "sessions", latest, "meta.json"), "utf8"),
-		) as SessionMeta;
+		return JSON.parse(readFileSync(path.join(latestSessionDir(), "meta.json"), "utf8")) as SessionMeta;
 	}
 
 	it("ran in agent mode with a REAL brain (not watch, not faux)", () => {
@@ -194,9 +209,7 @@ describe.skipIf(live.skip)("live: the agent actually drives the game", () => {
 	});
 
 	it("persisted decisions with a trigger, and the LLM's steps", () => {
-		const ids = readdirSync(path.join(dir, "sessions")).filter((f) => f !== "index.json");
-		const latest = ids.sort().reverse()[0]!;
-		const auditPath = path.join(dir, "sessions", latest, "audit.jsonl");
+		const auditPath = path.join(latestSessionDir(), "audit.jsonl");
 		const records = readFileSync(auditPath, "utf8")
 			.split("\n")
 			.filter(Boolean)

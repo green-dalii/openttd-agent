@@ -8,6 +8,20 @@
 > 踩过的坑的复盘（→ `MEMORY.md`；此处只写"改了什么"，不写"我为什么犯错"）。
 
 ## [Unreleased]
+### Added
+
+- **The decision runtime has a second, interchangeable backend** (`AGENT_HARNESS=1`):
+  the run loop can now drive a persistent `AgentHarness` session (one session and one
+  lane per game, one `lane.prompt()` per decision) whose transcript is written under
+  `<dataDir>/sessions/<id>/harness/`, so a game can be replayed entry by entry. The
+  bare-Agent path stays the default and the two are proven equivalent: against the
+  same seed both send a byte-identical system prompt, the same eleven tools, and
+  decision prompts that match character for character once numbers are normalized
+  (tokens 9374 vs 9352). Tool budget refusals, history pruning, lesson/score
+  injection and the audit trail are shared code, not copies, so the scaffold cannot
+  drift between them. Harness compaction is explicitly disabled: only one mechanism
+  may trim context.
+
 ### Documentation
 
 - **The pi-agent-core `AgentHarness` migration is designed and scoped**
