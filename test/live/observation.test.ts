@@ -19,9 +19,15 @@ import { live } from "../helpers/live.js";
 const BINARY = process.env.OPENTTD_BINARY;
 
 describe.skipIf(live.skip)("live: observation loop (real OpenTTD)", () => {
+	// 90s: the internal budget below (45s for the first economy) must be able to
+	// finish inside the test, or the test can only ever report "timed out" - which
+	// is exactly what it did on main (global testTimeout is 15s).
 	it("start_ai CPU -> company economy observed", async () => {
 		expect(BINARY, "OPENTTD_BINARY must be set for live tests").toBeTruthy();
 		const dir = await mkdtemp(join(tmpdir(), "ottd-live-"));
+		// Declared outside the try so `finally` can always stop them.
+		let mgr: OpenTTDProcessManager | null = null;
+		let client: AdminClient | null = null;
 		try {
 			const cfg = loadConfig({
 				OPENTTD_BINARY: BINARY,
@@ -30,27 +36,25 @@ describe.skipIf(live.skip)("live: observation loop (real OpenTTD)", () => {
 				OPENTTD_SEED: "7",
 				OPENTTD_START_YEAR: "1950",
 			});
-			const mgr = new OpenTTDProcessManager(cfg);
+			mgr = new OpenTTDProcessManager(cfg);
 			mgr.onExit = (code) => console.log(`[live] server exited ${code}`);
 
-			await mgr.ensureSandboxConfig();
-			await mgr.start();
-			await mgr.waitForAdminPort(25_000);
+			await mgr!.ensureSandboxConfig();
+			await mgr!.start();
+			await mgr!.waitForAdminPort(25_000);
 
 			const world = new WorldState();
-			const client = new AdminClient({
+			client = new AdminClient({
 				cfg,
 				callbacks: { onEvent: (ev) => world.ingest(ev) },
 			});
-			await client.connect(10_000);
-
-			// Wait until authed, then start the AI.
-			const deadline = Date.now() + 15_000;
-			while (!client.isAuthed() && Date.now() < deadline) {
-				await sleep(100);
-			}
-			expect(client.isAuthed(), "admin auth within 15s").toBe(true);
-			client.rcon(`start_ai "CPU"`);
+			// `connect()` is a single attempt: OpenTTD keeps the admin port open while
+			// the map is still generating, so the JOIN is routinely kicked in that
+			// window (`'' has disconnected` / ECONNRESET). `connectAuthed()` retries
+			// until Welcome - which is why it exists (see its doc comment).
+			await client!.connectAuthed(45_000);
+			expect(client!.isAuthed(), "admin auth after connectAuthed").toBe(true);
+			client!.rcon(`start_ai "CPU"`);
 			console.log("[live] rcon start_ai CPU sent");
 
 			// Wait for company_economy event.
@@ -60,7 +64,7 @@ describe.skipIf(live.skip)("live: observation loop (real OpenTTD)", () => {
 				const hasEco = [...snap.companies.values()].some((c) => c.economy !== null);
 				if (hasEco) break;
 				// Periodic poll keeps the server honest.
-				for (const [id] of snap.companies) client.pollCompanyEconomy(id);
+				for (const [id] of snap.companies) client!.pollCompanyEconomy(id);
 				await sleep(500);
 			}
 
@@ -75,12 +79,25 @@ describe.skipIf(live.skip)("live: observation loop (real OpenTTD)", () => {
 			expect(eco.money >= 0n).toBe(true);
 			expect(snap.date).not.toBeNull();
 
-			client.close();
-			await mgr.stop();
+			client!.close();
+			await mgr!.stop();
 		} finally {
+			// Best-effort teardown: a failed assertion must not leave a dedicated
+			// server holding 3977/3979 - that silently makes the next `gate` skip 13
+			// preflight cases (`gameRunIsLive()`), which is worse than the failure.
+			try {
+				client?.close();
+			} catch {
+				/* already closed */
+			}
+			try {
+				await mgr!.stop();
+			} catch {
+				/* never started */
+			}
 			await rm(dir, { recursive: true, force: true });
 		}
-	});
+	}, 90_000);
 });
 
 function sleep(ms: number): Promise<void> {

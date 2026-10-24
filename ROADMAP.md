@@ -118,7 +118,7 @@ pgrep -fl "bench.ts|run-experiment|cli/run.ts|llm-stub|OpenTTD.app"
 **D6b 完成后需要拍板的一件事**：`AGENT_HARNESS` 是否翻成默认。翻之前必须满足：
 ① 用同一 seed 各跑 3 局，两后端 `payloadHash` 相同的局数 ≥ 2（世界随机性会让首份 payload
 的数值不同，这条需要一个"数值归一化后的 payload 哈希"才能真的可比——否则别翻）；
-② `test:live` 在两条后端上都绿（`observation.test.ts` 是已知红，见 #22，先修它）；
+② `test:live` 在两条后端上都绿（已达成：2026-10-24 两条后端各 9/9，见 #22 的修复）；
 ③ 至少一局真实模型（非 stub）。
 
 **之后**：S7 世界事实补洞（Issue #13）→ P3 卫生。
