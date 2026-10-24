@@ -10,7 +10,7 @@
  *
  * 行为不变守则与 B-1..B-3 相同：1:1 搬迁 + gate 全绿 + 真机跑。
  */
-import type { Agent } from "@earendil-works/pi-agent-core";
+import type { DecisionAgent } from "./decision-agent.js";
 import { runDecision, type DecisionPlan } from "./loop.js";
 import type { DecisionScheduler } from "./scheduler.js";
 import type { Telemetry } from "./telemetry.js";
@@ -45,7 +45,7 @@ import type { Episode } from "./episode.js";
 
 export interface DecisionLoopCtx {
 	deps: AgentDeps;
-	agent: Agent;
+	agent: DecisionAgent;
 	scheduler: DecisionScheduler;
 	hub: SignalHub;
 	telemetry: Telemetry;

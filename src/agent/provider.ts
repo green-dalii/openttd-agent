@@ -13,7 +13,7 @@
 
 import { builtinModels } from "@earendil-works/pi-ai/providers/all";
 import { createModels, createProvider } from "@earendil-works/pi-ai";
-import type { CredentialStore, Model, ProviderStreams } from "@earendil-works/pi-ai";
+import type { CredentialStore, Model, Models, ProviderStreams } from "@earendil-works/pi-ai";
 import type { LlmConfig } from "../config.js";
 import { CUSTOM_LLM_APIS } from "../config.js";
 import { DEFAULT_LLM_PROVIDER_ID, resolveLlmSource } from "./llm-settings.js";
@@ -31,6 +31,13 @@ async function loadApi(api: string): Promise<ProviderStreams> {
 
 export interface BuiltProvider {
 	model: Model<string>;
+	/**
+	 * The provider registry, kept because `AgentHarness` streams through
+	 * `models.streamSimple(model, …)` rather than through a bare `streamFn`
+	 * (D6a). The same instance backs `streamFn`, so both paths share one cache
+	 * of provider/auth state.
+	 */
+	models: Models;
 	/** Which path produced this provider (see docs §6.5). */
 	source: "catalog" | "custom";
 	/** streamFn compatible with pi-agent-core's StreamFn. */
@@ -84,7 +91,12 @@ async function buildCatalogBrain(llm: LlmConfig, opts: BuildBrainOptions): Promi
 	// request baseUrl are resolved by pi-ai per request — we pass none of them.
 	const streamFn = (_m: unknown, context: never, options?: never) =>
 		models.stream(model, context, options);
-	return { model: model as Model<string>, source: "catalog", streamFn: streamFn as BuiltProvider["streamFn"] };
+	return {
+		model: model as Model<string>,
+		models,
+		source: "catalog",
+		streamFn: streamFn as BuiltProvider["streamFn"],
+	};
 }
 
 /**
@@ -143,7 +155,12 @@ async function buildCustomBrain(llm: LlmConfig): Promise<BuiltProvider> {
 	// Bind the models instance: pi-agent-core calls streamFn(model, context, options).
 	const streamFn = (_m: unknown, context: never, options?: never) =>
 		models.stream(model, context, options);
-	return { model: model as Model<string>, source: "custom", streamFn: streamFn as BuiltProvider["streamFn"] };
+	return {
+		model: model as Model<string>,
+		models,
+		source: "custom",
+		streamFn: streamFn as BuiltProvider["streamFn"],
+	};
 }
 
 /** Human-readable brain label for logs (never includes a key). */

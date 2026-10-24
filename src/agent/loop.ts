@@ -17,6 +17,7 @@
 
 /* eslint-disable no-console -- intentional runtime logging */
 import type { Agent } from "@earendil-works/pi-agent-core";
+import type { DecisionAgent } from "./decision-agent.js";
 import type { AgentDeps } from "./types.js";
 import type { ExecutorFact, RouteContextFact } from "./decision-context.js";
 import type { ScoreFact } from "./score.js";
@@ -31,7 +32,7 @@ import {
 } from "./decision-context.js";
 
 export interface DecisionLoopOptions {
-	agent: Agent;
+	agent: DecisionAgent;
 	deps: AgentDeps;
 	/** Max decisions to run before returning (safety bound). */
 	maxTurns?: number;
@@ -82,7 +83,7 @@ export interface DecisionRequest {
  * The agent calls tools (observe/build_bus_route/...) as it sees fit.
  */
 export async function runDecision(
-	agent: Agent,
+	agent: DecisionAgent,
 	deps: AgentDeps,
 	req: DecisionRequest,
 ): Promise<{ state: Record<string, unknown>; plan: DecisionPlan | null }> {
@@ -195,7 +196,9 @@ export async function runDecision(
 		`wait_until tells the framework when to ask you again; use null to accept the default beat.`;
 
 	await agent.prompt(prompt);
-	return { state: facts as unknown as Record<string, unknown>, plan: extractPlan(agent) };
+	// The plan is parsed from the transcript the agent actually produced, which
+	// is the same data on both paths (bare Agent state vs harness entries).
+	return { state: facts as unknown as Record<string, unknown>, plan: extractPlanFromMessages(await agent.planMessages()) };
 }
 
 /** A structured decision as defined by SPEC §4.2 step 2. */
@@ -215,7 +218,12 @@ export interface DecisionPlan {
  * failure must not stop the run (docs/AGENT-LOOP-AND-CONTROL.md §2.1.1).
  */
 export function extractPlan(agent: Agent): DecisionPlan | null {
-	const msgs = agent.state.messages as { role?: string; content?: unknown }[];
+	return extractPlanFromMessages(agent.state.messages);
+}
+
+/** Same parser, transcript-agnostic (harness lanes pass their own entries). */
+export function extractPlanFromMessages(raw: readonly unknown[]): DecisionPlan | null {
+	const msgs = raw as { role?: string; content?: unknown }[];
 	for (let i = msgs.length - 1; i >= 0; i--) {
 		const m = msgs[i];
 		if (!m || m.role !== "assistant") continue;

@@ -9,6 +9,7 @@ import { createFauxCore, fauxAssistantMessage, fauxText, fauxToolCall } from "@e
 import { createTools } from "../../src/agent/tools/index.js";
 import { createAgent, defaultConvertToLlm, SYSTEM_PROMPT } from "../../src/agent/runtime.js";
 import { runDecision, runDecisionLoop } from "../../src/agent/loop.js";
+import { agentDecisionAgent } from "../../src/agent/decision-agent.js";
 import type { AgentDeps, CommandSink, StateReader } from "../../src/agent/types.js";
 import { emptyTracker, recordAction, recordPhase } from "../../src/agent/decision-context.js";
 import type { WorldSnapshot } from "../../src/game/world-state.js";
@@ -254,7 +255,7 @@ describe("runDecision / runDecisionLoop", () => {
 	it("does NOT append a second copy of the world state (D2/S2)", async () => {
 		const { deps } = fakeDeps();
 		const { agent } = fauxAgent(deps, [fauxAssistantMessage([fauxText("nothing to do")])]);
-		const { state, plan } = await runDecision(agent, deps, { trigger: "start", tracker: emptyTracker() });
+		const { state, plan } = await runDecision(agentDecisionAgent(agent), deps, { trigger: "start", tracker: emptyTracker() });
 		expect(state.date).toBe("1950-03-01");
 		// D2: the world snapshot used to be appended as a `game_observation`
 		// message. It never reached the model (convertToLlm filters it out) and
@@ -273,7 +274,7 @@ describe("runDecision / runDecisionLoop", () => {
 		recordPhase(tracker, "EX hb road #1");
 		recordAction(tracker, { tool: "build_bus_route", ok: true, summary: "sent" });
 
-		await runDecision(agent, deps, { trigger: "phase_change", tracker, gameDay: 90, history: ["earlier"] });
+		await runDecision(agentDecisionAgent(agent), deps, { trigger: "phase_change", tracker, gameDay: 90, history: ["earlier"] });
 
 		// The prompt is the last *user* message (the tail is the model's reply).
 		const msgs = agent.state.messages as { role: string; content: unknown }[];
@@ -301,7 +302,7 @@ describe("runDecision / runDecisionLoop", () => {
 			fauxAssistantMessage("t2"),
 		]);
 		const turns: number[] = [];
-		const res = await runDecisionLoop({ agent, deps, maxTurns: 2, onTurn: (i) => turns.push(i.turn) });
+		const res = await runDecisionLoop({ agent: agentDecisionAgent(agent), deps, maxTurns: 2, onTurn: (i) => turns.push(i.turn) });
 		expect(res.turns).toBe(2);
 		expect(turns).toEqual([1, 2]);
 		expect(res.lastState.date).toBe("1950-03-01");
@@ -319,7 +320,7 @@ describe("structured plan extraction (SPEC §4.2 step 2)", () => {
 				),
 			]),
 		]);
-		const { plan } = await runDecision(agent, deps, { trigger: "interval", tracker: emptyTracker() });
+		const { plan } = await runDecision(agentDecisionAgent(agent), deps, { trigger: "interval", tracker: emptyTracker() });
 		expect(plan).not.toBeNull();
 		expect(plan!.goal).toBe("restore profitability");
 		expect(plan!.plan).toEqual(["add buses"]);
@@ -329,7 +330,7 @@ describe("structured plan extraction (SPEC §4.2 step 2)", () => {
 	it("asks for the structured decision without dictating its content", async () => {
 		const { deps } = fakeDeps();
 		const { agent } = fauxAgent(deps, [fauxAssistantMessage("ok")]);
-		await runDecision(agent, deps, { trigger: "start", tracker: emptyTracker() });
+		await runDecision(agentDecisionAgent(agent), deps, { trigger: "start", tracker: emptyTracker() });
 		const msgs = agent.state.messages as { role: string; content: unknown }[];
 		const user = [...msgs].reverse().find((m) => m.role === "user")!;
 		const text = typeof user.content === "string" ? user.content : JSON.stringify(user.content);
@@ -347,7 +348,7 @@ describe("structured plan extraction (SPEC §4.2 step 2)", () => {
 	it("returns null rather than throwing on a malformed plan", async () => {
 		const { deps } = fakeDeps();
 		const { agent } = fauxAgent(deps, [fauxAssistantMessage([fauxText('{"goal": "unclosed')])]);
-		const { plan } = await runDecision(agent, deps, { trigger: "start", tracker: emptyTracker() });
+		const { plan } = await runDecision(agentDecisionAgent(agent), deps, { trigger: "start", tracker: emptyTracker() });
 		expect(plan).toBeNull();
 	});
 
@@ -356,7 +357,7 @@ describe("structured plan extraction (SPEC §4.2 step 2)", () => {
 		const { agent } = fauxAgent(deps, [
 			fauxAssistantMessage([fauxText('State was {"date":"1950-01-01","totalEvents":3}')]),
 		]);
-		const { plan } = await runDecision(agent, deps, { trigger: "start", tracker: emptyTracker() });
+		const { plan } = await runDecision(agentDecisionAgent(agent), deps, { trigger: "start", tracker: emptyTracker() });
 		expect(plan).toBeNull();
 	});
 });

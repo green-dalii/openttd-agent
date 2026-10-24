@@ -44,7 +44,8 @@
 | 阶段 | 状态 | 事实位置 |
 |---|---|---|
 | **阶段 D：scaffold 成熟化 + 评测面（当前）**：D0 契约/地图 → D1 成绩可见 → D2 单一投影 → D3 反馈成对 → D4 旋钮 → D5 评测面 | ✅ D0–D5 全部完成 | `ROADMAP.md`「当前阶段」；`docs/SCAFFOLD-CONTRACT.md`；SPEC §10.114 |
-| **D6：迁 pi-agent-core `AgentHarness`（下一步）** | 🔵 方案已定、待执行（compact 后接续） | `docs/HARNESS-MIGRATION.md`（CoDesign 唯一权威）+ Issue #12 |
+| **D6a：可回放会话（已合并）** | ✅ 默认关（`AGENT_HARNESS=1` 开启），两条路径请求逐字相同 | SPEC §10.115 |
+| **D6b：真实 payload + usage 台账（下一步）** | 🔵 待做 | `docs/HARNESS-MIGRATION.md` §4 + Issue #12 |
 | R1 执行顺序 / 工具预算 / 披露路径 | ✅ | SPEC §10.75 |
 | R2a 经验 = 带实测读数的观察 + 可被推翻 | ✅ | SPEC §10.76 |
 | R2b 反思走 Agent + 记录工具 | ✅ | SPEC §10.77 |
@@ -73,6 +74,47 @@
 **已核实的事实（避免执行时再猜）**：见 `docs/HARNESS-MIGRATION.md` §3（会话缓存亲和由 harness 自己设、
 `lane.prompt` 只返回操作元数据、harness 忽略 per-tool `executionMode`、`NodeExecutionEnv`
 即 `FileSystem`、`Context` 用 `BACKGROUND_CONTEXT`/`withCancel`）。
+
+### D72（2026-10-24）重构时"提取公共件"必须一次到位：半提取会让文件语法崩掉
+
+**现象**：把 `transformContext` 从 `createAgent({...})` 里提取成独立常量、再给两条
+后端复用时，我先插入新声明、后删旧字段，中间那一刻文件是 `const x = foo({...}),` 这种
+**语法都不成立**的状态；`tsc` 连报 10 个错（`Trailing comma not allowed`、找不到符号），
+其中大部分与真实问题无关，是半成品噪声。若在这时切走（或被 compact 打断），下一个
+session 会看到一堆互相矛盾的错误。
+
+**根因**：编辑顺序按"先加后删"，而两处之间存在**语法耦合**（对象字面量的尾逗号）。
+
+**规则**：① 结构性重构先算清"新旧两处的完整边界"，用**一次替换**完成迁移；
+② 若必须分步，先让**旧处保持合法**（加新声明时旧字段继续存在但指向新变量），
+再单独删；③ 每次 `tsc` 报错超过 3 条且包含语法级错误（TS1005/TS1009）时，
+**先怀疑自己处于半成品态**，不要逐条去"修错误"。
+
+### D73（2026-10-24）`test:live` 是门禁，但它在 main 上一直是红的——因为没人跑它
+
+**现象**：D6a 要跑 `pnpm run test:live` 时，`agent-loop.test.ts` 的 8 条断言里 5 条报
+`ENOTDIR: .../sessions/events.jsonl/meta.json`。**在 `main` 上完全相同地失败**
+（用 worktree 对照验证过）。根因是测试自己的选取逻辑：它把 `<dataDir>/sessions/` 下的
+所有条目按名字倒序取"最新"，而该目录里除了 session 子目录还有 `index.json` 与
+`events.jsonl`（启动早期、session 目录尚未建立时写入的），`"events.jsonl"` 字典序
+**永远排在时间戳 id 之后** ⇒ 它每次都选中一个文件当目录用。
+
+**为什么能烂这么久**：D1–D5 的每一步都用"真机手动跑一局 + 读 metric 行"来验收
+（那套断言确实过了），而 `test:live` 这条**自动化**门禁自 `sessions/events.jsonl`
+出现起就没人再跑——于是 AGENTS §5.1 写在纸上的第 1/3/5 条事实上处于**无人执行**状态。
+这正是 D49「守卫存在 ≠ 守卫在循环里」的第二个实例，只不过这次失守的是**验收门禁本身**。
+
+**规则**：① 每阶段收尾的勾选清单里必须有"跑一次 `pnpm run test:live`"，且**只看它的
+退出码**；② 门禁红时先判断"是我改坏的还是它本来就红"——用 `git worktree add` 在
+`main` 上跑同一条命令，30 秒就能定性，不要凭感觉；③ 测试里凡是从目录"取最新一项"的
+辅助函数，必须按类型（目录）过滤，而不是按名字排序猜。
+
+**修完后的现状**（2026-10-24）：`agent-loop.test.ts` 8/8 绿（两条后端各跑一次）。
+`observation.test.ts` **仍红**（`start_ai CPU -> company economy observed` 15s 超时，
+`main` 上同样红）——已单开 Issue 跟踪，不属 D6a 范围。另一条附带教训：我自己遗留的
+OpenTTD 进程占着 3977/3979，会让 `gameRunIsLive()` 判定"真机局在跑"并**静默跳过**
+13 条 preflight 用例（门禁显示 22 skipped 而不是 9），并让 live 测试抢不到资源而假失败。
+**收尾必须先 `lsof -nP -iTCP:3977 -iTCP:3979` 确认为空**。
 
 ### 0.3 不漂移协议（每阶段收尾必做，长期有效）
 
