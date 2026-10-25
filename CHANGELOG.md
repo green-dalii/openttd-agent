@@ -8,6 +8,14 @@
 > 踩过的坑的复盘（→ `MEMORY.md`；此处只写"改了什么"，不写"我为什么犯错"）。
 
 ## [Unreleased]
+### Docs
+
+- **S7 world-fact design** (`docs/SCAFFOLD-CONTRACT.md` §9): the four remaining
+  observation gaps, each with its data source, the API that still needs live
+  verification, the attribution boundary (OpenTTD has no per-route delivery -
+  only per-town, so a route sharing a town with another cannot be separated), and
+  per-step acceptance. Design only; awaiting three owner decisions.
+
 ### Added
 
 - **Per-run spend caps.** `LLM_TOKEN_LIMIT` / `LLM_COST_LIMIT` (CLI:

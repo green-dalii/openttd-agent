@@ -115,9 +115,9 @@ pgrep -fl "bench.ts|run-experiment|cli/run.ts|llm-stub|OpenTTD.app"
 
 ### 2. 下一步做什么？
 
-**① #13 的 CoDesign（S7 世界事实补洞）——先出方案，等所有者审核再动手**：
-样本外镇名、逐线交付量、融资、未用信号源（`inspect_*` 族 / credit 账本 / GSEvent 推送 /
-`company_expenses`）。它会改变模型看到的东西，必须按"一次只改一类事实 + 前后可比"推进。
+**① #13 的 S7 方案已出，等所有者回答三个问题**：`docs/SCAFFOLD-CONTRACT.md` §9
+（四步 a–d：镇名 → 逐镇交付/按目的地归因 → 融资读数 → 推送族；每步各自验收，
+每步都会改 `scaffoldHash` ⇒ 改动前后不可直接比较）。**审核通过后从 S7a 开始**。
 
 **② 之后**：真实基准一轮（需所有者定模型与预算）→ D6d fork 再评估 → P3 卫生。
 （P4 花费闸已完成，Issue #27 关闭——所以下一步从 S7 开始。）
