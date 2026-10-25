@@ -21,6 +21,7 @@
 | [`STARTUP-AND-LIFECYCLE.md`](STARTUP-AND-LIFECYCLE.md) | **启动门禁**与 Session 生命周期 | preflight 检查项、LLM 可用性探测、CLI 行为、session 生命周期 | 决策循环（→ 循环文档）；协议字节（→ `SPEC.md`） |
 | [`RL-HARNESS-SCOPE-AUDIT.md`](RL-HARNESS-SCOPE-AUDIT.md) | **harness 边界的判据与逐条论证**（J1–J4） | 注入通道清单、违规项与修复、遗留 | 准则条文本身（→ `AGENTS.md` §2 铁律 7）；脚手架现状（→ 契约） |
 | [`ACTION-BUS-CODESIGN.md`](ACTION-BUS-CODESIGN.md) | 动作**如何被表示、分发、观测**（设计） | 动作信封三构件、与 pi-agent-core 的协同 | 模型侧动作面（→ 契约）；已执行结果（→ `SPEC.md`）；剩余计划（→ `ROADMAP.md` 阶段 D6） |
+| [`DASHBOARD-CODESIGN.md`](DASHBOARD-CODESIGN.md) | **整个 Dashboard 是否还是后端的界面**（方案，待审） | 四问（配置/观察/比较/复现）、能力对照表、十条发现、目标信息架构、B1–B6 顺序 | 运行配置的专项诊断（→ `SELECTION-STATE-CODESIGN.md`）；页面视觉规范（→ `DASHBOARD-UI.md`） |
 | [`SELECTION-STATE-CODESIGN.md`](SELECTION-STATE-CODESIGN.md) | **运行配置的「选择」与「真值」如何统一**（方案，待审） | 四份副本的诊断、唯一解析器方案、页面 draft/saved 分离、实施顺序 | 已实现的契约（→ `DASHBOARD-API.md`）；页面视觉规范（→ `DASHBOARD-UI.md`） |
 | [`HARNESS-MIGRATION.md`](HARNESS-MIGRATION.md) | **迁到 pi-agent-core `AgentHarness` 的方案**（做哪些、不做哪些、每步验收与回滚） | 阻抗不匹配与解法、已核实的库事实（带坐标）、风险表 | 脚手架契约（→ `SCAFFOLD-CONTRACT.md`）；进度（→ `ROADMAP.md`） |
 | [`archive/`](archive/) | **历史快照**（已落地或已被取代的评估/审计/开发日记） | 当时的证据与结论 | 任何现状判断——文件顶部有冻结横幅。当前：`MEMORY-DETAIL.md`（A–F 完整叙述）、`CHANGELOG-DEV-DIARY.md`（0.6.0 后的逐 PR 日记） |

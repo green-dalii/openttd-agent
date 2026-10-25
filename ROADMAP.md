@@ -123,6 +123,10 @@ pgrep -fl "bench.ts|run-experiment|cli/run.ts|llm-stub|OpenTTD.app"
 （已复现：保存 `MiniMax-M3.1-Flash` 后 API 仍答旧模型，直到重启；门禁与运行使用两份
 不同的解析）。通过后按 S1→S5 推进，**S1 建议单独先发**。
 
+**①c 整个 Dashboard 的 CoDesign 已出，等三个回答**：`docs/DASHBOARD-CODESIGN.md`
+（能力对照：8 个旋钮/bench/半数 manifest/6 类结果成因没有界面；一次决策的证据被拆成 6 块）。
+通过后与 ①b 一起按 B1→B6 推进（B1 = SELECTION 的 S1）。
+
 **② 之后**：真实基准一轮（需所有者定模型与预算）→ D6d fork 再评估 → P3 卫生。
 （P4 花费闸已完成，Issue #27 关闭——所以下一步从 S7 开始。）
 

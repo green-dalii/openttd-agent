@@ -10,6 +10,16 @@
 ## [Unreleased]
 ### Docs
 
+- **Whole-dashboard CoDesign** (`docs/DASHBOARD-CODESIGN.md`): the backend became a
+  configurable evaluation harness while the dashboard stayed a data mirror. Eight knobs,
+  the entire bench flow, half the manifest and six of ten outcome classes have no UI, and
+  one decision's evidence is split across six blocks. The document defines the four
+  questions a harness dashboard must answer, maps every backend capability to what the UI
+  actually shows, and proposes four destinations with a shippable B1-B6 order. Design only;
+  three owner decisions at the end.
+
+### Docs
+
 - **Selection-state CoDesign** (`docs/SELECTION-STATE-CODESIGN.md`): the run configuration
   currently has four copies (file, process-start snapshot, page state, catalog object) and
   three validators, so the page can show one model while the run uses another. The document
