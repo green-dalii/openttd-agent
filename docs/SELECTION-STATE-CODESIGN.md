@@ -147,7 +147,7 @@ next run → provider minimax-cn / model MiniMax-M3.1-Flash / api anthropic-mess
 
 | 步 | 内容 | 验收（必须全部） |
 |---|---|---|
-| **S1** | 修 A1/A2/A3/A4：视图每次读盘；POST 返回保存后的解析结果；catalog 保存写模型的真实 `api`/ctx/maxTokens；未知模型 400 | curl 复现脚本两行：保存后 GET 立刻是**新值**；未知模型得到 400 + 可读原因；不重启 |
+| **S1** ✅ | 修 A1/A2/A3/A4：视图每次读盘；POST 返回保存后的解析结果；catalog 保存写模型的真实 `api`/ctx/maxTokens；未知模型 400 | curl 复现脚本两行：保存后 GET 立刻是**新值**；未知模型得到 400 + 可读原因；不重启。<br>**已实现并真机验证，事实见 `SPEC.md` §10.117** |
 | **S2** | 引入 `resolveSelection`，四条路径改用它（含 preflight 的 `modelsStore`） | 单测：同一输入下 GET / preflight / runner **三处解析结果逐字段相同**；live-only 模型门禁转绿 |
 | **S3** | 页面 `draft`/`saved` 分离 + 结构化 problems 渲染 | 前端单测（保存→重载仍是新值）；浏览器探针：选未知模型 → 保存被拒且提示可执行；0 控制台 |
 | **S4** | 统一模型列表端点（catalog + custom）+ 快照年代展示 | 真机：刷新成功/401/404 三种都显示对应文案；custom 端点能列模型 |

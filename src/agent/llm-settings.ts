@@ -64,15 +64,33 @@ export function saveLlmSettingsFile(dataDir: string, s: LlmConfig): void {
  */
 export function applyLlmSettingsFile(cfg: Config): Config {
 	const file = loadLlmSettingsFile(cfg.dataDir);
+	/**
+	 * 哪些格子是 env/CLI **明确提供**的。
+	 *
+	 * `cfg.llmProvided` 是权威（Config 造出来的那一刻记下的）；手工构造的 Config
+	 * 没有它时，退回"非空即提供"——只对**没有默认值**的字段成立。`api` /
+	 * `contextWindow` / `maxTokens` 在 env 缺省时会被填成默认值，若按"非空即提供"
+	 * 处理，默认值就会永久遮住文件里的保存结果（这正是 A1/B2）。
+	 */
+	const pinned: Partial<LlmConfig> =
+		cfg.llmProvided ?? {
+			...(cfg.llm.providerId ? { providerId: cfg.llm.providerId } : {}),
+			...(cfg.llm.baseUrl ? { baseUrl: cfg.llm.baseUrl } : {}),
+			...(cfg.llm.apiKey ? { apiKey: cfg.llm.apiKey } : {}),
+			...(cfg.llm.model ? { model: cfg.llm.model } : {}),
+			...(cfg.llm.source ? { source: cfg.llm.source } : {}),
+		};
+
+	// 优先级：env/CLI（显式）> 设置文件（每次重读）> 默认值。
 	const merged: LlmConfig = {
-		providerId: cfg.llm.providerId || file.providerId || "",
-		baseUrl: cfg.llm.baseUrl || file.baseUrl || "",
-		apiKey: cfg.llm.apiKey || file.apiKey || "",
-		model: cfg.llm.model || file.model || "",
-		api: cfg.llm.api || file.api || "openai-completions",
-		source: cfg.llm.source ?? file.source,
-		contextWindow: cfg.llm.contextWindow || file.contextWindow || 128_000,
-		maxTokens: cfg.llm.maxTokens || file.maxTokens || 4096,
+		providerId: pinned.providerId ?? file.providerId ?? "",
+		baseUrl: pinned.baseUrl ?? file.baseUrl ?? "",
+		apiKey: pinned.apiKey ?? file.apiKey ?? "",
+		model: pinned.model ?? file.model ?? "",
+		api: pinned.api ?? file.api ?? "openai-completions",
+		source: pinned.source ?? file.source,
+		contextWindow: pinned.contextWindow ?? file.contextWindow ?? 128_000,
+		maxTokens: pinned.maxTokens ?? file.maxTokens ?? 4096,
 		// D63 的教训：重建对象是丢字段的惯犯。`scaffold` 是 D4 的旋钮，
 		// 这里少拷一次，CLI 的 --thinking/--tool-budget 就会被静默丢掉
 		// （真机实测过一次：传 low/5 却仍按 off/12 跑）。
@@ -83,12 +101,12 @@ export function applyLlmSettingsFile(cfg: Config): Config {
 		...(cfg.llm.limits ? { limits: cfg.llm.limits } : {}),
 	};
 	const envProvided = Boolean(
-		cfg.llm.providerId || cfg.llm.baseUrl || cfg.llm.model || cfg.llm.apiKey,
+		pinned.providerId ?? pinned.baseUrl ?? pinned.model ?? pinned.apiKey,
 	);
 	const fileProvided = Boolean(file.providerId || file.baseUrl || file.model || file.apiKey);
 	const appliedFrom =
 		cfg.llmAppliedFrom ?? (envProvided ? "env" : fileProvided ? "file" : "none");
-	return { ...cfg, llm: merged, llmAppliedFrom: appliedFrom };
+	return { ...cfg, llm: merged, llmAppliedFrom: appliedFrom, llmProvided: pinned };
 }
 
 /** Safe-for-UI view: never returns the raw key. */

@@ -57,15 +57,15 @@ describe("llm dashboard api", () => {
 		}
 	});
 
-	it("saves a catalog selection to llm.json without storing a key there", () => {
+	it("saves a catalog selection to llm.json without storing a key there", async () => {
 		const dir = tmp();
 		try {
 			const api = apiFor(dir);
-			const v = (api.llm.save({
+			const v = (await api.llm.save({
 				source: "catalog",
 				providerId: "deepseek",
-				model: "deepseek-chat",
-			}) ?? {}) as View;
+				model: "deepseek-v4-flash",
+			})) as View;
 
 			expect(v.selection.source).toBe("catalog");
 			expect(v.selection.providerId).toBe("deepseek");
@@ -81,19 +81,19 @@ describe("llm dashboard api", () => {
 		}
 	});
 
-	it("stores a catalog key in credentials.json and reports it immediately", () => {
+	it("stores a catalog key in credentials.json and reports it immediately", async () => {
 		const dir = tmp();
 		try {
 			const api = apiFor(dir);
-			api.llm.save({ source: "catalog", providerId: "deepseek", model: "deepseek-chat" });
+			await api.llm.save({ source: "catalog", providerId: "deepseek", model: "deepseek-v4-flash" });
 			// Save a key, then read back in the SAME tick: this was a real bug
 			// (the async credential write raced the view computation).
-			const v = api.llm.save({
+			const v = (await api.llm.save({
 				source: "catalog",
 				providerId: "deepseek",
-				model: "deepseek-chat",
+				model: "deepseek-v4-flash",
 				apiKey: "sk-stored-123",
-			}) as View;
+			})) as View;
 
 			expect(v.status.hasStoredKey).toBe(true);
 			expect(v.status.source).toBe("stored");
@@ -113,21 +113,21 @@ describe("llm dashboard api", () => {
 		}
 	});
 
-	it("keeps the stored key when saved blank, and clears it on null", () => {
+	it("keeps the stored key when saved blank, and clears it on null", async () => {
 		const dir = tmp();
 		try {
 			const api = apiFor(dir);
-			api.llm.save({ source: "catalog", providerId: "openai", model: "gpt-4", apiKey: "sk-keep" });
+			await api.llm.save({ source: "catalog", providerId: "openai", model: "gpt-4", apiKey: "sk-keep" });
 
-			const blank = api.llm.save({ source: "catalog", providerId: "openai", model: "gpt-4" }) as View;
+			const blank = (await api.llm.save({ source: "catalog", providerId: "openai", model: "gpt-4" })) as View;
 			expect(blank.status.hasStoredKey).toBe(true); // blank = keep
 
-			const cleared = api.llm.save({
+			const cleared = (await api.llm.save({
 				source: "catalog",
 				providerId: "openai",
 				model: "gpt-4",
 				apiKey: null,
-			}) as View;
+			})) as View;
 			expect(cleared.status.hasStoredKey).toBe(false); // null = clear
 			expect(cleared.status.configured).toBe(false);
 		} finally {
@@ -135,17 +135,17 @@ describe("llm dashboard api", () => {
 		}
 	});
 
-	it("detects credentials coming from the environment", () => {
+	it("detects credentials coming from the environment", async () => {
 		const dir = tmp();
 		const prev = process.env.DEEPSEEK_API_KEY;
 		try {
 			process.env.DEEPSEEK_API_KEY = "sk-from-env";
 			const api = apiFor(dir);
-			const v = api.llm.save({
+			const v = (await api.llm.save({
 				source: "catalog",
 				providerId: "deepseek",
-				model: "deepseek-chat",
-			}) as View;
+				model: "deepseek-v4-flash",
+			})) as View;
 			expect(v.status.configured).toBe(true);
 			expect(v.status.source).toBe("env");
 			expect(v.status.envKeys).toContain("DEEPSEEK_API_KEY");
@@ -157,19 +157,19 @@ describe("llm dashboard api", () => {
 		}
 	});
 
-	it("switching catalog -> custom replaces the endpoint and keeps the API valid", () => {
+	it("switching catalog -> custom replaces the endpoint and keeps the API valid", async () => {
 		const dir = tmp();
 		try {
 			const api = apiFor(dir);
-			api.llm.save({ source: "catalog", providerId: "openai", model: "gpt-4" });
-			const v = api.llm.save({
+			await api.llm.save({ source: "catalog", providerId: "openai", model: "gpt-4" });
+			const v = (await api.llm.save({
 				source: "custom",
 				providerId: "local",
 				model: "llama-3",
 				baseUrl: "http://127.0.0.1:8080/v1",
 				api: "openai-completions",
 				apiKey: "sk-local",
-			}) as View;
+			})) as View;
 			expect(v.selection.source).toBe("custom");
 			expect(v.selection.baseUrl).toBe("http://127.0.0.1:8080/v1");
 			expect(v.status.configured).toBe(true);
@@ -179,17 +179,17 @@ describe("llm dashboard api", () => {
 		}
 	});
 
-	it("ignores an unsupported api for custom endpoints", () => {
+	it("ignores an unsupported api for custom endpoints", async () => {
 		const dir = tmp();
 		try {
 			const api = apiFor(dir);
-			const v = api.llm.save({
+			const v = (await api.llm.save({
 				source: "custom",
 				providerId: "x",
 				model: "m",
 				baseUrl: "http://127.0.0.1:9/v1",
 				api: "google-generative-ai",
-			}) as View;
+			})) as View;
 			expect(v.selection.api).toBe("openai-completions"); // fell back, never stored garbage
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
@@ -216,11 +216,11 @@ describe("llm dashboard api", () => {
 		}
 	});
 
-	it("deletes a stored credential via the catalog hook", () => {
+	it("deletes a stored credential via the catalog hook", async () => {
 		const dir = tmp();
 		try {
 			const api = apiFor(dir);
-			api.llm.save({ source: "catalog", providerId: "openai", model: "gpt-4", apiKey: "sk-gone" });
+			await api.llm.save({ source: "catalog", providerId: "openai", model: "gpt-4", apiKey: "sk-gone" });
 			expect(existsSync(credentialsPath(dir))).toBe(true);
 			api.catalog.deleteCredential("openai");
 			const v = api.llm.get() as View;
@@ -230,16 +230,16 @@ describe("llm dashboard api", () => {
 		}
 	});
 
-	it("reports appliedFrom=env when env overrides the saved file", () => {
+	it("reports appliedFrom=env when env overrides the saved file", async () => {
 		const dir = tmp();
 		try {
 			// Save a file selection first...
-			apiFor(dir).llm.save({ source: "catalog", providerId: "openai", model: "gpt-4" });
+			await apiFor(dir).llm.save({ source: "catalog", providerId: "openai", model: "gpt-4" });
 			// ...then start with explicit env that wins over it.
 			const cfg = loadConfig({
 				OPENTTD_DATA_DIR: dir,
 				LLM_PROVIDER: "deepseek",
-				LLM_MODEL: "deepseek-chat",
+				LLM_MODEL: "deepseek-v4-flash",
 			});
 			const api = createLlmApi({ dataDir: dir, cfg, envLlm: cfg.llm });
 			const v = api.llm.get() as View;
@@ -345,5 +345,125 @@ describe("applyLlmSettingsFile 保留 scaffold 旋钮（D4/D63）", () => {
 		};
 		const out = applyLlmSettingsFile(base as never);
 		expect(out.llm.limits).toEqual({ tokens: 5000, cost: null });
+	});
+});
+
+/**
+ * B1（Issue #33）——运行配置只有一个真值。
+ *
+ * 四种形状，全部来自 2026-10-24 的真机复现（docs/SELECTION-STATE-CODESIGN.md §2）:
+ *   A1 视图读启动快照 => 保存后不重启永远是旧值
+ *   A2 POST 返回旧视图  => 调用方只能相信一个假答案
+ *   A3 catalog 保存把 api 钉成上一个模型的 api
+ *   A4 未知模型静默 200 => 直到门禁/运行才失败
+ */
+describe("B1: a save is the truth (no restart, no stale view)", () => {
+	/** Simulate `--serve`: the process merged the file once at boot, then the user edits. */
+	function bootedApi(dir: string) {
+		const boot = applyLlmSettingsFile(loadConfig({ OPENTTD_DATA_DIR: dir }));
+		return createLlmApi({ dataDir: dir, cfg: boot, envLlm: boot.llm });
+	}
+
+	it("GET reflects a save made after boot (A1)", async () => {
+		const dir = tmp();
+		try {
+			saveLlmSettingsFile(dir, {
+				providerId: "minimax-cn",
+				baseUrl: "",
+				apiKey: "",
+				model: "MiniMax-M2.7",
+				api: "anthropic-messages",
+				source: "catalog",
+				contextWindow: 204_800,
+				maxTokens: 131_072,
+			});
+			const api = bootedApi(dir);
+			await api.llm.save({
+				source: "catalog",
+				providerId: "minimax-cn",
+				model: "MiniMax-M2.7-highspeed",
+			});
+			// The same api instance, no restart: what the page asks for must be what
+			// the runner will read. It used to answer "MiniMax-M2.7" forever.
+			expect((api.llm.get() as View).selection.model).toBe("MiniMax-M2.7-highspeed");
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("the POST response is the post-save view, not the pre-save one (A2)", async () => {
+		const dir = tmp();
+		try {
+			const api = bootedApi(dir);
+			const saved = (await api.llm.save({
+				source: "catalog",
+				providerId: "minimax-cn",
+				model: "MiniMax-M2.7",
+			})) as View;
+			expect(saved.selection.providerId).toBe("minimax-cn");
+			expect(saved.selection.model).toBe("MiniMax-M2.7");
+			expect((api.llm.get() as View).selection.model).toBe("MiniMax-M2.7");
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("a catalog save persists the model's own api/contextWindow/maxTokens (A3)", async () => {
+		const dir = tmp();
+		try {
+			// Start from a custom selection whose api is openai-completions: that is
+			// the value the old code copied onto every catalog selection.
+			saveLlmSettingsFile(dir, {
+				providerId: "local",
+				baseUrl: "http://127.0.0.1:1/v1",
+				apiKey: "k",
+				model: "whatever",
+				api: "openai-completions",
+				source: "custom",
+				contextWindow: 4096,
+				maxTokens: 512,
+			});
+			const api = bootedApi(dir);
+			await api.llm.save({ source: "catalog", providerId: "minimax-cn", model: "MiniMax-M2.7" });
+			const file = loadLlmSettingsFile(dir);
+			expect(file.api).toBe("anthropic-messages");
+			expect(file.contextWindow).toBe(204_800);
+			expect(file.maxTokens).toBe(131_072);
+			// And the view reports the model's real numbers, not config defaults.
+			const sel = (api.llm.get() as View).selection as unknown as {
+				api: string;
+				contextWindow: number;
+				maxTokens: number;
+			};
+			expect(sel.api).toBe("anthropic-messages");
+			expect(sel.contextWindow).toBe(204_800);
+			expect(sel.maxTokens).toBe(131_072);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("rejects an unknown catalog model and leaves the file untouched (A4)", async () => {
+		const dir = tmp();
+		try {
+			const api = bootedApi(dir);
+			await api.llm.save({ source: "catalog", providerId: "minimax-cn", model: "MiniMax-M2.7" });
+			const before = readFileSync(settingsPath(dir), "utf8");
+			let caught: unknown;
+			try {
+				await api.llm.save({ source: "catalog", providerId: "minimax-cn", model: "No-Such-Model" });
+			} catch (e) {
+				caught = e;
+			}
+			expect(caught).toBeInstanceOf(Error);
+			const problems = (caught as { problems?: { code: string; hint: string }[] }).problems;
+			expect(problems?.[0]?.code).toBe("unknown_model");
+			// The hint has to be actionable: "refresh the list" is the next step,
+			// "invalid model" is not.
+			expect(problems?.[0]?.hint ?? "").toMatch(/refresh|pick/i);
+			expect(readFileSync(settingsPath(dir), "utf8")).toBe(before);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 });

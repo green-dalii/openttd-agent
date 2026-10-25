@@ -8,6 +8,16 @@
 > 踩过的坑的复盘（→ `MEMORY.md`；此处只写"改了什么"，不写"我为什么犯错"）。
 
 ## [Unreleased]
+### Fixed
+
+- **A saved run configuration is now the one that runs.** `GET /api/llm` re-reads `llm.json` on
+  every call instead of re-merging a snapshot taken at process start, so a save is visible without a
+  restart; the `POST` response is the post-save view; a catalog save stores the model's own
+  `api`/`contextWindow`/`maxTokens` instead of inheriting the previous selection's; and an unknown
+  model is rejected with `400 {error, problems[]}` without touching the file. Restoring a persisted
+  live-model overlay no longer requires a credential, so a model the page listed stays selectable
+  after a restart.
+
 ### Changed
 
 - **Outward-facing text is English from now on**: issues, pull requests, review replies and release

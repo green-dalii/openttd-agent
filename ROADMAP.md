@@ -115,11 +115,10 @@ pgrep -fl "bench.ts|run-experiment|cli/run.ts|llm-stub|OpenTTD.app"
 
 ### 2. 下一步做什么？
 
-**三个 CoDesign 都已获批准（2026-10-24）。执行顺序：B1 → B2 → (B3 ∥ B4) → B5 → B6。**
+**三个 CoDesign 都已获批准（2026-10-24）。B1 已完成（Issue #33 关闭）。执行顺序：B2 → (B3 ∥ B4) → B5 → B6。**
 
 | 步 | 内容（权威文档） | 关键验收 |
 |---|---|---|
-| **B1** | 运行配置真值 = `docs/SELECTION-STATE-CODESIGN.md` 的 **S1**：视图每次**读盘**（不要 `deps.cfg` 快照）、`POST /api/llm` 返回**保存后**的解析结果、catalog 保存写模型**真实**的 `api/contextWindow/maxTokens`、未知模型 **400 且不落盘** | curl 三行：保存 `X` → 立刻 `GET` 得 `X`（**不重启**）；未知模型 400；`llm.json` 里 api 与实际模型一致 |（#33）
 | **B2** | 发起面：`POST /api/run/start` 接受并**校验**运行旋钮（seed/游戏日/场景/记忆臂/thinking/tool budget/token·cost 上限/后端）；Configure 表单 + **next-run 预览**（字段与 manifest 同名） | 从页面用非默认旋钮起一局，`meta.manifest` 与预览**逐字段相同** |（#34）
 | **B3** | Run 页三段化 + **因果时间线**（decision → tools → job/阶段 → 效果，默认最近 20 条） | 一次决策的四段证据同屏、由 `job` 连接 |（#35）
 | **B4** | **Compare 页**：复用 `buildScorecard` + `pairedComparison`；排除按原因计数；样本不足写"不可判定" | 2 模型 × 2 seed 出四轴 + CI/不可判定 |（#36）
@@ -137,8 +136,9 @@ pgrep -fl "bench.ts|run-experiment|cli/run.ts|llm-stub|OpenTTD.app"
 **上一轮的遗留（未完成，别丢）**：
 - **#13 S7 世界事实补洞**：方案在 `docs/SCAFFOLD-CONTRACT.md` §9，等回答三问（归因口径可接受？顺序 a→b→c→d？一次一 PR？）。**排在 B 系列之后**。
 - **AGENT_HARNESS 翻默认**：前提已满足 2/3（live 双绿、跨 seed `payloadShapeHash` 相等）；
-  还差"至少一局真实模型"。**注意**：现在配置的 `MiniMax-M3.1-Flash` 会被**门禁**判死
-  （`probeLlmReal` 未传 `modelsStore`，见 B1/B2 的 A5），所以"真实模型一局"要等 B1。
+  还差"至少一局真实模型"。**注意**：现在配置的 `MiniMax-M3.1-Flash` 仍会被**门禁**判死
+  （`probeLlmReal` 未传 `modelsStore`——A5，属 S2 的范围，B1 未覆盖），
+  所以"真实模型一局"要等 S2 把四条路径并到同一个解析器。
 - **真实基准一轮**（需所有者定模型与预算）→ D6d fork 再评估 → P3 卫生。
 
 **端口占用（踩过两次）**：`dashboard:smoke` 默认在 **8899** 上自起 dashboard；临时
