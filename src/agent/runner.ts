@@ -26,8 +26,14 @@ import type { Config } from "../config.js";
 import { createAgent, SYSTEM_PROMPT, DEFAULT_MAX_TOOL_CALLS_PER_DECISION } from "./runtime.js";
 import { agentDecisionAgent, laneDecisionAgent } from "./decision-agent.js";
 import { readGameVersion } from "../game/version.js";
+
+/**
+ * The digest shape comes from the runtime, never a hand-written copy: adding a
+ * field there must reach the manifest without touching this file (D74).
+ */
+type PayloadDigest = () => ReturnType<HarnessRuntime["getPayloadDigest"]>;
 import { assertCostCapEnforceable, resolveRunLimits } from "./run-budget.js";
-import { createHarnessRuntime, harnessEnabled, HARNESS_LANE_NAME } from "./harness-runtime.js";
+import { createHarnessRuntime, harnessEnabled, HARNESS_LANE_NAME, type HarnessRuntime } from "./harness-runtime.js";
 import { scaffoldHash, type FingerprintableTool } from "./scaffold-fingerprint.js";
 import type { AgentOptions } from "@earendil-works/pi-agent-core";
 import type { Model } from "@earendil-works/pi-ai";
@@ -830,7 +836,10 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 	let decisionAgent: DecisionAgent;
 	let getBudgetBlocks: () => number;
 	/** Harness only (D6b): real payload fingerprint + request count. */
-	let getPayloadDigest: (() => { payloadHash: string | null; payloadCount: number }) | null = null;
+	// Typed from the harness runtime itself: a hand-written copy here would be the
+	// "second projection" trap (D74) one layer up - add a digest field there and
+	// this annotation would silently drop it.
+	let getPayloadDigest: PayloadDigest | null = null;
 	let closeBrain: (() => Promise<void>) | null = null;
 
 	tools = createTools(deps);
@@ -1036,7 +1045,13 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 	// left, so it is reported at the end (and recorded in the manifest).
 	if (getPayloadDigest) {
 		const d = getPayloadDigest();
-		console.log(`[agent] payload: hash=${d.payloadHash ?? "(none)"} requests=${d.payloadCount}`);
+		// Two fingerprints on purpose: `hash` proves "this exact request", `shape`
+		// proves "the same question apart from the world's numbers" - the only one
+		// that can match across seeds.
+		console.log(
+			`[agent] payload: hash=${d.payloadHash ?? "(none)"} shape=${d.payloadShapeHash ?? "(none)"} ` +
+				`requests=${d.payloadCount}`,
+		);
 	}
 
 	// D6a: flush the harness transcript and release the session. Done after the

@@ -274,10 +274,12 @@ describe("payload digest (D6b)", () => {
 		]);
 		const rt = await makeRuntime({ faux, emitPayload: true });
 		try {
-			expect(rt.getPayloadDigest()).toEqual({ payloadHash: null, payloadCount: 0 });
+			expect(rt.getPayloadDigest()).toEqual({ payloadHash: null, payloadShapeHash: null, payloadCount: 0 });
 			await laneDecisionAgent(rt.lane, rt.context).prompt("go");
 			const d = rt.getPayloadDigest();
 			expect(d.payloadHash).toMatch(/^[0-9a-f]{16}$/);
+			// Same payload, numbers normalized: the cross-seed comparable fingerprint.
+			expect(d.payloadShapeHash).toMatch(/^[0-9a-f]{16}$/);
 			// The tool loop made two provider calls; the count is what proves the run
 			// actually talked to the model twice.
 			expect(d.payloadCount).toBe(2);
