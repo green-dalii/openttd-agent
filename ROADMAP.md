@@ -146,7 +146,7 @@ web 81xx-82xx。
 
 ### 4. 最近的交接点（2026-10-24 收工）
 
-- `main` = **`2e0a90e`** + P4（花费闸，PR #28）。
+- `main` = **`4041053`**（P4 花费闸已合并，Issue #27 关闭）。
 - `pnpm run gate` = **1560 passed / 9 skipped**。
 - `LIVE_TESTS=1 vitest --run test/live`：**harness 9/9、裸 Agent 9/9**，跑完端口自动释放。
 - 开放 Issue：#13（世界事实，下一步）、#1（跟踪）。
