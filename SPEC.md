@@ -68,7 +68,11 @@ OpenTTD 有**两个动作面**，能力完全不同：
 
 ---
 
-## 2. 已验证的通信事实（OpenTTD 15.0）
+## 2. 已验证的通信事实（OpenTTD 15.x）
+
+> 首次验证在 **15.0**；2026-10-24 在 **15.3** 上复测了本文件依赖的链路
+> （admin JOIN / 订阅 / GS 消息 / 事件回流：真机多局，`meta.gameVersion=15.3`）。
+> 本机二进制路径与版本见 `ROADMAP.md` 的环境事实。
 
 ### 2.1 Admin Port (TCP)
 - 端口默认 `3977`（`openttd.cfg: server_admin_port`），当前机器已配置
@@ -295,15 +299,13 @@ OpenTTD 有**两个动作面**，能力完全不同：
 
 ## 9. 里程碑（实施顺序）
 
-| 里程碑 | 内容 | 验收 |
-|---|---|---|
-| **M0 环境钉死** | 定位 openttd 二进制；独立 data dir + admin auth 打通；能 `-D -f` 起服务、admin join、rcon pause/save | `pnpm run smoke:env` 绿 |
-| **M1 观测闭环** | AdminClient 订阅 company/date/economy/stats + GS rich state → 规范事件；Web 基础仪表盘能显示现金/年份 | 单测 + 真机 integration 绿；浏览器能看到 live 曲线 |
-| **M2 最小决策闭环** | bridge GS + executor AI v0.1（bus route 施工）；Pi Agent 装配 3 个 tool；能: 观察→LLM 决定→施工→结果回灌 | e2e: 一台 1950 地图跑通第一条 bus route 并开始盈利 |
-| **M3 进化闭环** | 局终结算 + 反思 + lessons 蒸馏 + 注入下局；metrics JSONL + 对比图 | 同 seed 带/不带 lessons 各 3 局可出对比曲线 |
-| **M4 打磨** | 策略库、replay、UI 完善、错误自愈、文档 | 全绿 + SPEC 更新 |
+| 里程碑 | 内容 |
+|---|---|
+| **M0** 环境钉死 · **M1** 观测闭环 · **M2** 最小决策闭环 | 首个可演示闭环 |
+| **M3** 进化闭环 · **M4** 打磨 | 进化与打磨 |
 
-**预计**: M0-M2 为首个可演示闭环（核心价值），M3-M4 为进化与打磨。
+**状态不在这里**：完成情况与下一步的唯一权威是 `ROADMAP.md`（本文件只留顺序与内容，
+避免两张状态表各自漂移——`AGENTS.md` §9.1）。
 
 ---
 
@@ -1146,100 +1148,43 @@ horizon，记忆随局累积；判决打印学习曲线）。m3-verdict 同步�
 + P2-3 功效行。空态自证：n=0 → "only 0 run(s) - a trend needs >= 3"。
 
 
-### 10.115 决策运行时双后端（D6a，2026-10-24）
+### 10.115 决策运行时双后端 + 运行溯源（2026-10-24）
 
-**做了什么**：决策运行时现在有两条**等价**后端 —— 裸 `Agent`（默认）与
-`AgentHarness`（`AGENT_HARNESS=1`，可回放会话）。一局 = 一个 harness session + 一个
-lane；一次决策 = 一次 `lane.prompt()`。方案与不变量见 `docs/HARNESS-MIGRATION.md`。
+**两条等价后端**：裸 `Agent`（默认）与 `AgentHarness`（`AGENT_HARNESS=1`，可回放会话）。
+一次决策 = 一次 `lane.prompt()`。库的接线事实（缓存亲和键 / 消息回读 / 执行顺序 /
+compaction 冲突）在 `docs/HARNESS-MIGRATION.md` §3（带坐标），此处只记**实测**。
 
-**实测：两条后端发出的请求逐字相同**（同一 seed，各 7 个请求）
-- system prompt 1382 字符，**byte-identical**；
-- 工具名单 11 个，**同名同序**；
-- 三个决策请求的提示：数字归一化后**同长同文**（1654 / 1654 / 2685 字符）；
-- token 总量 9374（harness）vs 9352（裸 Agent）= **+0.24%**，工具调用同为 1 次；
-- 触发序列相同：`start` → `event`。
+| 实测（同一 seed，各 7 个请求） | 值 |
+|---|---|
+| system prompt | 1382 字符，**byte-identical** |
+| 工具 | 11 个，同名同序 |
+| 三个决策请求 | 数字归一化后同长同文（1654 / 1654 / 2685） |
+| token 总量 | 9374（harness）vs 9352（裸 Agent）= +0.24%，工具调用同为 1 次 |
+| 触发序列 | `start` → `event` |
 
-**库事实（读源码核实，不是文档措辞）**
-- harness **自己**设置 provider 提示缓存亲和键：`sessionId = <session id>:<lane name>`
-  （`harness/runtime/drive/generation.js`）⇒ 迁移不丢缓存。
-- `lane.prompt()` 只返回操作元数据（`OperationResultRecord`），**不含消息** ⇒
-  plan 必须从 transcript 回读（`findEntries({type:"message", order:"newestFirst"})`）。
-- harness **忽略** per-tool `executionMode`，顺序只由全局 `toolExecution` 决定
-  ⇒ 必须显式设 `"sequential"`（写命令 FIFO，SPEC §10.39.1）。
-- `NodeExecutionEnv` 就是 `FileSystem`（`ExecutionEnv extends FileSystem, Shell`）
-  ⇒ `JsonlSessionRepo` 可直接用它，无需另建文件系统实现。
-- harness 自带的自动 compaction 可与我们的剪枝同时生效，**必须显式关闭**
-  （`compaction.enabled=false`），否则提示词会被两套机制各自裁剪。
-- `models.getModel()` 在每个 checkpoint 都会被调用（即使 compaction 关闭）
-  ⇒ 任何替身 `Models` 必须提供它，否则 harness 抛 `HarnessFault`。
+**manifest 是唯一投影**（`src/agent/manifest.ts`，字段表与投影只此一份）：
+`servedModel` / `backend` / `thinkingLevel` / `toolBudget` / `scaffoldHash` /
+`payloadHash` / `payloadShapeHash` / `payloadCount` / `tokenLimit` / `costLimit`。
 
-**为什么这值得记**：迁移的风险全在"库的接线细节"上——缓存键、消息回读、执行顺序、
-compaction 冲突都不报错，只会让两次运行看到的脚手架悄悄不同，而那正是基准评测的立身之本。
+- `payloadHash`：**第一份**真实 payload（序列化后要发出的 body）前 16 位；
+  `payloadCount` 按尝试计数。真机 `c4a214dc8d0dea46` / 5 次（3 决策 + 1 次重试）。
+  裸 Agent 记 `null`——没有 hook，用源码算出来的数只是主张。
+- `payloadShapeHash`：抹掉所有数值（**包括文本块里的数字串**，本仓库的数值走文本）
+  再哈希 ⇒ **跨 seed 可比**。真机两个 seed：`hash` 不同
+  （`97e9cb35…` / `37217019…`），`shape` 同为 `5bcce03557235e25`。
+- `gameVersion`：`openttd --version` 首行，实测 `15.3`。同 seed 换 build 不是同一个世界。
+- 传输层不再隐形：`retry_scheduled` → `totals.retries`，`fault` → `totals.faults`；
+  注入 503 实测 `retries=1` + 具体消息。
 
-**D6b：真实 payload 指纹与传输层可见性（同一节）**
-- `before_payload` 拿到的是**序列化后真正要发出的 body**，指纹取**第一份** payload
-  （system prompt + 11 个工具 schema + 首个世界投影）——后续请求因历史增长而必然不同。
-  真机：`payloadHash=c4a214dc8d0dea46`、`payloadCount=5`（3 次决策 + 1 次重试）；
-  另一次 2 决策的局是 `1a19e28b06ba2c37` / 3 次请求。
-- `manifest` 增 `payloadHash` / `payloadCount`；**裸 Agent 路径记 `null`**（没有 payload
-  hook，用源码算出来的数只是主张，不是测量）。
-- 传输层不再隐形：`retry_scheduled` → `totals.retries` + `recentRuntimeIssues`，
-  `fault`/`handler_error` → `totals.faults`。真机注入 503：
-  `retries=1`，消息 `attempt 2/4: 503: {"message":"injected 503"}`。
-- **坑（与 D3b 同型）**：manifest 在 `reflect-run.ts` 里是**按字段重建的白名单**，
-  在 `runner.ts` 新增的字段会被静默丢掉（真机第一次抓出：日志有 hash、文件里没有）。
-  已加单测锁住，并在该处写了警告注释。
-- 结论：使用量台账这条**不需要新代码** —— telemetry 已逐条消息记 usage，harness 落盘的
-  usage 条目是同一批数字；再建一条读取路径只会造出两个可能分歧的真源。
+**成本诚实**：自定义端点是**全零价目表**，`costTotal=0` 意味着"没测到"而不是"免费"。
+`costKnown` 与数字**同层**（`usage.costKnown`；放别的层会被字段复制丢掉），
+分数卡排除未定价的局，看板显示 `unknown`。
 
-**D6c：把"可比性"本身记进数据并显示出来（同一节）**
-- manifest 收敛为**一份投影** `src/agent/manifest.ts`（`projectManifest` + `MANIFEST_FIELDS`）。
-  此前它在三处按字段重建（session finalize、`toGameMetric`、reflect-run 入参），
-  新增字段必被其中一处静默丢掉 —— 真机两次：D3b 一次，D6b 的 `payloadHash`
-  只进了 `meta.json`，**没进 `metrics.jsonl`**（即分数卡看不到）。
-- 新增 `manifest.backend`（`agent` | `harness`）。没有它，"两次运行一模一样"是一句
-  无法证伪的话：请求可能相同，但持久化与失败路径不同。
-- 看板接线：Live 的 Cost 组新增 **Wire** KPI（`clean` / `N issue(s)` / **`not measured`**，
-  后者用于裸 Agent 路径——没有数据不等于干净）；Sessions 的对比表新增
-  **Backend / Scaffold / Payload** 三行，用 8 位短哈希，缺失写 `not measured`。
-- 真机：`dashboard:smoke` 0 条控制台（error+warn），图表高度正常。
-
-**D6e：运行溯源与成本诚实（同一节）**
-- 新增 `meta.gameVersion`（取自 `openttd --version` 首行，实测 `OpenTTD 15.3`），
-  同时进度量行。**同一个 seed 在不同 build 上不是同一个世界**，而版本号无法从配置
-  推断（配置只有二进制路径）。
-- 成本不再假装是 0：自定义端点以**全零价格**注册，其 `costTotal=0` 是"没有价目表"
-  而不是"这一局免费"。新增 `brain.costKnown` / `usage.costKnown`，
-  分数卡的效率轴**排除**未定价的局（全部未定价 → `not measured`），
-  看板把 `$0` 显示成 `unknown`。真机：`costKnown=false`、`gameVersion=15.3`。
-- 一个自证的坑：`costKnown` 一开始只放在 telemetry snapshot 的 brain 上，
-  而会话 meta 的 `usage` 是按字段复制的 ⇒ 页面读不到。修法是把旗帜放到**它限定的
-  那个数字旁边**（`usage.costKnown`），而不是放在另一层。
-
-**payloadShapeHash：跨 seed 的可比性（同一节）**
-- `payloadHash` 把数值也算进去，而世界数值本来就随机 ⇒ **不同 seed 必然不同哈希**，
-  "两条后端问了同一个问题" 于是不可检验。新增 `payloadShapeHash`：把每个数值
-  （**包括文本块里的数字串**）抹成占位符后取指纹。
-- 真机：两个 seed 各跑一局 → `hash` 分别 `97e9cb35f0657b5f` / `37217019d72c088a`，
-  **`shape` 都是 `5bcce03557235e25`**。这才是"同一问句、不同世界"的判据。
-- 代价（写明）：只在数字上不同的**脚手架**会被这份哈希视为相同；系统提示词与工具
-  schema 的权威指纹仍是 `scaffoldHash`。
-
-**P4：每次运行的花费闸（同一节）**
-- 旋钮 `LLM_TOKEN_LIMIT` / `LLM_COST_LIMIT`（CLI 同名 `--llm-token-limit` /
-  `--llm-cost-limit`）。非法值**抛错**；进了 `manifest.tokenLimit` / `costLimit`，
-  度量行同步（"为什么停"必须能从行里读出来）。
-- 执行点是**决策边界**（循环顶部 + 决策进行中的定时器）。因此**会超出**：真机
-  `--llm-token-limit 6000` 停在 **9354**（超出 55%，因为一次决策本身就要 ~9k）。
-  这是被记录的偏差，不是被隐藏的偏差。
-- 费用闸的前提是 `costKnown=true`；无价目表却设了费用上限 → **启动即报错**
-  （真机：`LLM_COST_LIMIT: this model has no price table`），因为"静默不执行"
-  会让配置说谎。
-- 停机会得到具名成因 `token_cap` / `cost_cap`，优先级 **人为停止 > 世界冻结 >
-  上限 > 未达 horizon > 结果读数**；达到 horizon 的局**不受**上限影响（成绩有效）。
-- **同一个事实有两个命名器**：`classifyOutcome`（数据）与 `metricExclusion`
-  （报告里的排除原因）。只改前者会让报告继续说 "horizon not reached" ——
-  已一并改成 "token cap reached"。看板列表同样点名。
+**花费闸（P4）**：`LLM_TOKEN_LIMIT` / `LLM_COST_LIMIT`（CLI 同名）。执行点是
+**决策边界**，因此会超出——真机 `6000` 停在 `9354`（一次决策本身约 9k），这是记录的
+偏差而非隐藏的偏差。无价目表却设费用上限 → **启动即报错**（否则配置在说谎）。
+停机得具名成因 `token_cap` / `cost_cap`；优先级 **人为停止 > 世界冻结 > 上限 >
+未达 horizon > 结果读数**，达到 horizon 的局不受上限影响。
 
 ### 10.114 阶段 D：脚手架成熟化 + 评测面（2026-10-23/24）
 

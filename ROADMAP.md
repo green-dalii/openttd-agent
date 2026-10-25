@@ -150,6 +150,9 @@ web 81xx-82xx。
 - `pnpm run gate` = **1560 passed / 9 skipped**。
 - `LIVE_TESTS=1 vitest --run test/live`：**harness 9/9、裸 Agent 9/9**，跑完端口自动释放。
 - 开放 Issue：#13（世界事实，下一步）、#1（跟踪）。
+- **文档已收敛（2026-10-24）**：MEMORY 2081→664、CHANGELOG 1846→495、SPEC 1297→1243；
+  旧的完整叙述进 `docs/archive/`（冻结）；预算与"减法义务"写进 `AGENTS.md` §9.1b，
+  由 `repo-hygiene` 守卫（`pnpm run gate` 会拦超额）。
 - 已完成阶段的实测数字：`SPEC.md` §10.114（D1–D5）+ §10.115（D6）。
 
 ---
