@@ -278,8 +278,11 @@ GET /api/llm
 POST /api/llm
   body { source?, providerId?, model?, api?, baseUrl?, contextWindow?, maxTokens?, apiKey? }
   - apiKey 缺省/空串 => **保持已存密钥**（绝不误清）；显式 null => 清除。
-  - catalog 选择时 baseUrl/api 由目录决定，忽略客户端传入。
-→ 200 同 GET /api/llm 的形状（保存后的视图）
+  - catalog 选择时 baseUrl/api/contextWindow/maxTokens 由**该模型**决定，忽略客户端传入。
+  - catalog 的 model 必须是目录已知（内置快照 ∪ 已持久化的实时覆盖层），否则拒绝。
+→ 200 同 GET /api/llm 的形状（**保存后**的视图：同一进程内立即可见，不需要重启）
+→ 400 { error, problems: [{ code, message, hint }] }，且 **llm.json 不被改写**。
+  code ∈ unknown_provider | unknown_model | …（见 src/agent/problems.ts）
 
 GET /api/llm/catalog
 → 200 { generatedAt: number | null, providers: CatalogProvider[] }

@@ -111,8 +111,11 @@ export interface WebServerOptions {
 	llm?: {
 		/** Safe view (never includes the raw key). */
 		get: () => unknown;
-		/** Validate + persist; returns the new safe view. Throws on bad input. */
-		save: (body: unknown) => unknown;
+		/**
+		 * Validate + persist; returns the new safe view. Throws on bad input.
+		 * May be async: resolving a catalog model can require a store read.
+		 */
+		save: (body: unknown) => unknown | Promise<unknown>;
 	};
 	/** Live agent telemetry snapshot. Absent => 404. */
 	telemetry?: () => unknown;
@@ -589,12 +592,16 @@ export class WebServer {
 			if (req.method === "POST") {
 				const raw = await readBody(req);
 				const parsed: unknown = raw.length ? JSON.parse(raw) : {};
-				json(200, this.llmHooks.save(parsed));
+				json(200, await this.llmHooks.save(parsed));
 				return;
 			}
 			json(405, { error: "method not allowed" });
 		} catch (e) {
-			json(400, { error: e instanceof Error ? e.message : String(e) });
+			// B5 的形状，B1 先用起来：`problems[]` 让页面按 code 渲染，
+			// `error` 保留给"还只会显示一句话"的旧代码。
+			const problems = (e as { problems?: unknown }).problems;
+			const message = e instanceof Error ? e.message : String(e);
+			json(400, Array.isArray(problems) ? { error: message, problems } : { error: message });
 		}
 	}
 }

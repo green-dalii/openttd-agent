@@ -144,3 +144,33 @@ describe("JsonModelsStore", () => {
 		expect(await store.read("p")).toBeUndefined();
 	});
 });
+
+describe("restoring the persisted overlay (B1)", () => {
+	it("works without a credential: a model the page listed must still be saveable", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "live-cat-"));
+		const store = new JsonModelsStore(join(dir, "models-cache.json"));
+		// Simulate a previous successful refresh (the shape pi-ai writes).
+		await store.write(PROVIDER, {
+			models: [
+				{
+					id: "MiniMax-M3.1-Flash",
+					name: "MiniMax-M3.1-Flash",
+					api: "anthropic-messages",
+					provider: PROVIDER,
+					baseUrl: "https://api.minimaxi.com/anthropic",
+					input: ["text"],
+					reasoning: false,
+					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+					contextWindow: 204_800,
+					maxTokens: 131_072,
+				},
+			],
+			checkedAt: Date.now(),
+		} as never);
+		// No credential on purpose: restoring local data must not require auth.
+		const cat = createLiveCatalog({ credentials: creds(false), modelsStore: store });
+		const r = await cat.refresh(PROVIDER, { allowNetwork: false });
+		expect(r.models.map((m) => m.id)).toContain("MiniMax-M3.1-Flash");
+		expect(r.models.find((m) => m.id === "MiniMax-M3.1-Flash")?.api).toBe("anthropic-messages");
+	});
+});

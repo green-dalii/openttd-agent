@@ -26,8 +26,10 @@ import {
 	isCatalogProvider,
 	listCatalogProvidersWithStatus,
 } from "./provider-catalog.js";
+import type { CatalogModel } from "./provider-types.js";
 import { FileCredentialStore } from "./file-credential-store.js";
 import { createLiveCatalog } from "./live-catalog.js";
+import { ProblemError } from "./problems.js";
 import { JsonModelsStore, modelsCachePath } from "./models-store.js";
 import type { CatalogHooks, WebServerOptions } from "../web/server.js";
 
@@ -130,7 +132,18 @@ export function createLlmApi(deps: LlmApiDeps): LlmApi {
 		};
 	}
 
-	function save(body: unknown): unknown {
+	/**
+	 * 目录里这个模型**真实**的 api / ctx / maxTokens。
+	 *
+	 * 先恢复持久化覆盖层（`allowNetwork:false`，不联网）：页面刷新过的 live-only 模型
+	 * 在重启后仍然必须被接受，否则"列表里有、保存却说没有"就是新的两个真值。
+	 */
+	async function resolveCatalogModel(providerId: string, model: string): Promise<CatalogModel | undefined> {
+		await liveCatalog.refresh(providerId, { allowNetwork: false }).catch(() => undefined);
+		return liveCatalog.models(providerId).find((m) => m.id === model);
+	}
+
+	async function save(body: unknown): Promise<unknown> {
 		const b = (body ?? {}) as Record<string, unknown>;
 		const cur = applyLlmSettingsFile(deps.cfg).llm;
 		const source: "catalog" | "custom" =
@@ -139,14 +152,46 @@ export function createLlmApi(deps: LlmApiDeps): LlmApi {
 
 		const providerId = str(b.providerId, cur.providerId);
 		const model = str(b.model, cur.model);
-		const apiCandidate = str(b.api, cur.api);
-		const api =
-			source === "custom" && CUSTOM_LLM_APIS.includes(apiCandidate as (typeof CUSTOM_LLM_APIS)[number])
+		const baseUrl = source === "custom" ? str(b.baseUrl, cur.baseUrl) : "";
+		let api: string;
+		let contextWindow: number;
+		let maxTokens: number;
+		if (source === "catalog") {
+			// A3: api/ctx/maxTokens **来自模型对象**，不来自上一个选择。
+			// 旧代码写成 `source === "custom" ? apiCandidate : cur.api`，于是从
+			// custom 切到 catalog 时把 openai-completions 钉在了 anthropic 模型上。
+			if (!isCatalogProvider(providerId)) {
+				throw new ProblemError([
+					{
+						code: "unknown_provider",
+						message: `unknown provider "${providerId}"`,
+						hint: "pick a provider from the bundled catalog, or use a custom endpoint",
+					},
+				]);
+			}
+			const found = await resolveCatalogModel(providerId, model);
+			if (!found) {
+				// A4: 保存成功必须等于"下一局能用"。旧代码让未知模型 200 落盘，
+				// 直到门禁/运行时才失败——那时页面早已把假答案显示给用户。
+				throw new ProblemError([
+					{
+						code: "unknown_model",
+						message: `unknown model "${model}" for provider "${providerId}"`,
+						hint: "refresh the model list on the Providers page, then pick a model from it",
+					},
+				]);
+			}
+			api = found.api;
+			contextWindow = found.contextWindow;
+			maxTokens = found.maxTokens;
+		} else {
+			const apiCandidate = str(b.api, cur.api);
+			api = CUSTOM_LLM_APIS.includes(apiCandidate as (typeof CUSTOM_LLM_APIS)[number])
 				? apiCandidate
 				: cur.api;
-		const baseUrl = source === "custom" ? str(b.baseUrl, cur.baseUrl) : "";
-		const contextWindow = typeof b.contextWindow === "number" ? b.contextWindow : cur.contextWindow;
-		const maxTokens = typeof b.maxTokens === "number" ? b.maxTokens : cur.maxTokens;
+			contextWindow = typeof b.contextWindow === "number" ? b.contextWindow : cur.contextWindow;
+			maxTokens = typeof b.maxTokens === "number" ? b.maxTokens : cur.maxTokens;
+		}
 
 		// Key semantics (contract §3.1): absent/blank keeps, explicit null clears.
 		const cleared = b.apiKey === null;

@@ -42,6 +42,15 @@ export interface Config {
 	 * 合并处知道每一格从哪里来，别处猜不出来；猜出来的结论就会撒谎。
 	 */
 	llmAppliedFrom?: "env" | "file" | "none";
+	/**
+	 * B1：`llm` 里**由 env/CLI 明确提供**的字段（不是默认值、不是文件值）。
+	 *
+	 * 为什么需要它：`applyLlmSettingsFile` 必须**每次重新读盘**，否则保存后不重启
+	 * 永远看到启动快照（A1）。但"重新读盘"不能把 env 覆盖也一起丢掉——而合并之后的
+	 * `llm` 已经分不出哪一格来自 env。所以在造 Config 的那一刻记下来，
+	 * 由 `applyLlmSettingsFile` 原样携带（不重算、不猜）。
+	 */
+	llmProvided?: Partial<LlmConfig>;
 }
 
 /** LLM provider configuration (OpenAI-compatible by default). */
@@ -145,6 +154,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
 	if (!dims) throw new ConfigError(`OPENTTD_MAP_SIZE: unknown "${mapSize}" (small|medium|large)`);
 	const companyName = env.OPENTTD_COMPANY_NAME?.trim() || "openttd-agent";
 	const llm = loadLlmConfig(env);
+	const llmProvided = providedLlmFields(env);
 
 	return {
 		openttdBinary: binary,
@@ -160,6 +170,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
 		mapSizeY: dims[1],
 		companyName,
 		llm,
+		...(Object.keys(llmProvided).length ? { llmProvided } : {}),
 	};
 }
 
@@ -168,6 +179,37 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
  * key (OPENAI_API_KEY etc.) works without renaming. Empty base/model = not
  * configured (the agent falls back to the offline faux provider for demos).
  */
+/**
+ * Which `llm` fields did the environment (or CLI-as-env) actually provide?
+ *
+ * 只认**显式给出**的键：`LLM_CONTEXT_WINDOW` 没设时那 128000 是默认值，不是选择，
+ * 让它去和文件争会把保存过的 204800 又顶回默认（A1 的同型 bug）。
+ */
+export function providedLlmFields(env: NodeJS.ProcessEnv): Partial<LlmConfig> {
+	const out: Partial<LlmConfig> = {};
+	const set = <K extends keyof LlmConfig>(k: K, v: LlmConfig[K] | undefined): void => {
+		if (v !== undefined) out[k] = v;
+	};
+	const trim = (v: string | undefined): string | undefined => {
+		const t = v?.trim();
+		return t ? t : undefined;
+	};
+	set("providerId", trim(env.LLM_PROVIDER));
+	set("baseUrl", trim(env.LLM_BASE_URL));
+	set("apiKey", trim(env.LLM_API_KEY ?? env.OPENAI_API_KEY ?? env.ANTHROPIC_API_KEY));
+	set("model", trim(env.LLM_MODEL));
+	set("api", trim(env.LLM_API));
+	const src = trim(env.LLM_SOURCE);
+	if (src === "catalog" || src === "custom") out.source = src;
+	if (trim(env.LLM_CONTEXT_WINDOW) !== undefined) {
+		out.contextWindow = intEnv(env, "LLM_CONTEXT_WINDOW", 128_000, { min: 1024, max: 10_000_000 }, "LLM context window");
+	}
+	if (trim(env.LLM_MAX_TOKENS) !== undefined) {
+		out.maxTokens = intEnv(env, "LLM_MAX_TOKENS", 4096, { min: 16, max: 1_000_000 }, "LLM max tokens");
+	}
+	return out;
+}
+
 export function loadLlmConfig(env: NodeJS.ProcessEnv): LlmConfig {
 	const apiRaw = (env.LLM_API ?? "openai-completions").trim();
 	if (!CUSTOM_LLM_APIS.includes(apiRaw as (typeof CUSTOM_LLM_APIS)[number])) {

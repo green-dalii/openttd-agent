@@ -200,11 +200,17 @@ export function createLiveCatalog(opts: LiveCatalogOptions = {}): LiveCatalog {
 			}
 			// pi-ai silently skips providers it cannot authenticate; asking first turns
 			// "the list is still old" into an explanation the page can show.
-			const auth = await registry.getAuth(providerId).catch(() => undefined);
-			if (!auth) {
-				const error = `no credential configured for "${providerId}" (an unauthenticated refresh is skipped by the provider layer)`;
-				lastError.set(providerId, error);
-				return { models: models(providerId), error, fetchedAt: lastOk.get(providerId) ?? null };
+			//
+			// **但只在真要联网时问**：`allowNetwork:false` 是"从本地存储恢复覆盖层"，
+			// 它不需要凭据。在这里用 auth 当闸门，会让"刷新过的 live-only 模型"
+			// 在重启后（或凭据被清掉后）突然变成"未知模型"——保存被拒，而列表里明明有它。
+			if (refreshOpts.allowNetwork !== false) {
+				const auth = await registry.getAuth(providerId).catch(() => undefined);
+				if (!auth) {
+					const error = `no credential configured for "${providerId}" (an unauthenticated refresh is skipped by the provider layer)`;
+					lastError.set(providerId, error);
+					return { models: models(providerId), error, fetchedAt: lastOk.get(providerId) ?? null };
+				}
 			}
 			const result = await registry.refresh({
 				providers: [providerId],

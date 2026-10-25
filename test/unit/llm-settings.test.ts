@@ -15,6 +15,7 @@ import {
 	toSettingsView,
 } from "../../src/agent/llm-settings.js";
 import { buildProvider, redactKey } from "../../src/agent/provider.js";
+import { loadConfig } from "../../src/config.js";
 import type { Config, LlmConfig } from "../../src/config.js";
 
 function tmp(): string {
@@ -259,5 +260,84 @@ describe("resolveLlmSource: 全新安装应落在内置目录,而不是自定义
 
 	it("只给了内置 providerId(旧配置无 source) -> catalog", () => {
 		expect(resolveLlmSource({ providerId: "deepseek" } as never)).toBe("catalog");
+	});
+});
+
+/**
+ * B1（Issue #33）——合并必须**每次重新读盘**。
+ *
+ * 旧的 `cfg.llm.x || file.x` 让"启动时合并进 cfg 的文件值"在后续合并里赢过文件，
+ * 于是 Providers 页保存后 GET 一直是旧值（真机复现见 docs/SELECTION-STATE-CODESIGN.md §2）。
+ * 修法是记住"哪些格子是 env/CLI 提供的"，而不是记住"合并结果"。
+ */
+describe("applyLlmSettingsFile: 每次重新读盘（B1）", () => {
+	function write(dir: string, model: string): void {
+		saveLlmSettingsFile(dir, {
+			providerId: "minimax-cn",
+			baseUrl: "",
+			apiKey: "",
+			model,
+			api: "anthropic-messages",
+			source: "catalog",
+			contextWindow: 204_800,
+			maxTokens: 131_072,
+		});
+	}
+
+	it("file-derived values are re-read on every merge", () => {
+		const dir = tmp();
+		try {
+			write(dir, "MiniMax-M2.7");
+			const boot = applyLlmSettingsFile(loadConfig({ OPENTTD_DATA_DIR: dir }));
+			expect(boot.llm.model).toBe("MiniMax-M2.7");
+			write(dir, "MiniMax-M2.7-highspeed");
+			// Same boot snapshot, new file contents: the file wins because nothing in
+			// the env asked for a model.
+			const again = applyLlmSettingsFile(boot);
+			expect(again.llm.model).toBe("MiniMax-M2.7-highspeed");
+			expect(again.llm.contextWindow).toBe(204_800);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("env-provided values still win across repeated merges", () => {
+		const dir = tmp();
+		try {
+			write(dir, "MiniMax-M2.7");
+			const boot = applyLlmSettingsFile(loadConfig({ OPENTTD_DATA_DIR: dir, LLM_MODEL: "from-env" }));
+			expect(boot.llm.model).toBe("from-env");
+			write(dir, "MiniMax-M2.7-highspeed");
+			expect(applyLlmSettingsFile(boot).llm.model).toBe("from-env");
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("config defaults do not shadow a saved contextWindow/maxTokens", () => {
+		const dir = tmp();
+		try {
+			write(dir, "MiniMax-M2.7");
+			const boot = applyLlmSettingsFile(loadConfig({ OPENTTD_DATA_DIR: dir }));
+			// 128000/4096 are defaults, not env choices: they must not win over the file.
+			expect(boot.llm.contextWindow).toBe(204_800);
+			expect(boot.llm.maxTokens).toBe(131_072);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("LLM_CONTEXT_WINDOW still overrides the file when explicitly set", () => {
+		const dir = tmp();
+		try {
+			write(dir, "MiniMax-M2.7");
+			const boot = applyLlmSettingsFile(
+				loadConfig({ OPENTTD_DATA_DIR: dir, LLM_CONTEXT_WINDOW: "64000" }),
+			);
+			expect(boot.llm.contextWindow).toBe(64_000);
+			expect(boot.llm.maxTokens).toBe(131_072);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 });
