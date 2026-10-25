@@ -12,7 +12,7 @@
 
 import { describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 const ROOT = process.cwd();
@@ -261,6 +261,45 @@ describe("文档正交性守卫（§9.1a）", () => {
 			ids.length,
 			`SPEC §10 有 ${ids.length} 条（上限 ${SPEC_MAX_ENTRIES}）：新增一条就要合并或删掉一条旧的`,
 		).toBeLessThanOrEqual(SPEC_MAX_ENTRIES);
+	});
+
+	it("每份主文档都在行数预算内（AGENTS §9.1b）", () => {
+		// 膨胀的机制是"默认只增不减"：预算把默认改掉，超出时 gate 直接拦。
+		const BUDGETS: Record<string, number> = {
+			"AGENTS.md": 340,
+			"SPEC.md": 1300,
+			"ROADMAP.md": 200,
+			"CHANGELOG.md": 650,
+			"MEMORY.md": 750,
+			"README.md": 260,
+			"README.zh-CN.md": 260,
+		};
+		const over: string[] = [];
+		for (const [file, max] of Object.entries(BUDGETS)) {
+			const lines = readFileSync(join(ROOT, file), "utf8").split("\n").length;
+			if (lines > max) over.push(`${file}: ${lines}/${max}`);
+		}
+		expect(over, `以下文档超出预算（见 AGENTS.md §9.1b）：${over.join(", ")}`).toEqual([]);
+	});
+
+	it("docs/ 单篇不超 600 行，且归档文件都有冻结横幅", () => {
+		const dir = join(ROOT, "docs");
+		const files = readdirSync(dir).filter((f) => f.endsWith(".md"));
+		const big = files
+			.map((f) => ({ f, n: readFileSync(join(dir, f), "utf8").split("\n").length }))
+			.filter((x) => x.n > 600)
+			.map((x) => `${x.f}: ${x.n}`);
+		expect(big, `docs/ 单篇上限 600 行：${big.join(", ")}`).toEqual([]);
+
+		const archiveDir = join(dir, "archive");
+		if (!existsSync(archiveDir)) return;
+		const banners = readdirSync(archiveDir)
+			.filter((f) => f.endsWith(".md"))
+			.map((f) => ({ f, text: readFileSync(join(archiveDir, f), "utf8") }));
+		const missing = banners
+			.filter((b) => !/冻结|归档|Frozen|archive/i.test(b.text.slice(0, 800)))
+			.map((b) => b.f);
+		expect(missing, `归档文件缺冻结横幅/归档理由：${missing.join(", ")}`).toEqual([]);
 	});
 
 	it("ROADMAP 只留未完成：无历史章节，且在行数预算内", () => {
