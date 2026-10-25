@@ -164,10 +164,10 @@ next run → provider minimax-cn / model MiniMax-M3.1-Flash / api anthropic-mess
 
 ---
 
-## 7. 需要所有者决定
+## 7. 已决定（2026-10-24，所有者批准）
 
-1. **保存即校验**（未知模型 400、不落盘）是否接受？替代方案是"允许保存、运行时再拒绝"，
-   但那正是今天"保存成功但不能用"的来源。
-2. **S1 是否单独先发**（只修 bug，不动页面结构）？我建议是：它立刻让"改模型"可用。
-3. 运行配置预览要显示到多细？建议：model / api / context / price known / thinking / tool budget /
-   scaffold 前 8 位——与 manifest 同名，多一个字段就要能在度量行里找到。
+| 问题 | 决定 |
+|---|---|
+| 保存即校验（未知模型 400、不落盘） | **接受**。替代方案（保存成功但运行时拒绝）正是本次 bug 的来源 |
+| S1 是否先单独发 | **先发 S1**：只修 bug（视图读盘 / 返回真值 / 写真实 api·ctx / 未知模型 400），不动页面结构 |
+| next-run 预览的字段 | 采纳建议：`model / api / context / price known / thinking / tool budget / scaffold 前 8 位`；**新增字段必须能在 manifest 里找到同名项** |

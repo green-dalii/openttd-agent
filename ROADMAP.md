@@ -115,29 +115,31 @@ pgrep -fl "bench.ts|run-experiment|cli/run.ts|llm-stub|OpenTTD.app"
 
 ### 2. 下一步做什么？
 
-**① #13 的 S7 方案已出，等所有者回答三个问题**：`docs/SCAFFOLD-CONTRACT.md` §9
-（四步 a–d：镇名 → 逐镇交付/按目的地归因 → 融资读数 → 推送族；每步各自验收，
-每步都会改 `scaffoldHash` ⇒ 改动前后不可直接比较）。**审核通过后从 S7a 开始**。
+**三个 CoDesign 都已获批准（2026-10-24）。执行顺序：B1 → B2 → (B3 ∥ B4) → B5 → B6。**
 
-**①b 运行配置真值 CoDesign 已出，等三个回答**：`docs/SELECTION-STATE-CODESIGN.md`
-（已复现：保存 `MiniMax-M3.1-Flash` 后 API 仍答旧模型，直到重启；门禁与运行使用两份
-不同的解析）。通过后按 S1→S5 推进，**S1 建议单独先发**。
+| 步 | 内容（权威文档） | 关键验收 |
+|---|---|---|
+| **B1** | 运行配置真值 = `docs/SELECTION-STATE-CODESIGN.md` 的 **S1**：视图每次**读盘**（不要 `deps.cfg` 快照）、`POST /api/llm` 返回**保存后**的解析结果、catalog 保存写模型**真实**的 `api/contextWindow/maxTokens`、未知模型 **400 且不落盘** | curl 三行：保存 `X` → 立刻 `GET` 得 `X`（**不重启**）；未知模型 400；`llm.json` 里 api 与实际模型一致 |
+| **B2** | 发起面：`POST /api/run/start` 接受并**校验**运行旋钮（seed/游戏日/场景/记忆臂/thinking/tool budget/token·cost 上限/后端）；Configure 表单 + **next-run 预览**（字段与 manifest 同名） | 从页面用非默认旋钮起一局，`meta.manifest` 与预览**逐字段相同** |
+| **B3** | Run 页三段化 + **因果时间线**（decision → tools → job/阶段 → 效果，默认最近 20 条） | 一次决策的四段证据同屏、由 `job` 连接 |
+| **B4** | **Compare 页**：复用 `buildScorecard` + `pairedComparison`；排除按原因计数；样本不足写"不可判定" | 2 模型 × 2 seed 出四轴 + CI/不可判定 |
+| **B5** | 结果词表**全 10 类** + 结构化错误 `{code,message,hint}`（删掉前端正则猜语义） | 10 类成因都能在 UI 出现；401/404/无凭据各有 code |
+| **B6** | History 补 manifest 全字段 + 按模型/seed/后端分组；Evolution 并入 History 的 "Memory" 分区 | 任一局可自查"同世界/同脚手架/是否被闸" |
 
-**①c 整个 Dashboard 的 CoDesign 已出，等三个回答**：`docs/DASHBOARD-CODESIGN.md`
-（能力对照：8 个旋钮/bench/半数 manifest/6 类结果成因没有界面；一次决策的证据被拆成 6 块）。
-通过后与 ①b 一起按 B1→B6 推进（B1 = SELECTION 的 S1）。
+**已批准的三条决定**（细节见两份 CoDesign 的 §7）：
+① 导航按四问重排（Run / Compare / History / Configure）；
+② 基准可从看板发起，但必须有"预计局数 / 预计花费（无价目表写 unknown）/ 逐格确认"；
+③ 因果时间线默认最近 20 条、按需加载。
 
-**② 之后**：真实基准一轮（需所有者定模型与预算）→ D6d fork 再评估 → P3 卫生。
-（P4 花费闸已完成，Issue #27 关闭——所以下一步从 S7 开始。）
-
-**AGENT_HARNESS 翻默认**（独立小改动，等所有者拍板）：三个前提里已有两个——
-live 双绿（✅）、跨 seed 的 `payloadShapeHash` 相等（✅ 真机：两 seed 的 shape 均为
-`5bcce03557235e25`）。**还差"至少一局真实模型"**（目前只有 stub）。
+**上一轮的遗留（未完成，别丢）**：
+- **#13 S7 世界事实补洞**：方案在 `docs/SCAFFOLD-CONTRACT.md` §9，等回答三问（归因口径可接受？顺序 a→b→c→d？一次一 PR？）。**排在 B 系列之后**。
+- **AGENT_HARNESS 翻默认**：前提已满足 2/3（live 双绿、跨 seed `payloadShapeHash` 相等）；
+  还差"至少一局真实模型"。**注意**：现在配置的 `MiniMax-M3.1-Flash` 会被**门禁**判死
+  （`probeLlmReal` 未传 `modelsStore`，见 B1/B2 的 A5），所以"真实模型一局"要等 B1。
+- **真实基准一轮**（需所有者定模型与预算）→ D6d fork 再评估 → P3 卫生。
 
 **端口占用（踩过两次）**：`dashboard:smoke` 默认在 **8899** 上自起 dashboard；临时
-stub/服务别占 8899，否则 smoke 会拒绝启动（脚本现在会显式报 "port already serving something"，
-以前是静默连上别人的服务然后挂住 15 分钟）。真机实验固定用 admin 3991 / game 3993 /
-web 81xx-82xx。
+stub/服务别占 8899。真机实验固定用 admin 3991 / game 3993 / web 81xx–82xx。
 
 **三条不得违反的不变量**：harness 默认关（`AGENT_HARNESS=0`）；harness compaction 必须关；
 完成=§5.1 八条真机断言全绿（单测绿不算）。
@@ -151,17 +153,26 @@ web 81xx-82xx。
 - 真机隔离模板：`OPENTTD_DATA_DIR=/tmp/pXX`、admin `3991`、game `3993`、`--web-port 8198`。
 - 无 CI workflow：本地 gate + PR 人工审核即门禁；**每阶段走分支 + PR**（用户 2026-10-23 要求）。
 - 一次性脚本一律放 `.scratch/` 并**用完删除**。
+- **当前 dashboard（2026-10-24 收工）**：`pnpm exec tsx src/cli/run.ts --serve --web-port 8187`
+  在后台跑，数据目录 `/tmp/openttd-agent-data`；模型选择 = `minimax-cn / MiniMax-M3.1-Flash`
+  （实时刷新到的模型，`llm.json` 里已写入）。**它现在会被门禁判死**（A5：`probeLlmReal` 缺
+  `modelsStore`）——这正是 B1/B2 要修的，修完才用它跑"至少一局真实模型"。
+- `models-cache.json` 里已有 `minimax-cn` 的 6 个实时模型覆盖层（`checkedAt` 2026-10-25）；
+  目录快照本身是 **2026-09-04** 的（`SPEC.md` §10.116）。
 
 ### 4. 最近的交接点（2026-10-24 收工）
 
-- `main` = **`4041053`**（P4 花费闸已合并，Issue #27 关闭）。
-- `pnpm run gate` = **1560 passed / 9 skipped**。
+- `main` = **`b27c4d0`** + 本提交（P4 / payloadShapeHash / 文档收敛 / Provider 刷新 /
+  两份 CoDesign 均已合并）。
+- `pnpm run gate` = **1602 passed / 9 skipped**。
 - `LIVE_TESTS=1 vitest --run test/live`：**harness 9/9、裸 Agent 9/9**，跑完端口自动释放。
 - 开放 Issue：#13（世界事实，下一步）、#1（跟踪）。
 - **文档已收敛（2026-10-24）**：MEMORY 2081→664、CHANGELOG 1846→495、SPEC 1297→1243；
   旧的完整叙述进 `docs/archive/`（冻结）；预算与"减法义务"写进 `AGENTS.md` §9.1b，
   由 `repo-hygiene` 守卫（`pnpm run gate` 会拦超额）。
-- 已完成阶段的实测数字：`SPEC.md` §10.114（D1–D5）+ §10.115（D6）。
+- 已完成阶段的实测数字：`SPEC.md` §10.114（D1–D5）+ §10.115（D6）+ §10.116（模型目录）。
+- **Dashboard 现状**：Live 2030 行模板 / 20 区块 / 14 KPI；无 Compare 页、无 bench 端点、
+  无旋钮入口（诊断与目标结构见 `docs/DASHBOARD-CODESIGN.md`）。
 
 ---
 

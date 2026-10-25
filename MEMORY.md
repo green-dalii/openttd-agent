@@ -50,7 +50,8 @@
 | **D6a：可回放会话（已合并）** | ✅ 默认关（`AGENT_HARNESS=1` 开启），两条路径请求逐字相同 | SPEC §10.115 |
 | **D6b：真实 payload + 传输层可见性** | ✅ `payloadHash`/`payloadCount` 进 manifest；`retries`/`faults` 进 telemetry | SPEC §10.115 |
 | **D6 收尾 + #22 + 溯源/成本诚实** | ✅ live 双后端 9/9；`gameVersion`、`costKnown`、manifest 单一投影 | SPEC §10.115 |
-| **P4：用量/费用上限（下一步）** | 🔵 计划已定，Issue #27 | `ROADMAP.md`「接续」§2 |
+| **P4：用量/费用上限** | ✅ 已合并（Issue #27 关闭） | SPEC §10.115 |
+| **Dashboard 全面 CoDesign** | ✅ 已批准（三问已答），执行从 **B1** 开始 | `docs/DASHBOARD-CODESIGN.md` §7 |
 | R1 执行顺序 / 工具预算 / 披露路径 | ✅ | SPEC §10.75 |
 | R2a 经验 = 带实测读数的观察 + 可被推翻 | ✅ | SPEC §10.76 |
 | R2b 反思走 Agent + 记录工具 | ✅ | SPEC §10.77 |
