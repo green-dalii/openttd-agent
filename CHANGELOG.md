@@ -8,6 +8,13 @@
 > 踩过的坑的复盘（→ `MEMORY.md`；此处只写"改了什么"，不写"我为什么犯错"）。
 
 ## [Unreleased]
+### Changed
+
+- **Outward-facing text is English from now on**: issues, pull requests, review replies and release
+  notes (`AGENTS.md` §8.1). Repository documents and code comments stay Chinese - that is the working
+  language of this repo, not the public face. The six dashboard issues created in this session were
+  rewritten the same day, and the open S7 comment was too.
+
 ### Docs
 
 - **Whole-dashboard CoDesign** (`docs/DASHBOARD-CODESIGN.md`): the backend became a

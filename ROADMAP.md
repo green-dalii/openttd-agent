@@ -119,12 +119,15 @@ pgrep -fl "bench.ts|run-experiment|cli/run.ts|llm-stub|OpenTTD.app"
 
 | 步 | 内容（权威文档） | 关键验收 |
 |---|---|---|
-| **B1** | 运行配置真值 = `docs/SELECTION-STATE-CODESIGN.md` 的 **S1**：视图每次**读盘**（不要 `deps.cfg` 快照）、`POST /api/llm` 返回**保存后**的解析结果、catalog 保存写模型**真实**的 `api/contextWindow/maxTokens`、未知模型 **400 且不落盘** | curl 三行：保存 `X` → 立刻 `GET` 得 `X`（**不重启**）；未知模型 400；`llm.json` 里 api 与实际模型一致 |
-| **B2** | 发起面：`POST /api/run/start` 接受并**校验**运行旋钮（seed/游戏日/场景/记忆臂/thinking/tool budget/token·cost 上限/后端）；Configure 表单 + **next-run 预览**（字段与 manifest 同名） | 从页面用非默认旋钮起一局，`meta.manifest` 与预览**逐字段相同** |
-| **B3** | Run 页三段化 + **因果时间线**（decision → tools → job/阶段 → 效果，默认最近 20 条） | 一次决策的四段证据同屏、由 `job` 连接 |
-| **B4** | **Compare 页**：复用 `buildScorecard` + `pairedComparison`；排除按原因计数；样本不足写"不可判定" | 2 模型 × 2 seed 出四轴 + CI/不可判定 |
-| **B5** | 结果词表**全 10 类** + 结构化错误 `{code,message,hint}`（删掉前端正则猜语义） | 10 类成因都能在 UI 出现；401/404/无凭据各有 code |
-| **B6** | History 补 manifest 全字段 + 按模型/seed/后端分组；Evolution 并入 History 的 "Memory" 分区 | 任一局可自查"同世界/同脚手架/是否被闸" |
+| **B1** | 运行配置真值 = `docs/SELECTION-STATE-CODESIGN.md` 的 **S1**：视图每次**读盘**（不要 `deps.cfg` 快照）、`POST /api/llm` 返回**保存后**的解析结果、catalog 保存写模型**真实**的 `api/contextWindow/maxTokens`、未知模型 **400 且不落盘** | curl 三行：保存 `X` → 立刻 `GET` 得 `X`（**不重启**）；未知模型 400；`llm.json` 里 api 与实际模型一致 |（#33）
+| **B2** | 发起面：`POST /api/run/start` 接受并**校验**运行旋钮（seed/游戏日/场景/记忆臂/thinking/tool budget/token·cost 上限/后端）；Configure 表单 + **next-run 预览**（字段与 manifest 同名） | 从页面用非默认旋钮起一局，`meta.manifest` 与预览**逐字段相同** |（#34）
+| **B3** | Run 页三段化 + **因果时间线**（decision → tools → job/阶段 → 效果，默认最近 20 条） | 一次决策的四段证据同屏、由 `job` 连接 |（#35）
+| **B4** | **Compare 页**：复用 `buildScorecard` + `pairedComparison`；排除按原因计数；样本不足写"不可判定" | 2 模型 × 2 seed 出四轴 + CI/不可判定 |（#36）
+| **B5** | 结果词表**全 10 类** + 结构化错误 `{code,message,hint}`（删掉前端正则猜语义） | 10 类成因都能在 UI 出现；401/404/无凭据各有 code |（#37）
+| **B6** | History 补 manifest 全字段 + 按模型/seed/后端分组；Evolution 并入 History 的 "Memory" 分区 | 任一局可自查"同世界/同脚手架/是否被闸" |（#38）
+
+**跟踪**：总 Issue **#32**（B1–B6 清单），每步各自一个 Issue（下面就标注）；PR 内 `Closes #N`。
+**语言**：对外载体（Issue/PR/评审回复）**一律英文**（`AGENTS.md` §8.1）；仓库文档仍是中文。
 
 **已批准的三条决定**（细节见两份 CoDesign 的 §7）：
 ① 导航按四问重排（Run / Compare / History / Configure）；

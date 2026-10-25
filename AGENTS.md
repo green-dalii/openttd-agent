@@ -199,15 +199,24 @@ scripts/       # dev 辅助 (loop-health, run-experiment, dashboard-smoke, sync/
 
 **一次逻辑变更 = 一个 commit。**
 
-**提交信息（subject 与 body）一律用英文。** 理由与边界：
-- 本项目是**国际化开源项目**（`README.md` 英文为主、`README.zh-CN.md` 为镜像），
-  提交历史是**公开的第一印象**；中英混排会让 `git log` 难以被国际读者检索与阅读。
-- 提交信息描述的是**代码变更**，而代码库里的文档/注释/规格（`SPEC.md`/`ROADMAP.md`/
-  `MEMORY.md`/源码注释）**按现状是中文**——这是两件事，不要互相"对齐"：
-  **commit = 英文，仓库内文档与注释 = 中文**。
+**提交信息（subject 与 body）一律用英文**：本项目是国际化开源项目，提交历史是公开的第一印象。
+**commit/Issue/PR = 英文，仓库内文档与注释 = 中文**——两件事，不要互相"对齐"（见 §8.1）。
 - 写错了就 `git commit --amend`；**未 push 的一整段历史语言写错，用 rebase 改写**（改完必须
   核对 `git diff <old-head> HEAD` 为空、tree 对象一致，确认只改了信息没改内容）。
 
+### 8.1 对外可见的一切都用英文（Issue / PR / 评审回复 / Release notes）
+
+英文：commit subject+body、**Issue**（标题/正文/新评论）、**PR**（标题/正文/评审回复）、
+Release notes、Discussion 与任何对外公告。
+中文（不"顺便翻译"）：`SPEC.md` / `ROADMAP.md` / `MEMORY.md` / `CHANGELOG.md` / `AGENTS.md` /
+`docs/**` 与源码注释——它们是协作者的内部工作语言；`README.md` / `README.zh-CN.md` 的双语镜像
+是既有例外（§9）。
+
+**追溯义务**：规则生效时仍 **open** 的 Issue/PR 语言不符就地改写（`gh issue edit`）；已关闭的
+作为历史保留，不批量翻译。中文只用于与项目所有者私下对话，不写进任何公开载体。
+
+> 2026-10-24：B1–B6 六个 Issue 首次用中文创建，同日全部改写为英文——本条的由来是"发现即修"，
+> 不是"以后注意"。
 
 已提交但**仍属同一次工作**的修正（写错、写漏、补充说明）→ **`git commit --amend`**，
 不要追加 `fix:` / `correct:` / `docs: 补充…` 之类的补丁 commit。
