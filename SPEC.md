@@ -1216,6 +1216,22 @@ compaction 冲突都不报错，只会让两次运行看到的脚手架悄悄不
   而会话 meta 的 `usage` 是按字段复制的 ⇒ 页面读不到。修法是把旗帜放到**它限定的
   那个数字旁边**（`usage.costKnown`），而不是放在另一层。
 
+**P4：每次运行的花费闸（同一节）**
+- 旋钮 `LLM_TOKEN_LIMIT` / `LLM_COST_LIMIT`（CLI 同名 `--llm-token-limit` /
+  `--llm-cost-limit`）。非法值**抛错**；进了 `manifest.tokenLimit` / `costLimit`，
+  度量行同步（"为什么停"必须能从行里读出来）。
+- 执行点是**决策边界**（循环顶部 + 决策进行中的定时器）。因此**会超出**：真机
+  `--llm-token-limit 6000` 停在 **9354**（超出 55%，因为一次决策本身就要 ~9k）。
+  这是被记录的偏差，不是被隐藏的偏差。
+- 费用闸的前提是 `costKnown=true`；无价目表却设了费用上限 → **启动即报错**
+  （真机：`LLM_COST_LIMIT: this model has no price table`），因为"静默不执行"
+  会让配置说谎。
+- 停机会得到具名成因 `token_cap` / `cost_cap`，优先级 **人为停止 > 世界冻结 >
+  上限 > 未达 horizon > 结果读数**；达到 horizon 的局**不受**上限影响（成绩有效）。
+- **同一个事实有两个命名器**：`classifyOutcome`（数据）与 `metricExclusion`
+  （报告里的排除原因）。只改前者会让报告继续说 "horizon not reached" ——
+  已一并改成 "token cap reached"。看板列表同样点名。
+
 ### 10.114 阶段 D：脚手架成熟化 + 评测面（2026-10-23/24）
 
 > 契约（模型看到什么/能做什么/动作后得到什么、两种模式的分界）见

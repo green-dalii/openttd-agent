@@ -9,6 +9,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { resolveScaffoldKnobs } from "./agent/scaffold-knobs.js";
+import { resolveRunLimits, type RunLimits } from "./agent/run-budget.js";
 
 export class ConfigError extends Error {
 	constructor(message: string) {
@@ -67,6 +68,11 @@ export interface LlmConfig {
 	maxTokens: number;
 	/** D4/S6: run-shape knobs (validated; see scaffold-knobs.ts). */
 	scaffold?: { thinkingLevel: import("./agent/scaffold-knobs.js").ThinkingLevelName; toolBudget: number };
+	/**
+	 * P4: spend caps (validated; see run-budget.ts). Parsed here so the CLI
+	 * overrides, the settings file and the dry-run view all see the same values.
+	 */
+	limits?: RunLimits;
 }
 
 /** Which provider path is in use. */
@@ -187,5 +193,6 @@ export function loadLlmConfig(env: NodeJS.ProcessEnv): LlmConfig {
 		// D4/S6: the two knobs that used to be hard-coded. Resolved (and
 		// validated) in one place; unknown values throw instead of falling back.
 		scaffold: resolveScaffoldKnobs(env as Record<string, string | undefined>),
+		limits: resolveRunLimits(env as Record<string, string | undefined>),
 	};
 }

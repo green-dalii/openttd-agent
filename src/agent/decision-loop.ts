@@ -40,6 +40,7 @@ import type { ExecutorFact, RouteContextFact } from "./decision-context.js";
 import { projectScore, type ScoreFact } from "./score.js";
 import type { FreezeController } from "./freeze.js";
 import type { Episode } from "./episode.js";
+import { budgetStop, type BudgetStop, type RunLimits } from "./run-budget.js";
 
 /* eslint-disable no-console -- intentional runtime logging */
 
@@ -64,6 +65,13 @@ export interface DecisionLoopCtx {
 		 * back to the legacy wall-clock deadline.
 		 */
 		episode?: Episode;
+		/**
+		 * Spend caps (P4): enforced at DECISION BOUNDARIES. One decision may
+		 * overshoot by its own usage (measured 3-9k tokens) - stated, not hidden.
+		 */
+		limits?: RunLimits;
+		/** Whether the model has a price table; a cost cap cannot fire without one. */
+		costKnown?: boolean;
 	};
 	isStopRequested(): boolean;
 	/** Ask the run to stop (used by the horizon watcher, G1). */
@@ -157,6 +165,24 @@ export function createDecisionLoop(ctx: DecisionLoopCtx): DecisionLoop {
 		ctx.scheduler.request("phase_change");
 	}
 
+	/**
+	 * Has this run spent past a cap? Reads the same predicate the result
+	 * classification uses, so "why it stopped" cannot drift from "did it stop".
+	 */
+	function spendStop(): BudgetStop | null {
+		const usage = ctx.telemetry.snapshot().usage.total;
+		return budgetStop(ctx.opts.limits, usage, ctx.opts.costKnown !== false);
+	}
+
+	function describeSpendStop(stop: BudgetStop | null): string {
+		if (!stop) return "";
+		const u = ctx.telemetry.snapshot().usage.total;
+		const limits = ctx.opts.limits;
+		return stop === "token_cap"
+			? `token cap reached (${u.totalTokens} >= ${limits?.tokens})`
+			: `cost cap reached (${u.costTotal} >= ${limits?.cost})`;
+	}
+
 	function handleNotable(summary: string): void {
 		recordEvent(tracker, summary);
 		ctx.scheduler.request("event");
@@ -177,6 +203,13 @@ export function createDecisionLoop(ctx: DecisionLoopCtx): DecisionLoop {
 			// G1: the episode clock decides. The wall-clock cap is an engineering
 			// bound, so when it fires we say plainly that the simulated horizon was
 			// NOT reached - a stalled world must not read as a finished episode.
+			const spend = spendStop();
+			if (spend) {
+				// Spending wins over the horizon check: there is no point asking for
+				// another decision the budget cannot pay for.
+				console.log(`[agent] ${describeSpendStop(spend)} - stopping`);
+				break;
+			}
 			const epState = episode ? episode.check({ gameDay: ctx.gameDay(), nowMs: ctx.now() }) : null;
 			if (epState?.stopReason === "horizon") {
 				console.log(`[agent] episode horizon reached (${epState.simulatedDays} game days) - stopping`);
@@ -225,11 +258,19 @@ export function createDecisionLoop(ctx: DecisionLoopCtx): DecisionLoop {
 			// not only between decisions. Without this the episode overshot its
 			// horizon by a whole decision (measured: horizon 25 -> 30 simulated
 			// days), reintroducing exactly the variable opportunity G1 removes.
-			const horizonWatch = episode
+			// Same reasoning for spend: a decision can cost thousands of tokens, so
+			// the cap must be watched WHILE it runs, not only between decisions.
+			const horizonWatch = episode || ctx.opts.limits
 				? setInterval(() => {
-						const st = episode.check({ gameDay: ctx.gameDay(), nowMs: ctx.now() });
-						if (st.stopReason === "horizon") {
-							console.log(`[agent] episode horizon reached (${st.simulatedDays} game days) - stopping`);
+						const st = spendStop();
+						if (st) {
+							console.log(`[agent] ${describeSpendStop(st)} - stopping`);
+							ctx.requestStop();
+							return;
+						}
+						const ep = episode ? episode.check({ gameDay: ctx.gameDay(), nowMs: ctx.now() }) : null;
+						if (ep && ep.stopReason === "horizon") {
+							console.log(`[agent] episode horizon reached (${ep && ep.simulatedDays} game days) - stopping`);
 							ctx.requestStop();
 						}
 					}, decisionTickMs)

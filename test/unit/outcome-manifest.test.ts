@@ -9,6 +9,7 @@
 
 import { describe, expect, it } from "vitest";
 import { classifyOutcome } from "../../src/evolution/outcome.js";
+import { metricExclusion } from "../../src/evolution/metrics.js";
 import { scaffoldHash } from "../../src/agent/scaffold-fingerprint.js";
 import { resolveScaffoldKnobs } from "../../src/agent/scaffold-knobs.js";
 
@@ -25,6 +26,53 @@ function row(over: Record<string, unknown> = {}) {
 		...over,
 	} as never;
 }
+
+describe("报告里的排除原因也点名上限（P4 验收：单列，不并进 horizon）", () => {
+	it("token 上限 → \"token cap reached\"", () => {
+		const row = { reachedHorizon: false, llmKind: "real", status: "aborted", deliveredRun: 0, totalTokens: 9354, manifest: { tokenLimit: 6000 } };
+		expect(metricExclusion(row as never)).toBe("token cap reached");
+	});
+
+	it("没有上限时仍是 \"horizon not reached\"（行为不变）", () => {
+		const row = { reachedHorizon: false, llmKind: "real", status: "aborted", deliveredRun: 0, totalTokens: 9354, manifest: {} };
+		expect(metricExclusion(row as never)).toBe("horizon not reached");
+	});
+});
+
+describe("classifyOutcome：花超了也是具名成因（P4 / #27）", () => {
+	const capped = (over: Record<string, unknown> = {}) =>
+		row({ deliveredRun: 0, reachedHorizon: false, totalTokens: 12_000, costTotal: 0, ...over });
+
+	it("token 到上限 → token_cap（不是 wall_clock_cap）", () => {
+		// A capped run did not reach the horizon, but "the clock ran out" would be
+		// a false reason: the clock was fine, the budget was not.
+		expect(classifyOutcome(capped({ manifest: { tokenLimit: 12_000, costLimit: null } }))).toBe("token_cap");
+	});
+
+	it("费用到上限 → cost_cap，但只在有价目表时", () => {
+		expect(
+			classifyOutcome(capped({ totalTokens: 10, costTotal: 3, costKnown: true, manifest: { tokenLimit: null, costLimit: 3 } })),
+		).toBe("cost_cap");
+		// Unpriced: cost 0 proves nothing, so the cap cannot be the named reason.
+		expect(
+			classifyOutcome(capped({ totalTokens: 10, costTotal: 0, costKnown: false, manifest: { tokenLimit: null, costLimit: 3 } })),
+		).toBe("wall_clock_cap");
+	});
+
+	it("达到 horizon 的局不受上限影响（成绩有效）", () => {
+		expect(
+			classifyOutcome(row({ deliveredRun: 5, reachedHorizon: true, totalTokens: 10 ** 6, manifest: { tokenLimit: 100 } })),
+		).toBe("delivered");
+	});
+
+	it("人为停止仍然优先于上限", () => {
+		expect(classifyOutcome(capped({ blockedByPause: true, manifest: { tokenLimit: 1 } }))).toBe("paused_by_agent");
+	});
+
+	it("没设上限时行为不变", () => {
+		expect(classifyOutcome(capped({ totalTokens: 10 ** 6 }))).toBe("wall_clock_cap");
+	});
+});
 
 describe("classifyOutcome（0 分也要有成因）", () => {
 	it("交付了东西 → delivered", () => {

@@ -248,7 +248,7 @@
             ? ` (${U.fmtInt(t.toolFailures)} failed)` : "";
           return `${U.fmtMoney(o.money)} · ${U.fmtInt(o.vehicles)} veh · ${U.fmtInt(o.stations)} stn · ` +
             `${U.fmtInt(t.decisions)} decisions · ${U.fmtInt(t.toolCalls)} tools${fail} · ` +
-            `${U.fmtTok(u.totalTokens)} tok · ${U.fmtCost(u.costTotal)}`;
+            `${U.fmtTok(u.totalTokens)} tok · ${U.fmtCostKnown(u.costTotal, u.costKnown)}`;
         },
 
         /** Events matching the search box, newest first, capped for the DOM. */

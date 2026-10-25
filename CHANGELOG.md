@@ -10,6 +10,25 @@
 ## [Unreleased]
 ### Added
 
+- **Per-run spend caps.** `LLM_TOKEN_LIMIT` / `LLM_COST_LIMIT` (CLI:
+  `--llm-token-limit` / `--llm-cost-limit`) stop a run at a decision boundary once
+  the reading reaches the cap. Illegal values throw instead of falling back, the
+  caps land in the run manifest (so "why did it stop" is readable from the row),
+  and the stop reason becomes a named outcome class (`token_cap` / `cost_cap`)
+  that the report and the sessions list both show instead of "horizon not reached".
+  A cost cap on a model without a price table **refuses to start**: the cap could
+  never fire, and silently running uncapped while the config says otherwise would
+  corrupt the benchmark's budget claim.
+- **The cap is a checkpoint, not a meter.** It is checked at decision boundaries, so
+  a decision may overshoot by its own usage - measured on a real run: a 6000-token
+  cap stopped at 9354 because one decision costs ~9k. This is stated in the docs
+  rather than engineered away.
+- **The dashboard no longer prints `$0` for an unpriced run** anywhere: header
+  total, session row, run detail, token card and per-turn cost all read `unknown`
+  (the header also refuses to present a partial sum as the total).
+
+### Added
+
 - **Runs record which OpenTTD build produced their world** (`meta.gameVersion`,
   also on the metric row), read from the binary's `--version` line. The same seed
   on a different build is not the same world, and nothing else in the record can

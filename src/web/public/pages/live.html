@@ -694,7 +694,7 @@
                 <span class="step-title" x-text="s.kind === 'tool' ? (s.tool + ' — ' + (s.summary || '')) : (s.model || 'assistant')"></span>
                 <span class="dim" x-show="s.durationMs !== undefined" x-text="$fmt.duration(s.durationMs)"></span>
                 <span class="dim" x-show="s.usage"
-                      x-text="s.usage ? $fmt.tok(s.usage.totalTokens) + ' tok · ' + $fmt.cost(s.usage.costTotal) : ''"></span>
+                      x-text="s.usage ? $fmt.tok(s.usage.totalTokens) + ' tok · ' + $fmt.costKnown(s.usage.costTotal, s.usage.costKnown) : ''"></span>
               </div>
               <template x-if="s.thinking">
                 <details class="think"><summary>reasoning</summary><pre x-text="s.thinking"></pre></details>

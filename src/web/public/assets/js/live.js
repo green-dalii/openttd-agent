@@ -489,8 +489,9 @@
           if (!rows.length) return "";
           const isCost = this.tokenMetric === "cost";
           const total = rows.reduce((a, r) => a + Number(this.rawTurnTotal(r.turn, isCost)), 0);
+          const costKnown = this.telemetry && this.telemetry.brain ? this.telemetry.brain.costKnown : undefined;
           return isCost
-            ? `${U.fmtCost(total)} across ${rows.length} turns`
+            ? `${U.fmtCostKnown(total, costKnown)} across ${rows.length} turns`
             : `${rows.length} turn${rows.length === 1 ? "" : "s"} · ${U.fmtTok(total)} total`;
         },
         /** Raw per-turn value for the summary line. */

@@ -27,7 +27,8 @@
         <span class="val" x-text="totals().successRate === null ? '—' : $fmt.pct(totals().successRate, 0)"
               :title="successTitle()">…</span></div>
       <div class="item"><span class="lbl">Tokens</span><span class="val" x-text="$fmt.tok(totals().tokens)">…</span></div>
-      <div class="item"><span class="lbl">Spend</span><span class="val" x-text="$fmt.cost(totals().cost)">…</span></div>
+      <div class="item"><span class="lbl">Spend</span>
+        <span class="val" x-text="$fmt.costKnown(totals().cost, totals().costKnown)">…</span></div>
     </div>
   </header>
 
@@ -137,7 +138,7 @@
               <div class="kpi-hint" x-text="`${$fmt.int(metaOutcome().stations)} stations`"></div></div>
             <div class="kpi"><div class="kpi-label">Tokens</div>
               <div class="kpi-value" x-text="$fmt.tok(metaUsage().totalTokens)"></div>
-              <div class="kpi-hint" x-text="$fmt.cost(metaUsage().costTotal)"></div></div>
+              <div class="kpi-hint" x-text="$fmt.costKnown(metaUsage().costTotal, metaUsage().costKnown)"></div></div>
             <div class="kpi"><div class="kpi-label">Tool failures</div>
               <div class="kpi-value" x-text="$fmt.int(metaTotals().toolFailures)"></div>
               <div class="kpi-hint" x-text="`${$fmt.int(metaTotals().toolCalls)} calls`"></div></div>
@@ -250,7 +251,7 @@
               <span class="step-title" x-text="stepTitle(s)"></span>
               <span class="dim" x-show="s.durationMs !== undefined" x-text="$fmt.duration(s.durationMs)"></span>
               <span class="dim" x-show="s.usage"
-                    x-text="s.usage ? `${$fmt.tok(s.usage.totalTokens)} tok · ${$fmt.cost(s.usage.costTotal)}` : ''"></span>
+                    x-text="s.usage ? `${$fmt.tok(s.usage.totalTokens)} tok · ${$fmt.costKnown(s.usage.costTotal, s.usage.costKnown)}` : ''"></span>
             </div>
             <template x-if="s.thinking">
               <details class="think" open><summary>reasoning</summary><pre x-text="s.thinking"></pre></details>

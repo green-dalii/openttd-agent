@@ -70,6 +70,10 @@ interface CliArgs {
 	thinking?: string;
 	/** D4/S6: per-decision tool-call budget. */
 	toolBudget?: number;
+	/** P4: stop the run after this many tokens (env LLM_TOKEN_LIMIT). */
+	llmTokenLimit?: number;
+	/** P4: stop the run after this much spend (env LLM_COST_LIMIT). */
+	llmCostLimit?: string;
 	/** Explicitly allow the scripted (non-LLM) demo brain in agent mode. */
 	offlineDemo?: boolean;
 	/** Seed the agent with cross-game memory. Default: on (self-evolution). */
@@ -86,6 +90,8 @@ export function parseArgs(argv: string[]): CliArgs {
 	let llmProvider: string | undefined;
 	let thinking: string | undefined;
 	let toolBudget: number | undefined;
+	let llmTokenLimit: number | undefined;
+	let llmCostLimit: string | undefined;
 	let timeoutMs = 15_000;
 	let aiName: string | undefined;
 	let webPort: number | undefined;
@@ -180,6 +186,14 @@ export function parseArgs(argv: string[]): CliArgs {
 			case "--tool-budget":
 				toolBudget = parseIntNum(argv[++i], "--tool-budget");
 				break;
+			case "--llm-token-limit":
+				llmTokenLimit = parseIntNum(argv[++i], "--llm-token-limit");
+				break;
+			case "--llm-cost-limit":
+				// Kept as text: resolveRunLimits validates (and rejects 0 / junk)
+				// so the rule lives in one place.
+				llmCostLimit = argv[++i];
+				break;
 			case "--offline-demo":
 				offlineDemo = true;
 				break;
@@ -229,7 +243,8 @@ export function parseArgs(argv: string[]): CliArgs {
 		// written, because the change was checked with `tsc` instead of the guard.
 		// Run test/unit/cli-v02.test.ts after touching any flag, not tsc.
 		mode, year, seed, timeoutMs, aiName, webPort, demoSeconds, gameDays, scenario, addVehicles, shrinkTo, retireJob, secondRoute, freeze, probeGsBuy, probeGsRoute,
-		llmBaseUrl, llmApiKey, llmModel, llmApi, llmProvider, thinking, toolBudget, offlineDemo, skipPreflight,
+		llmBaseUrl, llmApiKey, llmModel, llmApi, llmProvider, thinking, toolBudget, llmTokenLimit, llmCostLimit,
+		offlineDemo, skipPreflight,
 		injectMemory,
 	};
 }
@@ -275,6 +290,9 @@ Usage:
   --llm-provider P   agent: provider id (pi-ai catalog, e.g. openai)
   --thinking L       agent: thinking level off|minimal|low|medium|high|xhigh|max (default off)
   --tool-budget N    agent: tool calls allowed per decision (default 12)
+  --llm-token-limit N  agent: stop the run once total tokens reach N (default none)
+  --llm-cost-limit C   agent: stop the run once spend reaches C (default none;
+                       requires a model with a price table)
   --version, -V      print the version and exit
   --help             this help
 
@@ -314,6 +332,9 @@ async function main(): Promise<number> {
 	if (args.llmProvider !== undefined) overrides.LLM_PROVIDER = args.llmProvider;
 	if (args.thinking !== undefined) overrides.LLM_THINKING = args.thinking;
 	if (args.toolBudget !== undefined) overrides.LLM_TOOL_BUDGET = String(args.toolBudget);
+	// P4: spend caps (resolveRunLimits validates in the runner).
+	if (args.llmTokenLimit !== undefined) overrides.LLM_TOKEN_LIMIT = String(args.llmTokenLimit);
+	if (args.llmCostLimit !== undefined) overrides.LLM_COST_LIMIT = args.llmCostLimit;
 	const cfg = applyLlmSettingsFile(loadConfig({ ...process.env, ...overrides }));
 
 	if (args.mode === "dry-run") {

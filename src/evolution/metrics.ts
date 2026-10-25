@@ -22,6 +22,7 @@
 
 import type { SessionMeta } from "../agent/session-store.js";
 import { projectManifest, type RunManifest } from "../agent/manifest.js";
+import { classifyOutcome } from "./outcome.js";
 
 /** Injectable subset for tests and callers that do not have the store handy. */
 export interface SessionMetaLike {
@@ -788,6 +789,10 @@ export type MetricExclusion =
 	| "demo (not a real LLM)"
 	| "interrupted"
 	| "horizon not reached"
+	// Spend caps (P4): a run that was stopped early is not a failed attempt, and
+	// the dashboard counts exclusion reasons separately (D56).
+	| "token cap reached"
+	| "cost cap reached"
 	| "outcome not measured";
 
 export function metricExclusion(m: GameMetric | null | undefined): MetricExclusion | null {
@@ -798,7 +803,14 @@ export function metricExclusion(m: GameMetric | null | undefined): MetricExclusi
 	if (m.worldFrozen === true) return "world frozen";
 	if (m.llmKind === "faux") return "demo (not a real LLM)";
 	if (m.status === "interrupted") return "interrupted";
-	if (m.reachedHorizon === false) return "horizon not reached";
+	if (m.reachedHorizon === false) {
+		// Name the actual stop reason: "horizon not reached" is true but useless
+		// when a declared cap ended the run. Same predicate as the loop (D74).
+		const outcome = classifyOutcome(m);
+		if (outcome === "token_cap") return "token cap reached";
+		if (outcome === "cost_cap") return "cost cap reached";
+		return "horizon not reached";
+	}
 	if (m.deliveredRun === null || m.deliveredRun === undefined) return "outcome not measured";
 	return null;
 }
