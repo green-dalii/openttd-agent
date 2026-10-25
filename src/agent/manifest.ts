@@ -28,6 +28,12 @@ export interface RunManifest {
 	scaffoldHash: string | null;
 	/** Fingerprint of the FIRST provider payload actually serialized (harness only). */
 	payloadHash: string | null;
+	/**
+	 * Shape of that FIRST payload with every number normalized away (harness only).
+	 * The raw hash cannot match across seeds - the world's numbers are random - so
+	 * this is the only field that can answer "did two runs ask the same question".
+	 */
+	payloadShapeHash: string | null;
 	/** Provider requests attempted (a retried request counts once per attempt). */
 	payloadCount: number | null;
 	/**
@@ -54,6 +60,7 @@ export function projectManifest(src: Partial<RunManifest> | null | undefined): R
 		toolBudget: src?.toolBudget ?? null,
 		scaffoldHash: src?.scaffoldHash ?? null,
 		payloadHash: src?.payloadHash ?? null,
+		payloadShapeHash: src?.payloadShapeHash ?? null,
 		payloadCount: src?.payloadCount ?? null,
 		tokenLimit: src?.tokenLimit ?? null,
 		costLimit: src?.costLimit ?? null,
@@ -68,6 +75,7 @@ export const MANIFEST_FIELDS = [
 	"toolBudget",
 	"scaffoldHash",
 	"payloadHash",
+	"payloadShapeHash",
 	"payloadCount",
 	"tokenLimit",
 	"costLimit",

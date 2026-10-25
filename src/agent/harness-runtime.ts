@@ -28,6 +28,7 @@ import type { TSchema } from "typebox";
 import type { ActionResult } from "./types.js";
 import { createHash } from "node:crypto";
 import { ToolBudget } from "./tool-budget.js";
+import { payloadShapeHash as payloadShapeHashOf } from "./payload-shape.js";
 import { stableStringify } from "./scaffold-fingerprint.js";
 import { toHarnessTools } from "./harness-tools.js";
 import { harnessEventToAgentEvents, type AgentEventLike } from "./harness-events.js";
@@ -79,7 +80,15 @@ export interface HarnessRuntime {
 	 * Fingerprint of the FIRST request body actually serialized (D6b), and how
 	 * many requests were made. Null until the first request leaves.
 	 */
-	getPayloadDigest(): { payloadHash: string | null; payloadCount: number };
+	getPayloadDigest(): {
+		payloadHash: string | null;
+		/**
+		 * Same fingerprint with every number normalized away: comparable across
+		 * seeds (payloadHash is not, because the world's numbers are random).
+		 */
+		payloadShapeHash: string | null;
+		payloadCount: number;
+	};
 	/** Close the harness (flushes the transcript, releases the session). */
 	close(): Promise<void>;
 }
@@ -100,6 +109,7 @@ export async function createHarnessRuntime(opts: HarnessRuntimeOptions): Promise
 
 	const budget = new ToolBudget(opts.maxToolCallsPerDecision);
 	let payloadHash: string | null = null;
+	let payloadShapeHash: string | null = null;
 	let payloadCount = 0;
 
 	const harnessTools = toHarnessTools<undefined, ActionResult>(opts.tools);
@@ -146,6 +156,9 @@ export async function createHarnessRuntime(opts: HarnessRuntimeOptions): Promise
 				.update(stableStringify(event.payload), "utf8")
 				.digest("hex")
 				.slice(0, 16);
+			// Cross-seed comparability: the raw hash can never match two seeds,
+			// because the world's numbers differ. The shape hash can.
+			payloadShapeHash = payloadShapeHashOf(event.payload);
 		}
 		return undefined;
 	});
@@ -201,7 +214,7 @@ export async function createHarnessRuntime(opts: HarnessRuntimeOptions): Promise
 		lane,
 		context: canceller.context,
 		getBudgetBlocks: () => budget.blocked,
-		getPayloadDigest: () => ({ payloadHash, payloadCount }),
+		getPayloadDigest: () => ({ payloadHash, payloadShapeHash, payloadCount }),
 		close: async () => {
 			await harness.close(canceller.context);
 		},

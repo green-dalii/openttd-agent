@@ -8,6 +8,18 @@
 > 踩过的坑的复盘（→ `MEMORY.md`；此处只写"改了什么"，不写"我为什么犯错"）。
 
 ## [Unreleased]
+### Added
+
+- **`payloadShapeHash`: a payload fingerprint that can match across seeds.** The raw
+  payload hash can never match two seeds - the world's numbers are random - so "both
+  backends asked the same question" was untestable. The shape hash blanks every number
+  (including numeric runs inside the observation text, which is where this repo's
+  numbers actually live) and hashes the rest. Real check, two seeds:
+  `hash` differed (`97e9cb35…` vs `37217019…`), `shape` was identical
+  (`5bcce03557235e25`). Recorded in the manifest next to the raw hash. Numerals-only
+  scaffold differences are out of scope by design; `scaffoldHash` covers the prompt
+  and tool schema.
+
 ### Docs
 
 - **S7 world-fact design** (`docs/SCAFFOLD-CONTRACT.md` §9): the four remaining

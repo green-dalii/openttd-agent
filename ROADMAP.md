@@ -122,9 +122,9 @@ pgrep -fl "bench.ts|run-experiment|cli/run.ts|llm-stub|OpenTTD.app"
 **② 之后**：真实基准一轮（需所有者定模型与预算）→ D6d fork 再评估 → P3 卫生。
 （P4 花费闸已完成，Issue #27 关闭——所以下一步从 S7 开始。）
 
-**AGENT_HARNESS 翻默认**（独立小改动）：前提已满足 ②（live 双绿）与 backend 已记录；
-还差**跨 seed 的数值归一化 payload 比对**（`payloadShapeHash`）——没有它，"请求相同"
-只在单 seed 内成立。
+**AGENT_HARNESS 翻默认**（独立小改动，等所有者拍板）：三个前提里已有两个——
+live 双绿（✅）、跨 seed 的 `payloadShapeHash` 相等（✅ 真机：两 seed 的 shape 均为
+`5bcce03557235e25`）。**还差"至少一局真实模型"**（目前只有 stub）。
 
 **端口占用（踩过两次）**：`dashboard:smoke` 默认在 **8899** 上自起 dashboard；临时
 stub/服务别占 8899，否则 smoke 会拒绝启动（脚本现在会显式报 "port already serving something"，

@@ -1216,6 +1216,15 @@ compaction 冲突都不报错，只会让两次运行看到的脚手架悄悄不
   而会话 meta 的 `usage` 是按字段复制的 ⇒ 页面读不到。修法是把旗帜放到**它限定的
   那个数字旁边**（`usage.costKnown`），而不是放在另一层。
 
+**payloadShapeHash：跨 seed 的可比性（同一节）**
+- `payloadHash` 把数值也算进去，而世界数值本来就随机 ⇒ **不同 seed 必然不同哈希**，
+  "两条后端问了同一个问题" 于是不可检验。新增 `payloadShapeHash`：把每个数值
+  （**包括文本块里的数字串**）抹成占位符后取指纹。
+- 真机：两个 seed 各跑一局 → `hash` 分别 `97e9cb35f0657b5f` / `37217019d72c088a`，
+  **`shape` 都是 `5bcce03557235e25`**。这才是"同一问句、不同世界"的判据。
+- 代价（写明）：只在数字上不同的**脚手架**会被这份哈希视为相同；系统提示词与工具
+  schema 的权威指纹仍是 `scaffoldHash`。
+
 **P4：每次运行的花费闸（同一节）**
 - 旋钮 `LLM_TOKEN_LIMIT` / `LLM_COST_LIMIT`（CLI 同名 `--llm-token-limit` /
   `--llm-cost-limit`）。非法值**抛错**；进了 `manifest.tokenLimit` / `costLimit`，
