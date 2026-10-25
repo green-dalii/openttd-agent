@@ -26,6 +26,7 @@ import type { Config } from "../config.js";
 import { createAgent, SYSTEM_PROMPT, DEFAULT_MAX_TOOL_CALLS_PER_DECISION } from "./runtime.js";
 import { agentDecisionAgent, laneDecisionAgent } from "./decision-agent.js";
 import { readGameVersion } from "../game/version.js";
+import { assertCostCapEnforceable, resolveRunLimits } from "./run-budget.js";
 import { createHarnessRuntime, harnessEnabled, HARNESS_LANE_NAME } from "./harness-runtime.js";
 import { scaffoldHash, type FingerprintableTool } from "./scaffold-fingerprint.js";
 import type { AgentOptions } from "@earendil-works/pi-agent-core";
@@ -369,6 +370,15 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 
 	// The credential store keeps dashboard-saved keys across restarts (pi-ai's
 	// default store is in-memory only).
+	// P4: spend caps, already validated by loadConfig (so CLI overrides and the
+	// settings file are included). Resolved before the provider so a bad value
+	// fails before a game starts.
+	const limits = cfg.llm.limits ?? resolveRunLimits({});
+	if (limits.tokens !== null || limits.cost !== null) {
+		console.log(
+			`[agent] limits: tokens=${limits.tokens ?? "none"} cost=${limits.cost === null ? "none" : `$${limits.cost}`}`,
+		);
+	}
 	const credentials = new FileCredentialStore(path.join(cfg.dataDir, "credentials.json"));
 	if (isLlmConfigured(cfg.llm)) {
 		// Catalog = pi-ai built-in provider; custom = arbitrary OpenAI-compatible
@@ -378,6 +388,8 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 		model = built.model;
 		models = built.models;
 		brainCostKnown = built.costKnown;
+		// Refuse a cost cap this model cannot measure (it would never fire).
+		assertCostCapEnforceable(limits, brainCostKnown);
 		brainKind = "real";
 		console.log(
 			`[agent] brain: REAL ${built.source} provider ${describeBrainSelection(cfg)} key=${redactKey(cfg.llm.apiKey)}`,
@@ -969,6 +981,8 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 			maxDecisions: opts.maxDecisions,
 			seconds: opts.seconds,
 			episode: episode ?? undefined,
+			limits,
+			costKnown: brainCostKnown,
 		},
 		isStopRequested: () => stopRequested,
 		requestStop: () => {
@@ -1070,6 +1084,9 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 			thinkingLevel: scaffold.thinkingLevel,
 			toolBudget: scaffold.toolBudget,
 			scaffoldHash: fingerprint,
+			// P4: the cap that may have ended this run belongs to its identity.
+			tokenLimit: limits.tokens,
+			costLimit: limits.cost,
 			// D6b: only the harness can report the payload it actually sent. Absent
 			// on the bare path - a number derived from our own source would be a
 			// claim, and a null here is the honest "not measured".

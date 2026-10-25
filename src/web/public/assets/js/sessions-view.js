@@ -167,6 +167,29 @@
       + `</svg>`;
   }
 
+  /**
+   * Did a declared spend cap end this run? (P4)
+   *
+   * Mirrors run-budget.ts's predicate for the browser: a cap only names the
+   * reason when the reading reached it, and a cost cap needs a price table.
+   */
+  function capVerdict(session) {
+    const lim = (session && session.manifest) || {};
+    const u = (session && session.totals && session.totals.usage) || {};
+    if (typeof lim.tokenLimit === "number" && typeof u.totalTokens === "number" && u.totalTokens >= lim.tokenLimit) {
+      return "token cap reached";
+    }
+    if (
+      typeof lim.costLimit === "number" &&
+      u.costKnown !== false &&
+      typeof u.costTotal === "number" &&
+      u.costTotal >= lim.costLimit
+    ) {
+      return "cost cap reached";
+    }
+    return null;
+  }
+
   function runFacts(session) {
     const row = session || {};
     const o = row.outcome || {};
@@ -201,7 +224,8 @@
     } else if (o.gsErrors !== undefined && o.gsErrors !== null && o.gsErrors > 0) {
       out.push({ k: "verdict", v: int(o.gsErrors) + " GS errors", tone: "warn" });
     } else if (o.reachedHorizon === false) {
-      out.push({ k: "verdict", v: "horizon not reached", tone: "warn" });
+      const cap = capVerdict(session);
+      out.push({ k: "verdict", v: cap || "horizon not reached", tone: "warn" });
     }
 
     // ④ 存档位置：服务器已经把 savegame 挂在每个列表项上（serve.ts），
@@ -258,7 +282,13 @@
           done: done.length,
           successRate: done.length ? built.length / done.length : null,
           tokens: all.reduce((a, x) => a + num(usageOf(x).totalTokens), 0),
-          cost: all.reduce((a, x) => a + num(usageOf(x).costTotal), 0),
+          // Sum only runs that actually had a price table; if any run is
+          // unpriced the total is not a measurement, so the header says so
+          // instead of printing a partial sum as "$0" (P4's cost-honesty rule).
+          cost: all
+            .filter((x) => usageOf(x).costKnown !== false)
+            .reduce((a, x) => a + num(usageOf(x).costTotal), 0),
+          costKnown: all.length > 0 && all.every((x) => usageOf(x).costKnown !== false),
         };
       },
 

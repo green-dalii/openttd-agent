@@ -1743,7 +1743,7 @@
           ["Reasoning", U.fmtTok(u.reasoning)],
           ["Cache r/w", `${U.fmtTok(u.cacheRead)} / ${U.fmtTok(u.cacheWrite)}`],
           ["Total tokens", U.fmtTok(u.totalTokens)],
-          ["Cost", U.fmtCost(u.costTotal)],
+          ["Cost", U.fmtCostKnown(u.costTotal, t && t.brain ? t.brain.costKnown : undefined)],
           ["Last activity", U.fmtAgo(t.lastActivityAt)],
         ];
       },
@@ -1761,7 +1761,8 @@
             reasoning: U.fmtTok(u.reasoning),
             cache: U.fmtTok(u.cacheRead),
             total: U.fmtTok(u.totalTokens),
-            cost: U.fmtCost(u.costTotal),
+            // A turn's cost is unknown for the same reason the run's is: no price table.
+            cost: U.fmtCostKnown(u.costTotal, t && t.brain ? t.brain.costKnown : undefined),
             steps: U.fmtInt(r.steps),
           };
         });

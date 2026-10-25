@@ -35,7 +35,7 @@ interface SessionLike {
 
 interface Model {
 	visible(): SessionLike[];
-	totals(): { count: number; done: number; successRate: number | null; tokens: number; cost: number };
+	totals(): { count: number; done: number; successRate: number | null; tokens: number; cost: number; costKnown: boolean };
 	statusInfo(s: string): { cls: string; title: string };
 	isBuilt(s: SessionLike): boolean;
 	isIncomplete(s: SessionLike): boolean;
@@ -295,6 +295,18 @@ describe("sessions view model", () => {
 			}
 		});
 
+		it("the header total refuses to present a partial sum as the spend", () => {
+			// One priced run + one unpriced: summing alone would print "$0.2" as if
+			// that were the total. It is not - one run measured nothing.
+			// List items are the merged record (totals at the top), not {meta}.
+			const priced = { id: "p", status: "completed", totals: { usage: { totalTokens: 10, costTotal: 0.2, costKnown: true } } };
+			const unpriced = { id: "u", status: "completed", totals: { usage: { totalTokens: 10, costTotal: 0, costKnown: false } } };
+			const { model } = load([priced as never, unpriced as never]);
+			const t = model.totals();
+			expect(t.cost).toBeCloseTo(0.2, 6);
+			expect(t.costKnown).toBe(false);
+		});
+
 		it("marks an unpriced run's cost as unknown and refuses a Δ", () => {
 			const priced = {
 				meta: { ...a.meta, totals: { ...a.meta.totals, usage: { totalTokens: 1000, costTotal: 0.2, costKnown: true } } },
@@ -512,6 +524,31 @@ describe("sessions 列表：runFacts（不必点开就能判断一局值不值�
 		// 完整路径在 title 里（列表只给尾巴，但"这局能不能接着玩"要能拿到全路径）
 		expect(by("save")!.title).toBe("/tmp/dd/save/20260926-075117-seed9.sav");
 		expect(by("verdict")).toBeUndefined();
+	});
+
+	it("花超上限的局点出真正的停止原因（P4）", () => {
+		// "horizon not reached" is true but useless when a declared cap fired.
+		const { by } = factsOf({
+			outcome: { deliveredRun: 0, simulatedDays: 3, horizonDays: 400, reachedHorizon: false },
+			manifest: { tokenLimit: 6000 },
+			totals: { usage: { totalTokens: 9354, costTotal: 0, costKnown: false } },
+		});
+		expect(by("verdict")!.v).toBe("token cap reached");
+	});
+
+	it("未定价的局不把费用上限当理由、没到上限也不点", () => {
+		const unpriced = factsOf({
+			outcome: { deliveredRun: 0, reachedHorizon: false },
+			manifest: { costLimit: 1 },
+			totals: { usage: { totalTokens: 10, costTotal: 0, costKnown: false } },
+		});
+		expect(unpriced.by("verdict")!.v).toBe("horizon not reached");
+		const under = factsOf({
+			outcome: { deliveredRun: 0, reachedHorizon: false },
+			manifest: { tokenLimit: 5000 },
+			totals: { usage: { totalTokens: 4999 } },
+		});
+		expect(under.by("verdict")!.v).toBe("horizon not reached");
 	});
 
 	it("被暂停结束的局 → 一眼可见的 exclude 标记（W1）", () => {

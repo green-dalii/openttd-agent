@@ -74,6 +74,45 @@ function makeCtx(over: Partial<DecisionLoopCtx> = {}): DecisionLoopCtx & {
 	return Object.assign(ctx, { schedulerFake, runDecisionFake, auditFake, sessionFake, pendingActions });
 }
 
+describe("decision-loop —— 花费上限在决策边界停机（P4）", () => {
+	it("token 已到上限：不再发起决策", async () => {
+		const ctx = makeCtx({
+			opts: { decisionTickMs: 1, limits: { tokens: 100, cost: null }, costKnown: true },
+			telemetry: {
+				decisionPoint: vi.fn(),
+				snapshot: () => ({
+					totals: { decisions: 1, toolCalls: 0, toolFailures: 0 },
+					usage: { total: { input: 60, output: 40, cacheRead: 0, cacheWrite: 0, reasoning: 0, totalTokens: 100, costTotal: 0 } },
+				}),
+			} as never,
+		});
+		// A due decision exists, but the budget is already spent: asking anyway
+		// would be spending past a declared cap.
+		ctx.schedulerFake.take.mockImplementation(() => ({ trigger: "start" }));
+		await createDecisionLoop(ctx).run();
+		expect(ctx.runDecisionFake).not.toHaveBeenCalled();
+	});
+
+	it("未到上限：照常决策（闸不是「总是停」）", async () => {
+		const ctx = makeCtx({
+			opts: { decisionTickMs: 1, limits: { tokens: 100, cost: null }, costKnown: true },
+			telemetry: {
+				decisionPoint: vi.fn(),
+				snapshot: () => ({
+					totals: { decisions: 0, toolCalls: 0, toolFailures: 0 },
+					usage: { total: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, reasoning: 0, totalTokens: 25, costTotal: 0 } },
+				}),
+			} as never,
+		});
+		let calls = 0;
+		ctx.schedulerFake.take.mockImplementation(() => (calls++ === 0 ? { trigger: "start" } : null));
+		let iterations = 0;
+		ctx.isStopRequested = () => iterations++ > 3;
+		await createDecisionLoop(ctx).run();
+		expect(ctx.runDecisionFake).toHaveBeenCalledTimes(1);
+	});
+});
+
 describe("decision-loop —— B-4b 单元契约", () => {
 	it("start 触发：一次决策 → audit.decision → runDecision → checkpoint → pendingActions 清空", async () => {
 		const ctx = makeCtx({

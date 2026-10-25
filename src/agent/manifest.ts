@@ -30,6 +30,13 @@ export interface RunManifest {
 	payloadHash: string | null;
 	/** Provider requests attempted (a retried request counts once per attempt). */
 	payloadCount: number | null;
+	/**
+	 * Token cap applied to this run (null = no cap). Part of the run's identity:
+	 * "it stopped early" is only interpretable with the cap that stopped it.
+	 */
+	tokenLimit: number | null;
+	/** Cost cap applied to this run (null = no cap or not enforceable). */
+	costLimit: number | null;
 }
 
 /**
@@ -48,6 +55,8 @@ export function projectManifest(src: Partial<RunManifest> | null | undefined): R
 		scaffoldHash: src?.scaffoldHash ?? null,
 		payloadHash: src?.payloadHash ?? null,
 		payloadCount: src?.payloadCount ?? null,
+		tokenLimit: src?.tokenLimit ?? null,
+		costLimit: src?.costLimit ?? null,
 	};
 }
 
@@ -60,4 +69,6 @@ export const MANIFEST_FIELDS = [
 	"scaffoldHash",
 	"payloadHash",
 	"payloadCount",
+	"tokenLimit",
+	"costLimit",
 ] as const satisfies readonly (keyof RunManifest)[];

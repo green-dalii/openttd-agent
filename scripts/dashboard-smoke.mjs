@@ -46,6 +46,19 @@ let spawnTmpDir = null;
 async function ensureDashboard() {
   if (process.env.DASHBOARD_URL) return process.env.DASHBOARD_URL;
   const port = Number(process.env.SMOKE_PORT || 8899);
+  // Refuse to check a dashboard this script did not start: a stray server on the
+  // port (an earlier interrupted run, or a stub) would make the poll below pass
+  // while the page under test is someone else's build - and then hang.
+  const busy = await fetch(`http://127.0.0.1:${port}/`, { signal: AbortSignal.timeout(1000) }).then(
+    () => true,
+    () => false,
+  );
+  if (busy) {
+    throw new Error(
+      `port ${port} is already serving something: this script must start its own dashboard ` +
+        `(kill the process on ${port}, or set SMOKE_PORT to a free port)`,
+    );
+  }
   spawnTmpDir = mkdtempSync(join(tmpdir(), "dashboard-smoke-"));
   const { spawn: spawnProc } = await import("node:child_process");
   spawned = spawnProc("pnpm", ["run", "cli", "--serve", "--web-port", String(port)], {
@@ -140,8 +153,24 @@ const ws = new WebSocket(page.webSocketDebuggerUrl);
 const logs = [];
 let id = 0;
 const pending = new Map();
+// Every CDP call gets a deadline. Without one, a crashed renderer (or a closed
+// socket) leaves the promise pending forever: the check "hangs", which reads as
+// "slow" rather than "failed" and cost two 15-minute waits to notice.
+const CDP_TIMEOUT_MS = Number(process.env.SMOKE_CDP_TIMEOUT_MS || 30_000);
 const send = (method, params = {}) =>
-  new Promise((res) => { const n = ++id; pending.set(n, res); ws.send(JSON.stringify({ id: n, method, params })); });
+  new Promise((res, rej) => {
+    const n = ++id;
+    const timer = setTimeout(() => {
+      pending.delete(n);
+      rej(new Error(`CDP ${method} got no reply within ${CDP_TIMEOUT_MS}ms (renderer crashed or socket closed?)`));
+    }, CDP_TIMEOUT_MS);
+    pending.set(n, (r) => { clearTimeout(timer); res(r); });
+    ws.send(JSON.stringify({ id: n, method, params }));
+  });
+ws.addEventListener("close", () => {
+  for (const [n, res] of pending) { pending.delete(n); res({}); }
+  pending.clear();
+});
 
 ws.addEventListener("message", (ev) => {
   const msg = JSON.parse(ev.data);

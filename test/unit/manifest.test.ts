@@ -36,6 +36,33 @@ describe("projectManifest", () => {
 	});
 });
 
+describe("spend caps are part of the run's identity (P4)", () => {
+	it("projects the caps, keeping 'no cap' distinct from 'not recorded'", () => {
+		const p = projectManifest({ tokenLimit: 5000, costLimit: null });
+		expect(p.tokenLimit).toBe(5000);
+		// null here means "this run had no cost cap" and is a value, not a gap.
+		expect(p.costLimit).toBeNull();
+	});
+
+	it("carries the caps into the metric row (a capped run must be explainable)", () => {
+		const meta = {
+			id: "s1",
+			mode: "agent",
+			status: "aborted",
+			startedAt: 1000,
+			endedAt: 2000,
+			seed: 7,
+			startYear: 1950,
+			llm: { providerId: "p", model: "m", api: "openai-completions", kind: "real" },
+			totals: { decisions: 2, toolCalls: 1, usage: { input: 10, output: 5, totalTokens: 15 } },
+			manifest: { tokenLimit: 900, costLimit: 1.5 },
+		} as unknown as SessionMeta;
+		const m = toGameMetric(meta);
+		expect(m.manifest?.tokenLimit).toBe(900);
+		expect(m.manifest?.costLimit).toBeCloseTo(1.5, 6);
+	});
+});
+
 describe("the metric row is not a narrower copy of the manifest", () => {
 	it("carries every manifest field through toGameMetric", () => {
 		const meta = {

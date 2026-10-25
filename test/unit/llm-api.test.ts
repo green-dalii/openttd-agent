@@ -319,4 +319,31 @@ describe("applyLlmSettingsFile 保留 scaffold 旋钮（D4/D63）", () => {
 		const out = applyLlmSettingsFile(base as never);
 		expect(out.llm.scaffold).toEqual({ thinkingLevel: "low", toolBudget: 5 });
 	});
+
+	it("P4 的花费上限也不许被文件合并丢掉（同一张白名单）", async () => {
+		// Third occurrence of the same trap: a flag that is accepted, parsed,
+		// validated... and then dropped one layer later. The cap would silently
+		// not exist while the manifest said it did - if it got that far.
+		const { mkdtemp, writeFile } = await import("node:fs/promises");
+		const { tmpdir } = await import("node:os");
+		const { join } = await import("node:path");
+		const { applyLlmSettingsFile } = await import("../../src/agent/llm-settings.js");
+		const dir = await mkdtemp(join(tmpdir(), "ottd-llm-"));
+		await writeFile(join(dir, "llm.json"), JSON.stringify({ model: "from-file" }));
+		const base = {
+			dataDir: dir,
+			llm: {
+				providerId: "p",
+				baseUrl: "",
+				apiKey: "",
+				model: "from-env",
+				api: "openai-completions",
+				contextWindow: 1000,
+				maxTokens: 10,
+				limits: { tokens: 5000, cost: null },
+			},
+		};
+		const out = applyLlmSettingsFile(base as never);
+		expect(out.llm.limits).toEqual({ tokens: 5000, cost: null });
+	});
 });

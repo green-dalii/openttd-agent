@@ -77,6 +77,10 @@ export function applyLlmSettingsFile(cfg: Config): Config {
 		// 这里少拷一次，CLI 的 --thinking/--tool-budget 就会被静默丢掉
 		// （真机实测过一次：传 low/5 却仍按 off/12 跑）。
 		...(cfg.llm.scaffold ? { scaffold: cfg.llm.scaffold } : {}),
+		// Same trap, same fix: P4's spend caps live on llm too. Rebuilding this
+		// object without copying them would turn `--llm-token-limit` into a flag
+		// that is accepted and ignored (the D63 failure mode, third occurrence).
+		...(cfg.llm.limits ? { limits: cfg.llm.limits } : {}),
 	};
 	const envProvided = Boolean(
 		cfg.llm.providerId || cfg.llm.baseUrl || cfg.llm.model || cfg.llm.apiKey,

@@ -49,6 +49,8 @@
       money: (v) => U.fmtMoney(v),
       tok: (v) => U.fmtTok(v),
       cost: (v) => U.fmtCost(v),
+      // Cost with honesty: "unknown" when the model had no price table.
+      costKnown: (v, known) => U.fmtCostKnown(v, known),
       duration: (v) => U.fmtDuration(v),
       ago: (v) => U.fmtAgo(v),
       clock: (v) => U.fmtClock(v),

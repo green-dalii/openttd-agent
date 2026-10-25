@@ -12,6 +12,7 @@
  */
 
 import type { GameMetric } from "./metrics.js";
+import { budgetStop } from "../agent/run-budget.js";
 
 /** The named reason a run ended the way it did. */
 export type OutcomeClass =
@@ -22,6 +23,8 @@ export type OutcomeClass =
 	| "paused_by_agent"
 	| "world_frozen"
 	| "wall_clock_cap"
+	| "token_cap"
+	| "cost_cap"
 	| "unknown";
 
 /** The subset of a metric row the classification reads. */
@@ -34,6 +37,11 @@ export interface OutcomeFacts {
 	reachedHorizon?: boolean | null;
 	blockedByPause?: boolean | null;
 	worldFrozen?: boolean | null;
+	/** Spend readings, used only to name a cap that ended the run. */
+	totalTokens?: number | null;
+	costTotal?: number | null;
+	costKnown?: boolean;
+	manifest?: { tokenLimit?: number | null; costLimit?: number | null } | null;
 }
 
 /**
@@ -47,7 +55,20 @@ export function classifyOutcome(m: OutcomeFacts | GameMetric | null | undefined)
 	const f = m as OutcomeFacts;
 	if (f.blockedByPause === true) return "paused_by_agent";
 	if (f.worldFrozen === true) return "world_frozen";
-	if (f.reachedHorizon === false) return "wall_clock_cap";
+	if (f.reachedHorizon === false) {
+		// A cap is only the reason when the horizon was NOT reached: a run that
+		// finished its horizon produced a valid result even if it also spent a lot.
+		// The comparison comes from run-budget.ts so the loop's stop condition and
+		// the recorded reason cannot drift apart.
+		const stop = budgetStop(
+			{ tokens: f.manifest?.tokenLimit ?? null, cost: f.manifest?.costLimit ?? null },
+			{ totalTokens: f.totalTokens, costTotal: f.costTotal },
+			f.costKnown !== false,
+		);
+		if (stop === "token_cap") return "token_cap";
+		if (stop === "cost_cap") return "cost_cap";
+		return "wall_clock_cap";
+	}
 	if (typeof f.deliveredRun !== "number" || !Number.isFinite(f.deliveredRun)) return "unknown";
 	if (f.deliveredRun > 0) return "delivered";
 	// Every tool call was refused: the agent never got to act.
