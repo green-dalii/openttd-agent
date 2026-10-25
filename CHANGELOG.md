@@ -41,6 +41,16 @@
 
 ### Fixed
 
+- **The model list never refreshed.** The list on the Providers page came from the
+  **bundled pi-ai snapshot** (generated 2026-09-04), and pi-ai's `refresh()` skips static
+  providers, so a model released later could neither be listed **nor chosen**. The page now
+  has "Refresh from provider", which asks the provider's own `/models` endpoint through
+  pi-ai's dynamic-catalog machinery, shows where the list came from (and which entries are
+  newer than the build), and reports failures with the exact URLs and statuses — including
+  "no credential, so the refresh was skipped", which pi-ai does silently. Models that only
+  the provider knows are marked "live · price unknown" (their limits are borrowed from a
+  sibling and their price is not measured), and they are persisted so the agent process can
+  run them.
 - Runs could be **stopped and look like failures**: pause attribution, world-frozen runs
   and unfinished horizons are now named and excluded from comparisons.
 - **Deltas folded unread readings to zero** - the model read "no change" where nothing had

@@ -288,6 +288,20 @@ GET /api/llm/catalog/:providerId
 → 200 { provider: CatalogProvider, models: CatalogModel[] }
 → 404 { error }
 
+GET /api/llm/catalog/:providerId/refresh
+→ 200 { provider: string, models: CatalogModel[], error: string | null,
+        fetchedAt: number | null }
+→ 404 { error }                              // provider 未知（error 为空且 models 为空时）
+说明：
+- `models` 是**快照 + live 覆盖层**的合并结果；`source: "live"` 的条目来自 provider
+  自己的 /models 端点，其 `priceKnown: false`（价格未知，不是 0 元），
+  `contextWindow` / `maxTokens` / `api` 借自同族模型。
+- `error` 形如 `"<url> → HTTP 401; <url> → HTTP 404"`：**试过哪些 URL、各自为什么失败**。
+  失败时 `models` 保留上一次已知列表（端点说不出话 ≠ 模型消失了）。
+- 该端点**永不抛错**；"没有凭据所以跳过刷新"也走 `error` 说明（pi-ai 自己会静默跳过）。
+- 刷新结果由 pi-ai 的 `ModelsStore` 持久化到 `<dataDir>/models-cache.json`，因此
+  agent 进程启动时能恢复同一份覆盖层（否则"列表是新的但模型跑不起来"）。
+
 DELETE /api/llm/credentials/:providerId
 → 200 { ok: true }
 ```

@@ -28,6 +28,12 @@
         saving: false,
         provCbx: null,
         modelCbx: null,
+        /** True while asking the provider for its current model list. */
+        modelsRefreshing: false,
+        /** What the last refresh said (error, or "N models, M new"). */
+        modelsNote: "",
+        /** When the list currently shown was fetched from the provider (ms). */
+        modelsFetchedAt: 0,
 
         /* ------------------------------- init ------------------------------- */
         async init() {
@@ -126,6 +132,46 @@
           } catch {
             /* keep defaults */
           }
+          if (this.modelCbx) this.modelCbx.refresh();
+        },
+
+        /**
+         * Ask the provider what it has right now (P5).
+         *
+         * The bundled list is a snapshot of the pi-ai package, so it cannot know a
+         * model released later. This hits the provider's own /models endpoint via
+         * the server, which merges the result into the persisted overlay.
+         */
+        async refreshModels() {
+          const id = this.custom ? "" : this.providerId;
+          if (!id) {
+            this.modelsNote = this.custom
+              ? "Custom endpoints have no provider id - the list is read from the endpoint below."
+              : "Pick a provider first.";
+            return;
+          }
+          this.modelsRefreshing = true;
+          this.modelsNote = "";
+          try {
+            const r = await fetch(`/api/llm/catalog/${encodeURIComponent(id)}/refresh`);
+            const data = await r.json().catch(() => ({}));
+            if (data && Array.isArray(data.models)) this.models = data.models;
+            this.modelsFetchedAt = Number(data.fetchedAt || 0);
+            if (data && data.error) {
+              this.modelsNote = String(data.error);
+              U.toast("Could not refresh the model list", "warn", 6000);
+            } else {
+              const live = this.models.filter((m) => m && m.source === "live").length;
+              this.modelsNote = live
+                ? `${this.models.length} models (${live} newer than this build's snapshot)`
+                : `${this.models.length} models - this build's snapshot is current`;
+              U.toast("Model list refreshed", "ok");
+            }
+          } catch (e) {
+            this.modelsNote = `Refresh failed: ${e}`;
+            U.toast("Could not refresh the model list", "err");
+          }
+          this.modelsRefreshing = false;
           if (this.modelCbx) this.modelCbx.refresh();
         },
 

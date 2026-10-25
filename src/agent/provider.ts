@@ -12,6 +12,8 @@
  */
 
 import { builtinModels } from "@earendil-works/pi-ai/providers/all";
+import { createLiveCatalog } from "./live-catalog.js";
+import type { ModelsStore } from "@earendil-works/pi-ai";
 import { createModels, createProvider } from "@earendil-works/pi-ai";
 import type { CredentialStore, Model, Models, ProviderStreams } from "@earendil-works/pi-ai";
 import type { LlmConfig } from "../config.js";
@@ -57,6 +59,12 @@ export interface BuildBrainOptions {
 	 * saved from the dashboard are used (pi-ai otherwise only reads env vars).
 	 */
 	credentials?: CredentialStore;
+	/**
+	 * Persisted overlay of models reported live by the provider (pi-ai
+	 * `ModelsStore`). Restored on run start so a model newer than the bundled
+	 * snapshot is runnable without another network call.
+	 */
+	modelsStore?: ModelsStore;
 }
 
 /**
@@ -82,15 +90,25 @@ async function buildCatalogBrain(llm: LlmConfig, opts: BuildBrainOptions): Promi
 	if (!providerId || !llm.model) {
 		throw new Error("LLM not configured: pick a built-in provider and model in the dashboard (or set LLM_PROVIDER/LLM_MODEL).");
 	}
-	const known = listCatalogModels(providerId);
+	// Models the provider reported live live in the persisted overlay; restore it
+	// first (no network here) so a model newer than the bundled snapshot still runs.
+	const catalog = opts.modelsStore
+		? createLiveCatalog({
+				...(opts.credentials ? { credentials: opts.credentials } : {}),
+				modelsStore: opts.modelsStore,
+			})
+		: null;
+	if (catalog) await catalog.refresh(providerId, { allowNetwork: false }).catch(() => undefined);
+	const models = (catalog ? catalog.registry : builtinModels(opts.credentials ? { credentials: opts.credentials } : {})) as ReturnType<typeof builtinModels>;
+	const known = catalog ? catalog.models(providerId) : listCatalogModels(providerId);
 	const picked = known.find((m) => m.id === llm.model);
 	if (!picked) {
 		throw new Error(
 			`unknown model "${llm.model}" for built-in provider "${providerId}"` +
-				(known.length ? ` (e.g. ${known.slice(0, 3).map((m) => m.id).join(", ")})` : ""),
+				(known.length ? ` (e.g. ${known.slice(0, 3).map((m) => m.id).join(", ")})` : "") +
+				` - open Providers and press "Refresh from provider" if the model was released after this build.`,
 		);
 	}
-	const models = builtinModels(opts.credentials ? { credentials: opts.credentials } : {});
 	const model = models.getModel(providerId, llm.model);
 	if (!model) throw new Error(`provider "${providerId}" did not register model "${llm.model}"`);
 	// Auth (apiKey from the credential store or the provider's env var) and the

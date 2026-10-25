@@ -40,7 +40,9 @@ interface Model {
 	modelPlaceholder(): string;
 	saveBody(): Record<string, unknown>;
 	providerOptions(): { id: string; group: string; sub: string; search: string }[];
-	modelOptions(): { id: string; search: string }[];
+	modelOptions(): { id: string; search: string; sub?: string }[];
+	modelsFreshness(): string;
+	refreshHint(error: string): string;
 	setMsg(t: string, k: string): void;
 }
 
@@ -69,6 +71,52 @@ function prov(over: Record<string, unknown> = {}) {
 		...over,
 	};
 }
+
+describe("模型列表刷新（P5：列表不能只是构建时的快照）", () => {
+	const withModels = (models: unknown[]) => {
+		const m = load() as unknown as Record<string, unknown> & { modelOptions(): { id: string; sub?: string }[]; modelsFreshness(): string };
+		m.models = models;
+		return m as unknown as ReturnType<typeof load> & { modelsFreshness(): string; models: unknown[] };
+	};
+
+	it("says where the list came from - never a bare count", () => {
+		// "3 models" invites the question this fix exists to answer: from when?
+		const m = withModels([{ id: "a", source: "catalog", contextWindow: 1000 }]);
+		expect(m.modelsFreshness()).toBe("1 model from this build's snapshot (pi-ai)");
+	});
+
+	it("counts the models the provider reported live", () => {
+		const m = withModels([
+			{ id: "a", source: "catalog", contextWindow: 1000 },
+			{ id: "b", source: "live", contextWindow: 1000 },
+		]);
+		expect(m.modelsFreshness()).toBe("2 models · 1 newer than this build's snapshot");
+	});
+
+	it("marks a live-only option with what is actually unknown about it", () => {
+		// The limits are borrowed from a sibling and the price is unknown: saying only
+		// "1k ctx" would present borrowed metadata as measured fact.
+		const m = withModels([{ id: "new", source: "live", contextWindow: 1000 }]);
+		const opt = m.modelOptions()[0]!;
+		expect(opt.id).toBe("new");
+		expect(opt.sub).toContain("live");
+		expect(opt.sub).toContain("price unknown");
+	});
+
+	it("turns a 401 into an action instead of a raw status", () => {
+		const m = load();
+		expect(m.refreshHint("https://x/v1/models → HTTP 401")).toMatch(/re-enter it/i);
+	});
+
+	it("treats 404 as a normal outcome: the snapshot stays authoritative", () => {
+		const m = load();
+		expect(m.refreshHint("https://x/anthropic/models → HTTP 404")).toMatch(/no model-list endpoint/i);
+	});
+
+	it("says nothing extra when there is no error", () => {
+		expect(load().refreshHint("")).toBe("");
+	});
+});
 
 describe("Providers view model", () => {
 	describe("credentials panel", () => {
