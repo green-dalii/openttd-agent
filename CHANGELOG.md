@@ -8,6 +8,16 @@
 > 踩过的坑的复盘（→ `MEMORY.md`；此处只写"改了什么"，不写"我为什么犯错"）。
 
 ## [Unreleased]
+### Docs
+
+- **Selection-state CoDesign** (`docs/SELECTION-STATE-CODESIGN.md`): the run configuration
+  currently has four copies (file, process-start snapshot, page state, catalog object) and
+  three validators, so the page can show one model while the run uses another. The document
+  records the reproduced bug (save `MiniMax-M3.1-Flash` -> the API keeps answering
+  `MiniMax-M3.1` until restart), the other findings of the same shape, and a plan built on
+  one resolver shared by the view, save validation, preflight and the runner. Design only;
+  awaiting three owner decisions.
+
 
 > 0.6.0 之后的工作（2026-09-11 → 2026-10-24）。逐 PR 的开发日记已归档到
 > [`docs/archive/CHANGELOG-DEV-DIARY.md`](docs/archive/CHANGELOG-DEV-DIARY.md)：
