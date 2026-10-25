@@ -24,10 +24,11 @@ import {
 	catalogGeneratedAt,
 	expectedEnvKeys,
 	isCatalogProvider,
-	listCatalogModels,
 	listCatalogProvidersWithStatus,
 } from "./provider-catalog.js";
 import { FileCredentialStore } from "./file-credential-store.js";
+import { createLiveCatalog } from "./live-catalog.js";
+import { JsonModelsStore, modelsCachePath } from "./models-store.js";
 import type { CatalogHooks, WebServerOptions } from "../web/server.js";
 
 export interface LlmApiDeps {
@@ -63,6 +64,15 @@ function storedProviderIds(file: string): Set<string> {
 /** Build the /api/llm + /api/llm/catalog hooks for one runner. */
 export function createLlmApi(deps: LlmApiDeps): LlmApi {
 	const store = new FileCredentialStore(credentialsPath(deps.dataDir));
+	/**
+	 * One catalog per serve process: the overlay (models the provider reported
+	 * live) must survive page reloads, and it is persisted to dataDir so the
+	 * agent process can restore it too.
+	 */
+	const liveCatalog = createLiveCatalog({
+		credentials: store,
+		modelsStore: new JsonModelsStore(modelsCachePath(deps.dataDir)),
+	});
 	const credFile = credentialsPath(deps.dataDir);
 
 	/** Never returns the key itself — status only (contract §3.1). */
@@ -181,7 +191,14 @@ export function createLlmApi(deps: LlmApiDeps): LlmApi {
 		catalog: {
 			generatedAt: () => catalogGeneratedAt(),
 			providers: () => listCatalogProvidersWithStatus(deps.dataDir),
-			models: (providerId: string) => (isCatalogProvider(providerId) ? listCatalogModels(providerId) : null),
+			// Sync view: bundled snapshot + whatever a previous refresh persisted.
+			models: (providerId: string) => {
+				if (!isCatalogProvider(providerId)) return null;
+				void liveCatalog.refresh(providerId, { allowNetwork: false }).catch(() => undefined);
+				return liveCatalog.models(providerId);
+			},
+			// Explicit refresh (the Providers page button): asks the provider, persists.
+			refreshModels: (providerId: string, opts) => liveCatalog.refresh(providerId, opts),
 			deleteCredential: (providerId: string) => {
 				store.remove(providerId);
 			},

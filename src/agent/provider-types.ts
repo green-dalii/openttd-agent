@@ -36,4 +36,14 @@ export interface CatalogModel {
 	reasoning: boolean;
 	/** USD per 1M tokens (straight from pi-ai's Model.cost). */
 	cost: { input: number; output: number };
+	/**
+	 * Where this entry came from.
+	 * `catalog` = pi-ai's bundled snapshot (has a generation date);
+	 * `live` = returned by the provider's own /models endpoint just now, and
+	 * therefore **not** in the snapshot - its limits are borrowed from a sibling
+	 * model and its price is unknown (`cost` zeros, `priceKnown` false).
+	 */
+	source?: "catalog" | "live";
+	/** False for live-only models: nobody told us a price, so cost is "unknown". */
+	priceKnown?: boolean;
 }

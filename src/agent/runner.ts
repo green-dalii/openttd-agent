@@ -33,6 +33,7 @@ import { readGameVersion } from "../game/version.js";
  */
 type PayloadDigest = () => ReturnType<HarnessRuntime["getPayloadDigest"]>;
 import { assertCostCapEnforceable, resolveRunLimits } from "./run-budget.js";
+import { JsonModelsStore, modelsCachePath } from "./models-store.js";
 import { createHarnessRuntime, harnessEnabled, HARNESS_LANE_NAME, type HarnessRuntime } from "./harness-runtime.js";
 import { scaffoldHash, type FingerprintableTool } from "./scaffold-fingerprint.js";
 import type { AgentOptions } from "@earendil-works/pi-agent-core";
@@ -389,7 +390,12 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 	if (isLlmConfigured(cfg.llm)) {
 		// Catalog = pi-ai built-in provider; custom = arbitrary OpenAI-compatible
 		// endpoint (docs/DASHBOARD-API.md §6.5).
-		const built = await buildBrain(cfg.llm, { credentials });
+		const built = await buildBrain(cfg.llm, {
+			credentials,
+			// Restores the live-model overlay refreshed from the Providers page, so a
+			// model newer than pi-ai's bundled snapshot is runnable.
+			modelsStore: new JsonModelsStore(modelsCachePath(cfg.dataDir)),
+		});
 		streamFn = built.streamFn as unknown as AgentOptionsStreamFn;
 		model = built.model;
 		models = built.models;

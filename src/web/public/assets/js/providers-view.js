@@ -297,11 +297,50 @@
 
       /** Options for the model combobox. */
       modelOptions() {
-        return this.models.map((m) => ({
-          id: m.id,
-          search: `${m.id} ${m.name || ""} ${m.api || ""}`,
-          sub: m.contextWindow ? `${U.fmtTok(m.contextWindow)} ctx` : "",
-        }));
+        return this.models.map((m) => {
+          const bits = [];
+          // Say it in the row itself: a live-only model's limits are borrowed from a
+          // sibling and its price is unknown, so it is not the same kind of entry.
+          if (m.source === "live") bits.push("live · price unknown");
+          if (m.contextWindow) bits.push(`${U.fmtTok(m.contextWindow)} ctx`);
+          return {
+            id: m.id,
+            search: `${m.id} ${m.name || ""} ${m.api || ""}`,
+            sub: bits.join(" · "),
+          };
+        });
+      },
+
+      /**
+       * Turn a refresh error into something the user can act on.
+       *
+       * The raw string (URLs + statuses) stays available, but a bare "HTTP 401" does
+       * not tell anyone what to do - and "no route" (404) means the snapshot stays
+       * authoritative, which is a normal outcome, not a failure of the app.
+       */
+      refreshHint(error) {
+        const text = String(error || "");
+        if (!text) return "";
+        if (/\b401\b|unauthor|authentication/i.test(text)) {
+          return "The provider rejected the stored key (401): re-enter it below, then refresh again.";
+        }
+        if (/\b403\b|forbidden/i.test(text)) {
+          return "The provider refused this key for model listing (403); the snapshot list stays authoritative.";
+        }
+        if (/\b404\b/.test(text) && !/\b401\b/.test(text)) {
+          return "This provider has no model-list endpoint: the bundled snapshot is the only source.";
+        }
+        return "";
+      },
+
+      /** One line about where the model list came from (never blank). */
+      modelsFreshness() {
+        const n = (this.models || []).length;
+        const live = (this.models || []).filter((m) => m && m.source === "live").length;
+        if (!n) return this.modelsLoading ? "loading…" : "no models listed";
+        const word = n === 1 ? "model" : "models";
+        if (live) return `${n} ${word} · ${live} newer than this build's snapshot`;
+        return `${n} ${word} from this build's snapshot (pi-ai)`;
       },
 
       /** Message setter (single place, so kind/class cannot drift). */

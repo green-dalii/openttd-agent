@@ -48,6 +48,21 @@
         <div class="field">
           <label for="model-cbx">Model</label>
           <div id="model-cbx" x-ref="modelBox"></div>
+          <!-- The bundled list is a snapshot: say so, and let the provider answer. -->
+          <p class="hint" style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+            <span x-text="modelsFreshness()"></span>
+            <button type="button" class="btn sm" x-on:click="refreshModels()"
+                    x-bind:disabled="modelsRefreshing || !providerId">
+              <span x-show="!modelsRefreshing">Refresh from provider</span>
+              <span x-show="modelsRefreshing">Asking…</span>
+            </button>
+          </p>
+          <p class="hint" x-show="modelsNote">
+            <span x-text="modelsNote" style="display:block"></span>
+            <!-- Its own line: the raw URLs are evidence, the hint is the action. -->
+            <span class="dim" style="display:block;margin-top:.25rem"
+                  x-show="refreshHint(modelsNote)" x-text="refreshHint(modelsNote)"></span>
+          </p>
         </div>
 
         <div>

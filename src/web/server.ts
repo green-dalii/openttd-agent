@@ -43,8 +43,17 @@ export interface CatalogHooks {
 	generatedAt: () => number | null;
 	/** Providers annotated with credential status (sync: file + env reads only). */
 	providers: () => unknown[];
-	/** Models for one provider, or null when the provider is unknown. */
+	/** Models for one provider (snapshot + persisted live overlay), or null when unknown. */
 	models: (providerId: string) => unknown | null;
+	/**
+	 * Ask the provider for its current model list and merge it in (P5).
+	 * Never throws: returns `{models, error, fetchedAt}` where `error` explains
+	 * why the list could not be refreshed.
+	 */
+	refreshModels?: (
+		providerId: string,
+		opts: { force?: boolean },
+	) => Promise<{ models: unknown[]; error: string | null; fetchedAt: number | null }>;
 	/** Forget a stored credential (logout). */
 	deleteCredential: (providerId: string) => void;
 }
@@ -478,6 +487,14 @@ export class WebServer {
 					});
 				}
 				const id = decodeURIComponent(segments[3] ?? "");
+				if (segments[4] === "refresh") {
+					if (!this.catalogHooks.refreshModels) return json(404, { error: "live refresh disabled" });
+					const result = await this.catalogHooks.refreshModels(id, { force: true });
+					if (result.error === null && !result.models.length) {
+						return json(404, { error: `unknown provider "${id}"` });
+					}
+					return json(200, { provider: id, ...result });
+				}
 				const models = this.catalogHooks.models(id);
 				if (models === null) return json(404, { error: `unknown provider "${id}"` });
 				const provider = this.catalogHooks
