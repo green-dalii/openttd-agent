@@ -11,15 +11,14 @@
  * 禁止: 在此硬编码任何真实密钥；禁止在无配置时静默发起网络请求。
  */
 
-import { builtinModels } from "@earendil-works/pi-ai/providers/all";
-import { createLiveCatalog } from "./live-catalog.js";
+import { createSelectionResolver } from "./selection.js";
 import type { ModelsStore } from "@earendil-works/pi-ai";
 import { createModels, createProvider } from "@earendil-works/pi-ai";
 import type { CredentialStore, Model, Models, ProviderStreams } from "@earendil-works/pi-ai";
 import type { LlmConfig } from "../config.js";
 import { CUSTOM_LLM_APIS } from "../config.js";
 import { DEFAULT_LLM_PROVIDER_ID, resolveLlmSource } from "./llm-settings.js";
-import { getCatalogProvider, listCatalogModels } from "./provider-catalog.js";
+import { getCatalogProvider } from "./provider-catalog.js";
 
 /** Lazily loaded streaming API impls (subpath exports; heavy modules). */
 async function loadApi(api: string): Promise<ProviderStreams> {
@@ -84,33 +83,33 @@ export async function buildBrain(llm: LlmConfig, opts: BuildBrainOptions = {}): 
 	return buildCustomBrain(llm);
 }
 
-/** Select a model from the built-in catalog; auth comes from store/env. */
+/**
+ * Select a model from the built-in catalog; auth comes from store/env.
+ *
+ * The lookup goes through the **one** resolver (selection.ts) so the gate and
+ * the runner cannot disagree: before this, the gate built its brain without
+ * the persisted overlay and answered "unknown model" for a model the runner
+ * could run (A5).
+ */
 async function buildCatalogBrain(llm: LlmConfig, opts: BuildBrainOptions): Promise<BuiltProvider> {
 	const providerId = llm.providerId;
 	if (!providerId || !llm.model) {
 		throw new Error("LLM not configured: pick a built-in provider and model in the dashboard (or set LLM_PROVIDER/LLM_MODEL).");
 	}
-	// Models the provider reported live live in the persisted overlay; restore it
-	// first (no network here) so a model newer than the bundled snapshot still runs.
-	const catalog = opts.modelsStore
-		? createLiveCatalog({
-				...(opts.credentials ? { credentials: opts.credentials } : {}),
-				modelsStore: opts.modelsStore,
-			})
-		: null;
-	if (catalog) await catalog.refresh(providerId, { allowNetwork: false }).catch(() => undefined);
-	const models = (catalog ? catalog.registry : builtinModels(opts.credentials ? { credentials: opts.credentials } : {})) as ReturnType<typeof builtinModels>;
-	const known = catalog ? catalog.models(providerId) : listCatalogModels(providerId);
-	const picked = known.find((m) => m.id === llm.model);
-	if (!picked) {
+	const resolver = createSelectionResolver({
+		...(opts.credentials ? { credentials: opts.credentials } : {}),
+		...(opts.modelsStore ? { modelsStore: opts.modelsStore } : {}),
+	});
+	const resolved = await resolver.resolve(llm);
+	if (!resolved.valid || !resolved.catalog) {
+		const problem = resolved.problems[0];
 		throw new Error(
-			`unknown model "${llm.model}" for built-in provider "${providerId}"` +
-				(known.length ? ` (e.g. ${known.slice(0, 3).map((m) => m.id).join(", ")})` : "") +
-				` - open Providers and press "Refresh from provider" if the model was released after this build.`,
+			problem
+				? `${problem.message} - ${problem.hint}`
+				: `provider "${providerId}" does not know model "${llm.model}"`,
 		);
 	}
-	const model = models.getModel(providerId, llm.model);
-	if (!model) throw new Error(`provider "${providerId}" did not register model "${llm.model}"`);
+	const { model, models } = resolved.catalog;
 	// Auth (apiKey from the credential store or the provider's env var) and the
 	// request baseUrl are resolved by pi-ai per request — we pass none of them.
 	const streamFn = (_m: unknown, context: never, options?: never) =>
@@ -119,7 +118,7 @@ async function buildCatalogBrain(llm: LlmConfig, opts: BuildBrainOptions): Promi
 		model: model as Model<string>,
 		models,
 		source: "catalog",
-		costKnown: hasPrice(model),
+		costKnown: resolved.facts.costKnown,
 		streamFn: streamFn as BuiltProvider["streamFn"],
 	};
 }

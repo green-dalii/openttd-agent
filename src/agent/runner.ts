@@ -33,7 +33,6 @@ import { readGameVersion } from "../game/version.js";
  */
 type PayloadDigest = () => ReturnType<HarnessRuntime["getPayloadDigest"]>;
 import { assertCostCapEnforceable, resolveRunLimits } from "./run-budget.js";
-import { JsonModelsStore, modelsCachePath } from "./models-store.js";
 import { createHarnessRuntime, harnessEnabled, HARNESS_LANE_NAME, type HarnessRuntime } from "./harness-runtime.js";
 import { scaffoldHash, type FingerprintableTool } from "./scaffold-fingerprint.js";
 import type { AgentOptions } from "@earendil-works/pi-agent-core";
@@ -51,7 +50,7 @@ import { createTools } from "./tools/index.js";
 import { fauxAssistantMessage, fauxToolCall, createFauxCore } from "@earendil-works/pi-ai";
 import { buildBrain, redactKey } from "./provider.js";
 import { Telemetry } from "./telemetry.js";
-import { FileCredentialStore } from "./file-credential-store.js";
+import { selectionStores } from "./selection.js";
 import {
 	SessionStore,
 	listSessions,
@@ -386,16 +385,15 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 			`[agent] limits: tokens=${limits.tokens ?? "none"} cost=${limits.cost === null ? "none" : `$${limits.cost}`}`,
 		);
 	}
-	const credentials = new FileCredentialStore(path.join(cfg.dataDir, "credentials.json"));
+	// The SAME stores the gate uses (credential store + persisted model overlay).
+	// Two copies of this wiring is how the gate and the runner drifted apart (A5).
+	const stores = selectionStores(cfg.dataDir);
 	if (isLlmConfigured(cfg.llm)) {
 		// Catalog = pi-ai built-in provider; custom = arbitrary OpenAI-compatible
 		// endpoint (docs/DASHBOARD-API.md §6.5).
-		const built = await buildBrain(cfg.llm, {
-			credentials,
-			// Restores the live-model overlay refreshed from the Providers page, so a
-			// model newer than pi-ai's bundled snapshot is runnable.
-			modelsStore: new JsonModelsStore(modelsCachePath(cfg.dataDir)),
-		});
+		// The overlay (models the Providers page refreshed) is restored inside the
+		// resolver, so a model newer than pi-ai's bundled snapshot is runnable.
+		const built = await buildBrain(cfg.llm, stores);
 		streamFn = built.streamFn as unknown as AgentOptionsStreamFn;
 		model = built.model;
 		models = built.models;

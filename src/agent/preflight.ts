@@ -20,7 +20,7 @@ import { createServer } from "node:net";
 import type { Config } from "../config.js";
 import { isLlmConfigured } from "../config.js";
 import { buildBrain, scrubSecret } from "./provider.js";
-import { FileCredentialStore } from "./file-credential-store.js";
+import { selectionStores } from "./selection.js";
 
 export type CheckStatus = "pass" | "fail" | "warn" | "skip";
 
@@ -168,12 +168,15 @@ function checkLlmConfigured(cfg: Config, opts: PreflightOptions): PreflightCheck
  * cannot disagree with reality (a configured key can still be dead).
  */
 async function probeLlmReal(cfg: Config, timeoutMs: number): Promise<{ ok: boolean; detail: string }> {
-	const credentials = new FileCredentialStore(path.join(cfg.dataDir, "credentials.json"));
+	// The SAME stores the runner uses — including the persisted model overlay.
+	// Without the overlay the gate called a live-only model "unknown" while the
+	// runner could start it (A5): the gate then refused a run that would work.
+	const stores = selectionStores(cfg.dataDir);
 	const ctrl = new AbortController();
 	const timer = setTimeout(() => ctrl.abort(), timeoutMs);
 	const started = Date.now();
 	try {
-		const built = await buildBrain(cfg.llm, { credentials });
+		const built = await buildBrain(cfg.llm, stores);
 		const stream = built.streamFn(
 			built.model as never,
 			{

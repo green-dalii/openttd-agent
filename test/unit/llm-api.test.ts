@@ -38,10 +38,10 @@ function apiFor(dir: string, env: Record<string, string> = {}) {
 }
 
 describe("llm dashboard api", () => {
-	it("starts unconfigured with the frozen selection/status shape", () => {
+	it("starts unconfigured with the frozen selection/status shape", async () => {
 		const dir = tmp();
 		try {
-			const v = apiFor(dir).llm.get() as View;
+			const v = (await apiFor(dir).llm.get()) as View;
 			// A completely unconfigured install reports "catalog": the built-in provider
 			// list is the intended entry point. It used to report "custom", which made a
 			// fresh Providers page open on "Custom endpoint" with a disabled Save and a
@@ -105,7 +105,7 @@ describe("llm dashboard api", () => {
 			expect(readFileSync(settingsPath(dir), "utf8")).not.toContain("sk-stored-123");
 
 			// A fresh GET (new API instance, new process in practice) agrees.
-			const again = apiFor(dir).llm.get() as View;
+			const again = (await apiFor(dir).llm.get()) as View;
 			expect(again.status.hasStoredKey).toBe(true);
 			expect(again.status.source).toBe("stored");
 		} finally {
@@ -196,7 +196,7 @@ describe("llm dashboard api", () => {
 		}
 	});
 
-	it("exposes the catalog with auth status and correct env var names", () => {
+	it("exposes the catalog with auth status and correct env var names", async () => {
 		const dir = tmp();
 		try {
 			const api = apiFor(dir);
@@ -223,7 +223,7 @@ describe("llm dashboard api", () => {
 			await api.llm.save({ source: "catalog", providerId: "openai", model: "gpt-4", apiKey: "sk-gone" });
 			expect(existsSync(credentialsPath(dir))).toBe(true);
 			api.catalog.deleteCredential("openai");
-			const v = api.llm.get() as View;
+			const v = (await api.llm.get()) as View;
 			expect(v.status.hasStoredKey).toBe(false);
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
@@ -242,7 +242,7 @@ describe("llm dashboard api", () => {
 				LLM_MODEL: "deepseek-v4-flash",
 			});
 			const api = createLlmApi({ dataDir: dir, cfg, envLlm: cfg.llm });
-			const v = api.llm.get() as View;
+			const v = (await api.llm.get()) as View;
 			expect(v.status.appliedFrom).toBe("env");
 			expect(v.selection.providerId).toBe("deepseek");
 		} finally {
@@ -261,7 +261,7 @@ describe("llm dashboard api", () => {
  *
  * 这条测试镜像生产：**没有任何 LLM_* env**，只有 llm.json。
  */
-it("只有文件（无 env）时 appliedFrom 必须是 file，而不是 env", () => {
+it("只有文件（无 env）时 appliedFrom 必须是 file，而不是 env", async () => {
 	const dir = tmp();
 	try {
 		saveLlmSettingsFile(dir, {
@@ -277,7 +277,7 @@ it("只有文件（无 env）时 appliedFrom 必须是 file，而不是 env", ()
 		// 生产的顺序：先合并文件，再建 llm-api（envLlm 因此是合并结果）
 		const merged = applyLlmSettingsFile(loadConfig({ OPENTTD_DATA_DIR: dir }));
 		const api = createLlmApi({ dataDir: dir, cfg: merged, envLlm: merged.llm });
-		const v = api.llm.get() as View;
+		const v = (await api.llm.get()) as View;
 		expect(v.selection.model).toBe("gpt-4");
 		expect(v.status.appliedFrom).toBe("file");
 		// 粘性：llm-api 每次 GET 都会**再合并一次**（save 后 GET 是常态）。
@@ -285,7 +285,7 @@ it("只有文件（无 env）时 appliedFrom 必须是 file，而不是 env", ()
 		const twice = applyLlmSettingsFile(merged);
 		expect(twice.llmAppliedFrom).toBe("file");
 		const api2 = createLlmApi({ dataDir: dir, cfg: twice, envLlm: twice.llm });
-		expect((api2.llm.get() as View).status.appliedFrom).toBe("file");
+		expect(((await api2.llm.get()) as View).status.appliedFrom).toBe("file");
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
@@ -385,7 +385,7 @@ describe("B1: a save is the truth (no restart, no stale view)", () => {
 			});
 			// The same api instance, no restart: what the page asks for must be what
 			// the runner will read. It used to answer "MiniMax-M2.7" forever.
-			expect((api.llm.get() as View).selection.model).toBe("MiniMax-M2.7-highspeed");
+			expect(((await api.llm.get()) as View).selection.model).toBe("MiniMax-M2.7-highspeed");
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}
@@ -402,7 +402,7 @@ describe("B1: a save is the truth (no restart, no stale view)", () => {
 			})) as View;
 			expect(saved.selection.providerId).toBe("minimax-cn");
 			expect(saved.selection.model).toBe("MiniMax-M2.7");
-			expect((api.llm.get() as View).selection.model).toBe("MiniMax-M2.7");
+			expect(((await api.llm.get()) as View).selection.model).toBe("MiniMax-M2.7");
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}
@@ -430,7 +430,7 @@ describe("B1: a save is the truth (no restart, no stale view)", () => {
 			expect(file.contextWindow).toBe(204_800);
 			expect(file.maxTokens).toBe(131_072);
 			// And the view reports the model's real numbers, not config defaults.
-			const sel = (api.llm.get() as View).selection as unknown as {
+			const sel = ((await api.llm.get()) as View).selection as unknown as {
 				api: string;
 				contextWindow: number;
 				maxTokens: number;
