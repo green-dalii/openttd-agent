@@ -10,6 +10,15 @@
 ## [Unreleased]
 ### Fixed
 
+- **One resolver for the run configuration.** The view, the save path, the startup gate and the
+  runner now derive the selection from the same function, so they cannot answer differently. The
+  gate in particular stopped rejecting models the runner could run: it built its brain without the
+  persisted model overlay, so a model the Providers page had listed was reported as "unknown model"
+  and no run could start. The view also reports the model's own api/context/limits instead of the
+  values the settings file happened to carry.
+
+### Fixed
+
 - **A saved run configuration is now the one that runs.** `GET /api/llm` re-reads `llm.json` on
   every call instead of re-merging a snapshot taken at process start, so a save is visible without a
   restart; the `POST` response is the post-save view; a catalog save stores the model's own

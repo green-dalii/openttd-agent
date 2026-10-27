@@ -136,9 +136,9 @@ pgrep -fl "bench.ts|run-experiment|cli/run.ts|llm-stub|OpenTTD.app"
 **上一轮的遗留（未完成，别丢）**：
 - **#13 S7 世界事实补洞**：方案在 `docs/SCAFFOLD-CONTRACT.md` §9，等回答三问（归因口径可接受？顺序 a→b→c→d？一次一 PR？）。**排在 B 系列之后**。
 - **AGENT_HARNESS 翻默认**：前提已满足 2/3（live 双绿、跨 seed `payloadShapeHash` 相等）；
-  还差"至少一局真实模型"。**注意**：现在配置的 `MiniMax-M3.1-Flash` 仍会被**门禁**判死
-  （`probeLlmReal` 未传 `modelsStore`——A5，属 S2 的范围，B1 未覆盖），
-  所以"真实模型一局"要等 S2 把四条路径并到同一个解析器。
+  还差"至少一局真实模型"。**S2 已修好 A5**（门禁与 runner 共用同一份覆盖层，见 `SPEC.md` §10.118）：
+  门禁现在对 live-only 模型 `MiniMax-M3.1-Flash` 判 **ok**（provider 1592ms 应答），
+  所以"真实模型一局"不再被门禁挡住。
 - **真实基准一轮**（需所有者定模型与预算）→ D6d fork 再评估 → P3 卫生。
 
 **端口占用（踩过两次）**：`dashboard:smoke` 默认在 **8899** 上自起 dashboard；临时

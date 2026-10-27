@@ -109,8 +109,14 @@ export interface WebServerOptions {
 	 * agnostic of the agent layer. When absent, /api/llm returns 404.
 	 */
 	llm?: {
-		/** Safe view (never includes the raw key). */
-		get: () => unknown;
+		/**
+		 * Safe view (never includes the raw key).
+		 *
+		 * May be async: the view reports the **resolved** selection facts (the
+		 * model's own api/context/limits), which needs the catalog overlay — so
+		 * the view and the runner cannot disagree.
+		 */
+		get: () => unknown | Promise<unknown>;
 		/**
 		 * Validate + persist; returns the new safe view. Throws on bad input.
 		 * May be async: resolving a catalog model can require a store read.
@@ -586,7 +592,7 @@ export class WebServer {
 		};
 		try {
 			if (req.method === "GET") {
-				json(200, this.llmHooks.get());
+				json(200, await this.llmHooks.get());
 				return;
 			}
 			if (req.method === "POST") {
