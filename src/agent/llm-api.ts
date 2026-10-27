@@ -26,9 +26,9 @@ import {
 	isCatalogProvider,
 	listCatalogProvidersWithStatus,
 } from "./provider-catalog.js";
-import type { CatalogModel } from "./provider-types.js";
 import { FileCredentialStore } from "./file-credential-store.js";
 import { createLiveCatalog } from "./live-catalog.js";
+import { createSelectionResolver } from "./selection.js";
 import { ProblemError } from "./problems.js";
 import { JsonModelsStore, modelsCachePath } from "./models-store.js";
 import type { CatalogHooks, WebServerOptions } from "../web/server.js";
@@ -76,13 +76,29 @@ export function createLlmApi(deps: LlmApiDeps): LlmApi {
 		modelsStore: new JsonModelsStore(modelsCachePath(deps.dataDir)),
 	});
 	const credFile = credentialsPath(deps.dataDir);
+	/**
+	 * One resolver for the view AND the save path (S2): both must derive the
+	 * same facts from the same catalog, or the page would validate against one
+	 * answer and the runner would use another.
+	 */
+	const resolver = createSelectionResolver(
+		{ credentials: store, modelsStore: new JsonModelsStore(modelsCachePath(deps.dataDir)) },
+		liveCatalog,
+	);
 
 	/** Never returns the key itself — status only (contract §3.1). */
-	function statusFor(llm: LlmConfig): {
+	function statusFor(
+		llm: LlmConfig,
+		facts: { providerId: string; model: string; api: string; baseUrl: string },
+	): {
 		configured: boolean;
 		hasStoredKey: boolean;
 		envKeys: string[];
 		source: "stored" | "env" | "none";
+		/**
+		 * What the run will actually use — the **resolved** facts, not what the
+		 * file happens to say (the file can name a model whose real api differs).
+		 */
 		effective: { providerId: string; model: string; api: string; baseUrl: string };
 		appliedFrom: "env" | "file" | "none";
 	} {
@@ -111,36 +127,51 @@ export function createLlmApi(deps: LlmApiDeps): LlmApi {
 			hasStoredKey: stored,
 			envKeys,
 			source: credSource,
-			effective: { providerId: llm.providerId, model: llm.model, api: llm.api, baseUrl: llm.baseUrl },
+			effective: {
+				providerId: facts.providerId,
+				model: facts.model,
+				api: facts.api,
+				baseUrl: facts.baseUrl,
+			},
 			appliedFrom: envOverrode ? "env" : fileExists ? "file" : "none",
 		};
 	}
 
-	function currentView(): unknown {
+	/**
+	 * The view of the current selection.
+	 *
+	 * It reports the **resolved** facts (the model's own api/context/limits),
+	 * not the numbers the config file happens to carry: the file may name a
+	 * model whose real api is different (a live-only model), and a view that
+	 * disagrees with the runner is a view that lies (CoDesign §3 B2).
+	 */
+	async function currentView(): Promise<unknown> {
 		const llm = applyLlmSettingsFile(deps.cfg).llm;
+		const resolved = await resolver.resolve(llm);
+		const status = statusFor(llm, resolved.facts);
 		return {
 			selection: {
-				source: resolveLlmSource(llm),
-				providerId: llm.providerId,
-				model: llm.model,
-				api: llm.api,
-				baseUrl: llm.baseUrl,
-				contextWindow: llm.contextWindow,
-				maxTokens: llm.maxTokens,
+				source: resolved.intent.source,
+				providerId: resolved.facts.providerId,
+				model: resolved.facts.model,
+				api: resolved.facts.api,
+				// The **configured** base URL ("" for catalog providers, which
+				// resolve their own endpoint). The provider's real endpoint is a
+				// different fact and belongs to the next-run preview, not here.
+				baseUrl: resolved.intent.baseUrl ?? "",
+				contextWindow: resolved.facts.contextWindow,
+				maxTokens: resolved.facts.maxTokens,
 			},
-			status: statusFor(llm),
+			status,
+			/**
+			 * Whether a run can start **right now**: the selection is coherent AND
+			 * a credential is available. The two are separate facts (a valid
+			 * selection without a key cannot run; a key without a valid
+			 * selection cannot run either), so the page must not conflate them.
+			 */
+			usable: resolved.valid && status.configured,
+			problems: resolved.problems,
 		};
-	}
-
-	/**
-	 * 目录里这个模型**真实**的 api / ctx / maxTokens。
-	 *
-	 * 先恢复持久化覆盖层（`allowNetwork:false`，不联网）：页面刷新过的 live-only 模型
-	 * 在重启后仍然必须被接受，否则"列表里有、保存却说没有"就是新的两个真值。
-	 */
-	async function resolveCatalogModel(providerId: string, model: string): Promise<CatalogModel | undefined> {
-		await liveCatalog.refresh(providerId, { allowNetwork: false }).catch(() => undefined);
-		return liveCatalog.models(providerId).find((m) => m.id === model);
 	}
 
 	async function save(body: unknown): Promise<unknown> {
@@ -157,33 +188,23 @@ export function createLlmApi(deps: LlmApiDeps): LlmApi {
 		let contextWindow: number;
 		let maxTokens: number;
 		if (source === "catalog") {
-			// A3: api/ctx/maxTokens **来自模型对象**，不来自上一个选择。
-			// 旧代码写成 `source === "custom" ? apiCandidate : cur.api`，于是从
-			// custom 切到 catalog 时把 openai-completions 钉在了 anthropic 模型上。
-			if (!isCatalogProvider(providerId)) {
-				throw new ProblemError([
-					{
-						code: "unknown_provider",
-						message: `unknown provider "${providerId}"`,
-						hint: "pick a provider from the bundled catalog, or use a custom endpoint",
-					},
-				]);
+			// A3 + A4: the **resolver** decides what this selection really is.
+			// The model object supplies api/ctx/maxTokens (the old code copied
+			// `cur.api`, pinning openai-completions onto an anthropic model), and
+			// an unknown model is refused HERE rather than 200-ing a file that
+			// only fails later at the gate (so "saved" now means "runnable").
+			const resolved = await resolver.resolve({
+				...cur,
+				source: "catalog",
+				providerId,
+				model,
+			});
+			if (!resolved.valid) {
+				throw new ProblemError(resolved.problems);
 			}
-			const found = await resolveCatalogModel(providerId, model);
-			if (!found) {
-				// A4: 保存成功必须等于"下一局能用"。旧代码让未知模型 200 落盘，
-				// 直到门禁/运行时才失败——那时页面早已把假答案显示给用户。
-				throw new ProblemError([
-					{
-						code: "unknown_model",
-						message: `unknown model "${model}" for provider "${providerId}"`,
-						hint: "refresh the model list on the Providers page, then pick a model from it",
-					},
-				]);
-			}
-			api = found.api;
-			contextWindow = found.contextWindow;
-			maxTokens = found.maxTokens;
+			api = resolved.facts.api;
+			contextWindow = resolved.facts.contextWindow;
+			maxTokens = resolved.facts.maxTokens;
 		} else {
 			const apiCandidate = str(b.api, cur.api);
 			api = CUSTOM_LLM_APIS.includes(apiCandidate as (typeof CUSTOM_LLM_APIS)[number])
