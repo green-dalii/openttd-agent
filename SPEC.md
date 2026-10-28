@@ -311,14 +311,12 @@ OpenTTD 有**两个动作面**，能力完全不同：
 
 ## 10. 已实测事实速查（本节只写「今天仍为真」的事实）
 
-> **本节不是日记。** 2026-09-23 重写：原先 3780 行的逐轮实验叙事已按职责迁移——
-> 我们改了什么 → `CHANGELOG.md`；我为什么错 → `MEMORY.md`；未完成的计划 → `ROADMAP.md`；
-> 决策 ADR → `docs/*.md`。这里只留**系统事实**，每条满足三个条件：
-> (1) 今天仍为真；(2) §1–§5 / `AGENTS.md` / `README.md` / `docs/*` 里没有；
-> (3) 是事实（协议 / 引擎行为 / 不变量），不是「我们做了什么」。
->
-> 依据一律写**代码 / 测试 / 上游源码**，不写 `/tmp/...`（临时目录，环境重建即失效）。
-> **编号保持不变**，其它文档里的 `§10.x` 指针继续有效。
+> **本节不是日记。** 2026-09-23 重写：原先 3780 行的逐轮实验叙事已按职责迁移（改了什么 →
+> `CHANGELOG.md`；我为什么错 → `MEMORY.md`；未完成的计划 → `ROADMAP.md`；决策 ADR →
+> `docs/*.md`）。这里只留**系统事实**，每条满足三个条件：(1) 今天仍为真；(2) §1–§5 /
+> `AGENTS.md` / `README.md` / `docs/*` 里没有；(3) 是事实，不是「我们做了什么」。
+> 依据一律写**代码 / 测试 / 上游源码**，不写 `/tmp/...`。**编号保持不变**，其它文档里的
+> `§10.x` 指针继续有效。
 
 ### 索引（按主题；**编号不变**，其它文档的 `§10.x` 指针继续有效）
 
@@ -328,12 +326,12 @@ OpenTTD 有**两个动作面**，能力完全不同：
 | 主题 | 条目 | 数 |
 |---|---|---|
 | **A 通信与协议事实** | 10.2 观察信号 · 10.4 命令下发链路 · 10.13 OpenTTD Squirrel… · 10.24 第二条 admin 连接不能给 … · 10.25 GS 可对公司施工并扣公司钱 · 10.66 GS 通道的部分失效：`GSSt… · 10.99 数据的唯一来源边界：admin … · 10.106 事实通道补全与 admin 握手… | 9 |
-| **B 执行器与施工** | 10.3 GS-only 施工候选 · 10.10 v0.2 spike: 自定义 … · 10.11 v0.2 spike: Brid… · 10.12 v0.2 实现: 标牌邮箱可见性… · 10.14 v0.2 实现: Executo… · 10.15 v0.2.1: 分段贪心铺路解除… · 10.23 执行器阶段的解码契约 · 10.26 决策循环的 freeze/tha… · 10.27 执行器"假死"的真正根因：路径搜… · 10.28 控制台 `pause` 是单向的… · 10.29 执行器跑通完整公交线 · 10.39 NEXT-4 最小切片：执行器队… · 10.39.1 修正：FIFO + done 集… · 10.40 FIFO 队列真机验证通过 · 10.45 Phase A2：GS 侧类型化… · 10.46 Phase A3：harness… · 10.90 决定性事实：Bridge GS … · 10.92 AB-4a：GS 自建 + 自运… · 10.103 执行器异常：完整文本进事件流 · 10.107 P1-1a：执行器搬进 GS · 10.108 P1-1b：GS 寻路库入库 · 10.109 P1-1b 尾巴 + P1-3 … · 10.110 P1-2：动作面扩——选货 / … · 10.111 P1-3 收尾：FLEET 归因… | 24 |
+| **B 执行器与施工** | 10.3 GS-only 施工候选 · 10.10 v0.2 spike: 自定义 … · 10.11 v0.2 spike: Brid… · 10.12 v0.2 实现: 标牌邮箱可见性… · 10.14 v0.2 实现: Executo… · 10.15 v0.2.1: 分段贪心铺路解除… · 10.23 执行器阶段的解码契约 · 10.26 决策循环的 freeze/tha… · 10.27 执行器"假死"的真正根因：路径搜… · 10.28 控制台 `pause` 是单向的… · 10.29 执行器跑通完整公交线 · 10.39 NEXT-4 最小切片：执行器队… · 10.39.1 修正：FIFO + done 集… · 10.40 FIFO 队列真机验证通过 · 10.45 Phase A2：GS 侧类型化… · 10.46 Phase A3：harness… · 10.90 决定性事实：Bridge GS … · 10.92 AB-4a：GS 自建 + 自运… · 10.103 执行器异常：完整文本进事件流 · 10.107 P1-1a：执行器搬进 GS · 10.109 P1-1b 尾巴 + P1-3 … · 10.110 P1-2：动作面扩——选货 / … · 10.111 P1-3 收尾：FLEET 归因… | 24 |
 | **C 决策循环与运行时** | 10.16 v0.2.1 实现: Pi Ag… · 10.18 v0.5.0 实现: 启动门禁 … · 10.19 v0.6.0 实现: 决策循环对… · 10.20 `add_vehicles` 的… · 10.21 两个 runner 的事件转发契… · 10.30 `seconds` 从未限制运行… · 10.35 心跳被当成「变化」—— 决策循环… · 10.35.1 修复的实测结果与尚未解决的问题 · 10.36 新闻门：phase 按阶段门控，… · 10.37 新闻门之后的第一次校准跑 · 10.38 校准跑 #2：session h… · 10.47 Phase B-3：signal… · 10.48 Phase B-4a：决策循环纯… · 10.49 Phase B-4b：决策循环体… · 10.50 Phase C：结构化记忆 + … · 10.60 已验证的冻结：重新引入暂停，但这… · 10.61 冻结 vs 不冻结：机制成立，但… · 10.68 测量单元本身不可比：墙钟预算 →… · 10.69 G1 落地：局以模拟时间结束 · 10.74 与 pi-agent-core … · 10.75 R1 实施结果：执行顺序 / 工… · 10.83 G6 实测：单次请求峰值 5–7… · 10.93 `--serve` 的 Star… · 10.101 僵尸局取证：用户看到的那句告警，… · 10.102 世界时钟：一个事实、一个写者、一… | 26 | · 10.115 决策运行时双后端（harness/裸 Agent，请求逐字相同） · 10.116 模型目录是快照，实时列表要另取 |
 | **D 观测面与测量** | 10.1 动作面 · 10.53 NEXT-2 N2-1：线路经济… · 10.55 NEXT-2 N2-4：主指标换… · 10.59 工具必须能观测自己的效果：rco… · 10.65 流量指标的测量缺陷：`deliv… · 10.67 校准 #2：仪器缺陷不是方差来源… · 10.71 G2 落地：把"决定结局的那个过… · 10.72 S0 oracle 梯度：杠杆存… · 10.73 S1/G4 落地：预建场景 · 10.98 城镇与存档：两条"数据一直在、只… · 10.100 P1+P2 实测：产业/货种/公… · 10.105 车队数必须跨线路去重：同屏两个"… · 10.114 D1a：模型看得见自己这局的分 | 14 |
 | **E 记忆与进化** | 10.22 RL Harness 范围 · 10.31 M3 对照实验结果 · 10.34 M3 第二次 A/B：把决策权交… · 10.41 决策→结果账本接入反思 · 10.42 M3 A/B 第三次重跑：手眼账… · 10.43 为什么记忆无收益：全链路审计 · 10.76 R2 实施结果：经验 = 带实测… · 10.77 R2b 实施结果：反思改走 Ag… · 10.78 M1：反思产出率变成可诊断、可重… · 10.79 M2：把计分规则作为事实写进提示… · 10.80 M3 能力盘点：环境到底允许 a… · 10.82 第一性原理复检：能力面、空缺与协… · 10.84 M3-1b：车队杠杆真正的两处缺… · 10.85 第一性原理复审：离"自主 + 自… · 10.86 M3-2a：每线路登记表 + 退… · 10.87 M3-2b：披露粘滞——让事件相… · 10.88 M3-2c：车队请求对已登记的旧… · 10.89 M4a：`recall` 按需检… · 10.91 AB-1：`capabiliti… | 19 |
 | **F 实验方法与统计** | 10.32 第一性原理：M3 测不出差异，是… · 10.33 把决策权交还 agent：城镇对… · 10.52 每局存档+ M3 第五/六次重跑 · 10.56 N2-5 首轮 A/B 判废：臂… · 10.57 N2-5 有效轮次与两个结论 · 10.58 N2-5 oracle 探测：任… · 10.62 NEXT-2 收尾：首个干净判据… · 10.63 校准轮：窗口是方差的主因，实验设… · 10.64 顺序检验 block #1：CI… · 10.70 G3 落地：车队请求的静默无效变… · 10.81 M3-1 真机结果：车队杠杆被阶… · 10.112 P2-3：统计预登记 · 10.113 P2-1/P2-2 代码侧：实验… | 14 |
-| **G 产品面与前端** | 10.17 v0.3.0 实现: Dashb… · 10.94 Live 页面运行期的滚动失控与… · 10.95 图表渲染路径：三个真因与"图表健… · 10.96 长跑实测 · 10.97 uPlot 1.6.32 的交互… · 10.104 图表手势、区间读数与列表索引 · 10.117 一份运行配置真值 · 10.118 一份运行配置解析器 | 6 · 10.119 页面起一局：旋钮、预览与“预览即承诺”… · 10.120 因果时间线：一次决策一行，四段证据由 job 连接… |
+| **G 产品面与前端** | 10.17 v0.3.0 实现: Dashb… · 10.94 Live 页面运行期的滚动失控与… · 10.95 图表渲染路径：三个真因与"图表健… · 10.96 长跑实测 · 10.97 uPlot 1.6.32 的交互… · 10.104 图表手势、区间读数与列表索引 · 10.117 一份运行配置真值 · 10.118 一份运行配置解析器 | 6 · 10.119 页面起一局：旋钮、预览与“预览即承诺”… · 10.120 因果时间线：一次决策一行，四段证据由 job 连接… · 10.121 Compare 视图是投影：四轴/判定/排除都不是页面算的… |
 | **H 里程碑与实施流水** | 10.6 M0 实测结果 · 10.7 M1 实测结果 · 10.8 里程碑进度 · 10.9 M1.5 崩溃调查 | 5 |
 
 ### 10.1 动作面（回答"Admin Port 做不到的操作怎么办"）
@@ -651,15 +649,14 @@ OpenTTD 有**两个动作面**，能力完全不同：
 
 | 事实 | 读数 | 含义 |
 |------|------|------|
-| **agent 能亲手结束自己的 episode** | 最后一次决策（turn 90）的动作就是 `set_pause` → 游戏冻结，**此后 5 小时循环再没跑过** | 这是真实的"死局"：暂停后没有游戏日期推进 → 没有 event/interval 触发 → 循环静默停摆。**必须让"谁让它停的"成为可查事实**（已加 `pausedBy`/`pausedAt` 与快照 `control` 字段） |
-| **写工具只报"请求"会诱发空转** | 线路 100 被调车队 **32 次**；`retire_route` 对同一 job 重复 **5–7 次**（103/104/105/106），回执停在 `retire_unknown<104>` | "已退役"与"未知线路"在文本上无法区分，agent 只能重试。**空转的代价是 turn**（它把最后 20 轮都花在这里） |
-| **长跑上下文会增长 ~4×** | 单次请求峰值 **24,624 tokens**（turn 38；短跑实测 5,188–7,324） | §10.83 的"不需要上下文压缩"是**在 60 游戏日上量的**，**对长跑不成立**——长跑的输入累计 2.48M tokens |
-| **过度扩张 → 收缩是真实的策略学习** | 车辆 48 → 9；年收入 −267k → **+101k**；车队操作 50 次缩编 vs 14 次扩容 | 早期建 9 条线后现金跌到 £32,913，随后它自己发现并收缩到盈利。**这是自发的 credit assignment**（无人教它） |
-| **首个财年结束后公司价值才真实** | 早期 `old_economy[0] = 1`（占位）；1952 年实测 `companyValue = £12,021`、`deliveredCargo = 493` | 验证 §10.95 的 `companyValueKnown` 判定：越过首财年后数字自然出现 |
+| **agent 能亲手结束自己的 episode** | 最后一次决策（turn 90）的动作就是 `set_pause` → 游戏冻结，**此后 5 小时循环再没跑过** | 这是真实的"死局"：暂停后没有游戏日期推进 → 没有 |
+| **写工具只报"请求"会诱发空转** | 线路 100 被调车队 **32 次**；`retire_route` 对同一 job 重复 **5–7 次**（103/104/105/106），回执停在 `retire_unknown<` |
+| **长跑上下文会增长 ~4×** | 单次请求峰值 **24,624 tokens**（turn 38；短跑实测 5,188–7,324） | §10.83 的"不需要上下文压缩"是**在 60 游戏日上量的**，**对长跑不成立** |
+| **过度扩张 → 收缩是真实的策略学习** | 车辆 48 → 9；年收入 −267k → **+101k**；车队操作 50 次缩编 vs 14 次扩容 | 早期建 9 条线后现金跌到 £32,913，随后它自己发现并收缩到盈利。 |
+| **首个财年结束后公司价值才真实** | 早期 `old_economy[0] = 1`（占位）；1952 年实测 `companyValue = £12,021`、`deliveredCargo = 493` | 验证 §10.9 |
 | **车辆/站点类型分布早就在快照里** | `stats.breakdown {bus:9,…}`、`stationBreakdown {bus:8,…}` | 仪表盘"没有线路类型"不是数据缺失，是**没显示** |
 | **本次长跑**没有**跨局记忆** | `lessonsInjected: 0`，`recall` 两次命中 0 | 0 命中是**正确**行为（库为空），不是匹配缺陷；跨局学习需要**多局**（M4b/M5 的前提） |
 | 6 个文件、3 名参与者的运行时小样本 | — | — |
-
 ### 10.97 uPlot 1.6.32 的交互事实：`setScale` 不可依赖，视野必须直接写（2026-09-23 实测）
 
 图表加缩放/平移/复位时，连续四轮"修好了"都是假的。逐条量下来，**uPlot 在这条路径上有
@@ -990,33 +987,25 @@ unfinished action (simulated 2026-09-25)`（72 字符）⇒ 真实事件流按�
 4. Squirrel 类里 `this.Sleep` 来自 `AIController`/`GSController` 继承：
    `ExecCore` 不继承 ⇒ 需要自备代理（`GSController.Sleep` 存在）。
 
-### 10.108 P1-1b：GS 寻路库入库（2026-10-08 真机实测）
-
-**GS 库解析的实测事实**：
-1. GS 的库扫描树是 **`<data>/game/library/`**（OpenTTD 自建该目录；content 下载树
-   `content_download/ai/library/` 只对 **AI 上下文**可见——这就是旧 AI 能 import
-   而 GS 不能的全部原因）。
-2. **GS 虚拟机的库基类注册名是 `GSLibrary`**（四选一探针实测：`GameLibrary`/
-   `Library`/`ScriptLibrary`/`AILibrary` 均报 `the index '...' does not exist`）。
-3. **GS 虚拟机不注册 AI* API 名**（`the index 'AIList' does not exist`）；库内代码须按
-   双名映射改 GS 名（AITile/AIMap/AITunnel/AIBridge/AIRoad/AIVehicle/AITestMode/
-   AIList/AIBridgeList_Length → GSTile/GSMap/GSTunnel/GSBridge/GSRoad/GSVehicle/
-   GSTestMode/GSList/GSBridgeList_Length）。
-4. 依赖链：`pathfinder.road`(v4) → `graph.aystar`(v6) → `queue.binary_heap`(v1)。
-   三件套已 vendored 进 `src/game/squirrel/library/`（GPL v2 独立作品，保留许可全文，
-   修改声明在各 `library.nut` 顶部；边界见该目录 README）。`squirrel-deploy` 部署到
-   `<data>/game/library/`。
-
-**完整线路建成（P1-1a 验收补齐，seed 11 真机）**：
-`queued → work j100 → stA_ok → stB_ok → road seg1..3 → road_built → dpt_ok →
-dpt_conn → bus_live → done`，`done.fleet = {owned:1, ids:[4], applied:-1}`
-——车站×2 + 道路（真 Pathfinder.Road 分段寻路）+ 车库 + 巴士 + 发车，全部经 GS 执行
-核心，server.log 零 API 缺失。贪心回退（`GreedyPath`）保留为库不可用时的兜底。
-
-**遗留（收尾链缺陷，登记 ROADMAP）**：offline demo 收尾时反射步骤失败
-（faux 队列耗尽）会让 `runFinalizeAndReflect` 返回 1、进程退出码 1 且**不写指标行**
-（`/api/metrics` 看不到该局）——数据丢失，P2 的短局多跑必须先修。
-
+**P1-1b 补齐：GS 寻路库入库**（上面第 1 条的缺口已修；GS 库的解析事实，勿再试）：
+- GS 的库扫描树是 **`<data>/game/library/`**（OpenTTD 自建；`content_download/ai/library/`
+  只对 **AI 上下文**可见——这就是旧 AI 能 import 而 GS 不能的全部原因）。
+- **GS 虚拟机的库基类注册名是 `GSLibrary`**（四选一探针实测：`GameLibrary`/`Library`/
+  `ScriptLibrary`/`AILibrary` 均报 `the index '...' does not exist`）。
+- **GS 虚拟机不注册 AI* API 名**（`the index 'AIList' does not exist`）⇒ 库内代码须按双名
+  映射改 GS 名（AITile/AIMap/AITunnel/AIBridge/AIRoad/AIVehicle/AITestMode/AIList/
+  AIBridgeList_Length → GSTile/GSMap/GSTunnel/GSBridge/GSRoad/GSVehicle/GSTestMode/GSList/
+  GSBridgeList_Length）。
+- 依赖链：`pathfinder.road`(v4) → `graph.aystar`(v6) → `queue.binary_heap`(v1)。三件套已
+  vendored 进 `src/game/squirrel/library/`（GPL v2 独立作品，保留许可全文，修改声明在各
+  `library.nut` 顶部；边界见该目录 README）。`squirrel-deploy` 部署到 `<data>/game/library/`。
+- **完整线路建成**（P1-1a 验收补齐，seed 11 真机）：`queued → work j100 → stA_ok → stB_ok
+  → road seg1..3 → road_built → dpt_ok → dpt_conn → bus_live → done`，
+  `done.fleet = {owned:1, ids:[4], applied:-1}`——车站×2 + 道路（真 Pathfinder.Road 分段寻路）
+  + 车库 + 巴士 + 发车，全部经 GS 执行核心，server.log 零 API 缺失。
+- **遗留（收尾链缺陷，登记 ROADMAP）**：offline demo 收尾时反射步骤失败（faux 队列耗尽）会让
+  `runFinalizeAndReflect` 返回 1、进程退出码 1 且**不写指标行**（`/api/metrics` 看不到该局）
+  ——数据丢失，P2 的短局多跑必须先修。
 ### 10.109 P1-1b 尾巴 + P1-3 数据层：车队双向/退役实证（2026-10-08 真机）
 
 **双向与退役在新核心上全部落地**（D58 探针，seed 11）：
@@ -1271,11 +1260,11 @@ compaction 冲突）在 `docs/HARNESS-MIGRATION.md` §3（带坐标），此处�
   （坏请求，不是 409 冲突）。**harness 后端受进程门禁**：页面只能在进程允许时选它，
   否则 400 + `AGENT_HARNESS=1`。
 - 真机（隔离 data dir，provider `minimax-cn`、模型 `MiniMax-M3.1-Flash`）：页面填
-  seed 4242 / gameDays 40 / prebuilt / control / thinking high / toolBudget 5 /
-  tokenLimit 9000 → 点 Start → 跑完的 `meta.json` 与**页面显示的预览 10 个字段逐字段
-  相同**（`arm=control`、`seed=4242`、`scenario=prebuilt` 也对上）；token 上限**真的触发**
-  （9051 ≥ 9000 停机）。非法旋钮（`thinkingLevel=ultra`、`toolBudget=12abc`）与 harness
-  后端均 400 + 可执行原因，且**没有游戏进程被启动**。
+  seed 4242 / gameDays 40 / prebuilt / control / thinking high / toolBudget 5 / tokenLimit 9000
+  → 点 Start → 跑完的 `meta.json` 与**页面显示的预览 10 个字段逐字段相同**（`arm=control`、
+  `seed=4242`、`scenario=prebuilt` 也对上）；token 上限**真的触发**（9051 ≥ 9000 停机）。非法
+  旋钮（`thinkingLevel=ultra`、`toolBudget=12abc`）与 harness 后端均 400 + 可执行原因，且
+  **没有游戏进程被启动**。
 - 前端事实（AGENTS §5.2 的血泪）：Alpine 的 `x-for` **必须**在 `<template>` 上——写在普通
   元素上时循环变量对该元素自身的指令不在作用域，表单**整块渲染为空**而页面看起来正常
   （错误只出现在 `console.warn`）。且一个字段只能有**一个**控件：用 `x-show` 藏 select/input
@@ -1283,17 +1272,28 @@ compaction 冲突）在 `docs/HARNESS-MIGRATION.md` §3（带坐标），此处�
 
 ### 10.120 因果时间线：一次决策一行，四段证据由 `job` 连接（B3，2026-10-25）
 
-- 事实：**一行 = 一次决策**（`src/agent/causal-timeline.ts`）。四段：decision（触发/时刻/
-  目标）→ tools（工具与结果）→ job/相位 → effect（本窗口增量）。归属**靠窗口**（上一次
-  决策之后、下一次决策之前），不靠时间戳猜；**连接键是 `job`**（D3a）。
+- 事实：**一行 = 一次决策**（`src/agent/causal-timeline.ts`）：四段 = decision（触发/时刻/
+  目标）→ tools → job/相位 → effect（本窗口增量）。归属**靠窗口**（上一次决策之后、下一次
+  决策之前）；**连接键是 `job`**（D3a）。
 - 事实：**GS 相位必须归档**才可复盘：`signal-hub` 把每个非心跳 exec 事件写成 `gs_exec`
   审计记录（此前只在实时流里，跑完的局就查不到了）。
 - 事实：**effect = 与下一次决策快照的差**（钱/收入/车/站/交付/游戏日）。最后一个决策没有
-  "下一个快照" ⇒ effect = `null`（**没测到**，不是"什么都没变"，D60）；`delivered` 与
-  度量行同源同值（`deliveredRun.total`，同一"我方公司"口径）。
-- 事实：**会话 hook 只有一处构造**（`sessionHooks(dataDir)`）：runner 的
-  `web.attach({sessions})` 会**替换**掉 server 的 hook——两份构造曾让时间线在**run 一开始
-  就从页面上消失**（空闲看板能用、跑起来就没了）；`repo-hygiene` 有守卫。
-- 事实：页面只画服务端给的：增量由服务端量出，缺失写 `not measured`（D60）。
-- 真机（隔离 data dir，`minimax-cn` / `MiniMax-M3.1-Flash`）：freeform 局里决策 1 的工具链
-  与模型自述目标同在一行；`gs_exec` 归档把 job 101 的相位（queued → buildA → road → …）留下。
+  "下一个快照" ⇒ effect = `null`（**没测到**，不是"什么都没变"，D60）；`delivered` 与度量行
+  同源同值（`deliveredRun.total`，同一"我方公司"口径）。
+- 事实：**会话 hook 只有一处构造**（`sessionHooks(dataDir)`）：runner 的 `web.attach({sessions})`
+  会**替换**掉 server 的 hook——两份构造曾让时间线在**run 一开始就从页面上消失**（空闲看板能用、
+  跑起来就没了）；`repo-hygiene` 有守卫。页面只画服务端给的：缺失写 `not measured`（D60）。
+- 真机（隔离 data dir，`minimax-cn` / `MiniMax-M3.1-Flash`）：freeform 局里决策 2 下了 4 个
+  job，其相位（queued → buildA → road → …）与工具、效果同在一行，由 `job` 连接。
+
+### 10.121 Compare 视图是**投影**：四轴、判定与排除都不是页面算的（B4，2026-10-25）
+
+- 事实：`GET /api/compare` 是**只读**的：四轴来自 `buildScorecard`，配对判定来自
+  `pairedComparison`，排除原因来自 `metricExclusion`——**页面一个数都不重算、也不下判断**。
+- 事实：分组用**实际服务的模型**（`manifest.servedModel`），请求的模型另列（`requestedModels`）
+  ⇒ 网关替换**可见**；无价目表模型的 `costPerRun` 是"没测到"（§10.115）；每局能下钻到
+  History（`/sessions?run=<id>`）。**进化 hook 只有一处构造**（`evolutionHooks(dataDir)`，
+  D82 同款：runner 的 `attach()` 会整体替换它们，两份构造已漂移过一次）。
+- 真机（隔离 data dir，`minimax-cn` / `MiniMax-M3.1-Flash` + 本地 stub，各 2 个 seed）：两模型
+  × 两 seed 出四轴 + 配对判定（2 对 ⇒ "not determinable"，区间需 ≥3 对），无价目表一侧的
+  `Cost / run` 显示 `not measured`。

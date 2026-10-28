@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Compare — openttd-agent</title>
+  <link rel="stylesheet" href="/assets/vendor/uplot/uPlot.min.css">
+  <link rel="stylesheet" href="/assets/css/style.css">
+</head>
+<body>
+  <header>
+    <div class="brand" data-brand="compare"></div>
+  </header>
+
+  <main x-data="compare" x-init="init()">
+    <div class="group"><h2>Compare</h2><div class="rule"></div>
+      <span class="dim">same worlds, different models — every number computed by the server</span></div>
+
+    <p class="notice" x-show="error" x-text="error"></p>
+    <p class="dim" x-show="loading">Loading…</p>
+
+    <p class="notice" x-show="!loading && !error && !hasRuns()">
+      No finished runs to compare yet. Finish a game with <code>--agent</code> and its
+      metric row will show up here.
+    </p>
+
+    <!-- ===================== ① the four axes ===================== -->
+    <section class="panel" x-show="!loading && !error && hasRuns()">
+      <div class="panel-head">
+        <h2>Four axes per model <span class="dim">成绩 / 效率 / 可靠性 / 成长</span></h2>
+        <span class="dim" x-text="modelRows().length + ' model(s)'"></span>
+      </div>
+      <!-- The numbers come from the scorecard (server-side). A missing reading
+           reads "not measured" — the page never turns it into a zero. -->
+      <div class="tbl-wrap">
+        <table class="kv cmp-table">
+          <thead>
+            <tr>
+              <th>Model</th><th>Runs</th><th>Excluded</th>
+              <th>Result</th><th>Efficiency</th><th>Reliability</th><th>Growth</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="row in modelRows()" :key="row.model">
+              <tr>
+                <td>
+                  <div class="cmp-model" x-text="row.model"></div>
+                  <div class="dim cmp-sub" x-show="row.requested && row.requested !== row.model"
+                       x-text="'requested: ' + row.requested"></div>
+                </td>
+                <td x-text="row.runs"></td>
+                <td x-text="row.excluded"></td>
+                <td>
+                  <template x-for="a in row.ability" :key="a.label">
+                    <div class="cmp-ax"><span class="dim" x-text="a.label"></span><span x-text="a.text"></span></div>
+                  </template>
+                </td>
+                <td>
+                  <template x-for="a in row.efficiency" :key="a.label">
+                    <div class="cmp-ax"><span class="dim" x-text="a.label"></span><span x-text="a.text"></span></div>
+                  </template>
+                </td>
+                <td>
+                  <template x-for="a in row.stability" :key="a.label">
+                    <div class="cmp-ax"><span class="dim" x-text="a.label"></span><span x-text="a.text"></span></div>
+                  </template>
+                </td>
+                <td>
+                  <div class="cmp-ax"><span x-text="row.growth.text"></span></div>
+                  <div class="dim cmp-sub" x-text="row.growthMessage"></div>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ===================== ② the paired verdict =====================
+         The picker lives here ALWAYS: putting it inside the "only when there is
+         a comparison" branch made the page a dead end (the controls were
+         invisible, so no comparison could ever be asked for). -->
+    <section class="panel" x-show="!loading && !error && hasRuns()">
+      <div class="panel-head">
+        <h2>Paired comparison <span class="dim">同一批 seed 上的配对差异</span></h2>
+        <span class="dim" x-text="comparison() ? (comparison().modelA + ' vs ' + comparison().modelB) : ''"></span>
+      </div>
+      <div class="actions">
+        <template x-for="m in modelNames()" :key="'pick-' + m">
+          <label class="check">
+            <input type="checkbox" :value="m" x-model="picked" />
+            <span x-text="m"></span>
+          </label>
+        </template>
+        <button type="button" class="btn sm primary" :disabled="picked.length !== 2 || loading" @click="comparePicked()">
+          Compare the two
+        </button>
+        <span class="form-msg" x-show="picked.length !== 2" x-text="'pick exactly two models (' + picked.length + ' picked)'"></span>
+      </div>
+      <!-- The verdict is the server's (pairedComparison). The page never
+           decides which model is better, and never turns "not determinable"
+           into "no difference". Both the verdict word and the server's
+           message are shown: the word is the canonical one, the message says
+           why. -->
+      <div x-show="comparison()">
+        <p class="verdict" :class="comparison() && comparison().known ? 'ok' : 'dim'">
+          <span class="badge" :class="comparison() && comparison().known ? 'ok' : 'dim'"
+                x-text="comparison() ? comparison().verdict : ''"></span>
+          <span x-text="comparison() ? comparison().message : ''"></span>
+        </p>
+        <div class="kpis">
+          <div class="kpi"><div class="kpi-k">Pairs</div><div class="kpi-v" x-text="comparison() ? comparison().pairs : 0"></div></div>
+          <div class="kpi"><div class="kpi-k">Mean difference</div>
+            <div class="kpi-v" x-text="comparison() && comparison().meanDiff !== null ? comparison().meanDiff.toFixed(2) : 'not measured'"></div></div>
+          <div class="kpi"><div class="kpi-k">95% CI</div>
+            <div class="kpi-v" x-text="comparison() && comparison().ci ? ('[' + comparison().ci[0].toFixed(2) + ', ' + comparison().ci[1].toFixed(2) + ']') : 'not measured'"></div></div>
+        </div>
+      </div>
+      <p class="hint" x-show="!comparison()">
+        Pick two models above to compare them on the same worlds (same seed, same repeat).
+      </p>
+    </section>
+
+    <!-- ===================== ③ the exclusions ===================== -->
+    <section class="panel" x-show="!loading && !error && exclusionRows().length">
+      <div class="panel-head">
+        <h2>Excluded runs <span class="dim">按原因计数</span></h2>
+        <span class="dim" x-text="'dropped runs are not a smaller sample, they are a different question'"></span>
+      </div>
+      <div class="kpis">
+        <template x-for="e in exclusionRows()" :key="e.reason">
+          <div class="kpi">
+            <div class="kpi-k" x-text="e.reason"></div>
+            <div class="kpi-v" x-text="e.count"></div>
+          </div>
+        </template>
+      </div>
+    </section>
+
+    <!-- ===================== ④ the runs ===================== -->
+    <section class="panel" x-show="!loading && !error && runRows().length">
+      <div class="panel-head">
+        <h2>The runs <span class="dim">每一局都能下钻</span></h2>
+        <span class="dim" x-text="runRows().length + ' run(s)'"></span>
+      </div>
+      <div class="tbl-wrap">
+        <table class="kv">
+          <thead>
+            <tr><th>Run</th><th>Model</th><th>Seed</th><th>Backend</th><th>Delivered / day</th><th>Status</th></tr>
+          </thead>
+          <tbody>
+            <template x-for="r in runRows()" :key="r.id">
+              <tr>
+                <td><a :href="r.link" x-text="r.id"></a></td>
+                <td x-text="r.model"></td>
+                <td x-text="r.seed"></td>
+                <td x-text="r.backend || '—'"></td>
+                <td x-text="r.perDay === null ? 'not measured' : r.perDay.toFixed(2)"></td>
+                <td x-text="r.excluded || 'counted'"></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script src="/assets/vendor/alpinejs/alpine.min.js" defer></script>
+  <script src="/assets/js/common.js"></script>
+  <script src="/assets/js/alpine-bridge.js"></script>
+  <script src="/assets/js/compare-view.js"></script>
+  <script src="/assets/js/compare.js"></script>
+</body>
+</html>

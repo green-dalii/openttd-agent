@@ -420,6 +420,31 @@ describe("WebServer REST", () => {
 		}
 	});
 
+	it("GET /api/compare returns the server-computed comparison (and 404s without the hook)", async () => {
+		const asked: { models?: string[]; seed?: number; backend?: string }[] = [];
+		await start({
+			evolution: {
+				metrics: () => [],
+				lessons: () => [],
+				strategies: () => [],
+				compare: (opts) => {
+					asked.push(opts);
+					return { models: [], exclusions: [], runs: [] };
+				},
+			},
+		});
+		const r = await req("GET", "/api/compare?models=a,b&seed=7&backend=harness");
+		expect(r.status).toBe(200);
+		expect(asked[0]).toEqual({ models: ["a", "b"], seed: 7, backend: "harness" });
+
+		// No filters => no narrowing (the page asks for everything).
+		await req("GET", "/api/compare");
+		expect(asked[1]).toEqual({});
+
+		await start({ evolution: { metrics: () => [], lessons: () => [], strategies: () => [] } });
+		expect((await req("GET", "/api/compare")).status).toBe(404);
+	});
+
 	it("serves every page route declared in the PAGES table", async () => {
 		await start();
 		// Guards the URL->file mapping so a page can never 404 silently.

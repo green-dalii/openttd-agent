@@ -10,6 +10,24 @@
 ## [Unreleased]
 ### Added
 
+- **A Compare page.** It answers "how do these models compare on the same worlds": one row per
+  model across the four axes (result, efficiency, reliability, growth), the excluded runs counted
+  **by reason**, and - once two models are picked - the paired verdict with its interval or the
+  reason it cannot be decided. Every run in the list drills through to that run in History.
+  The numbers are the server's: the four axes come from the scorecard, the paired verdict from the
+  paired comparison, the exclusion reasons from the existing enum. The page computes nothing and
+  judges nothing; a missing reading reads "not measured", and an unpriced model's cost reads
+  "not measured" rather than $0.
+
+### Fixed
+
+- **The evolution hooks had drifted into two copies.** The runner re-attaches its own hooks when
+  a run starts, and only the server's copy carried the per-row exclusion reason - so the same run
+  could show a different exclusion depending on which path served the page. They are built in one
+  place now, and a guard keeps them there.
+
+### Added
+
 - **The Run page now reads as three bands, and one decision is one row.** The page answers "is it
   playing" (health, score, the current goal), then "what just happened" - a **causal timeline**
   where a row is a decision and expanding it shows the four pieces of evidence together: the

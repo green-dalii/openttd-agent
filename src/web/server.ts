@@ -90,6 +90,14 @@ export interface EvolutionHooks {
 	arms?: () => unknown;
 	/** Flip the human confirmation flag on one strategy card (SPEC §5.3 guardrail). */
 	setStrategyEnabled?: (id: string, enabled: boolean) => boolean;
+	/**
+	 * The Compare page's payload (B4): the four axes per model, the exclusion
+	 * counts by reason, and the paired comparison of two selected models.
+	 *
+	 * Computed **server-side**: the page must not recompute a comparability
+	 * judgement (that is `scorecard.ts` / `bench-stats.ts`).
+	 */
+	compare?: (opts: { models?: string[]; seed?: number; backend?: string }) => unknown;
 }
 
 /**
@@ -185,6 +193,7 @@ export interface WebServerOptions {
  */
 export const PAGES: Record<string, string> = {
 	"/": "pages/live.html",
+	"/compare": "pages/compare.html",
 	"/providers": "pages/providers.html",
 	"/sessions": "pages/sessions.html",
 	"/evolution": "pages/evolution.html",
@@ -629,6 +638,28 @@ export class WebServer {
 					strategies: this.evolutionHooks.strategies(),
 					arms: this.evolutionHooks.arms ? this.evolutionHooks.arms() : null,
 				});
+			}
+
+			// GET /api/compare — the Compare page's payload (B4). Read-only: it
+			// computes the four axes, the exclusion counts and the paired verdict
+			// from the metric rows; the page only draws them.
+			if (segments[1] === "compare") {
+				if (!this.evolutionHooks?.compare) return json(404, { error: "compare disabled" });
+				if (req.method !== "GET") return json(405, { error: "method not allowed" });
+				const modelsRaw = url.searchParams.get("models");
+				const models = modelsRaw
+					? modelsRaw.split(",").map((m) => m.trim()).filter((m) => m !== "")
+					: undefined;
+				const seedRaw = Number(url.searchParams.get("seed"));
+				const backendRaw = url.searchParams.get("backend");
+				return json(
+					200,
+					this.evolutionHooks.compare({
+						...(models && models.length ? { models } : {}),
+						...(Number.isFinite(seedRaw) && seedRaw > 0 ? { seed: seedRaw } : {}),
+						...(backendRaw ? { backend: backendRaw } : {}),
+					}),
+				);
 			}
 
 			return json(404, { error: "not found" });
