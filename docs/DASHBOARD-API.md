@@ -165,33 +165,15 @@ interface SessionMeta {
   id: string;                        // "20260910-213000-seed7"
   mode: "watch" | "agent" | "v02" | "probe";
   status: "running" | "completed" | "aborted" | "error";
-  startedAt: number;
-  endedAt?: number;
-  seed: number;
-  startYear: number;
-  mapSize: [number, number];
-  serverName: string;
-  companyName: string;
+  startedAt: number; endedAt?: number;
+  seed: number; startYear: number; mapSize: [number, number];
+  serverName: string; companyName: string;
   llm: { providerId: string; model: string; api: string; kind: "real" | "faux" };
-  outcome?: {
-    constructionDone?: boolean;
-    phase?: string;
-    vehicles?: number;
-    stations?: number;
-    money?: string;
-    totalEvents?: number;
-  };
-  totals: {
-    events: number;
-    decisions: number;
-    toolCalls: number;
-    toolFailures: number;
-    usage: UsageView;
-  };
+  outcome?: { constructionDone?, phase?, vehicles?, stations?, money?, totalEvents? };
+  totals: { events, decisions, toolCalls, toolFailures, usage: UsageView };
   checkpoints: SessionCheckpoint[];  // 阶段性总结
   error?: string;
 }
-
 interface SessionCheckpoint {
   at: number;                        // epoch ms
   gameDate: string;                  // "1950-03-01" 或 "unknown"
@@ -330,6 +312,7 @@ GET /api/sessions/:id
 → 404 { error }
 ```
 
+
 ### 3.4 旧字段的处置
 
 `GET /api/llm` 的旧字段已收敛进 `selection` / `status`，**不保留双形状**（避免第二个事实源）。
@@ -407,20 +390,18 @@ GET /api/sessions/:id
 export function newSessionId(seed: number, at?: Date): string;   // "20260910-213000-seed7"
 export class SessionStore {
   constructor(dataDir: string);
-  create(meta: Omit<SessionMeta, "checkpoints" | "totals"> & Partial<Pick<SessionMeta,"checkpoints"|"totals">>): SessionMeta;
-  update(patch: Partial<SessionMeta>): SessionMeta;     // 写 meta.json + 刷新 index.json
-  addCheckpoint(cp: SessionCheckpoint): void;
-  appendEvent(ev: GameEvent): void;                      // events.jsonl
-  appendAudit(rec: Record<string, unknown>): void;       // audit.jsonl
-  saveTelemetry(t: TelemetrySnapshot): void;             // telemetry.json（末次全量）
-  finalize(patch?: Partial<SessionMeta>): SessionMeta;
-  get id(): string;
+  create(meta): SessionMeta; update(patch): SessionMeta;      // 写 meta.json + 刷新 index.json
+  addCheckpoint(cp): void; appendEvent(ev): void;              // events.jsonl
+  appendAudit(rec): void; saveTelemetry(t): void;              // audit.jsonl / telemetry.json
+  finalize(patch?): SessionMeta; get id(): string;
 }
 export function listSessions(dataDir: string): SessionMeta[];      // 读 index.json, newest first
-export function readSession(dataDir: string, id: string, opts?: { limit?: number }): {
+export function readSession(dataDir, id, opts?): {
   meta: SessionMeta; telemetry: TelemetrySnapshot; events: GameEvent[]; audit: unknown[];
 } | null;
-export function buildStageSummary(meta: SessionMeta, gameDate: string, turn: number): string;
+export function readSessionTimeline(dataDir, id, opts?): { rows; total; offset } | null;  // 因果时间线
+export function sessionHooks(dataDir: string): SessionHooks;   // **唯一的** hook 构造（server 与 runner 共用）
+export function buildStageSummary(meta, gameDate, turn): string;
 ```
 
 要求：
@@ -549,7 +530,25 @@ GET /api/capabilities
 例如独立的 `--watch` 模式（无 agent）或纯静态 HTTP。与 `/api/telemetry` 一致：
 **返回 404**，不是 200 + 空对象—— 面板据此**隐藏**，避免假装“环境中一个动作都没有”。
 
-### 3.7 运行控制面（v0.6.x，B2）
+### 3.7 因果时间线（v0.6.x，B3）
+
+```
+GET /api/sessions/:id/timeline?limit=20&offset=0
+→ 200 { rows: [{
+    turn, trigger, ts, gameDate, goal,        // goal = 模型自述的目标（可为 null）
+    tools: [{ tool, ok, summary, job }],     // job = 该工具下的 GS 单
+    jobs:  [{ job, command, phases: [{ stage, phase, ts }] }],
+    effect: { gameDays, money, income, vehicles, stations, delivered } | null,
+  }], total, offset }
+→ 404 { error }                               // 未知 session / 未装配 timeline hook
+```
+
+**一行 = 一次决策**（归属靠窗口：上一次决策之后、下一次决策之前）；**四段证据由 `job` 连接**
+（工具下的单 → GS job → 相位 → 效果＝与下一次决策快照的差）。`effect` 为 `null` 表示**还没有
+下一次快照**（"没测到"，不是"什么都没变"）。页面**不重算**：增量由服务端量出，缺失显示
+`not measured`（不折成 0）。
+
+### 3.8 运行控制面（v0.6.x，B2）
 
 ```
 GET  /api/run → 200 { state, mode, sessionId, startedAt, error }

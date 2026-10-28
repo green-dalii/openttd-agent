@@ -13,6 +13,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync, append
 // 存档文件名规则只有一处实现（`savegameName`）：这里复用它，避免两套命名分叉。
 import { savegameName } from "./runner-helpers.js";
 import { appendMetric } from "../evolution/store.js";
+import { buildCausalTimeline, type TimelineRow } from "./causal-timeline.js";
 import path from "node:path";
 import type { TelemetrySnapshot } from "./telemetry.js";
 import type { GameEvent } from "../types.js";
@@ -621,6 +622,83 @@ export function readSession(
 		telemetry: readJsonSafe<TelemetrySnapshot>(path.join(dir, "telemetry.json")),
 		events: readJsonlSafe<GameEvent>(path.join(dir, "events.jsonl"), opts.limit ?? 300),
 		audit: readJsonlSafe<unknown>(path.join(dir, "audit.jsonl"), opts.limit ?? 300),
+	};
+}
+
+/**
+ * One page of a session's causal timeline (B3).
+ *
+ * `rows` are the newest first (the user cares about what just happened);
+ * `total` is how many rows the session has, so the page can say "there are
+ * more" without loading them.
+ */
+export interface SessionTimelinePage {
+	rows: TimelineRow[];
+	total: number;
+	offset: number;
+}
+
+/**
+ * Read one session's causal timeline.
+ *
+ * Why the whole audit trail is read and then paged: a decision's tools and
+ * phases live in the window **after** it, so slicing the file first would cut
+ * a decision off from its own evidence. The file is read whole, the timeline
+ * is built, and only the page is returned.
+ *
+ * null = the session does not exist or cannot be read. An empty `rows` array
+ * means "this session really has no decisions" — a different claim.
+ */
+export function readSessionTimeline(
+	dataDir: string,
+	id: string,
+	opts: { limit?: number; offset?: number } = {},
+): SessionTimelinePage | null {
+	if (!id || id.includes("/") || id.includes("..")) return null;
+	const dir = sessionDir(dataDir, id);
+	if (!readJsonSafe<SessionMeta>(path.join(dir, "meta.json"))) return null;
+	const audit = readJsonlSafe<unknown>(path.join(dir, "audit.jsonl"));
+	if (!audit) return null;
+	const all = buildCausalTimeline(audit);
+	const limit = Math.max(1, Math.min(opts.limit ?? 20, 200));
+	const offset = Math.max(0, opts.offset ?? 0);
+	// Newest first.
+	const ordered = [...all].reverse();
+	return {
+		rows: ordered.slice(offset, offset + limit),
+		total: ordered.length,
+		offset,
+	};
+}
+
+/**
+ * The dashboard's session hooks — **one** construction, shared by the supervised
+ * server and the standalone runner.
+ *
+ * Why one: the runner calls `web.attach({sessions: …})`, which **replaces** the
+ * server's hooks with its own. Two constructions therefore meant two contracts:
+ * a hook the server had but the runner did not (the causal timeline) vanished
+ * from the page **as soon as a run started** — the feature worked on an idle
+ * dashboard and disappeared on a running one. That is the same "two places, one
+ * fact" defect as D74/A5, and it is invisible in tests that never start a run.
+ *
+ * The savegame info is added here (not in one of the two callers) so the page
+ * sees the same shape either way.
+ */
+export function sessionHooks(dataDir: string): {
+	list: () => unknown[];
+	read: (id: string, limit?: number) => unknown | null;
+	stageFile: (id: string, file: string) => Buffer | null;
+	timeline: (id: string, opts: { limit?: number; offset?: number }) => SessionTimelinePage | null;
+} {
+	return {
+		list: () => listSessions(dataDir).map((s) => ({ ...s, savegame: savegameInfo(dataDir, s.id) })),
+		read: (id, limit) => {
+			const one = readSession(dataDir, id, limit ? { limit } : {});
+			return one ? { ...one, savegame: savegameInfo(dataDir, id) } : one;
+		},
+		stageFile: (id, file) => readStageFile(dataDir, id, file),
+		timeline: (id, opts) => readSessionTimeline(dataDir, id, opts),
 	};
 }
 

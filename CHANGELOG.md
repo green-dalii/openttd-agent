@@ -10,6 +10,28 @@
 ## [Unreleased]
 ### Added
 
+- **The Run page now reads as three bands, and one decision is one row.** The page answers "is it
+  playing" (health, score, the current goal), then "what just happened" - a **causal timeline**
+  where a row is a decision and expanding it shows the four pieces of evidence together: the
+  tools it called, the GS job those tools ordered (with the phases it went through), and what
+  changed until the next decision. The pieces are joined **by the job id**, not by guessing from
+  timestamps. The newest 20 rows are shown; older ones load on demand. The diagnostics (cash,
+  fleet, cargo, towns, tokens, wire detail, raw log) moved into a collapsed band - folded, not
+  deleted.
+- **The timeline is a server fact.** `GET /api/sessions/:id/timeline` returns the rows; the page
+  only draws them, and a reading the server did not have is shown as "not measured" rather than
+  as zero. The GS phases are now archived with the session, so a finished run can still be
+  explained - before this they existed only in the live stream.
+
+### Fixed
+
+- **The timeline did not survive the start of a run.** The runner re-attaches its own session
+  hooks when a run starts, which **replaced** the server's hooks with a narrower copy - so the
+  feature worked on an idle dashboard and vanished the moment a run began. The hooks are now
+  built in one place, and a guard keeps them there.
+
+### Added
+
 - **The dashboard can start a run, and says what the next run will use.** The run knobs (seed,
   game days, scenario, memory arm, thinking level, tool budget, token and cost caps, backend) are
   now settable from the Providers page, and `POST /api/run/start` carries them with the run. The

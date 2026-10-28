@@ -5,11 +5,13 @@
  */
 import { afterEach, describe, expect, it } from "vitest";
 import http from "node:http";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { WebSocket } from "ws";
 import { PAGES, PAGE_ALIASES, PUBLIC_DIR, WebServer } from "../../src/web/server.js";
 import { createTools } from "../../src/agent/tools/index.js";
+import { sessionHooks } from "../../src/agent/session-store.js";
 import type { AgentDeps } from "../../src/agent/types.js";
 
 /** Minimal deps so createTools(...) can list the action surface. */
@@ -359,6 +361,63 @@ describe("WebServer REST", () => {
 
 		const missing = await req("GET", "/api/sessions/unknown");
 		expect(missing.status).toBe(404);
+	});
+
+	it("GET /api/sessions/:id/timeline returns one page of the causal timeline (and 404s without the hook)", async () => {
+		const asked: { id: string; limit?: number; offset?: number }[] = [];
+		await start({
+			sessions: {
+				list: () => [],
+				read: () => null,
+				timeline: (id, opts) => {
+					asked.push({ id, ...opts });
+					return { rows: [{ turn: 3 }], total: 7, offset: 0 };
+				},
+			},
+		});
+		const r = await req("GET", "/api/sessions/known/timeline?limit=20&offset=2");
+		expect(r.status).toBe(200);
+		expect((r.body.rows as unknown[]).length).toBe(1);
+		expect(r.body.total).toBe(7);
+		expect(asked[0]).toEqual({ id: "known", limit: 20, offset: 2 });
+
+		// An unknown session is a 404, not an empty timeline ("no rows" would
+		// read as "this session had no decisions").
+		await start({
+			sessions: {
+				list: () => [],
+				read: () => null,
+				timeline: () => null,
+			},
+		});
+		expect((await req("GET", "/api/sessions/nope/timeline")).status).toBe(404);
+
+		// Without the hook the feature is absent, not broken.
+		await start({ sessions: { list: () => [], read: () => null } });
+		expect((await req("GET", "/api/sessions/known/timeline")).status).toBe(404);
+	});
+
+	it("the causal timeline survives the runner's attach() (one hook construction)", async () => {
+		// The runner calls `web.attach({sessions})`, which **replaces** the
+		// server's hooks with its own. Two constructions meant the timeline
+		// vanished from the page the moment a run started — the feature worked
+		// on an idle dashboard and disappeared on a running one.
+		const dir = mkdtempSync(join(tmpdir(), "b3-attach-"));
+		try {
+			mkdirSync(join(dir, "sessions", "s1"), { recursive: true });
+			writeFileSync(join(dir, "sessions", "s1", "meta.json"), JSON.stringify({ id: "s1" }), "utf8");
+			writeFileSync(join(dir, "sessions", "s1", "audit.jsonl"), "", "utf8");
+			await start({ sessions: sessionHooks(dir) });
+			const before = await req("GET", "/api/sessions/s1/timeline");
+			expect(before.status).toBe(200);
+
+			// What the runner does when a run starts.
+			server!.attach({ sessions: sessionHooks(dir) });
+			const after = await req("GET", "/api/sessions/s1/timeline");
+			expect(after.status, "时间线在 run 开始后消失了").toBe(200);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 
 	it("serves every page route declared in the PAGES table", async () => {

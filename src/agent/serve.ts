@@ -16,7 +16,7 @@
 import type { Config } from "../config.js";
 import { WebServer } from "../web/server.js";
 import { createLlmApi } from "./llm-api.js";
-import { listSessions, readSession, savegameInfo } from "./session-store.js";
+import { sessionHooks } from "./session-store.js";
 import { evolutionView, setStrategyEnabled } from "../evolution/web-view.js";
 import { RunSupervisor, type RunMode } from "./supervisor.js";
 import { runAgent } from "./runner.js";
@@ -344,15 +344,7 @@ export async function runServe(cfg: Config, opts: ServeOptions = {}): Promise<Se
 		// construction — the underlying catalog is a memoized view of the tool
 		// registry, so this hook is cheap and safe to call on every request.
 		capabilities: () => actionCatalog(),
-		sessions: {
-			// 存档信息只加在 **API 边界**上：它是"这个文件现在在哪"的即时事实，
-			// 不该被写回 index.json（否则会把一个陈旧的路径持久化下来）。
-			list: () => listSessions(cfg.dataDir).map((s) => ({ ...s, savegame: savegameInfo(cfg.dataDir, s.id) })),
-			read: (id, limit) => {
-				const one = readSession(cfg.dataDir, id, limit ? { limit } : {});
-				return one ? { ...one, savegame: savegameInfo(cfg.dataDir, id) } : one;
-			},
-		},
+		sessions: sessionHooks(cfg.dataDir),
 		// Cross-game memory (SPEC §6.1 view 4). Read-only except the human
 		// confirmation toggle, which is the one write a human performs here
 		// (SPEC §5.3: the engine advises, the human decides).
