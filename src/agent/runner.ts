@@ -79,7 +79,7 @@ import { makeSignalHub, type SignalHub } from "./signal-hub.js";
 import { createDecisionLoop } from "./decision-loop.js";
 import { runDecision } from "./loop.js";
 import { runFinalizeAndReflect } from "./reflect-run.js";
-import { evolutionView, setStrategyEnabled } from "../evolution/web-view.js";
+import { evolutionHooks } from "../evolution/web-view.js";
 import { AuditLog } from "./audit.js";
 import { isLlmConfigured } from "../config.js";
 import { toWireSnapshot } from "../game/wire-snapshot.js";
@@ -586,14 +586,9 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 		sessions: sessionHooks(cfg.dataDir),
 		// Same evolution view as the supervised server, so an unsupervised run
 		// serves the identical contract instead of a second implementation.
-		evolution: {
-			metrics: () => evolutionView(cfg.dataDir).metrics,
-			lessons: () => evolutionView(cfg.dataDir).lessons,
-			strategies: () => evolutionView(cfg.dataDir).strategies,
-			arms: () => evolutionView(cfg.dataDir).arms,
-			setStrategyEnabled: (id: string, enabled: boolean) =>
-				setStrategyEnabled(cfg.dataDir, id, enabled),
-		},
+		// One construction for the evolution hooks (the attach() below replaces
+		// the server's hooks — see MEMORY D82).
+		evolution: evolutionHooks(cfg.dataDir),
 	};
 	if (attachedWeb) {
 		attachedWeb.attach(wired);

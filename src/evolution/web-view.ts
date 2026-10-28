@@ -13,7 +13,8 @@
  */
 
 import { classifyOutcome } from "./outcome.js";
-import { type CompareBy, compareArms, type GameMetric} from "./metrics.js";
+import { type CompareBy, compareArms, metricExclusion, type GameMetric} from "./metrics.js";
+import { buildCompareView } from "./compare-view.js";
 import { evaluatePromotion, type StrategyCard } from "./strategies.js";
 import { readLessons, readMetrics, readStrategies, setStrategyEnabled } from "./store.js";
 import type { ArmComparison } from "./metrics.js";
@@ -62,3 +63,48 @@ export function evolutionView(dataDir: string, by: CompareBy = "memory"): Evolut
 }
 
 export { setStrategyEnabled };
+
+/**
+ * The dashboard's evolution hooks — **one** construction, shared by the
+ * supervised server and the standalone runner.
+ *
+ * Why one: the runner calls `web.attach({evolution: …})`, which **replaces**
+ * the server's hooks with its own (D82: a replaced hook means two contracts
+ * unless there is one construction). The two copies had already drifted: only
+ * the server's added the per-row `excluded` reason, so the same run showed a
+ * different exclusion on two paths.
+ *
+ * The Compare page's payload (B4) is computed **here**, not in the web layer:
+ * the four axes, the exclusion counts and the paired verdict are the
+ * evolution layer's rules (`scorecard.ts` / `bench-stats.ts`), and the page
+ * must not recompute any of them.
+ */
+export function evolutionHooks(dataDir: string): {
+	metrics: () => unknown[];
+	lessons: () => unknown[];
+	strategies: () => unknown[];
+	arms: () => unknown;
+	setStrategyEnabled: (id: string, enabled: boolean) => boolean;
+	compare: (opts: { models?: string[]; seed?: number; backend?: string }) => unknown;
+} {
+	return {
+		// Read fresh on each request: the page must reflect games that finished
+		// after it was loaded. `excluded` is an additive field — the reason comes
+		// from `metricExclusion`, the single writer of that rule (D64/C1).
+		metrics: () => evolutionView(dataDir).metrics.map((m) => ({ ...m, excluded: metricExclusion(m) })),
+		lessons: () => evolutionView(dataDir).lessons,
+		strategies: () => evolutionView(dataDir).strategies,
+		arms: () => evolutionView(dataDir).arms,
+		setStrategyEnabled: (id: string, enabled: boolean) => setStrategyEnabled(dataDir, id, enabled),
+		compare: (opts) => buildCompareView(readMetricsSafe(dataDir), opts),
+	};
+}
+
+/** The metric rows, or an empty list when the ledger cannot be read. */
+function readMetricsSafe(dataDir: string): GameMetric[] {
+	try {
+		return readMetrics(dataDir);
+	} catch {
+		return [];
+	}
+}

@@ -811,7 +811,7 @@ function renderChrome() {
   const el = document.querySelector("[data-brand]");
   if (!el) return;
   const page = el.getAttribute("data-brand") || "";
-  const active = { live: "/", providers: "/providers", sessions: "/sessions", evolution: "/evolution" }[page];
+  const active = { live: "/", compare: "/compare", providers: "/providers", sessions: "/sessions", evolution: "/evolution" }[page];
   // 注意：原先 evolution 页的 `.brand` 里有个 `#app-version` 元素，而
   // `window.APP_VERSION` **从来没有任何地方赋值** —— 那段是死代码（版本永远不显示）。
   // 统一页头时删掉，而不是把它复制到另外三页。
@@ -821,6 +821,7 @@ function renderChrome() {
 function renderNav(active) {
   const items = [
     ["/", "Live"],
+    ["/compare", "Compare"],
     ["/providers", "Providers"],
     ["/sessions", "Sessions"],
     ["/evolution", "Evolution"],

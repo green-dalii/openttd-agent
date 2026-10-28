@@ -51,7 +51,7 @@ describe("repo hygiene: 临时脚本", () => {
 		).toEqual([]);
 	});
 
-	it("会话 hook 只有一处构造（runner 的 attach() 会替换掉 server 的）", () => {
+	it("会话/进化 hook 只有一处构造（runner 的 attach() 会替换掉 server 的）", () => {
 		// The runner calls `web.attach({sessions})`, which REPLACES the server's
 		// hooks with its own. Two constructions meant the causal timeline
 		// vanished from the page the moment a run started — invisible in any
@@ -64,10 +64,14 @@ describe("repo hygiene: 临时脚本", () => {
 			if (/sessions:\s*\{[\s\S]{0,200}?\blist\s*:/.test(src) && !src.includes("sessionHooks(")) {
 				offenders.push(file);
 			}
+			// The same for the evolution hooks (the runner replaces those too).
+			if (/evolution:\s*\{[\s\S]{0,200}?\bmetrics\s*:/.test(src) && !src.includes("evolutionHooks(")) {
+				offenders.push(file);
+			}
 		}
 		expect(
 			offenders,
-			`这些文件自己造了一份 session hook；请改用 sessionHooks(dataDir)（session-store.ts）:\n` +
+			`这些文件自己造了一份 hook；请改用 sessionHooks(dataDir) / evolutionHooks(dataDir)：\n` +
 				offenders.map((f) => `  - ${f}`).join("\n"),
 		).toEqual([]);
 	});

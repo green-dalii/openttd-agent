@@ -695,3 +695,14 @@ button[disabled] { opacity: .45; cursor: not-allowed; }
 .diag-band[open] > summary { border-bottom: 1px solid var(--line); color: var(--ink); }
 .diag-band > *:not(summary) { padding-left: 14px; padding-right: 14px; }
 .diag-band > .group:first-of-type { margin-top: 14px; }
+
+/* --- Compare page (B4) ----------------------------------------------------
+   One row per model: the four axes the server computed. A missing reading
+   reads "not measured" — the page never turns it into a zero. */
+.cmp-table th { font-size: 10.5px; text-transform: uppercase; letter-spacing: .08em;
+  color: var(--muted); text-align: left; font-weight: 600; vertical-align: bottom; }
+.cmp-table td { vertical-align: top; font-size: 12.5px; }
+.cmp-model { font-family: var(--mono); font-weight: 600; }
+.cmp-sub { font-size: 11px; margin-top: 2px; }
+.cmp-ax { display: flex; gap: 6px; align-items: baseline; white-space: nowrap; }
+.cmp-ax .dim { font-size: 11px; }
