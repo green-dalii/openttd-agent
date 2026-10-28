@@ -35,6 +35,7 @@ const FRONTEND_GLOBALS = {
 	navigator: "readonly",
 	location: "readonly",
 	AbortController: "readonly",
+	URLSearchParams: "readonly",
 	Event: "readonly",
 	CustomEvent: "readonly",
 	Image: "readonly",

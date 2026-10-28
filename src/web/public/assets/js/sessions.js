@@ -83,8 +83,15 @@
             // 这个页面是"回放浏览器"：进来却右半屏空着、让人先点一下才能看到任何东西，
             // 等于把最该先被看见的那一局藏起来了。最新一局就是用户刚跑完/最关心的一局。
             if (!this.selected && this.sessions.length) {
-              const newest = this.sessions[0];
-              if (newest && newest.id) await this.open(newest.id);
+              // `/sessions?run=<id>` (the Compare page's drill-down): every row of
+              // the comparison must be able to land on its run, or the "go and
+              // look at it" step is broken.
+              const wanted = new URLSearchParams(window.location.search).get("run");
+              const target =
+                wanted && this.sessions.some((s) => s && s.id === wanted)
+                  ? this.sessions.find((s) => s.id === wanted)
+                  : this.sessions[0];
+              if (target && target.id) await this.open(target.id);
             }
           } catch (e) {
             this.sessions = [];

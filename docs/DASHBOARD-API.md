@@ -97,22 +97,8 @@ interface StepRecord {
   ts: number;             // epoch ms
   turn: number;           // 1-based（agent turn）
   kind: "message" | "tool";
-
-  // kind === "message"
-  text?: string;          // 可见文本（拼接 text 块）
-  thinking?: string;      // 思考文本（拼接 ThinkingContent / thinking_delta）
-  model?: string;
-  provider?: string;
-  stopReason?: string;    // "stop" | "toolUse" | "length" | "error" | "aborted" | ...
-  usage?: UsageView;
-
-  // kind === "tool"
-  tool?: string;
-  args?: unknown;
-  ok?: boolean;
-  summary?: string;
-  data?: Record<string, unknown>;
-  durationMs?: number;
+  // kind === "message": text? thinking? model? provider? stopReason? usage?
+  // kind === "tool":    tool? args? ok? summary? data? durationMs?
 }
 ```
 
@@ -548,7 +534,28 @@ GET /api/sessions/:id/timeline?limit=20&offset=0
 下一次快照**（"没测到"，不是"什么都没变"）。页面**不重算**：增量由服务端量出，缺失显示
 `not measured`（不折成 0）。
 
-### 3.8 运行控制面（v0.6.x，B2）
+### 3.8 Compare（v0.6.x，B4）
+
+```
+GET /api/compare?models=A,B&seed=7&backend=harness
+→ 200 {
+    conditions: BenchConditions,
+    models: [{ model, requestedModels, runs, excluded, excludedReasons,
+               ability, efficiency, stability, growth }],   // 四轴（scorecard.ts）
+    exclusions: [{ reason, count }],                        // 排除**按原因计数**
+    comparison: { design: "paired", modelA, modelB, pairs, meanDiff, diffCi95,
+                  verdict, message } | null,                 // 两个模型才有
+    runs: [{ id, model, seed, backend, status, excluded, deliveredPerGameDay,
+             deliveredRun, simulatedDays, totalTokens, costKnown, costTotal }],
+  }
+→ 404 { error }                                            // 未装配 compare hook
+```
+
+**只读**：端点不写文件、不发起运行，只从**已有的度量行**算出。四轴来自 `buildScorecard`，
+配对判定来自 `pairedComparison`，排除原因来自 `metricExclusion`——**页面不重算、也不下判断**
+（含 `not determinable` 这类结论）。`costPerRun` 在**无价目表**的模型上是"没测到"，不是 `$0`。
+
+### 3.9 运行控制面（v0.6.x，B2）
 
 ```
 GET  /api/run → 200 { state, mode, sessionId, startedAt, error }
