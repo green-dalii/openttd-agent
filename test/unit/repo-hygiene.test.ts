@@ -51,6 +51,27 @@ describe("repo hygiene: 临时脚本", () => {
 		).toEqual([]);
 	});
 
+	it("会话 hook 只有一处构造（runner 的 attach() 会替换掉 server 的）", () => {
+		// The runner calls `web.attach({sessions})`, which REPLACES the server's
+		// hooks with its own. Two constructions meant the causal timeline
+		// vanished from the page the moment a run started — invisible in any
+		// test that never starts a run. One factory (session-store.ts) makes the
+		// drift impossible; this guard keeps it that way.
+		const offenders: string[] = [];
+		for (const file of trackedFiles().filter((f) => f.startsWith("src/agent/") && f.endsWith(".ts"))) {
+			const src = readFileSync(join(ROOT, file), "utf8");
+			// A hand-built sessions hook: `sessions: {` followed by its own `list:`.
+			if (/sessions:\s*\{[\s\S]{0,200}?\blist\s*:/.test(src) && !src.includes("sessionHooks(")) {
+				offenders.push(file);
+			}
+		}
+		expect(
+			offenders,
+			`这些文件自己造了一份 session hook；请改用 sessionHooks(dataDir)（session-store.ts）:\n` +
+				offenders.map((f) => `  - ${f}`).join("\n"),
+		).toEqual([]);
+	});
+
 	it("仓库根目录只有 eslint.config.mjs 这一个 .mjs 被跟踪", () => {
 		const rootMjs = trackedFiles().filter((f) => !f.includes("/") && f.endsWith(".mjs"));
 		expect(rootMjs).toEqual(["eslint.config.mjs"]);

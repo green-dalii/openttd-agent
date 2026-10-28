@@ -110,10 +110,16 @@ export function auditState(snap: WorldSnapshot): Record<string, unknown> {
 			stations: fact?.stations ?? null,
 		};
 	});
+	// The delivered counter of OUR company, by the same rule the scorer uses
+	// (id 0, else the first one) and from the same source (`deliveredRun.total`,
+	// SPEC §10.65) — so the causal timeline's effect and the metric row cannot
+	// disagree about what was delivered. null = not measured (never 0).
+	const ours = snap.companies.get(0) ?? [...snap.companies.values()][0];
 	return {
 		date: facts.date,
 		companies,
 		towns: facts.towns.map((t) => ({ id: t.id, population: t.pop, x: t.x, y: t.y })),
+		delivered: ours?.deliveredRun?.total ?? null,
 		recentEventCount: snap.recent.length,
 		totalEvents: snap.totalEvents,
 	};

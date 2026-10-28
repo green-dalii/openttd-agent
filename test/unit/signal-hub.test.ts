@@ -26,6 +26,9 @@ const fakeWorld = () => ({
 const fakeWeb = () => ({ publishEvent: vi.fn() });
 const fakeSession = () => ({
 	appendEvent: vi.fn(),
+	// The real SessionStore has it (the hub archives the exec phases for the
+	// causal timeline, B3).
+	appendAudit: vi.fn(),
 	current: () => ({ checkpoints: [{ gameDate: "1950-03-14" }, { gameDate: "1950-04-01" }] }),
 });
 const fakeLedger = () => ({ markDone: vi.fn(), record: vi.fn() });
@@ -142,6 +145,45 @@ describe("signal-hub —— B-3 单元契约（golden from /tmp/calA3.log）", (
 		} as unknown as GameEvent);
 		expect(ledger.markDone).toHaveBeenCalledWith(100, "1950-04-01");
 		expect(hub.getReachedDone()).toBe(true);
+	});
+
+	it_("GS exec 相位被归档（因果时间线要能从跑完的局重建，B3）", () => {
+		const session = fakeSession();
+		const hub = makeSignalHub({
+			world: fakeWorld() as never,
+			getWeb: () => null,
+			getSession: () => session as never,
+			routeLedger: fakeLedger() as never,
+			getDecisionCount: () => 0,
+			onPhaseChange: () => {}, onNotableEvent: () => {},
+		});
+		hub.onEvent({
+			kind: "gamescript",
+			payload: { kind: "exec", stage: "road", job: 101, hb: false, raw: "EX rd s0 r0 d117 p0 j101" },
+		} as unknown as GameEvent);
+		const archived = session.appendAudit.mock.calls.map((c) => c[0] as Record<string, unknown>);
+		expect(archived.length).toBe(1);
+		expect(archived[0]!.type).toBe("gs_exec");
+		expect(archived[0]!.job).toBe(101);
+		expect(archived[0]!.stage).toBe("road");
+		expect(String(archived[0]!.phase)).toContain("j101");
+	});
+
+	it_("心跳相位不归档（它没有新闻）", () => {
+		const session = fakeSession();
+		const hub = makeSignalHub({
+			world: fakeWorld() as never,
+			getWeb: () => null,
+			getSession: () => session as never,
+			routeLedger: fakeLedger() as never,
+			getDecisionCount: () => 0,
+			onPhaseChange: () => {}, onNotableEvent: () => {},
+		});
+		hub.onEvent({
+			kind: "gamescript",
+			payload: { kind: "exec", stage: "heartbeat", job: 101, hb: true, raw: "EX hb j101" },
+		} as unknown as GameEvent);
+		expect(session.appendAudit).not.toHaveBeenCalled();
 	});
 
 	it_("GS build_bus_route ack → ledger.record 携带当前决策号", () => {

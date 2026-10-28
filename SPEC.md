@@ -333,7 +333,7 @@ OpenTTD 有**两个动作面**，能力完全不同：
 | **D 观测面与测量** | 10.1 动作面 · 10.53 NEXT-2 N2-1：线路经济… · 10.55 NEXT-2 N2-4：主指标换… · 10.59 工具必须能观测自己的效果：rco… · 10.65 流量指标的测量缺陷：`deliv… · 10.67 校准 #2：仪器缺陷不是方差来源… · 10.71 G2 落地：把"决定结局的那个过… · 10.72 S0 oracle 梯度：杠杆存… · 10.73 S1/G4 落地：预建场景 · 10.98 城镇与存档：两条"数据一直在、只… · 10.100 P1+P2 实测：产业/货种/公… · 10.105 车队数必须跨线路去重：同屏两个"… · 10.114 D1a：模型看得见自己这局的分 | 14 |
 | **E 记忆与进化** | 10.22 RL Harness 范围 · 10.31 M3 对照实验结果 · 10.34 M3 第二次 A/B：把决策权交… · 10.41 决策→结果账本接入反思 · 10.42 M3 A/B 第三次重跑：手眼账… · 10.43 为什么记忆无收益：全链路审计 · 10.76 R2 实施结果：经验 = 带实测… · 10.77 R2b 实施结果：反思改走 Ag… · 10.78 M1：反思产出率变成可诊断、可重… · 10.79 M2：把计分规则作为事实写进提示… · 10.80 M3 能力盘点：环境到底允许 a… · 10.82 第一性原理复检：能力面、空缺与协… · 10.84 M3-1b：车队杠杆真正的两处缺… · 10.85 第一性原理复审：离"自主 + 自… · 10.86 M3-2a：每线路登记表 + 退… · 10.87 M3-2b：披露粘滞——让事件相… · 10.88 M3-2c：车队请求对已登记的旧… · 10.89 M4a：`recall` 按需检… · 10.91 AB-1：`capabiliti… | 19 |
 | **F 实验方法与统计** | 10.32 第一性原理：M3 测不出差异，是… · 10.33 把决策权交还 agent：城镇对… · 10.52 每局存档+ M3 第五/六次重跑 · 10.56 N2-5 首轮 A/B 判废：臂… · 10.57 N2-5 有效轮次与两个结论 · 10.58 N2-5 oracle 探测：任… · 10.62 NEXT-2 收尾：首个干净判据… · 10.63 校准轮：窗口是方差的主因，实验设… · 10.64 顺序检验 block #1：CI… · 10.70 G3 落地：车队请求的静默无效变… · 10.81 M3-1 真机结果：车队杠杆被阶… · 10.112 P2-3：统计预登记 · 10.113 P2-1/P2-2 代码侧：实验… | 14 |
-| **G 产品面与前端** | 10.17 v0.3.0 实现: Dashb… · 10.94 Live 页面运行期的滚动失控与… · 10.95 图表渲染路径：三个真因与"图表健… · 10.96 长跑实测 · 10.97 uPlot 1.6.32 的交互… · 10.104 图表手势、区间读数与列表索引 · 10.117 一份运行配置真值 · 10.118 一份运行配置解析器 | 6 · 10.119 页面起一局：旋钮、预览与“预览即承诺”… |
+| **G 产品面与前端** | 10.17 v0.3.0 实现: Dashb… · 10.94 Live 页面运行期的滚动失控与… · 10.95 图表渲染路径：三个真因与"图表健… · 10.96 长跑实测 · 10.97 uPlot 1.6.32 的交互… · 10.104 图表手势、区间读数与列表索引 · 10.117 一份运行配置真值 · 10.118 一份运行配置解析器 | 6 · 10.119 页面起一局：旋钮、预览与“预览即承诺”… · 10.120 因果时间线：一次决策一行，四段证据由 job 连接… |
 | **H 里程碑与实施流水** | 10.6 M0 实测结果 · 10.7 M1 实测结果 · 10.8 里程碑进度 · 10.9 M1.5 崩溃调查 | 5 |
 
 ### 10.1 动作面（回答"Admin Port 做不到的操作怎么办"）
@@ -809,34 +809,31 @@ W2 的目标是让"这局是在**世界冻住**时结束的"成为 run 记录里
    （§10.66 的 `IsStationTile` 就是"一处坏、整条通道按局退化"）。
 
 **W2 事实链**：`signal-hub` 记录"日期**变化**"的时刻 → runner 记录"**harness 自己**按住
-世界"的时刻表（agent `set_pause` / 页面按钮与 `supervisor.pause` / freeze 模式三条路径，
-见 `runner.ts` 的 `markWorldHeld`）→ 收尾时两者合成 outcome：
-`worldFrozen: true` 仅当"超过阈值且没有人按住"，另记证据 `worldFrozenMs`。
-只写 `true`、不写 `false`（把"没发生"与"没记录"混成 false 就是另一种噪声）。
+世界"的时刻表（agent `set_pause` / 页面按钮与 `supervisor.pause` / freeze 三条路径，见
+`runner.ts` 的 `markWorldHeld`）→ 收尾时两者合成 outcome：`worldFrozen: true` 仅当"超过
+阈值且没有人按住"，另记证据 `worldFrozenMs`（只写 `true`、不写 `false`——把"没发生"与
+"没记录"混成 false 就是另一种噪声）。
 
 **阈值 45 s 的来历（实测，不是拍脑袋）**：健康期相邻推进间隔 **max 6.0 s**（41 个样本，
 中位 5.9 s）⇒ 45 s ≈ 7.5×；外部 rcon 暂停后的冻结段实测 **64–66 s**（outcome 记 66 109 ms，
-事件流独立算出 64 s，互相印证）；真机事故是 **1 小时**。
-
-**真机验收（重放 2026-09-12 `pause_on_join` 事故的形状）**：从 harness **之外**用 admin
-rcon 暂停世界（与页面按钮两条独立路径）⇒ `meta.json` 记 `worldFrozen=true`、
-`worldFrozenMs=66109`，而 `blockedByPause` 为**空**（暂停不来自我们）——两类原因被分开。
-页面截图复核：health 条从假的 `frozen` 变成真的 `30.2/min`。
+事件流独立算出 64 s，互相印证）；真机事故是 **1 小时**。**真机验收**（重放 2026-09-12
+`pause_on_join` 事故的形状）：从 harness **之外**用 admin rcon 暂停世界（与页面按钮两条
+独立路径）⇒ `meta.json` 记 `worldFrozen=true`、`worldFrozenMs=66109`，而 `blockedByPause`
+为**空**（暂停不来自我们）——两类原因被分开；health 条从假的 `frozen` 变成真的 `30.2/min`。
 
 ### 10.103 执行器异常：完整文本进事件流（2026-09-25）
 
-**问题**：`EX exc:can't execute over an un…` + `vehicles: 0`。错误文本在**生产端**被砍：
-`catch` 里 `if (es.len() > 24) es = es.slice(0, 24);`。为什么是 24？因为相位要写进
-**公司名**，而作者以为预算是 31 - 4 - 5。**上限是真的，算法是错的** —— 于是现场那句
-`…` 不是显示层截断，是信息在源头就没了。
+**问题**：`EX exc:can't execute over an un…` + `vehicles: 0`。错误文本在**生产端**被砍
+（`catch` 里 `es.slice(0, 24)`）——上限是真的，算法是错的：于是现场那句 `…` 不是显示层截断，
+是信息在源头就没了。
 
 **三条候选通道，逐条实测排除**（隔离真机，探针已回退；勿再重试）：
-
-| 通道 | 实测结果 | 结论 |
-|------|----------|------|
-| 公司名（`AICompany.SetName`） | **31 接受；32/44/56/64/72 全部静默拒绝** | 上限 31 是硬事实，一条错误永远放不下 |
-| `AILog.*` | macOS dedicated `-v dedicated` 下 **0 行**（server.log 与 admin console 包都没有） | 与 §10.10 一致：这条通道在 macOS 上不存在 |
-| `AISign.BuildSign` → GS 的 `GSSignList()` | AI 建标牌**成功**（`ok30481`），但 GS 扫描 **16/16 次报告都看不到它**（current 模式 0 个；company 模式只看到 GS 自己放的 3 个 bp 标牌） | 可见性不通，这条通道不可用 |
+- 公司名（`AICompany.SetName`）：**31 接受；32/44/56/64/72 全部静默拒绝** ⇒ 上限 31 是硬
+  事实，一条错误永远放不下。
+- `AILog.*`：macOS dedicated `-v dedicated` 下 **0 行**（server.log 与 admin console 包都没有）
+  ⇒ 与 §10.10 一致，这条通道在 macOS 上不存在。
+- `AISign.BuildSign` → GS 的 `GSSignList()`：AI 建标牌**成功**（`ok30481`），但 GS 扫描
+  **16/16 次报告都看不到它**。
 
 ⇒ **公司名是唯一已验证的执行器→harness 通道**（GS 每 ~20 script tick ≈ 1.1 s 轮询一次），
 于是错误只能**分块**走它。
@@ -869,9 +866,8 @@ unfinished action (simulated 2026-09-25)`（72 字符）⇒ 真实事件流按�
 
 ### 10.104 图表手势、区间读数与列表索引（2026-09-25 用户实测复核）
 
-用户在真实长局（`/tmp` 外的自有实例，9.15M tokens / 691 决策 / 17 条线路）上指出
-"折线图、Token 用量等，鼠标缩放逻辑不正确，也没有对应坐标轴范围显示缩放及区间范围"。
-逐条核对代码与 DOM 后确认三件事：
+用户在真实长局（自有实例，9.15M tokens / 691 决策 / 17 条线路）上指出"折线图、Token 用量等，
+鼠标缩放逻辑不正确，也没有对应坐标轴范围显示缩放及区间范围"。逐条核对代码与 DOM 后确认三件事：
 
 | 现象 | 实测根因 |
 |------|----------|
@@ -892,9 +888,8 @@ unfinished action (simulated 2026-09-25)`（72 字符）⇒ 真实事件流按�
 
 **Fleet Detail 的"不更新"其实不是响应式缺陷**：白盒注入 `vehicles 5 → 11` 后抽屉 DOM
 （`x-for` + `:key`）确实跟着变（真机实测），快照流也在增长（25 s 内 history 35 → 107）。
-真正的三个问题是：① 指标本身几乎不变（见 §10.105）② 两个车队数字互相矛盾 ③ 页面没有任何
+真正的三个问题是：① 指标本身几乎不变（见 §10.105）② 两个车队数字互相矛盾 ③ 页面没有
 "数据新鲜度"信号，用户无法判断"是没变还是没在更新"。
-
 **/sessions 列表**（用户："统计信息过少，缺少关键信息，也缺少该 session 的存档文件位置"）：
 服务器**早就**把 `savegame` 挂在每个列表项上（`serve.ts` 的 `list()`），但列表模板从不渲染它，
 只有详情面板显示；且决定"这局能不能进比较"的三件事（交付量 / 窗口长度 / 是否有效样本）
@@ -1072,29 +1067,18 @@ to clone`），不吞请求不假装成功。
 **可选车型目录**：state 报告新增 `engines: [{id, name, speed}]`（GSEngineList(VT_ROAD) +
 IsBuildable + GetName + GetMaxSpeed，四个 API 均实测存在）——agent 要看得见选项才可能学选择。
 `route-stats` 带 `cargoApplied`（标签）/`engineApplied`（引擎 id），缺失 = 未改装（字段缺席）。
-
-### 10.111 P1-3 收尾：FLEET 归因分解（2026-10-08 真机实证）
-
-**恒等式**（`src/agent/route-stats.ts` `fleetDecomposition`，纯函数 + 单测）：
-```
-owned + unattributed === companyTotal      // 跨线路按 id 去重
-owned = onRoad + inDepot                   // 在途/在库（GS 报 fleetDepot）
-```
-任何一项不可得 = `null`（显示 `—`），**不是 0**（D60）。差额**具名**
-（"Unattributed — named gap, not dropped"），不再有两个各自为政的车队数字。
-
-**数据**：`route-stats` 增 `fleetDepot`（登记车辆中 `IsStoppedInDepot` 的 id，引擎读数）。
-分解在**服务端**算好下发（wire `fleet` 字段），页面只渲染（`fleetAttributionRows`，
-永不为 null 的数组，D45 模板守卫）。
-
-**真机页面实证**（demo seed 11，CDP 全级别控制台）：
-```
-Company total 3 · Owned by routes 3 · — on the road 3 · — in depot 0 ·
-Unattributed 0 (named gap, not dropped)
-```
-恒等式 3+0=3 对上；0 控制台条目。**未做截图**（CDP captureScreenshot 在本机
-headless 持续超时）——布局正确性由 DOM 文本断言 + smoke 的元素检查兜底，如实披露。
-
+- **恒等式**（`src/agent/route-stats.ts` `fleetDecomposition`，纯函数 + 单测）：
+  `owned + unattributed === companyTotal`（跨线路按 id 去重）；`owned = onRoad + inDepot`（在途/在库，GS 报 `fleetDepot`）。
+  任何一项不可得 = `null`（显示 `—`），**不是 0**（D60）；差额**具名**（"Unattributed — named gap, not dropped"）。
+  （"Unattributed — named gap, not dropped"），不再有两个各自为政的车队数字。
+- **数据**：`route-stats` 增 `fleetDepot`（登记车辆中 `IsStoppedInDepot` 的 id）；分解在**服务端**算好下发（wire `fleet`），页面只渲染（`fleetAttributionRows`）。
+  分解在**服务端**算好下发（wire `fleet` 字段），页面只渲染（`fleetAttributionRows`，
+  永不为 null 的数组，D45 模板守卫）。
+- **真机页面实证**（demo seed 11，CDP 全级别控制台）：`Company total 3 · Owned by routes 3 · — on the road 3 · — in depot 0 · Unattributed 0`；恒等式 3+0=3 对上，0 控制台条目。**未做截图**（CDP captureScreenshot 在本机 headless 持续超时）——布局由 DOM 文本断言 + smoke 兜底，如实披露。
+  Company total 3 · Owned by routes 3 · — on the road 3 · — in depot 0 ·
+  Unattributed 0 (named gap, not dropped)
+  恒等式 3+0=3 对上；0 控制台条目。**未做截图**（CDP captureScreenshot 在本机
+  headless 持续超时）——布局正确性由 DOM 文本断言 + smoke 的元素检查兜底，如实披露。
 ### 10.112 P2-3：统计预登记（2026-10-08，跑前拒绝）
 
 **预登记条目**（P2 系列实验不得事后修改）：
@@ -1296,3 +1280,20 @@ compaction 冲突）在 `docs/HARNESS-MIGRATION.md` §3（带坐标），此处�
   元素上时循环变量对该元素自身的指令不在作用域，表单**整块渲染为空**而页面看起来正常
   （错误只出现在 `console.warn`）。且一个字段只能有**一个**控件：用 `x-show` 藏 select/input
   会让两者**同 id**，`#knob-toolBudget` 解析到隐藏的那个。
+
+### 10.120 因果时间线：一次决策一行，四段证据由 `job` 连接（B3，2026-10-25）
+
+- 事实：**一行 = 一次决策**（`src/agent/causal-timeline.ts`）。四段：decision（触发/时刻/
+  目标）→ tools（工具与结果）→ job/相位 → effect（本窗口增量）。归属**靠窗口**（上一次
+  决策之后、下一次决策之前），不靠时间戳猜；**连接键是 `job`**（D3a）。
+- 事实：**GS 相位必须归档**才可复盘：`signal-hub` 把每个非心跳 exec 事件写成 `gs_exec`
+  审计记录（此前只在实时流里，跑完的局就查不到了）。
+- 事实：**effect = 与下一次决策快照的差**（钱/收入/车/站/交付/游戏日）。最后一个决策没有
+  "下一个快照" ⇒ effect = `null`（**没测到**，不是"什么都没变"，D60）；`delivered` 与
+  度量行同源同值（`deliveredRun.total`，同一"我方公司"口径）。
+- 事实：**会话 hook 只有一处构造**（`sessionHooks(dataDir)`）：runner 的
+  `web.attach({sessions})` 会**替换**掉 server 的 hook——两份构造曾让时间线在**run 一开始
+  就从页面上消失**（空闲看板能用、跑起来就没了）；`repo-hygiene` 有守卫。
+- 事实：页面只画服务端给的：增量由服务端量出，缺失写 `not measured`（D60）。
+- 真机（隔离 data dir，`minimax-cn` / `MiniMax-M3.1-Flash`）：freeform 局里决策 1 的工具链
+  与模型自述目标同在一行；`gs_exec` 归档把 job 101 的相位（queued → buildA → road → …）留下。

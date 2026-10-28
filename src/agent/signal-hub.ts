@@ -355,6 +355,21 @@ export function makeSignalHub(refs: SignalHubRefs): SignalHub {
 						if (errText) executorError = { message: errText, truncated: false, complete: true, at: Date.now() };
 						const stage = String(p.stage);
 						const job = Number(p.job);
+						// Archive the phase so the causal timeline can be rebuilt
+						// from a FINISHED session (B3). The exec event used to
+						// live only in the live stream: a past run's phases were
+						// simply gone, so "what did this decision set in motion,
+						// and what happened to it?" could only be answered while
+						// watching. Heartbeats are skipped — they carry no news.
+						if (!p.hb && Number.isInteger(job) && job >= 0) {
+							refs.getSession()?.appendAudit({
+								type: "gs_exec",
+								ts: Date.now(),
+								job,
+								stage,
+								phase: composePhaseText(p.raw, p.note, job),
+							});
+						}
 						if (stage === "done" && job >= 0) {
 							refs.routeLedger.markDone(
 								job,
