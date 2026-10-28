@@ -53,11 +53,9 @@ import { Telemetry } from "./telemetry.js";
 import { selectionStores } from "./selection.js";
 import {
 	SessionStore,
-	listSessions,
 	newSessionId,
-	readSession,
-	readStageFile,
 	reconcileStaleSessions,
+	sessionHooks,
 } from "./session-store.js";
 import { createLlmApi } from "./llm-api.js";
 import { WebServer } from "../web/server.js";
@@ -581,11 +579,11 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 		// Static action surface for the dashboard (AB-1). Same shape across
 		// supervised and unsupervised runs — see docs/DASHBOARD-API.md §3.6.
 		capabilities: () => actionCatalog(),
-		sessions: {
-			list: () => listSessions(cfg.dataDir),
-			read: (id: string, limit?: number) => readSession(cfg.dataDir, id, limit ? { limit } : {}),
-			stageFile: (id: string, file: string) => readStageFile(cfg.dataDir, id, file),
-		},
+		// The session hooks come from ONE construction (session-store.ts): the
+		// runner's `attach()` **replaces** the server's hooks with these, so a
+		// hook that only the server had would vanish from the page the moment a
+		// run started (the causal timeline did exactly that).
+		sessions: sessionHooks(cfg.dataDir),
 		// Same evolution view as the supervised server, so an unsupervised run
 		// serves the identical contract instead of a second implementation.
 		evolution: {

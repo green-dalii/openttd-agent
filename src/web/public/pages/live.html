@@ -129,8 +129,8 @@
         <span x-text="controlNote()"></span>
       </div>
       <div class="now-intent">
-        <h3>Current intent</h3>
-        <p class="now-text" x-text="nowSummary().intent"></p>
+        <h3>Current goal</h3>
+        <p class="now-text" x-text="timelineGoal() || nowSummary().intent"></p>
         <h3>Last action</h3>
         <p class="now-text" x-text="nowSummary().action"></p>
       </div>
@@ -162,6 +162,96 @@
         </div>
       </template>
     </section>
+
+    <!-- ===================== ② JUST HAPPENED =====================
+         因果时间线：一次决策一行，展开是 decision → tools → job/相位 → effect。
+         四段证据**由 job 连接**（D3a），不是按时间猜。
+         行的内容全部来自服务端 `/api/sessions/:id/timeline`；页面只画，不重算。 -->
+    <div class="group"><h2>Just happened</h2><div class="rule"></div>
+      <span class="dim">one row per decision — tools, the job they ordered, and what changed</span></div>
+    <section class="panel">
+      <p class="hint" x-show="timeline.error" x-text="timeline.error"></p>
+      <p class="empty" x-show="!timeline.loading && !timeline.rows.length && !timeline.error">
+        No decisions recorded yet — the timeline fills as the agent decides.
+      </p>
+      <ol class="timeline">
+        <template x-for="row in timelineRows()" :key="(row.turn || 0) + '-' + (row.ts || 0)">
+          <li class="tl-row">
+            <details>
+              <summary>
+                <span class="tl-turn" x-text="timelineHeadline(row).turn"></span>
+                <span class="tl-trigger" x-text="timelineHeadline(row).trigger"></span>
+                <span class="tl-date dim" x-text="timelineHeadline(row).date"></span>
+                <span class="tl-sum" x-text="timelineSummary(row)"></span>
+              </summary>
+              <div class="tl-body">
+                <p class="tl-goal" x-show="timelineHeadline(row).goal">
+                  <span class="tl-k">Goal</span>
+                  <span x-text="timelineHeadline(row).goal"></span>
+                </p>
+                <!-- ② tools -->
+                <div class="tl-seg" x-show="timelineTools(row).length">
+                  <span class="tl-k">Tools</span>
+                  <ul class="tl-list">
+                    <template x-for="t in timelineTools(row)" :key="t.tool + '-' + t.job">
+                      <li>
+                        <span class="tl-tool" :class="t.ok ? '' : 'bad'" x-text="t.tool"></span>
+                        <span class="dim" x-show="t.job !== null" x-text="'job ' + t.job"></span>
+                        <span class="tl-tool-sum" x-text="t.summary"></span>
+                      </li>
+                    </template>
+                  </ul>
+                </div>
+                <!-- ③ job / phase -->
+                <div class="tl-seg" x-show="timelineJobs(row).length">
+                  <span class="tl-k">Job</span>
+                  <ul class="tl-list">
+                    <template x-for="j in timelineJobs(row)" :key="j.job">
+                      <li>
+                        <span class="tl-tool" x-text="'job ' + j.job"></span>
+                        <span class="dim" x-show="j.command" x-text="j.command"></span>
+                        <span class="tl-phases">
+                          <template x-for="p in j.phases" :key="p.stage + '-' + p.phase">
+                            <span class="tl-chip" x-text="p.stage" :title="p.phase"></span>
+                          </template>
+                        </span>
+                      </li>
+                    </template>
+                  </ul>
+                </div>
+                <!-- ④ effect -->
+                <div class="tl-seg" x-show="timelineEffect(row)">
+                  <span class="tl-k">Effect</span>
+                  <span class="tl-effects" x-show="timelineEffect(row)">
+                    <template x-for="e in (timelineEffect(row) || [])" :key="e.label">
+                      <span class="tl-eff" :class="e.known ? '' : 'dim'">
+                        <span class="dim" x-text="e.label"></span>
+                        <span x-text="e.text"></span>
+                      </span>
+                    </template>
+                  </span>
+                </div>
+              </div>
+            </details>
+          </li>
+        </template>
+      </ol>
+      <div class="actions">
+        <button type="button" class="btn sm" x-show="timelineHasMore()" @click="loadOlderTimeline()"
+                :disabled="timeline.loading">
+          <span x-show="!timeline.loading">Load older decisions</span>
+          <span x-show="timeline.loading">Loading…</span>
+        </button>
+        <span class="dim" x-show="timeline.total" x-text="timeline.total + ' decision(s) in total'"></span>
+      </div>
+    </section>
+
+    <!-- ===================== ③ DIAGNOSTICS =====================
+         诊断区：默认**收起**（证据不删，只是不占首屏）。
+         展开后与今天等价：现金曲线、车队/站、货种、城镇、token/轮次、
+         动作面、注入的记忆、原始事件流。 -->
+    <details class="diag-band">
+      <summary>Diagnostics <span class="dim">— cash, fleet, cargo, towns, tokens, wire detail, raw log</span></summary>
     <section class="panel">
       <div class="panel-head">
         <h2>Cash history</h2>
@@ -774,6 +864,7 @@
         </ol>
       </details>
     </section>
+    </details>
   </main>
 
   <!-- ========================= DRILL-DOWN DRAWER =========================
@@ -864,6 +955,7 @@
 <script src="/assets/vendor/alpinejs/alpine.min.js" defer></script>
 <script src="/assets/js/alpine-bridge.js"></script>
 <script src="/assets/js/live-view.js"></script>
+<script src="/assets/js/timeline-view.js"></script>
 <script src="/assets/js/live.js"></script>
 </body>
 </html>

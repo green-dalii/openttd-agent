@@ -34,6 +34,10 @@
         /* ------------------------------ state ------------------------------ */
         linkOk: false,
         evPaused: false,
+        /** The causal timeline's page (rows + total + load state). */
+        timeline: { rows: [], total: 0, offset: 0, loading: false, error: "" },
+        /** The decision count the current timeline page was loaded for. */
+        timelineDecisions: null,
 
         /* ------------------------------- init ------------------------------- */
         init() {
@@ -279,7 +283,113 @@
             this.steps = replace ? t.steps.slice() : this.mergeSteps(this.steps, t.steps);
           }
           this.thinking = Array.isArray(t.recentThinking) ? t.recentThinking : [];
+          // A new decision = a new timeline row: refresh when the decision
+          // count moves. The timeline is read from the session's audit trail
+          // (the server owns the rules), so it is fetched, not derived here.
+          // The count lives under `totals` (the snapshot's own shape) — reading
+          // `t.decisions` silently yields undefined, and then the timeline
+          // never loads at all.
+          const decisions = Number(t && t.totals && t.totals.decisions);
+          if (Number.isFinite(decisions) && decisions !== this.timelineDecisions) {
+            this.timelineDecisions = decisions;
+            void this.loadTimeline();
+          }
           this.$nextTick(() => { this.afterSteps(); });
+        },
+
+        /* -------------------------- causal timeline ------------------------- */
+        /**
+         * Load the next page of the causal timeline (B3).
+         *
+         * The rows come from the server (`/api/sessions/:id/timeline`): the
+         * page does not join the evidence itself — which tool belongs to which
+         * decision, what the effect was — that is the server's rule.
+         */
+        async loadTimeline(opts) {
+          const sid = this.timelineSessionId();
+          if (!sid) {
+            this.timeline = { rows: [], total: 0, offset: 0, loading: false, error: "" };
+            return;
+          }
+          const offset = opts && typeof opts.offset === "number" ? opts.offset : 0;
+          const limit = opts && typeof opts.limit === "number" ? opts.limit : 20;
+          this.timeline = { ...this.timeline, loading: true, error: "" };
+          try {
+            const r = await fetch(
+              `/api/sessions/${encodeURIComponent(sid)}/timeline?limit=${limit}&offset=${offset}`,
+            );
+            if (!r.ok) {
+              const out = await r.json().catch(() => ({}));
+              this.timeline = { rows: [], total: 0, offset: 0, loading: false, error: String(out.error || `HTTP ${r.status}`) };
+              return;
+            }
+            const page = await r.json();
+            const rows = window.TimelineView.rows(page);
+            // Older rows are appended BELOW the newer ones (the page shows the
+            // newest at the top); the server already ordered them newest-first.
+            const merged = offset > 0 ? [...this.timeline.rows, ...rows] : rows;
+            this.timeline = { rows: merged, total: Number(page.total) || 0, offset, loading: false, error: "" };
+          } catch (e) {
+            this.timeline = { rows: [], total: 0, offset: 0, loading: false, error: `Timeline failed: ${e}` };
+          }
+        },
+
+        /** Load the next (older) page — "older ones load on demand". */
+        loadOlderTimeline() {
+          return this.loadTimeline({ offset: this.timeline.rows.length, limit: 20 });
+        },
+
+        /** The session the timeline belongs to (the run being watched). */
+        timelineSessionId() {
+          return (this.telemetry && this.telemetry.sessionId) || this.sessionId || "";
+        },
+
+        /** The rows the page draws (newest first, as the server ordered them). */
+        timelineRows() {
+          return window.TimelineView.rows(this.timeline);
+        },
+
+        /** Is there an older page waiting? */
+        timelineHasMore() {
+          return window.TimelineView.hasMore(this.timeline, this.timeline.rows.length);
+        },
+
+        /** The tools of one row. */
+        timelineTools(row) {
+          return window.TimelineView.tools(row);
+        },
+
+        /** The jobs (and phases) of one row. */
+        timelineJobs(row) {
+          return window.TimelineView.jobs(row);
+        },
+
+        /** The effect readings of one row (null = no later reading yet). */
+        timelineEffect(row) {
+          return window.TimelineView.effect(row);
+        },
+
+        /** The headline of one row. */
+        timelineHeadline(row) {
+          return window.TimelineView.headline(row);
+        },
+
+        /** The one-line summary of one row. */
+        timelineSummary(row) {
+          return window.TimelineView.summary(row);
+        },
+
+        /**
+         * The goal of the most recent decision (band ①: "what is it doing").
+         *
+         * It comes from the timeline's newest row — the same fact the row
+         * shows, not a second copy from another source.
+         */
+        timelineGoal() {
+          const rows = this.timelineRows();
+          if (!rows.length) return "";
+          const head = window.TimelineView.headline(rows[0]);
+          return head.goal || "";
         },
 
         /** Telemetry snapshots repeat the tail of the step list; keep one of each. */

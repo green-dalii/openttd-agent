@@ -63,6 +63,14 @@ export interface SessionHooks {
 	read: (id: string, limit?: number) => unknown | null;
 	/** Raw bytes of an archived stage image (e.g. "001.png"), or null. */
 	stageFile?: (id: string, file: string) => Buffer | null;
+	/**
+	 * One page of the session's causal timeline (B3).
+	 *
+	 * The web layer does NOT build it: the timeline's rules (which tools
+	 * belong to which decision, what counts as the effect) are the agent
+	 * layer's. Here it is only forwarded.
+	 */
+	timeline?: (id: string, opts: { limit?: number; offset?: number }) => unknown | null;
 }
 
 /**
@@ -569,6 +577,18 @@ export class WebServer {
 				if (req.method !== "GET") return json(405, { error: "method not allowed" });
 				if (segments.length === 2) return json(200, { sessions: this.sessionHooks.list() });
 				const id = decodeURIComponent(segments[2] ?? "");
+				// GET /api/sessions/:id/timeline — the causal timeline (B3).
+				if (segments[3] === "timeline") {
+					if (!this.sessionHooks.timeline) return json(404, { error: "timeline disabled" });
+					const limitRaw = Number(url.searchParams.get("limit"));
+					const offsetRaw = Number(url.searchParams.get("offset"));
+					const page = this.sessionHooks.timeline(id, {
+						...(Number.isFinite(limitRaw) && limitRaw > 0 ? { limit: limitRaw } : {}),
+						...(Number.isFinite(offsetRaw) && offsetRaw > 0 ? { offset: offsetRaw } : {}),
+					});
+					if (!page) return json(404, { error: `unknown session "${id}"` });
+					return json(200, page);
+				}
 				const limitRaw = Number(url.searchParams.get("limit"));
 				const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : undefined;
 				const one = this.sessionHooks.read(id, limit);
