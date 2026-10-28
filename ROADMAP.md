@@ -115,9 +115,9 @@ pgrep -fl "bench.ts|run-experiment|cli/run.ts|llm-stub|OpenTTD.app"
 
 ### 2. 下一步做什么？
 
-**B1（#33）、S2（#40）已合并。B2（#34）在分支 `feat/b2-launch-surface` 上：代码 + 真机端到端 +
-页面验证（真实 Chrome、0 console）+ 文档**全部完成**，门禁全绿（1656 passed / 9 skipped），
-**只差英文 commit + PR（`Closes #34`）**。真机结论见 `SPEC.md` §10.119。**
+**B1（#33）、S2（#40）、B2（#41）均已合并**（B2 = 旋钮 + next-run 预览，真机结论见
+`SPEC.md` §10.119）。**下一步：B3（Run 页三段化 + 因果时间线）与 B4（Compare 页）可并行**，
+两者都只依赖已合并的服务端事实。
 
 | 步 | 内容（权威文档） | 关键验收 |
 |---|---|---|
