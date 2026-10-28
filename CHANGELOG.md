@@ -8,6 +8,31 @@
 > 踩过的坑的复盘（→ `MEMORY.md`；此处只写"改了什么"，不写"我为什么犯错"）。
 
 ## [Unreleased]
+### Added
+
+- **The dashboard can start a run, and says what the next run will use.** The run knobs (seed,
+  game days, scenario, memory arm, thinking level, tool budget, token and cost caps, backend) are
+  now settable from the Providers page, and `POST /api/run/start` carries them with the run. The
+  rules are the ones the command line already used — the page cannot introduce a second set. A
+  next-run preview (`POST /api/run/preview`) resolves the knobs server-side and shows the values
+  the next run would use; its field names are the manifest's own, so "the preview equals the
+  manifest" is a contract a test can check field by field. An illegal knob is refused with a
+  reason and a hint, before any game process starts.
+
+### Fixed
+
+- **A cost cap the model cannot enforce is now a bad request, not a conflict.** Setting a cost cap
+  on a model without a price table could never fire, so it was refused before the game started —
+  but the refusal was reported as "409 conflict", which told the user their request collided with
+  a running game. It is now `400` with the structured reason `unpriced_with_cost_cap`, and the
+  preview refuses it too (a preview must not promise a run that cannot start).
+- **The run knobs form renders.** Alpine's `x-for` has to sit on a `<template>`; on a plain element
+  the loop variable is not in scope for that element's own directives, so the whole form rendered
+  empty while the page looked fine (the errors only appear in `console.warn`). The knob fields
+  also had two controls sharing one id, so `#knob-toolBudget` resolved to the hidden one.
+- **The preview follows the form.** It was fetched once on load, so the panel kept showing the
+  values of the previous knobs while claiming to describe the next run.
+
 ### Fixed
 
 - **One resolver for the run configuration.** The view, the save path, the startup gate and the

@@ -16,6 +16,32 @@ export interface RunManifest {
 	/** Model the provider actually served (may differ from the requested one). */
 	servedModel: string | null;
 	/**
+	 * The model this run **asked for** (the resolved selection).
+	 *
+	 * Why both: a gateway may answer with a different model than the one
+	 * requested, so "what we asked" and "what served us" are two facts
+	 * (D3b). The requested one is what the next-run preview can promise; the
+	 * served one only telemetry knows.
+	 */
+	model: string | null;
+	/**
+	 * The API the model is served over (`anthropic-messages`,
+	 * `openai-completions`, …).
+	 *
+	 * It is part of the run's identity: the same model over a different API is
+	 * a different request, so a comparison across APIs is not like-for-like.
+	 */
+	api: string | null;
+	/** The model's context window (null = not measured). */
+	contextWindow: number | null;
+	/**
+	 * Whether the model's cost is measurable (it has a price table).
+	 *
+	 * `false` = no price table ⇒ the cost axis of this run is "not measured",
+	 * not zero. Same name as the metric row and the brain (D77).
+	 */
+	costKnown: boolean | null;
+	/**
 	 * Which runtime drove the loop. Two manifests that look identical otherwise
 	 * still differ in persistence and failure paths, so this must be recorded.
 	 */
@@ -55,6 +81,10 @@ export interface RunManifest {
 export function projectManifest(src: Partial<RunManifest> | null | undefined): RunManifest {
 	return {
 		servedModel: src?.servedModel ?? null,
+		model: src?.model ?? null,
+		api: src?.api ?? null,
+		contextWindow: src?.contextWindow ?? null,
+		costKnown: src?.costKnown ?? null,
 		backend: src?.backend ?? null,
 		thinkingLevel: src?.thinkingLevel ?? null,
 		toolBudget: src?.toolBudget ?? null,
@@ -70,6 +100,10 @@ export function projectManifest(src: Partial<RunManifest> | null | undefined): R
 /** Field count, exported so a guard test can assert no projection drops one. */
 export const MANIFEST_FIELDS = [
 	"servedModel",
+	"model",
+	"api",
+	"contextWindow",
+	"costKnown",
 	"backend",
 	"thinkingLevel",
 	"toolBudget",

@@ -296,14 +296,13 @@ GET /api/llm/catalog/:providerId/refresh
         fetchedAt: number | null }
 → 404 { error }                              // provider 未知（error 为空且 models 为空时）
 说明：
-- `models` 是**快照 + live 覆盖层**的合并结果；`source: "live"` 的条目来自 provider
-  自己的 /models 端点，其 `priceKnown: false`（价格未知，不是 0 元），
-  `contextWindow` / `maxTokens` / `api` 借自同族模型。
+- `models` 是**快照 + live 覆盖层**的合并结果；`source: "live"` 的条目来自 provider 自己的
+  /models 端点，其 `priceKnown: false`（价格未知，不是 0 元），`api`/上下文/上限借自同族模型。
 - `error` 形如 `"<url> → HTTP 401; <url> → HTTP 404"`：**试过哪些 URL、各自为什么失败**。
   失败时 `models` 保留上一次已知列表（端点说不出话 ≠ 模型消失了）。
-- 该端点**永不抛错**；"没有凭据所以跳过刷新"也走 `error` 说明（pi-ai 自己会静默跳过）。
-- 刷新结果由 pi-ai 的 `ModelsStore` 持久化到 `<dataDir>/models-cache.json`，因此
-  agent 进程启动时能恢复同一份覆盖层（否则"列表是新的但模型跑不起来"）。
+- 该端点**永不抛错**；"没有凭据所以跳过刷新"也走 `error` 说明（pi-ai 会静默跳过）。
+- 刷新结果由 pi-ai 的 `ModelsStore` 持久化到 `<dataDir>/models-cache.json`，agent 进程
+  启动时能恢复同一份覆盖层（否则"列表是新的但模型跑不起来"）。
 
 DELETE /api/llm/credentials/:providerId
 → 200 { ok: true }
@@ -331,11 +330,9 @@ GET /api/sessions/:id
 → 404 { error }
 ```
 
-### 3.4 旧接口兼容
+### 3.4 旧字段的处置
 
-`GET /api/llm` 的**旧字段**（`providerId/baseUrl/model/api/contextWindow/maxTokens/hasApiKey/configured`）
-不再单独存在于顶层——已收敛进 `selection` / `status`。**前端全部改用新形状。**
-（不保留双形状：避免第二个事实源。）
+`GET /api/llm` 的旧字段已收敛进 `selection` / `status`，**不保留双形状**（避免第二个事实源）。
 
 ---
 
@@ -351,10 +348,9 @@ GET /api/sessions/:id
 
 - 新客户端连上：先收一帧 `snapshot`（含 `telemetry` 全量），此后收增量。
 - 后端**必须节流** telemetry 帧（≥250ms），否则 thinking delta 会刷爆 WS。
-- **`checkpoint` 必须在运行中产生**（`--agent` 每个 decision turn 一条；`--watch` 每约
-  60 个事件一条），且 `snapshot.checkpoints` 必须带**全量 backlog**（含最终条）。
-  原因：v0.3 只在 shutdown 写 checkpoint，导致 Live 页「阶段性总结」面板在**整局运行期间
-  恒为空**（晚订阅/刷新者同样看不到）。见 `docs/DASHBOARD-UI.md` §7。
+- **`checkpoint` 必须在运行中产生**（`--agent` 每 decision turn 一条；`--watch` 每约 60
+  事件一条），且 `snapshot.checkpoints` 带**全量 backlog**（含最终条）——否则
+  「阶段性总结」面板在整局运行期间恒为空（见 `docs/DASHBOARD-UI.md` §7）。
 - **`snapshot.sessionId`** 供 Live 页在遥测缺席（watch 模式）时仍能显示当前局 ID。
 - **Session 状态可能是派生的**：`GET /api/sessions[/:id]` 返回的 `status` 已经过
   `effectiveStatus()` 处理——心跳超时的 `running` 会呈现为 `interrupted`。
@@ -396,21 +392,7 @@ GET /api/sessions/:id
 
 ### 6.1 `src/agent/telemetry.ts`
 
-```ts
-export class Telemetry {
-  constructor(opts?: { limit?: number; sessionId?: string });
-  setBrain(b: { provider: string; model: string; kind: "real" | "faux" }): void;
-  /** 计数一个决策点（runDecision 之前调用）。 */
-  decisionPoint(): void;
-  /** 喂 pi-agent-core 的 AgentEvent。 */
-  ingestAgentEvent(ev: AgentEvent): void;
-  snapshot(): TelemetrySnapshot;
-  /** 每条 StepRecord 完成时回调（runner 用它做 JSONL 审计 + WS 推送）。 */
-  onStep?: (rec: StepRecord) => void;
-  /** 遥测发生变化时的轻量通知（runner 用于节流广播）。 */
-  onActivity?: () => void;
-}
-```
+接口：`Telemetry{ constructor({limit?, sessionId?}), setBrain, decisionPoint, ingestAgentEvent, snapshot, onStep?, onActivity? }`。
 
 要求：
 - 只消费 `AgentEvent`（`message_update` 累积 thinking/text delta；`message_end` 落下
@@ -566,3 +548,42 @@ GET /api/capabilities
 **缺失语义**：服务端可以在 `WebServer` 创建器里选择不传 `capabilities` hook，
 例如独立的 `--watch` 模式（无 agent）或纯静态 HTTP。与 `/api/telemetry` 一致：
 **返回 404**，不是 200 + 空对象—— 面板据此**隐藏**，避免假装“环境中一个动作都没有”。
+
+### 3.7 运行控制面（v0.6.x，B2）
+
+```
+GET  /api/run → 200 { state, mode, sessionId, startedAt, error }
+
+POST /api/run/start
+  body { mode?: "agent"|"watch", knobs?: { seed?, gameDays?, scenario?, memoryArm?,
+                                          thinkingLevel?, toolBudget?, tokenLimit?,
+                                          costLimit?, backend? } }
+  - knobs 的值**原样**转发给 agent 层（web 层不认识旋钮，规则只有一份）。
+  - 省略的字段 = 沿用**进程**的设置（env/CLI）；空串等同于省略。
+→ 200 { state, mode, sessionId, startedAt, error }
+→ 400 { error, problems: [{ code, message, hint }] }   // 非法旋钮；**没有游戏进程被启动**
+→ 409 { error }                                       // 已有运行（冲突，不是坏请求）
+
+POST /api/run/preview
+  body { knobs?: { …同上… } }
+→ 200 { preview: NextRunPreview | null, problems: Problem[] }
+→ 404 { error }                                       // 服务端未装配 run hook
+```
+
+**`NextRunPreview` 的字段名 = manifest 的字段名**（同名同义）：
+
+- 解析后的模型事实：`model` / `api` / `contextWindow` / `costKnown`
+  （不是配置文件里可能过时的值）。
+- 本局生效的旋钮：`thinkingLevel` / `toolBudget` / `tokenLimit` / `costLimit` / `backend`。
+- `scaffoldHash`：提示词 + 工具 schema 的指纹（**不用开游戏**就能算出）。
+- 仅预览有的补充事实：`providerId` / `maxTokens` / `seed` / `gameDays` / `scenario` / `memoryArm`。
+
+跑完才知道的字段（`servedModel` / `payloadHash` / `payloadShapeHash` / `payloadCount`）
+**不在预览里**：预览只承诺它能兑现的（D79）。
+
+**预览与启动用同一条闸**：无法执行的花费上限（模型无价目表）在预览里就被拒，
+不会预览出一局跑不起来的运行。
+
+**问题码**（`src/agent/problems.ts`）：`invalid_knob`（旋钮非法）·
+`unpriced_with_cost_cap`（无价目表却设了费用上限）· `unknown_provider` /
+`unknown_model` / `no_credential` / `invalid_base_url` / `provider_unavailable`。

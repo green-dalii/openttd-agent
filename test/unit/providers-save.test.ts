@@ -136,7 +136,12 @@ function load(opts: { status?: number; error?: string; fetchThrows?: boolean } =
 	vm.createContext(sandbox);
 	const src = readFileSync(join(PUBLIC_DIR, "assets/js/providers.js"), "utf8");
 	const viewSrc = readFileSync(join(PUBLIC_DIR, "assets/js/providers-view.js"), "utf8");
+	// The providers component also carries the run knobs (B2), so its view
+	// module must be loaded too — otherwise the component throws on load and
+	// the test would fail for a reason that has nothing to do with the save path.
+	const configureSrc = readFileSync(join(PUBLIC_DIR, "assets/js/configure-view.js"), "utf8");
 	vm.runInContext(viewSrc, sandbox);
+	vm.runInContext(configureSrc, sandbox);
 	vm.runInContext(src, sandbox);
 	if (!registered) throw new Error("providers component did not register via Alpine.data");
 	const make = registered as unknown as () => Record<string, unknown>;

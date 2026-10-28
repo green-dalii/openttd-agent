@@ -26,6 +26,19 @@ import { applyLlmSettingsFile } from "./llm-settings.js";
 import { APP_VERSION } from "../version.js";
 import { actionCatalog } from "./tools/catalog.js";
 import { metricExclusion } from "../evolution/metrics.js";
+import {
+	knobInputFrom,
+	previewRunKnobs,
+	resolveRunKnobs,
+	type RunBackend,
+	type RunKnobDefaults,
+	type RunKnobInput,
+	type RunKnobs,
+} from "./run-knobs.js";
+import { buildNextRunPreview, type NextRunPreview } from "./run-preview.js";
+import { harnessEnabled } from "./harness-runtime.js";
+import { assertCostCapEnforceable, costCapProblem } from "./run-budget.js";
+import type { Problem } from "./problems.js";
 
 export interface ServeOptions {
 	webPort?: number;
@@ -48,6 +61,10 @@ export interface ServeOptions {
 		offlineDemo?: boolean;
 		injectMemory?: boolean;
 		seconds?: number;
+		/** Episode horizon in simulated game days (the default for the page's knob). */
+		gameDays?: number;
+		/** "freeform" (default) or "prebuilt". */
+		scenario?: "freeform" | "prebuilt";
 		planTowns?: { from?: number; to?: number };
 		maxTurns?: number;
 		decisionMinGapMs?: number;
@@ -57,6 +74,41 @@ export interface ServeOptions {
 	};
 	/** Hook for tests: run something else instead of the real runners. */
 	launcher?: (mode: RunMode, cfg: Config, opts: Record<string, unknown>) => Promise<number>;
+}
+
+/** The knobs the page may set for the next run (all optional). */
+export type { RunKnobInput };
+
+/**
+ * The backends this process may run.
+ *
+ * The harness backend is **off unless `AGENT_HARNESS=1`** (the D6c
+ * invariant: the default must stay the plain agent until the owner decides
+ * otherwise). A page that asks for "harness" without that env gets a
+ * refusal with the fix, not a silent downgrade to "agent".
+ */
+export function allowedBackends(env: Record<string, string | undefined> = process.env): RunBackend[] {
+	return harnessEnabled(env) ? ["agent", "harness"] : ["agent"];
+}
+
+/**
+ * The knob values a run starts from when the page does not name one.
+ *
+ * They come from the **process** (env/CLI), so "the page did not touch it"
+ * means "keep what the operator configured on the command line".
+ */
+export function runKnobDefaults(cfg: Config, opts: ServeOptions): RunKnobDefaults {
+	return {
+		seed: cfg.seed,
+		gameDays: opts.runOptions?.gameDays ?? null,
+		scenario: opts.runOptions?.scenario ?? "freeform",
+		memoryArm: opts.runOptions?.injectMemory === false ? "control" : "treatment",
+		thinkingLevel: cfg.llm.scaffold?.thinkingLevel ?? "off",
+		toolBudget: cfg.llm.scaffold?.toolBudget ?? 12,
+		tokenLimit: cfg.llm.limits?.tokens ?? null,
+		costLimit: cfg.llm.limits?.cost ?? null,
+		backend: harnessEnabled(process.env) ? "harness" : "agent",
+	};
 }
 
 /**
@@ -89,6 +141,15 @@ export function resolveRunOptions(
 export interface ServeHandle {
 	port: number;
 	supervisor: RunSupervisor;
+	/**
+	 * The next-run preview, resolved server-side.
+	 *
+	 * Exposed on the handle (not only through HTTP) so the preview and the
+	 * start path can be compared **in one test**: the preview must refuse
+	 * exactly what the start refuses, and the fields it promises must be the
+	 * fields the run records.
+	 */
+	preview(knobs?: RunKnobInput): Promise<{ preview: NextRunPreview | null; problems: Problem[] }>;
 	/** Wait until the process is asked to stop. */
 	done: Promise<void>;
 	stop(): Promise<void>;
@@ -103,10 +164,114 @@ export async function runServe(cfg: Config, opts: ServeOptions = {}): Promise<Se
 	const llmApi = createLlmApi({ dataDir: cfg.dataDir, cfg, envLlm: cfg.llm });
 	let web: WebServer | null = null;
 
+	/** The knobs a run starts from (the process's own settings). */
+	const knobDefaults = (): RunKnobDefaults => runKnobDefaults(cfg, opts);
+	/** The backends this process may run (the harness one is opt-in). */
+	const backends = (): RunBackend[] => allowedBackends();
+
+	/**
+	 * Resolve the knobs of a run, or explain why they cannot be used.
+	 *
+	 * Throws `ProblemError` → the web layer turns it into 400 + `problems[]`,
+	 * and **nothing is started** (no game process, no session).
+	 */
+	async function resolveKnobs(raw: RunKnobInput | undefined): Promise<RunKnobs> {
+		const knobs = resolveRunKnobs(raw ?? {}, knobDefaults(), backends());
+		// A cost cap on a model without a price table can never fire, so it would
+		// be a lie about the budget. Refuse it here — before the game starts —
+		// with the same rule the runner uses (run-budget.ts).
+		if (knobs.costLimit !== null) {
+			const resolved = await llmApi.resolveCurrent();
+			if (resolved.valid) {
+				assertCostCapEnforceable(
+					{ tokens: knobs.tokenLimit, cost: knobs.costLimit },
+					resolved.facts.costKnown,
+				);
+			}
+		}
+		return knobs;
+	}
+
+	/**
+	 * The next-run preview: what the next run would actually use.
+	 *
+	 * Everything here is **resolved server-side** — the page never normalizes
+	 * or guesses. Illegal knobs come back as `problems[]` (the page shows them
+	 * next to the field) rather than a thrown error, so the form can stay
+	 * usable while the user is still typing.
+	 */
+	async function previewRun(raw: RunKnobInput | undefined): Promise<{
+		preview: NextRunPreview | null;
+		problems: Problem[];
+	}> {
+		const parsed = previewRunKnobs(raw ?? {}, knobDefaults(), backends());
+		if (!parsed.knobs) return { preview: null, problems: parsed.problems };
+		const resolved = await llmApi.resolveCurrent();
+		if (!resolved.valid) return { preview: null, problems: resolved.problems };
+		// The same refusal Start makes: a preview that promises a cost cap the
+		// run cannot enforce is a lie in a nicer dress. The rule is the SAME
+		// function the runner uses (run-budget.ts), so the two cannot disagree.
+		const capProblem = costCapProblem(
+			{ tokens: parsed.knobs.tokenLimit, cost: parsed.knobs.costLimit },
+			resolved.facts.costKnown,
+		);
+		if (capProblem) return { preview: null, problems: [capProblem] };
+		return {
+			preview: buildNextRunPreview(parsed.knobs, {
+				providerId: resolved.facts.providerId,
+				model: resolved.facts.model,
+				api: resolved.facts.api,
+				contextWindow: resolved.facts.contextWindow,
+				maxTokens: resolved.facts.maxTokens,
+				costKnown: resolved.facts.costKnown,
+			}),
+			problems: [],
+		};
+	}
+
+	/**
+	 * The knobs of one run, applied to the config and the run options.
+	 *
+	 * Why the config is **cloned** instead of mutated: `cfg` is the process's
+	 * configuration (shared by every run); a run's knobs must not leak into the
+	 * next one ("applies to this run", not "to the process").
+	 */
+	function applyKnobs(base: Config, knobs: RunKnobs): Config {
+		return {
+			...base,
+			// The world seed (the process manager passes it to OpenTTD).
+			seed: knobs.seed,
+			llm: {
+				...base.llm,
+				// The scaffold knobs (thinking level, tool budget) and the spend
+				// caps travel in the config because that is where the runner
+				// reads them from (one source, no second copy).
+				scaffold: { thinkingLevel: knobs.thinkingLevel, toolBudget: knobs.toolBudget },
+				limits: { tokens: knobs.tokenLimit, cost: knobs.costLimit },
+			},
+		};
+	}
+
+	/**
+	 * The knobs of a run, applied to the **run options** the runner receives.
+	 *
+	 * The arm is the memory variable: "control" means no cross-game memory is
+	 * injected (the runner reads `injectMemory === false` as the control arm).
+	 */
+	function applyKnobOptions(base: Record<string, unknown>, knobs: RunKnobs): Record<string, unknown> {
+		return {
+			...base,
+			gameDays: knobs.gameDays ?? undefined,
+			scenario: knobs.scenario,
+			injectMemory: knobs.memoryArm === "treatment",
+			backend: knobs.backend,
+		};
+	}
+
 	// The supervisor owns the run lifecycle; the launcher decides HOW to run.
 	const supervisor = new RunSupervisor({
 		onStateChange: (s) => web?.publishRun(s),
-		start: async (mode, hooks) => {
+		start: async (mode, hooks, knobs) => {
 			if (!web) throw new Error("dashboard not ready");
 			// **每次 Start 都重新合并 `<dataDir>/llm.json`**（2026-09-22 的回归）。
 			//
@@ -119,9 +284,14 @@ export async function runServe(cfg: Config, opts: ServeOptions = {}): Promise<Se
 			// 幂等；且 `providerId` 故意**不带默认值回填**，所以重复合并不会把默认值烘进去
 			// 而遮住之后的文件更新（llm-settings.ts 里那段注释预见的正是“再次合并”）。
 			const runCfg = applyLlmSettingsFile(cfg);
+			// The knobs of THIS run (the page may set them; the CLI may not).
+			// Resolved before the gate so an illegal knob is refused with a
+			// reason and **no game process is started**.
+			const runKnobs = await resolveKnobs(knobs);
+			const scopedCfg = applyKnobs(runCfg, runKnobs);
 			// Same gate as the CLI: refuse to start when prerequisites are missing,
 			// and surface the reason verbatim to the page.
-			const pre = await runPreflight(runCfg, {
+			const pre = await runPreflight(scopedCfg, {
 				mode,
 				// Same resolved value the runner will get. Reading opts.offlineDemo
 				// here directly was a second source of truth - see resolveRunOptions.
@@ -135,25 +305,29 @@ export async function runServe(cfg: Config, opts: ServeOptions = {}): Promise<Se
 						: "preflight refused to start",
 				);
 			}
-			const runOpts = resolveRunOptions(opts, web, {
-				onReady: (h: { stop: () => void; pause: () => void; resume: () => void }) => {
-					hooks.stop = h.stop;
-					hooks.pause = h.pause;
-					hooks.resume = h.resume;
-				},
-				// agent 自己按暂停 → **supervisor 是 run 状态的唯一写者**。
-				// pause("agent") 会调 hooks.pause（= scheduler.pause + rcon，与页面同路径）
-				// 并把 pausedBy 记成 "agent"；resume 同理。幂等：已 paused 时不改写来源
-				// （"第一个让它停的才是原因"），因此 agent 在页面已暂停后再按不会夺走归因。
-				onAgentPause: (paused: boolean) => {
-					const p = paused ? supervisor.pause("agent") : supervisor.resume();
-					void p.catch((e) => console.error(`[serve] agent pause/resume failed: ${e instanceof Error ? e.message : e}`));
-				},
-			});
+			const runOpts = applyKnobOptions(
+				resolveRunOptions(opts, web, {
+					onReady: (h: { stop: () => void; pause: () => void; resume: () => void }) => {
+						hooks.stop = h.stop;
+						hooks.pause = h.pause;
+						hooks.resume = h.resume;
+					},
+					// agent 自己按暂停 → **supervisor 是 run 状态的唯一写者**。
+					// pause("agent") 会调 hooks.pause（= scheduler.pause + rcon，与页面同路径）
+					// 并把 pausedBy 记成 "agent"；resume 同理。幂等：已 paused 时不改写来源
+					// （"第一个让它停的才是原因"），因此 agent 在页面已暂停后再按不会夺走归因。
+					onAgentPause: (paused: boolean) => {
+						const p = paused ? supervisor.pause("agent") : supervisor.resume();
+						void p.catch((e) => console.error(`[serve] agent pause/resume failed: ${e instanceof Error ? e.message : e}`));
+					},
+				}),
+				runKnobs,
+			);
 			const launch = opts.launcher ?? defaultLauncher;
 			// Run in the background: the supervisor tracks completion via onStopped.
-			// `runCfg`（已合并当前 llm.json）而不是启动时那份：否则门禁放行、运行却用旧配置。
-			void launch(mode, runCfg, runOpts)
+			// `scopedCfg`（已合并当前 llm.json + 本局旋钮）而不是启动时那份：
+			// 否则门禁放行、运行却用旧配置。
+			void launch(mode, scopedCfg, runOpts)
 				.catch((e) => console.error(`[serve] run failed: ${e instanceof Error ? e.message : e}`))
 				.finally(() => hooks.onStopped?.());
 		},
@@ -195,7 +369,12 @@ export async function runServe(cfg: Config, opts: ServeOptions = {}): Promise<Se
 		},
 		run: {
 			status: () => supervisor.state(),
-			start: (mode) => supervisor.start(mode),
+			// The raw request record is converted to the typed input **once**, at
+			// this boundary: the web layer does not know the rules, the agent
+			// layer does. Both paths (start, preview) convert the same way, so
+			// the preview can never describe a different run than the one started.
+			start: (mode, knobs) => supervisor.start(mode, knobInputFrom(knobs)),
+			preview: (knobs) => previewRun(knobInputFrom(knobs)),
 			stop: () => supervisor.stop(),
 			pause: () => supervisor.pause(),
 			resume: () => supervisor.resume(),
@@ -220,6 +399,7 @@ export async function runServe(cfg: Config, opts: ServeOptions = {}): Promise<Se
 	return {
 		port: web.actualPort,
 		supervisor,
+		preview: (knobs?: RunKnobInput) => previewRun(knobs),
 		done,
 		async stop() {
 			try {

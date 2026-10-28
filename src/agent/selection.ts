@@ -141,6 +141,45 @@ export function hasPriceTable(model: Model<string>): boolean {
 }
 
 /**
+ * Resolve a **custom** endpoint selection.
+ *
+ * Split out of `resolveWithCatalog` so the provider builder and the resolver
+ * cannot drift (D74): the facts the manifest records and the facts the preview
+ * shows must be the same numbers, produced by the same code.
+ */
+export function resolveCustomSelection(llm: LlmConfig): ResolvedSelection {
+	const problems: Problem[] = [];
+	const api = CUSTOM_LLM_APIS.includes(llm.api as (typeof CUSTOM_LLM_APIS)[number])
+		? llm.api
+		: "openai-completions";
+	const baseUrl = llm.baseUrl.trim();
+	if (!baseUrl) {
+		problems.push({
+			code: "invalid_base_url",
+			message: "a custom endpoint needs a base URL",
+			hint: "fill in the endpoint URL (e.g. http://127.0.0.1:11434/v1) on the Providers page",
+		});
+	}
+	return {
+		intent: { source: "custom", providerId: llm.providerId, model: llm.model, api, baseUrl },
+		facts: {
+			providerId: llm.providerId,
+			model: llm.model,
+			api,
+			baseUrl,
+			contextWindow: llm.contextWindow,
+			maxTokens: llm.maxTokens,
+			// A custom endpoint is registered with zero prices: unknown, not free.
+			costKnown: false,
+			providerKnown: true,
+			modelKnown: true,
+		},
+		valid: problems.length === 0,
+		problems,
+	};
+}
+
+/**
  * Resolve one selection against a prepared catalog.
  *
  * Catalog path: the model is looked up in the snapshot **plus** the persisted
@@ -155,36 +194,7 @@ export async function resolveWithCatalog(
 	const source = resolveLlmSource(llm);
 	const problems: Problem[] = [];
 
-	if (source === "custom") {
-		const api = CUSTOM_LLM_APIS.includes(llm.api as (typeof CUSTOM_LLM_APIS)[number])
-			? llm.api
-			: "openai-completions";
-		const baseUrl = llm.baseUrl.trim();
-		if (!baseUrl) {
-			problems.push({
-				code: "invalid_base_url",
-				message: "a custom endpoint needs a base URL",
-				hint: "fill in the endpoint URL (e.g. http://127.0.0.1:11434/v1) on the Providers page",
-			});
-		}
-		return {
-			intent: { source, providerId: llm.providerId, model: llm.model, api, baseUrl },
-			facts: {
-				providerId: llm.providerId,
-				model: llm.model,
-				api,
-				baseUrl,
-				contextWindow: llm.contextWindow,
-				maxTokens: llm.maxTokens,
-				// A custom endpoint is registered with zero prices: unknown, not free.
-				costKnown: false,
-				providerKnown: true,
-				modelKnown: true,
-			},
-			valid: problems.length === 0,
-			problems,
-		};
-	}
+	if (source === "custom") return resolveCustomSelection(llm);
 
 	const providerId = llm.providerId;
 	const providerKnown = isCatalogProvider(providerId);

@@ -101,7 +101,7 @@
 
 ---
 
-## 🔴 COMPACT 后从这里接续（2026-10-24）
+## 🔴 COMPACT 后从这里接续（2026-10-25）
 
 > 给"compact 后的我自己"的恢复手册。**按顺序做，不必重新推导**。
 
@@ -115,11 +115,13 @@ pgrep -fl "bench.ts|run-experiment|cli/run.ts|llm-stub|OpenTTD.app"
 
 ### 2. 下一步做什么？
 
-**三个 CoDesign 都已获批准（2026-10-24）。B1 已完成（Issue #33 关闭）。执行顺序：B2 → (B3 ∥ B4) → B5 → B6。**
+**B1（#33）、S2（#40）已合并。B2（#34）在分支 `feat/b2-launch-surface` 上：代码 + 真机端到端 +
+页面验证（真实 Chrome、0 console）+ 文档**全部完成**，门禁全绿（1656 passed / 9 skipped），
+**只差英文 commit + PR（`Closes #34`）**。真机结论见 `SPEC.md` §10.119。**
 
 | 步 | 内容（权威文档） | 关键验收 |
 |---|---|---|
-| **B2** | 发起面：`POST /api/run/start` 接受并**校验**运行旋钮（seed/游戏日/场景/记忆臂/thinking/tool budget/token·cost 上限/后端）；Configure 表单 + **next-run 预览**（字段与 manifest 同名） | 从页面用非默认旋钮起一局，`meta.manifest` 与预览**逐字段相同** |（#34）
+| **B2** 🔵 | 发起面：`POST /api/run/start` 接受并**校验**运行旋钮（seed/游戏日/场景/记忆臂/thinking/tool budget/token·cost 上限/后端）；Configure 表单 + **next-runn 预览**（字段与 manifest 同名） | 从页面用非默认旋钮起一局，`meta.manifest` 与预览**逐字段相同** |（#34）
 | **B3** | Run 页三段化 + **因果时间线**（decision → tools → job/阶段 → 效果，默认最近 20 条） | 一次决策的四段证据同屏、由 `job` 连接 |（#35）
 | **B4** | **Compare 页**：复用 `buildScorecard` + `pairedComparison`；排除按原因计数；样本不足写"不可判定" | 2 模型 × 2 seed 出四轴 + CI/不可判定 |（#36）
 | **B5** | 结果词表**全 10 类** + 结构化错误 `{code,message,hint}`（删掉前端正则猜语义） | 10 类成因都能在 UI 出现；401/404/无凭据各有 code |（#37）
@@ -136,7 +138,7 @@ pgrep -fl "bench.ts|run-experiment|cli/run.ts|llm-stub|OpenTTD.app"
 **上一轮的遗留（未完成，别丢）**：
 - **#13 S7 世界事实补洞**：方案在 `docs/SCAFFOLD-CONTRACT.md` §9，等回答三问（归因口径可接受？顺序 a→b→c→d？一次一 PR？）。**排在 B 系列之后**。
 - **AGENT_HARNESS 翻默认**：前提已满足 2/3（live 双绿、跨 seed `payloadShapeHash` 相等）；
-  还差"至少一局真实模型"。**S2 已修好 A5**（门禁与 runner 共用同一份覆盖层，见 `SPEC.md` §10.118）：
+  还差"至少一局真实模型"。**S2 已修好 A5**（门禁与 runner 共用同一份覆盖层，见 `SPEC.md` §10.117）：
   门禁现在对 live-only 模型 `MiniMax-M3.1-Flash` 判 **ok**（provider 1592ms 应答），
   所以"真实模型一局"不再被门禁挡住。
 - **真实基准一轮**（需所有者定模型与预算）→ D6d fork 再评估 → P3 卫生。
@@ -163,11 +165,10 @@ stub/服务别占 8899。真机实验固定用 admin 3991 / game 3993 / web 81xx
 - `models-cache.json` 里已有 `minimax-cn` 的 6 个实时模型覆盖层（`checkedAt` 2026-10-25）；
   目录快照本身是 **2026-09-04** 的（`SPEC.md` §10.116）。
 
-### 4. 最近的交接点（2026-10-24 收工）
+### 4. 最近的交接点（2026-10-25 收工）
 
-- `main` = **`b27c4d0`** + 本提交（P4 / payloadShapeHash / 文档收敛 / Provider 刷新 /
-  两份 CoDesign 均已合并）。
-- `pnpm run gate` = **1602 passed / 9 skipped**。
+- `main` = **`93090cf`**（S2：四路共用一个 selection resolver）。B2 只在分支
+  `feat/b2-launch-surface`（未提交）。`pnpm run gate` = **1652 passed / 9 skipped**。
 - `LIVE_TESTS=1 vitest --run test/live`：**harness 9/9、裸 Agent 9/9**，跑完端口自动释放。
 - 开放 Issue：#13（世界事实，下一步）、#1（跟踪）。
 - **文档已收敛（2026-10-24）**：MEMORY 2081→664、CHANGELOG 1846→495、SPEC 1297→1243；

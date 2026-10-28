@@ -154,6 +154,87 @@
       </div>
     </div>
   </section>
+
+  <!-- ========================= RUN KNOBS + PREVIEW =========================
+       "下一次会用什么" —— 旋钮 + 服务端解析出来的预览（B2）。
+       预览里的每一个值都来自 `/api/run/preview` 的回答；页面不自己算 manifest
+       （页面抄一份规则就会和跑的时候漂移）。 -->
+  <div class="group"><h2>Run settings</h2><div class="rule"></div>
+    <span class="dim">what the next run will use — resolved by the server, not by this page</span></div>
+  <section class="grid split-12">
+    <div class="panel">
+      <div class="panel-head"><h2>Run knobs</h2></div>
+      <!-- The knob fields come from the view module (one place), not from the
+           template. `x-for` MUST sit on a <template>: on a plain element the
+           loop variable is not in scope for that element's OWN directives
+           (`:id`, `x-text`), and Alpine reports it as an expression error —
+           the form then renders empty while the page looks fine. -->
+      <template x-for="f in knobFields()" :key="f.key">
+        <div class="field">
+          <label :for="'knob-' + f.key" x-text="f.label"></label>
+          <!-- ONE control per field, chosen by the field's shape. `x-if` (not
+               `x-show`): with `x-show` both the select and the input exist and
+               carry the SAME id, so the id resolves to whichever came first —
+               often the hidden one. The label then points at a control the
+               user cannot see or type in. -->
+          <template x-if="f.options">
+            <select :id="'knob-' + f.key" x-model="knobs[f.key]" @change="schedulePreview()">
+              <!-- The blank option means "keep the server's setting" — same rule as
+                   an empty text field (otherwise a select would always override the
+                   process's own configuration). -->
+              <option value="" x-text="blankLabel()"></option>
+              <template x-for="o in (f.options || [])" :key="o">
+                <option :value="o" x-text="o"></option>
+              </template>
+            </select>
+          </template>
+          <template x-if="!f.options">
+            <input :id="'knob-' + f.key" type="text" x-model="knobs[f.key]"
+                   @input="schedulePreview()" :placeholder="f.hint || ''" spellcheck="false" />
+          </template>
+          <!-- The hint is shown once: a text field carries it in its placeholder,
+               so the line below would repeat the same words twice. A select has
+               no placeholder, so it keeps the line. -->
+          <p class="hint" x-show="f.hint && f.options" x-text="f.hint"></p>
+        </div>
+      </template>
+      <div class="actions">
+        <button type="button" class="btn sm" :disabled="previewing" @click="refreshPreview()">
+          <span x-show="!previewing">Preview</span>
+          <span x-show="previewing">Resolving…</span>
+        </button>
+        <button type="button" class="btn sm primary" :disabled="runBusy" @click="startRun()">
+          <span x-show="!runBusy">Start with these settings</span>
+          <span x-show="runBusy">Starting…</span>
+        </button>
+        <span class="form-msg" :class="runMsg.kind" x-text="runMsg.text"></span>
+      </div>
+      <p class="hint">
+        An empty field keeps the server's own setting. The knobs travel with the
+        Start request, so the run and the preview below always describe the same thing.
+      </p>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><h2>Next run</h2></div>
+      <p class="hint" :class="previewStatus().kind" x-text="previewStatus().text"></p>
+      <table class="kv">
+        <template x-for="[k, v] in previewRows()" :key="k">
+          <tr><td x-text="k"></td><td x-text="v"></td></tr>
+        </template>
+      </table>
+      <!-- The server's reasons, one per line (code + what to do about it). -->
+      <div x-show="problemHints().length" style="margin-top:.75rem">
+        <template x-for="(p, i) in problemHints()" :key="i">
+          <p class="hint">
+            <span class="badge bad" x-text="p.code"></span>
+            <span x-text="p.message"></span>
+            <span class="dim" x-show="p.hint" x-text="p.hint"></span>
+          </p>
+        </template>
+      </div>
+    </div>
+  </section>
 </main>
 </div>
 
@@ -166,6 +247,7 @@
 <script src="/assets/vendor/alpinejs/alpine.min.js" defer></script>
 <script src="/assets/js/alpine-bridge.js"></script>
 <script src="/assets/js/providers-view.js"></script>
+<script src="/assets/js/configure-view.js"></script>
 <script src="/assets/js/providers.js"></script>
 </body>
 </html>

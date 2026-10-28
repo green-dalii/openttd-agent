@@ -102,6 +102,15 @@ export interface AgentRunOptions {
 	 */
 	gameDays?: number;
 	/**
+	 * Which runtime drives the loop.
+	 *
+	 * `undefined` = follow the process (`AGENT_HARNESS=1` ⇒ harness, else the
+	 * plain agent). Set explicitly by the dashboard, which may only choose among
+	 * the backends the process allows — the harness one stays off unless the
+	 * operator enabled it (ROADMAP §3 不变量).
+	 */
+	backend?: "agent" | "harness";
+	/**
 	 * S1/G4: build a deterministic route BEFORE the measurement window opens, so
 	 * the episode measures management decisions instead of construction luck.
 	 * Default "freeform" keeps the historical behaviour.
@@ -372,6 +381,8 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 	let brainKind: "real" | "faux" = "faux";
 	/** Whether the model has a price table (custom endpoints: no). */
 	let brainCostKnown = false;
+	/** The resolved selection facts of the brain (null for the faux demo). */
+	let brainFacts: { model: string; api: string; contextWindow: number } | null = null;
 	const mustServeDashboard = opts.webPort !== undefined;
 
 	// The credential store keeps dashboard-saved keys across restarts (pi-ai's
@@ -398,6 +409,11 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 		model = built.model;
 		models = built.models;
 		brainCostKnown = built.costKnown;
+		brainFacts = {
+			model: built.facts.model,
+			api: built.facts.api,
+			contextWindow: built.facts.contextWindow,
+		};
 		// Refuse a cost cap this model cannot measure (it would never fire).
 		assertCostCapEnforceable(limits, brainCostKnown);
 		brainKind = "real";
@@ -835,7 +851,12 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 	//   - "harness": AgentHarness + a durable, replayable session transcript
 	// The flag exists so the migration is reversible by configuration, not by a
 	// revert: docs/HARNESS-MIGRATION.md §4.
-	const backend = harnessEnabled(process.env) ? "harness" : "agent";
+	//
+	// `opts.backend` is the **per-run** choice (the dashboard's knob); without
+	// it the process decides (`AGENT_HARNESS=1`). The page may only choose
+	// among the backends the process allows, so this cannot turn the harness on
+	// behind the operator's back (ROADMAP §3 不变量: harness 默认关).
+	const backend = opts.backend ?? (harnessEnabled(process.env) ? "harness" : "agent");
 	let tools: AgentTool[];
 	let decisionAgent: DecisionAgent;
 	let getBudgetBlocks: () => number;
@@ -1103,6 +1124,14 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 			thinkingLevel: scaffold.thinkingLevel,
 			toolBudget: scaffold.toolBudget,
 			scaffoldHash: fingerprint,
+			// The model the run ASKED for, and the facts of that model (its api
+			// and context window) — resolved by the same resolver the next-run
+			// preview uses, so the two agree field by field. `servedModel` (what
+			// the provider answered with) is added by reflect-run from telemetry.
+			model: brainFacts?.model ?? null,
+			api: brainFacts?.api ?? null,
+			contextWindow: brainFacts?.contextWindow ?? null,
+			costKnown: brainFacts ? brainCostKnown : null,
 			// P4: the cap that may have ended this run belongs to its identity.
 			tokenLimit: limits.tokens,
 			costLimit: limits.cost,

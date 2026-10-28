@@ -11,6 +11,8 @@
  *   - 在这里做启动前的检查（那是 preflight 的职责）；本类只转发 start。
  */
 
+import type { RunKnobInput } from "./run-knobs.js";
+
 export type RunState = "idle" | "starting" | "running" | "paused" | "stopping";
 export type RunMode = "agent" | "watch";
 
@@ -46,8 +48,14 @@ export interface RunHooks {
 }
 
 export interface SupervisorOptions {
-	/** Launch a run. Must populate `hooks` and resolve once it is up. */
-	start: (mode: RunMode, hooks: RunHooks) => Promise<void>;
+	/**
+	 * Launch a run. Must populate `hooks` and resolve once it is up.
+	 *
+	 * `knobs` are the run's settings, as the page sent them: the supervisor
+	 * forwards them untouched so the launcher (which owns the rules) decides
+	 * whether they are usable.
+	 */
+	start: (mode: RunMode, hooks: RunHooks, knobs?: RunKnobInput) => Promise<void>;
 	/** Notified on every state transition (drives the WS push). */
 	onStateChange?: (s: RunStatus) => void;
 }
@@ -80,8 +88,12 @@ export class RunSupervisor {
 	/**
 	 * Start a run. Rejects when one is already active so the dashboard can show a
 	 * clear conflict instead of silently replacing the running game.
+	 *
+	 * `knobs` are the run's settings from the page; they are forwarded to the
+	 * launcher untouched (the launcher validates them — a second copy of the
+	 * rules here would drift).
 	 */
-	async start(mode: RunMode): Promise<void> {
+	async start(mode: RunMode, knobs?: RunKnobInput): Promise<void> {
 		if (this.canControl() || this.cur.state === "starting") {
 			throw new Error(`a run is already running (mode=${this.cur.mode})`);
 		}
@@ -90,7 +102,7 @@ export class RunSupervisor {
 			onStopped: () => this.markFinished(),
 		};
 		try {
-			await this.opts.start(mode, hooks);
+			await this.opts.start(mode, hooks, knobs);
 		} catch (e) {
 			const msg = e instanceof Error ? e.message : String(e);
 			this.hooks = {};
