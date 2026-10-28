@@ -142,6 +142,125 @@ describe("WebServer REST", () => {
 		expect(r.body.saved).toMatchObject({ source: "catalog", providerId: "deepseek" });
 	});
 
+	describe("the run surface (B2)", () => {
+		/** What the run hooks saw (the knobs must arrive **unvalidated**). */
+		let started: { mode: string; knobs: Record<string, unknown> | undefined }[] = [];
+		let previewed: (Record<string, unknown> | undefined)[] = [];
+
+		async function startWithRunHooks(
+			over: Partial<ConstructorParameters<typeof WebServer>[0]> = {},
+		): Promise<void> {
+			started = [];
+			previewed = [];
+			await start({
+				run: {
+					status: () => ({ state: "idle" }),
+					start: (mode, knobs) => {
+						started.push({ mode, knobs });
+					},
+					preview: (knobs) => {
+						previewed.push(knobs);
+						return { preview: { model: "m" }, problems: [] };
+					},
+					stop: () => {},
+					pause: () => {},
+					resume: () => {},
+				},
+				...over,
+			});
+		}
+
+		it("POST /api/run/start forwards the knobs to the run (the web layer does not validate them)", async () => {
+			await startWithRunHooks();
+			const r = await req("POST", "/api/run/start", {
+				mode: "agent",
+				knobs: { seed: 4242, thinkingLevel: "high", toolBudget: 5 },
+			});
+			expect(r.status).toBe(200);
+			expect(started).toHaveLength(1);
+			expect(started[0]!.mode).toBe("agent");
+			// The knobs arrive verbatim: the agent layer owns the rules.
+			expect(started[0]!.knobs).toEqual({ seed: 4242, thinkingLevel: "high", toolBudget: 5 });
+		});
+
+		it("POST /api/run/start answers 400 + problems[] when the knobs are illegal", async () => {
+			await startWithRunHooks({
+				run: {
+					status: () => ({ state: "idle" }),
+					start: () => {
+						const err = new Error("thinking level: off|minimal");
+						(err as { problems?: unknown }).problems = [
+							{ code: "invalid_knob", message: "thinkingLevel must be one of …", hint: "pick one of …" },
+						];
+						throw err;
+					},
+					stop: () => {},
+					pause: () => {},
+					resume: () => {},
+				},
+			});
+			const r = await req("POST", "/api/run/start", { mode: "agent", knobs: { thinkingLevel: "turbo" } });
+			expect(r.status).toBe(400);
+			expect((r.body.problems as { code: string }[])[0]!.code).toBe("invalid_knob");
+		});
+
+		it("POST /api/run/start answers 409 when a run is already active (a conflict, not a bad request)", async () => {
+			await startWithRunHooks({
+				run: {
+					status: () => ({ state: "running" }),
+					start: () => {
+						throw new Error("a run is already running (mode=agent)");
+					},
+					stop: () => {},
+					pause: () => {},
+					resume: () => {},
+				},
+			});
+			const r = await req("POST", "/api/run/start", { mode: "agent" });
+			expect(r.status).toBe(409);
+		});
+
+		it("a cost cap the model cannot enforce is a 400 (a bad knob), not a 409", async () => {
+			// The refusal is about the REQUESTED knobs, not about a running game:
+			// answering 409 would tell the user their request collided with
+			// something, which is not what happened (real-machine finding).
+			await startWithRunHooks({
+				run: {
+					status: () => ({ state: "idle" }),
+					start: () => {
+						const err = new Error("this model has no price table");
+						(err as { problems?: unknown }).problems = [
+							{
+								code: "unpriced_with_cost_cap",
+								message: "this model has no price table (costKnown=false), so a cost cap cannot be enforced",
+								hint: "set a token cap instead (LLM_TOKEN_LIMIT), or configure a priced model",
+							},
+						];
+						throw err;
+					},
+					stop: () => {},
+					pause: () => {},
+					resume: () => {},
+				},
+			});
+			const r = await req("POST", "/api/run/start", { mode: "agent", knobs: { costLimit: "2" } });
+			expect(r.status).toBe(400);
+			expect((r.body.problems as { code: string }[])[0]!.code).toBe("unpriced_with_cost_cap");
+		});
+
+		it("POST /api/run/preview returns the preview (and 404s when the hook is absent)", async () => {
+			await startWithRunHooks();
+			const r = await req("POST", "/api/run/preview", { knobs: { seed: 7 } });
+			expect(r.status).toBe(200);
+			expect(r.body.preview).toEqual({ model: "m" });
+			expect(previewed[0]).toEqual({ seed: 7 });
+
+			await start();
+			const missing = await req("POST", "/api/run/preview", { knobs: {} });
+			expect(missing.status).toBe(404);
+		});
+	});
+
 	it("GET /api/telemetry returns the snapshot (and 404 when disabled)", async () => {
 		await start();
 		const r = await req("GET", "/api/telemetry");

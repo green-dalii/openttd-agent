@@ -327,14 +327,14 @@ OpenTTD 有**两个动作面**，能力完全不同：
 
 | 主题 | 条目 | 数 |
 |---|---|---|
-| **A 通信与协议事实** | 10.2 观察信号 · 10.4 命令下发链路 · 10.13 OpenTTD Squirrel… · 10.24 第二条 admin 连接不能给 … · 10.25 GS 可对公司施工并扣公司钱 · 10.25.1 两条附带实测事实 · 10.66 GS 通道的部分失效：`GSSt… · 10.99 数据的唯一来源边界：admin … · 10.106 事实通道补全与 admin 握手… | 9 |
+| **A 通信与协议事实** | 10.2 观察信号 · 10.4 命令下发链路 · 10.13 OpenTTD Squirrel… · 10.24 第二条 admin 连接不能给 … · 10.25 GS 可对公司施工并扣公司钱 · 10.66 GS 通道的部分失效：`GSSt… · 10.99 数据的唯一来源边界：admin … · 10.106 事实通道补全与 admin 握手… | 9 |
 | **B 执行器与施工** | 10.3 GS-only 施工候选 · 10.10 v0.2 spike: 自定义 … · 10.11 v0.2 spike: Brid… · 10.12 v0.2 实现: 标牌邮箱可见性… · 10.14 v0.2 实现: Executo… · 10.15 v0.2.1: 分段贪心铺路解除… · 10.23 执行器阶段的解码契约 · 10.26 决策循环的 freeze/tha… · 10.27 执行器"假死"的真正根因：路径搜… · 10.28 控制台 `pause` 是单向的… · 10.29 执行器跑通完整公交线 · 10.39 NEXT-4 最小切片：执行器队… · 10.39.1 修正：FIFO + done 集… · 10.40 FIFO 队列真机验证通过 · 10.45 Phase A2：GS 侧类型化… · 10.46 Phase A3：harness… · 10.90 决定性事实：Bridge GS … · 10.92 AB-4a：GS 自建 + 自运… · 10.103 执行器异常：完整文本进事件流 · 10.107 P1-1a：执行器搬进 GS · 10.108 P1-1b：GS 寻路库入库 · 10.109 P1-1b 尾巴 + P1-3 … · 10.110 P1-2：动作面扩——选货 / … · 10.111 P1-3 收尾：FLEET 归因… | 24 |
 | **C 决策循环与运行时** | 10.16 v0.2.1 实现: Pi Ag… · 10.18 v0.5.0 实现: 启动门禁 … · 10.19 v0.6.0 实现: 决策循环对… · 10.20 `add_vehicles` 的… · 10.21 两个 runner 的事件转发契… · 10.30 `seconds` 从未限制运行… · 10.35 心跳被当成「变化」—— 决策循环… · 10.35.1 修复的实测结果与尚未解决的问题 · 10.36 新闻门：phase 按阶段门控，… · 10.37 新闻门之后的第一次校准跑 · 10.38 校准跑 #2：session h… · 10.47 Phase B-3：signal… · 10.48 Phase B-4a：决策循环纯… · 10.49 Phase B-4b：决策循环体… · 10.50 Phase C：结构化记忆 + … · 10.60 已验证的冻结：重新引入暂停，但这… · 10.61 冻结 vs 不冻结：机制成立，但… · 10.68 测量单元本身不可比：墙钟预算 →… · 10.69 G1 落地：局以模拟时间结束 · 10.74 与 pi-agent-core … · 10.75 R1 实施结果：执行顺序 / 工… · 10.83 G6 实测：单次请求峰值 5–7… · 10.93 `--serve` 的 Star… · 10.101 僵尸局取证：用户看到的那句告警，… · 10.102 世界时钟：一个事实、一个写者、一… | 26 | · 10.115 决策运行时双后端（harness/裸 Agent，请求逐字相同） · 10.116 模型目录是快照，实时列表要另取 |
-| **D 观测面与测量** | 10.1 动作面 · 10.53 NEXT-2 N2-1：线路经济… · 10.54 NEXT-2 N2-2/N2-3… · 10.55 NEXT-2 N2-4：主指标换… · 10.59 工具必须能观测自己的效果：rco… · 10.65 流量指标的测量缺陷：`deliv… · 10.67 校准 #2：仪器缺陷不是方差来源… · 10.71 G2 落地：把"决定结局的那个过… · 10.72 S0 oracle 梯度：杠杆存… · 10.73 S1/G4 落地：预建场景 · 10.98 城镇与存档：两条"数据一直在、只… · 10.100 P1+P2 实测：产业/货种/公… · 10.105 车队数必须跨线路去重：同屏两个"… · 10.114 D1a：模型看得见自己这局的分 | 14 |
+| **D 观测面与测量** | 10.1 动作面 · 10.53 NEXT-2 N2-1：线路经济… · 10.55 NEXT-2 N2-4：主指标换… · 10.59 工具必须能观测自己的效果：rco… · 10.65 流量指标的测量缺陷：`deliv… · 10.67 校准 #2：仪器缺陷不是方差来源… · 10.71 G2 落地：把"决定结局的那个过… · 10.72 S0 oracle 梯度：杠杆存… · 10.73 S1/G4 落地：预建场景 · 10.98 城镇与存档：两条"数据一直在、只… · 10.100 P1+P2 实测：产业/货种/公… · 10.105 车队数必须跨线路去重：同屏两个"… · 10.114 D1a：模型看得见自己这局的分 | 14 |
 | **E 记忆与进化** | 10.22 RL Harness 范围 · 10.31 M3 对照实验结果 · 10.34 M3 第二次 A/B：把决策权交… · 10.41 决策→结果账本接入反思 · 10.42 M3 A/B 第三次重跑：手眼账… · 10.43 为什么记忆无收益：全链路审计 · 10.76 R2 实施结果：经验 = 带实测… · 10.77 R2b 实施结果：反思改走 Ag… · 10.78 M1：反思产出率变成可诊断、可重… · 10.79 M2：把计分规则作为事实写进提示… · 10.80 M3 能力盘点：环境到底允许 a… · 10.82 第一性原理复检：能力面、空缺与协… · 10.84 M3-1b：车队杠杆真正的两处缺… · 10.85 第一性原理复审：离"自主 + 自… · 10.86 M3-2a：每线路登记表 + 退… · 10.87 M3-2b：披露粘滞——让事件相… · 10.88 M3-2c：车队请求对已登记的旧… · 10.89 M4a：`recall` 按需检… · 10.91 AB-1：`capabiliti… | 19 |
-| **F 实验方法与统计** | 10.32 第一性原理：M3 测不出差异，是… · 10.33 把决策权交还 agent：城镇对… · 10.51 M3 第四次重跑：首次有效分臂 · 10.52 每局存档+ M3 第五/六次重跑 · 10.56 N2-5 首轮 A/B 判废：臂… · 10.57 N2-5 有效轮次与两个结论 · 10.58 N2-5 oracle 探测：任… · 10.62 NEXT-2 收尾：首个干净判据… · 10.63 校准轮：窗口是方差的主因，实验设… · 10.64 顺序检验 block #1：CI… · 10.70 G3 落地：车队请求的静默无效变… · 10.81 M3-1 真机结果：车队杠杆被阶… · 10.112 P2-3：统计预登记 · 10.113 P2-1/P2-2 代码侧：实验… | 14 |
-| **G 产品面与前端** | 10.17 v0.3.0 实现: Dashb… · 10.94 Live 页面运行期的滚动失控与… · 10.95 图表渲染路径：三个真因与"图表健… · 10.96 长跑实测 · 10.97 uPlot 1.6.32 的交互… · 10.104 图表手势、区间读数与列表索引 · 10.117 一份运行配置真值 · 10.118 一份运行配置解析器 | 6 |
-| **H 里程碑与实施流水** | 10.5 待 M0/M1 spike 实测… · 10.6 M0 实测结果 · 10.7 M1 实测结果 · 10.8 里程碑进度 · 10.9 M1.5 崩溃调查 | 5 |
+| **F 实验方法与统计** | 10.32 第一性原理：M3 测不出差异，是… · 10.33 把决策权交还 agent：城镇对… · 10.52 每局存档+ M3 第五/六次重跑 · 10.56 N2-5 首轮 A/B 判废：臂… · 10.57 N2-5 有效轮次与两个结论 · 10.58 N2-5 oracle 探测：任… · 10.62 NEXT-2 收尾：首个干净判据… · 10.63 校准轮：窗口是方差的主因，实验设… · 10.64 顺序检验 block #1：CI… · 10.70 G3 落地：车队请求的静默无效变… · 10.81 M3-1 真机结果：车队杠杆被阶… · 10.112 P2-3：统计预登记 · 10.113 P2-1/P2-2 代码侧：实验… | 14 |
+| **G 产品面与前端** | 10.17 v0.3.0 实现: Dashb… · 10.94 Live 页面运行期的滚动失控与… · 10.95 图表渲染路径：三个真因与"图表健… · 10.96 长跑实测 · 10.97 uPlot 1.6.32 的交互… · 10.104 图表手势、区间读数与列表索引 · 10.117 一份运行配置真值 · 10.118 一份运行配置解析器 | 6 · 10.119 页面起一局：旋钮、预览与“预览即承诺”… |
+| **H 里程碑与实施流水** | 10.6 M0 实测结果 · 10.7 M1 实测结果 · 10.8 里程碑进度 · 10.9 M1.5 崩溃调查 | 5 |
 
 ### 10.1 动作面（回答"Admin Port 做不到的操作怎么办"）
 **仍为真**：动作面（agent 能做什么）以 §4.3 的工具集为准；环境侧的施工原语见 §10.25。
@@ -347,9 +347,6 @@ OpenTTD 有**两个动作面**，能力完全不同：
 
 ### 10.4 命令下发链路（三方先例收敛）
 **仍为真**：主链路 = Admin → Bridge GS `ScriptEventAdminPort` → 蓝图 → Executor 施工 → GS 回报；标牌邮箱细节见 §2.4。
-
-### 10.5 待 M0/M1 spike 实测项
-**过程** → `CHANGELOG.md`（v0.0.1–v0.1）。M0/M1 spike 已完成；**仍为真的事实**：无（结论已并入 §2.5 / §10.25）。
 
 ### 10.6 M0 实测结果（v0.0.1 完成）
 **过程** → `CHANGELOG.md`（v0.0.1）。**仍为真的事实**：RCON **不能**铺轨/建站/买车，真正的「玩」必须在游戏内有 AI/GS（§1.2）。
@@ -416,9 +413,6 @@ OpenTTD 有**两个动作面**，能力完全不同：
 **仍为真**：`GSCompanyMode` 下 GS 能以该公司身份 `BuildRoad` / `BuildRoadDepot` / `BuildRoadStation` / `BuildVehicle` / `AppendOrder` / `StartStopVehicle`，**并扣该公司的钱**（真机 `probe_cm`：100000 → 70416）。
 另：`GSEngineList` **必须**带 `GSVehicle.VT_ROAD`，否则报 wrong number of parameters；周期性代码块必须先确认公司在（tick ~200 时 `GSCompany.ResolveCompanyID(0)` 仍是 `COMPANY_INVALID`），且**没有订阅者时 `GSAdmin.Send` 静默丢弃**。
 依据：`src/game/squirrel/bridge-gs/main.nut`；`docs/EXECUTOR-ARCHITECTURE.md`。
-
-### 10.25.1 两条附带实测事实
-**见 §10.25**（本节是其源码级证据细节；上游为 `script_companymode.hpp`）。
 
 ### 10.26 决策循环的 freeze/thaw 必须有 finally（2026-09-12 实证）
 **过程** → `CHANGELOG.md`。**仍为真的事实**：冻结/解冻必须在 `finally` 里做（否则异常路径会留下暂停的游戏）。
@@ -498,17 +492,11 @@ OpenTTD 有**两个动作面**，能力完全不同：
 ### 10.50 Phase C：结构化记忆 + 实验脚手架（2026-09-15，calC1–C3）
 **过程** → `CHANGELOG.md`。**仍为真的事实**：记忆是结构化观察（带实测读数），不是散文。
 
-### 10.51 M3 第四次重跑：首次有效分臂（2026-09-15，/tmp/m3e → m3f → m3g）
-**过程** → `CHANGELOG.md`。**仍为真的事实**：无。
-
 ### 10.52 每局存档（可回看）+ M3 第五/六次重跑（2026-09-15/16）
 **过程** → `CHANGELOG.md`。**仍为真的事实**：每局存档（可回看）是诊断的前提。
 
 ### 10.53 NEXT-2 N2-1：线路经济事件（route-stats）——探针全绿（2026-09-16）
 **过程** → `CHANGELOG.md`。**仍为真的事实**：线路经济事实（route-stats）必须可从环境查到。
-
-### 10.54 NEXT-2 N2-2/N2-3：让经济事实可查、可见、可记（2026-09-16）
-**过程** → `CHANGELOG.md`。**仍为真的事实**：无。
 
 ### 10.55 NEXT-2 N2-4：主指标换成收益流 + 标定结果（2026-09-16）
 **过程** → `CHANGELOG.md`。**仍为真的事实**：主指标是**收益流**，不是成本。
@@ -799,26 +787,26 @@ inst.__zoomedByUser = true;       // 让数据帧走 setData(data, false)，视�
 W2 的目标是让"这局是在**世界冻住**时结束的"成为 run 记录里的事实。落地时先撞上一个
 **更底层**的缺陷，不修它 W2 的判据就没有可信的输入：
 
-| 事实 | 证据 |
-|------|------|
-| admin port 的 DATE 包按 **`Monthly`** 订阅 | `admin-client.ts` 的 `DEFAULT_SUBSCRIBE`：`[AdminUpdateType.Date, AdminUpdateFrequency.Monthly]` |
-| 于是一局 90 s 的真实运行只收到 **1** 个 date 事件 | 隔离真机 `events.jsonl` 事件计数：`date: 1`（同时 `company_info: 128`） |
-| 页面 health 条的判据是"最近 90 s 内有没有新 date 事件" | `live-view.js` 的 `worldRate()`：`advancing: now - lastAt <= 90 * 1000` |
-| ⇒ 它**结构性地**永远报 `world frozen` | 真机截图：世界每 6 s 推进一次，页面却写 `WORLD frozen — no new game date in the last 90s` |
-| 同一个字段还喂给 agent 的 `observe` | `tools/index.ts` 读 `snap.date` ⇒ **模型看到的世界时间也停在连接那一刻** |
+- admin port 的 DATE 包按 **`Monthly`** 订阅（`admin-client.ts` 的 `DEFAULT_SUBSCRIBE`）
+  ⇒ 一局 90 s 的真实运行只收到 **1** 个 date 事件（隔离真机 `events.jsonl`：`date: 1`，
+  同时 `company_info: 128`）。
+- 页面 health 条的判据是"最近 90 s 内有没有新 date 事件"（`live-view.js` 的 `worldRate()`）
+  ⇒ 它**结构性地**永远报 `world frozen`（真机截图：世界每 6 s 推进一次，页面却写
+  `WORLD frozen — no new game date in the last 90s`）。
+- 同一个字段还喂给 agent 的 `observe`（`tools/index.ts` 读 `snap.date`）⇒ **模型看到的世界
+  时间也停在连接那一刻**。
 
-**结论（系统事实）**：按游戏月刷新的通道不能当"当前时间"用；页面与模型都曾因此拿到
-**结构上过时**的时间事实。可用的细粒度来源是 Bridge GS 的 `GSDate`（每 200 script tick
-≈ 6 s 一次，`signal-hub.ts` 的 `gsRawDate`）——它一直在报，只是从未变成 `date` 事件。
+**结论（系统事实）**：按游戏月刷新的通道不能当"当前时间"用；页面与模型都曾因此拿到**结构性
+过时**的时间事实。可用的细粒度来源是 Bridge GS 的 `GSDate`（每 200 script tick ≈ 6 s 一次，
+`signal-hub.ts` 的 `gsRawDate`）——它一直在报，只是从未变成 `date` 事件。
 
 **修法（三件事一起，缺一件就还是旧的谎）**：
-1. `WorldState` 成为 `date` 的**唯一写者**（`applyDate`），并**单调**：较旧的读数一律丢弃
-   ——按月到达的 admin 包不得把日期往回滚（交付计量器按 `gameDay` 判季度，倒退会污染它）。
-2. hub 在 GS 日期**变化**时把它变成一个真正的 `date` 事件（`source:"gs"`），走与收包
-   **完全相同**的三条路径（world / 页面 / 归档）。`source` 是诚实标注：它是 OpenTTD 时钟的
-   **观测**，不是 admin 包。
-3. 该段自带 `try/catch`：里面有 IO（归档写盘），一次失败不许连坐同一份 state 里的
-   城镇/产业/运量事实（SPEC §10.66 的 `IsStationTile` 就是"一处坏、整条通道按局退化"）。
+1. `WorldState` 成为 `date` 的**唯一写者**（`applyDate`）且**单调**——按月到达的 admin 包
+   不得把日期往回滚（交付计量器按 `gameDay` 判季度，倒退会污染它）。
+2. hub 在 GS 日期**变化**时才发 `date` 事件（`source:"gs"`，即 OpenTTD 时钟的**观测**而非
+   admin 包），走与收包**完全相同**的三条路径（world / 页面 / 归档）。
+3. 该段自带 `try/catch`：一次归档写盘失败不许连坐同一份 state 里的城镇/产业/运量事实
+   （§10.66 的 `IsStationTile` 就是"一处坏、整条通道按局退化"）。
 
 **W2 事实链**：`signal-hub` 记录"日期**变化**"的时刻 → runner 记录"**harness 自己**按住
 世界"的时刻表（agent `set_pause` / 页面按钮与 `supervisor.pause` / freeze 模式三条路径，
@@ -828,13 +816,12 @@ W2 的目标是让"这局是在**世界冻住**时结束的"成为 run 记录里
 
 **阈值 45 s 的来历（实测，不是拍脑袋）**：健康期相邻推进间隔 **max 6.0 s**（41 个样本，
 中位 5.9 s）⇒ 45 s ≈ 7.5×；外部 rcon 暂停后的冻结段实测 **64–66 s**（outcome 记 66 109 ms，
-事件流独立算出 64 s，两者互相印证）；真机事故是 **1 小时**。
+事件流独立算出 64 s，互相印证）；真机事故是 **1 小时**。
 
 **真机验收（重放 2026-09-12 `pause_on_join` 事故的形状）**：从 harness **之外**用 admin
 rcon 暂停世界（与页面按钮两条独立路径）⇒ `meta.json` 记 `worldFrozen=true`、
 `worldFrozenMs=66109`，而 `blockedByPause` 为**空**（暂停不来自我们）——两类原因被分开。
-页面截图复核：health 条从假的 `frozen` 变成真的 `30.2/min`，`GAME DATE` 从连接时刻的
-`1950-01-01` 变成实时的 `1950-02-01`。
+页面截图复核：health 条从假的 `frozen` 变成真的 `30.2/min`。
 
 ### 10.103 执行器异常：完整文本进事件流（2026-09-25）
 
@@ -1254,39 +1241,58 @@ compaction 冲突）在 `docs/HARNESS-MIGRATION.md` §3（带坐标），此处�
 - 真机冒烟：2 格矩阵跑通并产出 JSON+MD 报告（两局都因墙钟未达 horizon 被排除，
   报告如实写出 `horizon not reached x2`）。
 
-### 10.117 一份运行配置真值（B1，2026-10-25）
+### 10.117 一份运行配置真值 + 一个解析器（B1/S2，2026-10-25）
 
 - 事实：`llm.json` 是**唯一**的运行配置真值；合并优先级是
-  **env/CLI 显式提供 > 文件（每次重读） > 默认值**。旧实现是
-  `cfg.llm.x || file.x`——启动快照里的文件值会赢过文件本身，于是保存后
-  `GET /api/llm` 永远回答旧值，只有重启才对（真机复现见
-  `docs/SELECTION-STATE-CODESIGN.md` §2）。
-- 区分"显式提供"与"默认值"是修法的核心：`LLM_CONTEXT_WINDOW` 没设时的 128000
+  **env/CLI 显式提供 > 文件（每次重读） > 默认值**。旧实现 `cfg.llm.x || file.x` 让启动
+  快照里的文件值赢过文件本身，于是保存后 `GET /api/llm` 永远回答旧值，只有重启才对
+  （复现见 `docs/SELECTION-STATE-CODESIGN.md` §2）。
+- 事实：区分"显式提供"与"默认值"是修法的核心：`LLM_CONTEXT_WINDOW` 没设时的 128000
   是默认值，不是选择；按"非空即 env"处理会把保存过的 204800 顶回 128000。
   `Config.llmProvided` 在造配置时记下**明确的键**，合并处原样携带。
-- `POST /api/llm` 的成功语义从此是"**下一局能用**"：catalog 选择必须在目录里
+- 事实：**只有一个推导路径**（`src/agent/selection.ts`）：view（`GET /api/llm`）、
+  save（`POST /api/llm`）、gate（`runPreflight`）、runner（`buildBrain`）都调它——
+  四条路径各解一次就会各说各话。
+- 真机事故（A5）：门禁的 `buildBrain` **没传 `modelsStore`**，只认打包快照，对只在持久化
+  覆盖层里的 live-only 模型报 "unknown model"；runner 传了覆盖层，**同一个模型能跑**。
+  症状：页面列出了这个模型，一按 Start 就被门禁拒绝。修法：两边共用同一份
+  `selectionStores(dataDir)`。
+- 事实：`POST /api/llm` 的成功语义是"**下一局能用**"：catalog 选择必须在目录里
   （内置快照 ∪ 持久化覆盖层）找到该模型，并写入**模型自己的**
   `api`/`contextWindow`/`maxTokens`；找不到 → 400 + `problems[]`，文件不动。
-- 真机（`/tmp/pB1`，不重启）：`custom → catalog` 后 `POST` 与 `GET` 同答
-  `MiniMax-M2.7 / anthropic-messages / 204800 / 131072`；未知模型 400 且
-  `shasum llm.json` 不变；`MiniMax-M3.1-Flash`（只在覆盖层里）在无凭据下仍可保存。
-- 覆盖层的恢复路径（`allowNetwork:false`）**不需要凭据**：用 auth 当闸门会让
+- 事实：覆盖层的恢复路径（`allowNetwork:false`）**不需要凭据**——用 auth 当闸门会让
   "刷新过的 live-only 模型"在重启后变成"未知模型"，而列表里明明有它。
+- 事实：视图报**解析后**的事实而不是文件里存的值：同一局的 `selection.api` =
+  `anthropic-messages`（模型自己的），而 `llm.json` 里存的是旧的 `openai-completions`
+  （一个事实两个命名器，D77）。
+- 事实：`valid`（选择自洽）与 `usable`（还能**开跑**：自洽 ∧ 有凭据）分开——一个没有
+  key 的合法选择不能跑，页面不得把两者混为一谈。
+- 真机：不重启时 `custom → catalog` 后 `POST` 与 `GET` 同答
+  `MiniMax-M2.7 / anthropic-messages / 204800 / 131072`；未知模型 400 且 `llm.json`
+  字节不变；只在覆盖层里的模型在无凭据下仍可保存，门禁对它判 ok。
 
-### 10.118 一份运行配置解析器：四条路径必须解出同一个答案（S2，2026-10-25）
+### 10.119 页面起一局：旋钮、预览与"预览即承诺"（B2，2026-10-25）
 
-- 事实：**运行配置只有一个推导路径**（`src/agent/selection.ts`）：view（`GET /api/llm`）、
-  save（`POST /api/llm`）、gate（`runPreflight`）、runner（`buildBrain`）都调它。
-  推导优先级是 env/CLI 显式 > `llm.json`（每次重读）> 默认值。
-- 真机事故（A5，2026-10-24）：门禁的 `buildBrain` **没传 `modelsStore`**，于是只认打包快照，
-  对只在持久化覆盖层里的 live-only 模型报 "unknown model"；而 runner 传了覆盖层，**同一个模型能跑**。
-  症状：页面明明列出了这个模型，一按 Start 就被门禁拒绝。修法：门禁与 runner 共用同一份
-  `selectionStores(dataDir)`，两边看同一个覆盖层。
-- 门禁实测（`/tmp/openttd-agent-data`，provider `minimax-cn`、live-only 模型
-  `MiniMax-M3.1-Flash`）：`[preflight] ok` —— `llmConfigured` 与 `llmReachable` 都通过，
-  provider **1592ms 应答**。此前该模型连门禁都过不去。
-- 视图现在报**解析后**的事实而不是文件里存的值：同一局的 `selection.api` =
-  `anthropic-messages`（模型自己的），而 `llm.json` 里存的是旧的 `openai-completions`。
-  两者曾经是同一响应里的两个答案（一个事实两个命名器，D77）。
-- `usable` 与 `valid` 分开：`valid` = 选择自洽（provider/模型存在）；`usable` = 还能**开跑**
-  （自洽 ∧ 有凭据）。一个没有 key 的合法选择不能跑——页面不得把两者混为一谈。
+- 事实：**旋钮只有一处规则**（`src/agent/run-knobs.ts`）：thinking 档位与工具预算走
+  `resolveScaffoldKnobs`，花费上限走 `resolveRunLimits`——与 CLI 同源。页面字符串**原样**
+  进服务端（`"12abc"` 不被悄悄改成 12）；空字段 = 不改，沿用进程设置。
+- 事实：**预览的字段名 = manifest 的字段名**（`PREVIEW_MANIFEST_FIELDS`，10 个）。为此
+  manifest 补了 `model`/`api`/`contextWindow`/`costKnown`——否则"逐字段相同"无从比对
+  （D79：缺的一方要补，不许把预览悄悄缩小）。**跑完才知道的事实不在预览里**：
+  `servedModel`（provider 实际应答名）与 `payload*`。
+- 事实：`scaffoldHash`（`7956ab6d8c86fa60`）**不用开游戏就能算出**：指纹只覆盖工具的
+  名称/描述/schema，探针 deps 一碰世界就抛错。
+- 事实：**无法执行的花费上限在启动前被拒**（无价目表的模型 + 费用上限），**预览也拒**
+  ——同一条闸（`costCapProblem`），错误码 `unpriced_with_cost_cap` → HTTP **400**
+  （坏请求，不是 409 冲突）。**harness 后端受进程门禁**：页面只能在进程允许时选它，
+  否则 400 + `AGENT_HARNESS=1`。
+- 真机（隔离 data dir，provider `minimax-cn`、模型 `MiniMax-M3.1-Flash`）：页面填
+  seed 4242 / gameDays 40 / prebuilt / control / thinking high / toolBudget 5 /
+  tokenLimit 9000 → 点 Start → 跑完的 `meta.json` 与**页面显示的预览 10 个字段逐字段
+  相同**（`arm=control`、`seed=4242`、`scenario=prebuilt` 也对上）；token 上限**真的触发**
+  （9051 ≥ 9000 停机）。非法旋钮（`thinkingLevel=ultra`、`toolBudget=12abc`）与 harness
+  后端均 400 + 可执行原因，且**没有游戏进程被启动**。
+- 前端事实（AGENTS §5.2 的血泪）：Alpine 的 `x-for` **必须**在 `<template>` 上——写在普通
+  元素上时循环变量对该元素自身的指令不在作用域，表单**整块渲染为空**而页面看起来正常
+  （错误只出现在 `console.warn`）。且一个字段只能有**一个**控件：用 `x-show` 藏 select/input
+  会让两者**同 id**，`#knob-toolBudget` 解析到隐藏的那个。

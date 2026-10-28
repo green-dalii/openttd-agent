@@ -11,7 +11,7 @@
  * 禁止: 在此硬编码任何真实密钥；禁止在无配置时静默发起网络请求。
  */
 
-import { createSelectionResolver } from "./selection.js";
+import { createSelectionResolver, resolveCustomSelection, type SelectionFacts } from "./selection.js";
 import type { ModelsStore } from "@earendil-works/pi-ai";
 import { createModels, createProvider } from "@earendil-works/pi-ai";
 import type { CredentialStore, Model, Models, ProviderStreams } from "@earendil-works/pi-ai";
@@ -47,6 +47,16 @@ export interface BuiltProvider {
 	 * the run was free - reporting it as $0.00 makes the efficiency axis lie.
 	 */
 	costKnown: boolean;
+	/**
+	 * The **resolved** selection facts (api, context window, …) of the model that
+	 * will actually be streamed.
+	 *
+	 * Why the runner needs them: the manifest records what the run used, and
+	 * the next-run preview promises the same numbers. Both must come from the
+	 * one resolver (selection.ts), never from the config file (which may name
+	 * a model whose real api differs).
+	 */
+	facts: SelectionFacts;
 	/** streamFn compatible with pi-agent-core's StreamFn. */
 	streamFn: (model: unknown, context: never, options?: never) => ReturnType<ReturnType<typeof createModels>["stream"]>;
 }
@@ -119,6 +129,7 @@ async function buildCatalogBrain(llm: LlmConfig, opts: BuildBrainOptions): Promi
 		models,
 		source: "catalog",
 		costKnown: resolved.facts.costKnown,
+		facts: resolved.facts,
 		streamFn: streamFn as BuiltProvider["streamFn"],
 	};
 }
@@ -185,6 +196,9 @@ async function buildCustomBrain(llm: LlmConfig): Promise<BuiltProvider> {
 		source: "custom",
 		// Registered with zero prices: unknown, not free.
 		costKnown: hasPrice(model),
+		// The same resolver the preview and the gate use, so the manifest and
+		// the preview cannot disagree about the api or the context window.
+		facts: resolveCustomSelection(llm).facts,
 		streamFn: streamFn as BuiltProvider["streamFn"],
 	};
 }

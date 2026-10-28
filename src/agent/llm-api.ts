@@ -28,7 +28,7 @@ import {
 } from "./provider-catalog.js";
 import { FileCredentialStore } from "./file-credential-store.js";
 import { createLiveCatalog } from "./live-catalog.js";
-import { createSelectionResolver } from "./selection.js";
+import { createSelectionResolver, type ResolvedSelection } from "./selection.js";
 import { ProblemError } from "./problems.js";
 import { JsonModelsStore, modelsCachePath } from "./models-store.js";
 import type { CatalogHooks, WebServerOptions } from "../web/server.js";
@@ -45,6 +45,16 @@ export interface LlmApiDeps {
 export interface LlmApi {
 	llm: NonNullable<WebServerOptions["llm"]>;
 	catalog: CatalogHooks;
+	/**
+	 * The **resolved** facts of the current (saved) selection.
+	 *
+	 * Why the serve layer needs this: the next-run preview and the cost-cap
+	 * gate must state the model that will *actually* run (its api, its context
+	 * window, whether it has a price table) — not what the file happens to say.
+	 * Same resolver as the view and the save path, so the page, the gate and
+	 * the runner cannot disagree (S2).
+	 */
+	resolveCurrent: () => Promise<ResolvedSelection>;
 }
 
 /** Credential file path for a data dir (mirrors FileCredentialStore's default). */
@@ -138,6 +148,16 @@ export function createLlmApi(deps: LlmApiDeps): LlmApi {
 	}
 
 	/**
+	 * Resolve the current (merged) selection.
+	 *
+	 * `applyLlmSettingsFile` re-reads the file every call, so this reflects a
+	 * save that happened a moment ago — the same merge the runner will do.
+	 */
+	async function resolveCurrent(): Promise<ResolvedSelection> {
+		return resolver.resolve(applyLlmSettingsFile(deps.cfg).llm);
+	}
+
+	/**
 	 * The view of the current selection.
 	 *
 	 * It reports the **resolved** facts (the model's own api/context/limits),
@@ -146,8 +166,8 @@ export function createLlmApi(deps: LlmApiDeps): LlmApi {
 	 * disagrees with the runner is a view that lies (CoDesign §3 B2).
 	 */
 	async function currentView(): Promise<unknown> {
+		const resolved = await resolveCurrent();
 		const llm = applyLlmSettingsFile(deps.cfg).llm;
-		const resolved = await resolver.resolve(llm);
 		const status = statusFor(llm, resolved.facts);
 		return {
 			selection: {
@@ -254,6 +274,7 @@ export function createLlmApi(deps: LlmApiDeps): LlmApi {
 
 	return {
 		llm: { get: currentView, save },
+		resolveCurrent,
 		catalog: {
 			generatedAt: () => catalogGeneratedAt(),
 			providers: () => listCatalogProvidersWithStatus(deps.dataDir),

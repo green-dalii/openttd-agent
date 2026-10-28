@@ -14,6 +14,8 @@
  *   用量，实测 3–9k tokens——这是已知且被记录的偏差，不假装精确）。
  */
 
+import { ProblemError, type Problem } from "./problems.js";
+
 /** A run's spend caps. `null` = no cap. */
 export interface RunLimits {
 	tokens: number | null;
@@ -61,19 +63,39 @@ function positive(
 }
 
 /**
+ * The structured reason a cost cap cannot be enforced.
+ *
+ * The code is the one the vocabulary already names (`unpriced_with_cost_cap`,
+ * docs/SELECTION-STATE-CODESIGN.md §4.1): "the model has no price table and a
+ * cost cap was asked for" is ONE fact, so it gets one name everywhere
+ * (D77). Returning null means the cap is enforceable.
+ */
+export function costCapProblem(limits: RunLimits, costKnown: boolean): Problem | null {
+	if (limits.cost === null) return null;
+	if (costKnown) return null;
+	return {
+		code: "unpriced_with_cost_cap",
+		message:
+			"LLM_COST_LIMIT: this model has no price table (costKnown=false), so a cost cap cannot be enforced",
+		hint: "set a token cap instead (LLM_TOKEN_LIMIT), or configure a priced model",
+	};
+}
+
+/**
  * Refuse a cost cap the run cannot measure.
  *
  * A model without a price table always reports 0, so a cost cap would never
  * fire. Failing at startup is the honest choice: silently running uncapped
  * while the config says otherwise corrupts the benchmark's budget claim.
+ *
+ * The refusal is a **structured** one (`ProblemError`), not a bare string: it
+ * is a property of the requested knobs, so the web layer must answer 400
+ * with `problems[]` — a 409 "conflict" would tell the user their request
+ * collided with a running game, which is not what happened.
  */
 export function assertCostCapEnforceable(limits: RunLimits, costKnown: boolean): void {
-	if (limits.cost === null) return;
-	if (costKnown) return;
-	throw new Error(
-		`LLM_COST_LIMIT: this model has no price table (costKnown=false), so a cost cap ` +
-			`cannot be enforced. Use LLM_TOKEN_LIMIT, or configure a priced model.`,
-	);
+	const problem = costCapProblem(limits, costKnown);
+	if (problem) throw new ProblemError([problem]);
 }
 
 /**
