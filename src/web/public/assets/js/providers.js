@@ -1,9 +1,11 @@
 /* Providers page — Alpine component (data loading + imperative widgets).
  *
- * 职责: 只做两件事 ——
+ * 职责: 只做三件事 ——
  *   1) 与 `/api/llm`、`/api/llm/catalog` 交换数据，灌进 view model
  *   2) 挂载必须命令式创建的部件：两个搜索下拉（provider / model）与分段开关
- *   所有"该显示什么"的判断在 providers-view.js 里（可单测）。
+ *   3) 跑一局的旋钮与预览（B2）：`/api/run/preview` 问服务端"下一次会用什么"，
+ *      `/api/run/start` 把**同一份**旋钮带去启动。
+ * 所有"该显示什么"的判断在 providers-view.js / configure-view.js 里（可单测）。
  *
  * 为什么下拉仍是命令式的（docs/FRONTEND.md §3.2）:
  *   provider/model 选择器是 `U.combobox`（本仓库自带的搜索下拉）。阶段 3 曾尝试换成
@@ -20,9 +22,14 @@
   document.addEventListener("alpine:init", function () {
     window.Alpine.data("providers", function () {
       const model = window.ProvidersView.create();
+      // The run knobs + the next-run preview (B2). A **separate** view module:
+      // the knobs have their own rules (and their own tests), and folding them
+      // into providers-view.js would make that file a grab bag.
+      const run = window.ConfigureView.create();
 
       return {
         ...model,
+        ...run,
 
         /* ------------------------------ state ------------------------------ */
         saving: false,
@@ -40,6 +47,10 @@
           U.renderChrome();
           await this.loadCatalog();
           await this.loadSettings();
+          // The preview is asked for **once** on load: the page must show what
+          // the next run would use, not an empty panel (an empty panel reads as
+          // "broken" — MEMORY B8).
+          await this.refreshPreview();
           this.$nextTick(() => {
             this.mountMode();
             this.mountCombos();

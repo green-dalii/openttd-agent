@@ -37,8 +37,7 @@ export type WireMessage =
 	| { type: "stage"; data: unknown }
 	| { type: "stageImage"; data: unknown };
 
-/** Provider catalog access (docs/DASHBOARD-API.md §3.1). */
-export interface CatalogHooks {
+/** Provider catalog access (docs/DASHBOARD-API.md §3.1). */export interface CatalogHooks {
 	/** Catalog generation timestamp (ms) or null. */
 	generatedAt: () => number | null;
 	/** Providers annotated with credential status (sync: file + env reads only). */
@@ -92,11 +91,30 @@ export interface EvolutionHooks {
  */
 export interface RunHooks {
 	status: () => unknown;
-	start: (mode: "agent" | "watch") => Promise<void> | void;
+	/**
+	 * Start a run.
+	 *
+	 * `knobs` are the run's settings as the page sent them. They are passed
+	 * through **unvalidated**: the web layer does not know the rules, and the
+	 * agent layer owns them (a second copy of the rules would drift). An
+	 * illegal knob must be refused with a reason and no game process started.
+	 */
+	start: (mode: "agent" | "watch", knobs?: RunKnobRequest) => Promise<void> | void;
+	/** The next-run preview: what the next run would actually use. */
+	preview?: (knobs?: RunKnobRequest) => Promise<unknown> | unknown;
 	stop: () => Promise<void> | void;
 	pause: () => Promise<void> | void;
 	resume: () => Promise<void> | void;
 }
+
+/**
+ * The run knobs as they arrive from the page.
+ *
+ * Values are **unvalidated** (`unknown` per field): the page forwards what the
+ * user typed, and the agent layer parses it strictly. Numbers and strings are
+ * both accepted; `null`/absent means "not set".
+ */
+export type RunKnobRequest = Record<string, unknown>;
 
 export interface WebServerOptions {
 	host?: string;
@@ -441,12 +459,35 @@ export class WebServer {
 					}
 					const mode = body.mode === "watch" ? "watch" : "agent";
 					try {
-						await this.runHooks.start(mode);
+						await this.runHooks.start(mode, body.knobs as RunKnobRequest | undefined);
 					} catch (e) {
-						// 409: conflict (a run is already active), not a client error.
-						return json(409, { error: e instanceof Error ? e.message : String(e) });
+						// 400: the knobs are illegal (the agent layer says which and
+						// how to fix it) — no game process was started.
+						// 409: a run is already active (a conflict, not a bad request).
+						const problems = (e as { problems?: unknown }).problems;
+						const message = e instanceof Error ? e.message : String(e);
+						if (Array.isArray(problems)) return json(400, { error: message, problems });
+						return json(409, { error: message });
 					}
 					return json(200, this.runHooks.status());
+				}
+				if (action === "preview" && req.method === "POST") {
+					if (!this.runHooks.preview) return json(404, { error: "preview not available" });
+					const raw = await readBody(req);
+					let body: Record<string, unknown> = {};
+					try {
+						body = raw.length ? (JSON.parse(raw) as Record<string, unknown>) : {};
+					} catch {
+						return json(400, { error: "invalid JSON body" });
+					}
+					try {
+						return json(200, await this.runHooks.preview(body.knobs as RunKnobRequest | undefined));
+					} catch (e) {
+						const problems = (e as { problems?: unknown }).problems;
+						const message = e instanceof Error ? e.message : String(e);
+						if (Array.isArray(problems)) return json(400, { error: message, problems });
+						return json(409, { error: message });
+					}
 				}
 				if (action === "stop" && req.method === "POST") {
 					try {

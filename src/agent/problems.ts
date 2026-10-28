@@ -11,6 +11,8 @@
  */
 
 export type ProblemCode =
+	/** A run knob (seed, days, scenario, arm, thinking, budget, cap, backend) is illegal. */
+	| "invalid_knob"
 	| "unknown_provider"
 	| "unknown_model"
 	| "no_credential"
