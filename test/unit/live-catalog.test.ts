@@ -63,7 +63,7 @@ describe("createLiveCatalog", () => {
 		const cat = createLiveCatalog({ credentials: creds(), fetchImpl: modelsFetch(["MiniMax-M9"]) });
 		const before = cat.models(PROVIDER).length;
 		const result = await cat.refresh(PROVIDER, { force: true });
-		expect(result.error).toBeNull();
+		expect(result.problems).toEqual([]);
 		const added = result.models.find((m) => m.id === "MiniMax-M9");
 		expect(added, "the newly reported model must appear").toBeTruthy();
 		expect(added!.source).toBe("live");
@@ -85,7 +85,7 @@ describe("createLiveCatalog", () => {
 		const fetchImpl = modelsFetch(["X"]);
 		const cat = createLiveCatalog({ credentials: creds(false), fetchImpl });
 		const result = await cat.refresh(PROVIDER, { force: true });
-		expect(result.error).toMatch(/credential/i);
+		expect(result.problems[0]!.code).toBe("no_credential");
 		expect(fetchImpl).not.toHaveBeenCalled();
 	});
 
@@ -94,8 +94,15 @@ describe("createLiveCatalog", () => {
 		const cat = createLiveCatalog({ credentials: creds(), fetchImpl: failing });
 		const before = cat.models(PROVIDER).length;
 		const result = await cat.refresh(PROVIDER, { force: true });
-		expect(result.error).toMatch(/503/);
+		expect(result.problems[0]!.message).toMatch(/503/);
 		expect(result.models.length).toBe(before);
+	});
+
+	it("names a rejected key with a code, so the page need not guess", async () => {
+		const failing = vi.fn(async () => new Response("nope", { status: 401 })) as unknown as typeof fetch;
+		const cat = createLiveCatalog({ credentials: creds(), fetchImpl: failing });
+		const result = await cat.refresh(PROVIDER, { force: true });
+		expect(result.problems[0]!.code).toBe("endpoint_401");
 	});
 
 	it("respects the TTL unless forced (implicit calls stay cheap, explicit ones are real)", async () => {
@@ -111,7 +118,7 @@ describe("createLiveCatalog", () => {
 	it("reports an unknown provider instead of pretending an empty list is the answer", async () => {
 		const cat = createLiveCatalog({ credentials: creds() });
 		const result = await cat.refresh("no-such-provider", { force: true });
-		expect(result.error).toMatch(/unknown provider/i);
+		expect(result.problems[0]!.code).toBe("unknown_provider");
 	});
 });
 

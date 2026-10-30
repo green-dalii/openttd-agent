@@ -349,6 +349,65 @@ describe("WebServer REST", () => {
 		expect(deleted).toEqual(["openai"]);
 	});
 
+	/* ---- B5: the reasons are structured, and the status says whose fault it is ---- */
+
+	it("GET /api/llm/catalog/:id/refresh returns the reasons as codes, not as prose", async () => {
+		await start({
+			catalog: {
+				generatedAt: () => 1234,
+				providers: () => [{ id: "openai" }],
+				models: () => [],
+				refreshModels: async () => ({
+					models: [],
+					problems: [{ code: "endpoint_401", message: "https://x/v1/models → HTTP 401", hint: "re-enter the key" }],
+					fetchedAt: null,
+				}),
+				deleteCredential: () => undefined,
+			},
+		});
+		const r = await req("GET", "/api/llm/catalog/openai/refresh");
+		// 502 = the upstream provider failed (not our bad request).
+		expect(r.status).toBe(502);
+		const problems = r.body.problems as { code: string; message: string; hint: string }[];
+		expect(problems[0]!.code).toBe("endpoint_401");
+		expect(problems[0]!.hint).toBe("re-enter the key");
+	});
+
+	it("a missing credential is a 400 (the request cannot be honored as asked)", async () => {
+		await start({
+			catalog: {
+				generatedAt: () => 1234,
+				providers: () => [{ id: "openai" }],
+				models: () => [],
+				refreshModels: async () => ({
+					models: [],
+					problems: [{ code: "no_credential", message: "no credential configured for \"openai\"", hint: "enter the API key" }],
+					fetchedAt: null,
+				}),
+				deleteCredential: () => undefined,
+			},
+		});
+		const r = await req("GET", "/api/llm/catalog/openai/refresh");
+		expect(r.status).toBe(400);
+		expect((r.body.problems as { code: string }[])[0]!.code).toBe("no_credential");
+	});
+
+	it("a refresh that worked carries no problems", async () => {
+		await start({
+			catalog: {
+				generatedAt: () => 1234,
+				providers: () => [{ id: "openai" }],
+				models: () => [],
+				refreshModels: async () => ({ models: [{ id: "gpt-5" }], problems: [], fetchedAt: 42 }),
+				deleteCredential: () => undefined,
+			},
+		});
+		const r = await req("GET", "/api/llm/catalog/openai/refresh");
+		expect(r.status).toBe(200);
+		expect(r.body.problems).toEqual([]);
+		expect(r.body.fetchedAt).toBe(42);
+	});
+
 	it("GET /api/sessions lists and /api/sessions/:id reads one", async () => {
 		await start();
 		const list = await req("GET", "/api/sessions");

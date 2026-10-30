@@ -12,7 +12,7 @@
  */
 
 import { learningCurve, metricExclusion, type GameMetric } from "./metrics.js";
-import { classifyOutcome, type OutcomeClass } from "./outcome.js";
+import { classifyOutcome, describeOutcome, type OutcomeClass, type OutcomeClassCount } from "./outcome.js";
 
 export interface BenchConditions {
 	scenario: string | null;
@@ -45,6 +45,13 @@ export interface StabilityAxis {
 	toolFailureRate: number | null;
 	/** Outcome class → count. */
 	outcomes: Partial<Record<OutcomeClass, number>>;
+	/**
+	 * The same counts, with the **server's** names and meanings (B5).
+	 *
+	 * 为什么多一份：页面不该自己写一份"这个结果意味着什么"的词表（那是两份实现，
+	 * 迟早漂移）。`outcomes` 是**事实**（计数），这份是**投影**（给页面照抄）。
+	 */
+	outcomeDistribution: OutcomeClassCount[];
 	/** GS error replies per run (mean). */
 	gsErrorsPerRun: number | null;
 }
@@ -168,9 +175,16 @@ export function buildScorecard(
 
 		const calls = used.reduce((a, m) => a + (m.toolCalls || 0), 0);
 		const failures = used.reduce((a, m) => a + (m.toolFailures || 0), 0);
+		const outcomeDistribution: OutcomeClassCount[] = Object.entries(outcomes)
+			.map(([code, count]) => {
+				const d = describeOutcome(code as OutcomeClass);
+				return { code: d.code, label: d.label, hint: d.hint, count: Number(count) };
+			})
+			.sort((a, b) => b.count - a.count || a.code.localeCompare(b.code));
 		const stability: StabilityAxis = {
 			toolFailureRate: calls > 0 ? failures / calls : null,
 			outcomes,
+			outcomeDistribution,
 			gsErrorsPerRun: mean(used.map((m) => (typeof m.gsErrors === "number" ? m.gsErrors : null))),
 		};
 

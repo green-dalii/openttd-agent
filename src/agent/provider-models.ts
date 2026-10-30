@@ -9,9 +9,12 @@
  * 铁律:
  *   - 失败要**说清试过哪些 URL、各自为什么失败**（"拿不到" ≠ "没有模型"）。
  *   - 成功但空列表 = 端点回答了但没有模型（与失败区分）。
+ *   - **失败带 code**（B5）：页面按 code 渲染，不再用正则猜"401 该做什么"。
  *   - 不做猜测式 URL 拼接：候选顺序固定，且都写进错误里。
  * 禁止: 读取或打印密钥；本模块只把它放进请求头。
  */
+
+import { problem, type Problem, type ProblemCode } from "./problems.js";
 
 /** Result of one live listing attempt. */
 export interface LiveModelsResult {
@@ -19,8 +22,8 @@ export interface LiveModelsResult {
 	models: string[];
 	/** When the request completed (ms since epoch). */
 	fetchedAt: number;
-	/** Human-readable reason when nothing could be listed, else null. */
-	error: string | null;
+	/** Why the listing failed — one entry per attempt (empty when it worked). */
+	problems: Problem[];
 	/** URLs tried, in order (for the error message and for debugging). */
 	tried: string[];
 }
@@ -103,21 +106,39 @@ export function normalizeModelList(body: unknown): string[] {
 }
 
 /**
+ * The code for one failed attempt.
+ *
+ * 事实来源: HTTP 状态码本身（不是对错误文案做正则）——401/403/404 各有各的
+ *   下一步动作，混成一句话就又得让页面去猜。
+ */
+function codeForStatus(status: number): ProblemCode {
+	if (status === 401) return "endpoint_401";
+	if (status === 403) return "endpoint_403";
+	if (status === 404) return "no_model_endpoint";
+	return "provider_unavailable";
+}
+
+/**
  * Ask the provider what models it has right now.
  *
- * Never throws: every failure becomes `{models: [], error}` with the tried URLs,
+ * Never throws: every failure becomes a structured problem with the tried URLs,
  * because "we could not ask" and "it has none" are different claims.
  */
 export async function fetchLiveModels(opts: FetchLiveModelsOptions): Promise<LiveModelsResult> {
 	const fetchedAt = Date.now();
 	const urls = modelListUrls(opts.baseUrl, opts.api);
 	if (!urls.length) {
-		return { models: [], fetchedAt, error: "no base URL configured", tried: [] };
+		return {
+			models: [],
+			fetchedAt,
+			problems: [problem("invalid_base_url", "no base URL configured")],
+			tried: [],
+		};
 	}
 	const doFetch = opts.fetchImpl ?? fetch;
 	const headers: Record<string, string> = { accept: "application/json", ...(opts.headers ?? {}) };
 	if (opts.apiKey) headers.authorization = `Bearer ${opts.apiKey}`;
-	const problems: string[] = [];
+	const problems: Problem[] = [];
 	for (const url of urls) {
 		try {
 			const res = await doFetch(url, {
@@ -125,19 +146,21 @@ export async function fetchLiveModels(opts: FetchLiveModelsOptions): Promise<Liv
 				signal: AbortSignal.timeout(opts.timeoutMs ?? 8000),
 			});
 			if (!res.ok) {
-				problems.push(`${url} → HTTP ${res.status}`);
+				problems.push(problem(codeForStatus(res.status), `${url} → HTTP ${res.status}`));
 				continue;
 			}
 			const body: unknown = await res.json().catch(() => null);
 			const models = normalizeModelList(body);
-			if (models.length) return { models, fetchedAt: Date.now(), error: null, tried: urls };
+			if (models.length) return { models, fetchedAt: Date.now(), problems: [], tried: urls };
 			// Answered, but nothing parseable: say so rather than claiming success.
-			problems.push(`${url} → 200 but no model list in the response`);
+			problems.push(problem("provider_unavailable", `${url} → 200 but no model list in the response`));
 		} catch (e) {
-			problems.push(`${url} → ${e instanceof Error ? e.message : String(e)}`);
+			problems.push(
+				problem("provider_unavailable", `${url} → ${e instanceof Error ? e.message : String(e)}`),
+			);
 		}
 	}
-	return { models: [], fetchedAt, error: problems.join("; "), tried: urls };
+	return { models: [], fetchedAt, problems, tried: urls };
 }
 
 /**

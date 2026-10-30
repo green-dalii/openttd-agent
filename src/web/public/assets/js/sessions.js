@@ -198,10 +198,16 @@
         outcomeRows() {
           const o = this.metaOutcome();
           const m = this.meta();
+          // B5：**具名**结果类放在第一行（服务端判定 + 服务端命名，页面照拄）。
+          // 有了它，下面那些原始读数才有个上下文：“这一类”到底意味着什么。
+          const named = o.class
+            ? [{ k: "Outcome class", v: `${o.label || o.class}${o.hint ? " — " + o.hint : ""}` }]
+            : [];
           // 暂停收场优先显示：这类局不是"没学会"，而是**被自己按停的**（SPEC §10.101），
           // 人工审核与离线统计都必须能一眼把它挑出来。
           if (o.blockedByPause === true) {
             return [
+              ...named,
               { k: "Ended while paused", v: `yes — paused by the ${o.pausedBy === "agent" ? "agent itself (set_pause)" : o.pausedBy || "someone"}${o.pausedAt ? " at " + new Date(o.pausedAt).toISOString().slice(0, 16).replace("T", " ") : ""}` },
               { k: "Status", v: String(m.status || "—") },
               { k: "Treat as", v: "NOT a learning result — filter it out of averages" },
@@ -212,6 +218,7 @@
           if (o.worldFrozen === true) {
             const secs = typeof o.worldFrozenMs === "number" ? Math.round(o.worldFrozenMs / 1000) : null;
             return [
+              ...named,
               { k: "Ended with the world frozen", v: `yes — no game-day advance for ${secs === null ? "an unrecorded span" : secs + " s"} while nothing held it` },
               { k: "Status", v: String(m.status || "—") },
               { k: "Treat as", v: "NOT a learning result — the environment stopped, not the agent" },
@@ -221,6 +228,7 @@
           const num = (v) => (v === null || v === undefined || v === "" ? "—" : U.fmtInt(v));
           const money = (v) => (v === null || v === undefined ? "—" : U.fmtMoney(v));
           const rows = [
+            ...named,
             { k: "Construction done", v: o.constructionDone === true ? "yes" : o.constructionDone === false ? "no" : "—" },
             { k: "Delivered cargo (all time)", v: num(o.delivered) },
             { k: "Delivered in run", v: num(o.deliveredRun) + (o.deliveredRunComplete === true ? " (settled)" : o.deliveredRunComplete === false ? " (not settled)" : "") },
