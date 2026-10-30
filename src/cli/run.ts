@@ -9,20 +9,12 @@
  * 禁止: 在本文件之外做协议假设; 崩溃不清理子进程。
  */
 
-import net from "node:net";
 import { access } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import { loadConfig, ConfigError, type Config } from "../config.js";
 import { OpenTTDProcessManager } from "../game/process-manager.js";
-import {
-	AdminPacketType,
-	AdminUpdateFrequency,
-	AdminUpdateType,
-	ALL_COMPANIES,
-	FrameWriter,
-	FrameStreamParser,
-} from "../game/admin-protocol.js";
-import { handleServerPacket } from "../game/observer.js";
+import { AdminUpdateFrequency, AdminUpdateType } from "../game/admin-protocol.js";
+import { AdminClient } from "../game/admin-client.js";
 import { runWatch } from "../game/runner.js";
 import { formatPreflight, runPreflight } from "../agent/preflight.js";
 import { runServe } from "../agent/serve.js";
@@ -475,7 +467,7 @@ async function runProbe(cfg: Config, timeoutMs: number): Promise<number> {
 	};
 
 	const outcome: ProbeOutcome = { ok: false, reason: "", events: [], sawEconomy: false };
-	let client: AdminProbeClient | null = null;
+	let client: AdminClient | null = null;
 
 	try {
 		await mgr.ensureSandboxConfig();
@@ -487,39 +479,41 @@ async function runProbe(cfg: Config, timeoutMs: number): Promise<number> {
 		await mgr.waitForAdminPort(20_000);
 		console.log("[probe] admin port open");
 
-		client = new AdminProbeClient(cfg);
-		client.onEvent = (ev) => {
-			outcome.events.push(ev);
-			console.log(`[event] ${JSON.stringify(ev)}`);
-		};
-		client.onEconomy = () => {
-			outcome.sawEconomy = true;
-		};
+		client = new AdminClient({
+			cfg,
+			callbacks: {
+				onEvent: (ev) => {
+					outcome.events.push(ev);
+					console.log(`[event] ${JSON.stringify(ev)}`);
+					if (ev.kind === "company_economy") outcome.sawEconomy = true;
+				},
+			},
+		});
 
-		await client.connect();
-		client.join();
-		client.subscribeDateMonthly();
-		client.subscribeEconomyMonthly();
+		// 用**真客户端**握手（带界重试），不要用一次性 connect：D73 的教训——
+		// 地图生成期间 admin 端口已经开着，一次性 connect 会被踢，"超时"只是表象。
+		await client.connectAuthed(Math.min(timeoutMs, 20_000));
+		// 探针要的是**月度**经济（默认订阅是季度）。
+		client.subscribe(AdminUpdateType.CompanyEconomy, AdminUpdateFrequency.Monthly);
 		console.log("[probe] joined + subscribed, waiting for data ...");
 
-		// Stream until we see >=1 economy OR deadline.
-		const done = await client.drainUntil(
-			() => outcome.sawEconomy,
-			timeoutMs,
-		);
-		if (!done && !outcome.sawEconomy) {
+		// 等到第一份经济数据或超时（数据由客户端读走，经 onEvent 送达）。
+		const deadline = Date.now() + timeoutMs;
+		while (!outcome.sawEconomy && Date.now() < deadline) {
+			await sleep(100);
+		}
+		if (!outcome.sawEconomy) {
 			// No company on a fresh map — still a pass for the probe (env is up).
 			console.log(
 				`[probe] note: no company economy within ${timeoutMs}ms (fresh map has no company) — env OK`,
 			);
 			outcome.reason = "no-company-on-fresh-map";
 		} else {
-			outcome.reason = outcome.sawEconomy ? "economy-observed" : "no-economy";
+			outcome.reason = "economy-observed";
 		}
 
-		client.rcon("pause");
 		console.log("[probe] rcon pause sent");
-		await client.waitForRconEnd(3000);
+		await client.rconAwait("pause", 3000);
 
 		outcome.ok = true;
 	} catch (e) {
@@ -535,154 +529,6 @@ async function runProbe(cfg: Config, timeoutMs: number): Promise<number> {
 	return outcome.ok ? 0 : 1;
 }
 
-/**
- * Minimal inline admin client (join / subscribe / poll / rcon / read loop).
- * Kept deliberately small for the probe; a fuller client lands in v0.1.
- */
-class AdminProbeClient {
-	onEvent?: (ev: unknown) => void;
-	onEconomy?: () => void;
-
-	private sock: net.Socket | null = null;
-	private parser = new FrameStreamParser();
-	private seq = 0;
-	private rconEndWaiters: (() => void)[] = [];
-
-	async connect(): Promise<void> {
-		const { adminHost, adminPort } = this.cfg;
-		await new Promise<void>((resolve, reject) => {
-			const sock = net.connect({ host: adminHost, port: adminPort });
-			sock.setNoDelay(true);
-			this.sock = sock;
-			const timer = setTimeout(() => reject(new Error("admin connect timeout")), 5000);
-			sock.once("connect", () => {
-				clearTimeout(timer);
-				resolve();
-			});
-			sock.once("error", (e) => {
-				clearTimeout(timer);
-				reject(e);
-			});
-		});
-		this.sock!.on("data", (chunk) => this.onData(new Uint8Array(chunk)));
-		this.sock!.on("error", () => this.sock?.destroy());
-		this.sock!.on("close", () => this.notifyRconEnd());
-	}
-
-	join(): void {
-		this.send(AdminPacketType.AdminJoin, (w) =>
-			w.str(this.cfg.adminPassword).str("openttd-agent-probe").str("0.0.1"),
-		);
-	}
-
-	subscribeDateMonthly(): void {
-		this.send(AdminPacketType.AdminUpdateFrequency, (w) =>
-			w.uint16(AdminUpdateType.Date).uint16(AdminUpdateFrequency.Monthly),
-		);
-	}
-
-	subscribeEconomyMonthly(): void {
-		this.send(AdminPacketType.AdminUpdateFrequency, (w) =>
-			w.uint16(AdminUpdateType.CompanyEconomy).uint16(AdminUpdateFrequency.Monthly),
-		);
-	}
-
-	pollDate(): void {
-		this.send(AdminPacketType.AdminPoll, (w) => w.uint8(AdminUpdateType.Date).uint32(0));
-	}
-
-	pollEconomyAll(): void {
-		this.send(AdminPacketType.AdminPoll, (w) =>
-			w.uint8(AdminUpdateType.CompanyEconomy).uint32(ALL_COMPANIES),
-		);
-	}
-
-	rcon(cmd: string): void {
-		this.send(AdminPacketType.AdminRemoteConsoleCommand, (w) => w.str(cmd));
-	}
-
-	/**
-	 * Read until predicate true or timeout.
-	 * @returns true if predicate became true before timeout.
-	 */
-	async drainUntil(pred: () => boolean, timeoutMs: number): Promise<boolean> {
-		const deadline = Date.now() + timeoutMs;
-		while (!pred()) {
-			if (Date.now() > deadline) return false;
-			await sleep(150);
-		}
-		return true;
-	}
-
-	waitForRconEnd(timeoutMs: number): Promise<boolean> {
-		return new Promise((resolve) => {
-			const timer = setTimeout(() => {
-				this.rconEndWaiters = this.rconEndWaiters.filter((w) => w !== done);
-				resolve(false);
-			}, timeoutMs);
-			const done = () => {
-				clearTimeout(timer);
-				this.rconEndWaiters = this.rconEndWaiters.filter((w) => w !== done);
-				resolve(true);
-			};
-			this.rconEndWaiters.push(done);
-		});
-	}
-
-	close(): void {
-		// No AdminQuit: OpenTTD 15.0 aborts in the server's admin-socket close
-		// path if we send Quit then destroy (SPEC §10.7). EOF from destroy is safe.
-		this.sock?.destroy();
-		this.sock = null;
-	}
-
-	// -- internals -------------------------------------------------------
-
-	private send(type: number, fill: (w: FrameWriter) => void): void {
-		const w = new FrameWriter();
-		fill(w);
-		this.sock?.write(Buffer.from(w.build(type)));
-	}
-
-	private onData(chunk: Uint8Array): void {
-		for (const pkt of this.parser.push(chunk)) {
-			this.dispatch(pkt);
-		}
-	}
-
-	private dispatch(pkt: { type: number; payload: Uint8Array; frame: Uint8Array }): void {
-		switch (pkt.type) {
-			case AdminPacketType.ServerProtocol:
-				return; // ignore
-			case AdminPacketType.ServerWelcome:
-				// Authenticated. Ask for current date + all-company economy.
-				this.pollDate();
-				this.pollEconomyAll();
-				return;
-			case AdminPacketType.ServerRconEnd:
-				this.notifyRconEnd();
-				return;
-			default: {
-				const ev = handleServerPacket(pkt, this.seq++, Date.now());
-				if (!ev) return;
-				this.onEvent?.(ev);
-				if (ev.kind === "company_economy") this.onEconomy?.();
-			}
-		}
-	}
-
-	private notifyRconEnd(): void {
-		const waiters = [...this.rconEndWaiters];
-		this.rconEndWaiters = [];
-		for (const w of waiters) w();
-	}
-
-	private readonly cfg: Config;
-
-	constructor(cfg: Config) {
-		this.cfg = cfg;
-	}
-}
 
 function sleep(ms: number): Promise<void> {
 	return new Promise((r) => setTimeout(r, ms));

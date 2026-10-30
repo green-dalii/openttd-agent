@@ -108,6 +108,10 @@
 
 - **The manifest's "served a different model" flag was invisible.** The warning colour was scoped
   to the list chips, so the detail table showed the substituted model in plain text.
+- **The probe mode carried its own copy of the admin client** (148 lines of protocol code next to
+  the real, tested one) - and it used the one-shot connect, the very mistake that made a probe
+  time out for weeks. It uses the real client now: the handshake is bounded and retried, and the
+  duplicated protocol code is gone.
 
 - **The evolution hooks had drifted into two copies.** The runner re-attaches its own hooks when
   a run starts, and only the server's copy carried the per-row exclusion reason - so the same run
