@@ -10,6 +10,18 @@
 ## [Unreleased]
 ### Added
 
+- **Every run now says what kind of run it was.** The backend could already name ten outcomes,
+  but the pages showed a fraction of them - and the most actionable one ("every tool call was
+  refused" - the signal that a model is flailing) was invisible. The vocabulary is now **closed**
+  (ten classes, no more, no less) and its names and meanings come from the server, so History
+  shows each run's class and Compare shows how many runs of each class a model has. A run whose
+  readings are missing reads "unknown" - not "nothing happened".
+- **Errors carry a code instead of a sentence.** A failed model-list refresh, a rejected key, a
+  missing credential, an unknown model: each now arrives as `{code, message, hint}`, and **each
+  code has exactly one canonical hint** - so the same 401 reads the same way wherever it appears.
+  The refresh endpoint's status says whose fault it is: 400 when the request cannot be honored
+  (no key), 502 when the provider upstream failed. The pages render by code; the page no longer
+  reverse-engineers intent from the wording of an error, and a guard keeps it that way.
 - **A Compare page.** It answers "how do these models compare on the same worlds": one row per
   model across the four axes (result, efficiency, reliability, growth), the excluded runs counted
   **by reason**, and - once two models are picked - the paired verdict with its interval or the

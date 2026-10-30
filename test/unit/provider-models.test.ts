@@ -78,7 +78,7 @@ describe("fetchLiveModels", () => {
 			fetchImpl,
 		});
 		expect(r.models).toEqual(["MiniMax-M4"]);
-		expect(r.error).toBeNull();
+		expect(r.problems).toEqual([]);
 		expect(r.tried[0]).toBe("https://api.minimaxi.com/v1/models");
 	});
 
@@ -108,14 +108,15 @@ describe("fetchLiveModels", () => {
 		const fetchImpl = vi.fn(async () => new Response("nope", { status: 401 })) as unknown as typeof fetch;
 		const r = await fetchLiveModels({ baseUrl: "https://x.test/v1", fetchImpl });
 		expect(r.models).toEqual([]);
-		expect(r.error).toMatch(/401/);
-		expect(r.error).toMatch(/x\.test/);
+		expect(r.problems.length).toBeGreaterThan(0);
+		expect(r.problems[0]!.message).toMatch(/401/);
+		expect(r.problems[0]!.message).toMatch(/x\.test/);
 	});
 
 	it("distinguishes an unparseable 200 from a failed request", async () => {
 		const fetchImpl = vi.fn(async () => new Response("<html>hi</html>", { status: 200 })) as unknown as typeof fetch;
 		const r = await fetchLiveModels({ baseUrl: "https://x.test/v1", fetchImpl });
-		expect(r.error).toMatch(/200 but no model list/);
+		expect(r.problems[0]!.message).toMatch(/200 but no model list/);
 	});
 
 	it("never throws — a thrown fetch is one more reported problem", async () => {
@@ -123,12 +124,46 @@ describe("fetchLiveModels", () => {
 			throw new Error("ECONNREFUSED");
 		}) as unknown as typeof fetch;
 		const r = await fetchLiveModels({ baseUrl: "https://x.test/v1", fetchImpl });
-		expect(r.error).toMatch(/ECONNREFUSED/);
+		expect(r.problems[0]!.message).toMatch(/ECONNREFUSED/);
+	});
+
+	/* ---- B5: the failures carry CODES, so the page need not guess (CoDesign F8) ---- */
+
+	it("names a rejected key with a code", async () => {
+		const fetchImpl = vi.fn(async () => new Response("nope", { status: 401 })) as unknown as typeof fetch;
+		const r = await fetchLiveModels({ baseUrl: "https://x.test/v1", fetchImpl });
+		expect(r.problems[0]!.code).toBe("endpoint_401");
+	});
+
+	it("names a forbidden key with a code", async () => {
+		const fetchImpl = vi.fn(async () => new Response("nope", { status: 403 })) as unknown as typeof fetch;
+		const r = await fetchLiveModels({ baseUrl: "https://x.test/v1", fetchImpl });
+		expect(r.problems[0]!.code).toBe("endpoint_403");
+	});
+
+	it("names a provider without a model-list endpoint", async () => {
+		const fetchImpl = vi.fn(async () => new Response("nope", { status: 404 })) as unknown as typeof fetch;
+		const r = await fetchLiveModels({ baseUrl: "https://x.test/v1", fetchImpl });
+		expect(r.problems[0]!.code).toBe("no_model_endpoint");
+	});
+
+	it("names an unreachable provider", async () => {
+		const fetchImpl = vi.fn(async () => {
+			throw new Error("ECONNREFUSED");
+		}) as unknown as typeof fetch;
+		const r = await fetchLiveModels({ baseUrl: "https://x.test/v1", fetchImpl });
+		expect(r.problems[0]!.code).toBe("provider_unavailable");
+	});
+
+	it("carries no problems when the listing worked", async () => {
+		const fetchImpl = ok({ data: [{ id: "m" }] }) as unknown as typeof fetch;
+		const r = await fetchLiveModels({ baseUrl: "https://x.test/v1", fetchImpl });
+		expect(r.problems).toEqual([]);
 	});
 });
 
 describe("createLiveModelsCache", () => {
-	const value = { models: ["a"], fetchedAt: 1, error: null, tried: ["u"] };
+	const value = { models: ["a"], fetchedAt: 1, problems: [], tried: ["u"] };
 
 	it("serves a cached answer inside the TTL", async () => {
 		const cache = createLiveModelsCache(60_000);

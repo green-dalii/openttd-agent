@@ -26,14 +26,15 @@ import {
 } from "@earendil-works/pi-ai";
 import { builtinModels } from "@earendil-works/pi-ai/providers/all";
 import { fetchLiveModels } from "./provider-models.js";
+import { problem, type Problem } from "./problems.js";
 import type { CatalogModel } from "./provider-types.js";
 
 /** What one refresh produced (always resolved, never thrown). */
 export interface LiveRefreshResult {
 	/** The provider's current known models (snapshot + overlay), as the UI renders them. */
 	models: CatalogModel[];
-	/** Human-readable reason the refresh did not happen / did not help, else null. */
-	error: string | null;
+	/** Why the refresh did not happen / did not help (one entry per reason). */
+	problems: Problem[];
 	/** When the provider was last asked successfully (ms), null if never. */
 	fetchedAt: number | null;
 }
@@ -121,17 +122,19 @@ export function createLiveCatalog(opts: LiveCatalogOptions = {}): LiveCatalog {
 	const ttlMs = opts.ttlMs ?? 60_000;
 	const now = opts.now ?? (() => Date.now());
 	const lastOk = new Map<string, number>();
-	const lastError = new Map<string, string>();
+	const lastProblems = new Map<string, Problem[]>();
 	/** Ids the bundled snapshot knew, per provider - used to tell "live only" apart. */
 	const baselineIds = new Map<string, Set<string>>();
 
 	/** Replace the static provider with a clone that can fetch its own list. */
-	function enable(providerId: string): string | null {
+	function enable(providerId: string): Problem | null {
 		const base = registry.getProvider(providerId);
-		if (!base) return `unknown provider "${providerId}"`;
+		if (!base) return problem("unknown_provider", `unknown provider "${providerId}"`);
 		if (base.refreshModels) return null; // already patched
 		const siblings = base.getModels() as readonly Model<string>[];
-		if (!siblings.length) return `provider "${providerId}" has no baseline model to borrow metadata from`;
+		if (!siblings.length) {
+			return problem("provider_unavailable", `provider "${providerId}" has no baseline model to borrow metadata from`);
+		}
 		baselineIds.set(providerId, new Set(siblings.map((m) => String(m.id))));
 		const sibling = siblings[0]!;
 		const api = String(sibling.api);
@@ -163,13 +166,13 @@ export function createLiveCatalog(opts: LiveCatalogOptions = {}): LiveCatalog {
 						apiKey: credential?.key ?? credential?.access ?? null,
 						fetchImpl: opts.fetchImpl,
 					});
-					if (result.error) {
-						lastError.set(providerId, result.error);
+					if (result.problems.length) {
+						lastProblems.set(providerId, result.problems);
 						// Keep the previous list: the endpoint told us nothing, which is not
 						// evidence that the models disappeared.
 						return [];
 					}
-					lastError.delete(providerId);
+					lastProblems.delete(providerId);
 					lastOk.set(providerId, Date.now());
 					const known = new Set(siblings.map((m) => String(m.id)));
 					return result.models
@@ -194,9 +197,9 @@ export function createLiveCatalog(opts: LiveCatalogOptions = {}): LiveCatalog {
 		registry,
 		models,
 		async refresh(providerId, refreshOpts = {}) {
-			const enableError = enable(providerId);
-			if (enableError) {
-				return { models: models(providerId), error: enableError, fetchedAt: lastOk.get(providerId) ?? null };
+			const enableProblem = enable(providerId);
+			if (enableProblem) {
+				return { models: models(providerId), problems: [enableProblem], fetchedAt: lastOk.get(providerId) ?? null };
 			}
 			// pi-ai silently skips providers it cannot authenticate; asking first turns
 			// "the list is still old" into an explanation the page can show.
@@ -207,9 +210,12 @@ export function createLiveCatalog(opts: LiveCatalogOptions = {}): LiveCatalog {
 			if (refreshOpts.allowNetwork !== false) {
 				const auth = await registry.getAuth(providerId).catch(() => undefined);
 				if (!auth) {
-					const error = `no credential configured for "${providerId}" (an unauthenticated refresh is skipped by the provider layer)`;
-					lastError.set(providerId, error);
-					return { models: models(providerId), error, fetchedAt: lastOk.get(providerId) ?? null };
+					const p = problem(
+						"no_credential",
+						`no credential configured for "${providerId}" (an unauthenticated refresh is skipped by the provider layer)`,
+					);
+					lastProblems.set(providerId, [p]);
+					return { models: models(providerId), problems: [p], fetchedAt: lastOk.get(providerId) ?? null };
 				}
 			}
 			const result = await registry.refresh({
@@ -220,8 +226,12 @@ export function createLiveCatalog(opts: LiveCatalogOptions = {}): LiveCatalog {
 				...(refreshOpts.allowNetwork === false ? { allowNetwork: false } : {}),
 			});
 			const err = result.errors.get(providerId);
-			const error = err ? err.message : (lastError.get(providerId) ?? null);
-			return { models: models(providerId), error, fetchedAt: lastOk.get(providerId) ?? null };
+			// The provider layer's own error (if any) wins; otherwise the last
+			// structured reason we recorded for this provider.
+			const problems: Problem[] = err
+				? [problem("provider_unavailable", err.message)]
+				: (lastProblems.get(providerId) ?? []);
+			return { models: models(providerId), problems, fetchedAt: lastOk.get(providerId) ?? null };
 		},
 	};
 }

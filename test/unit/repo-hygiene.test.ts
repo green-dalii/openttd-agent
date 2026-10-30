@@ -341,3 +341,45 @@ describe("文档正交性守卫（§9.1a）", () => {
 		}
 	});
 });
+
+/**
+ * B5: the front end must not **guess** what an error meant.
+ *
+ * 背景（CoDesign F8）：服务端曾经只给 `{error: string}`，页面用正则从这句话里猜
+ * "401 该做什么"（`providers-view.js` 的 `refreshHint()`）。于是同一个 401 在
+ * Providers、启动失败、门禁结果里出现三种不同文案。
+ *
+ * 现在错误是结构化的 `{code, message, hint}`（`src/agent/problems.ts`），页面按
+ * `code` 渲染。这条守卫挡住"顺手又写回一个正则"。
+ */
+describe("repo hygiene: 页面不猜错误的意思（B5）", () => {
+	/** Regex literals that would match a status code / auth word inside a message. */
+	const GUESS_PATTERNS = [
+		/\\b401\\b/,
+		/\\b403\\b/,
+		/\\b404\\b/,
+		/unauthor/i,
+		/forbidden/i,
+	];
+
+	it("前端没有用正则去猜错误文案", () => {
+		const dir = join(ROOT, "src", "web", "public", "assets", "js");
+		const offenders: string[] = [];
+		for (const f of readdirSync(dir).filter((f) => f.endsWith(".js"))) {
+			const src = readFileSync(join(dir, f), "utf8");
+			for (const re of GUESS_PATTERNS) {
+				if (re.test(src)) offenders.push(`${f} (${re.source})`);
+			}
+		}
+		expect(
+			offenders,
+			`页面不许用正则猜错误（错误已是结构化的 code/message/hint）：${offenders.join(", ")}`,
+		).toEqual([]);
+	});
+
+	it("providers-view 不再有 refreshHint（正则猜 401 的旧办法）", () => {
+		const src = readFileSync(join(ROOT, "src", "web", "public", "assets", "js", "providers-view.js"), "utf8");
+		// 只看**方法定义**（注释里提到旧名字不算）。
+		expect(src).not.toMatch(/^\s*refreshHint\s*\(/m);
+	});
+});

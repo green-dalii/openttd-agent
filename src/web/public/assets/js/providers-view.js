@@ -312,25 +312,23 @@
       },
 
       /**
-       * Turn a refresh error into something the user can act on.
+       * The reasons a refresh did not work, **as the server gave them**.
        *
-       * The raw string (URLs + statuses) stays available, but a bare "HTTP 401" does
-       * not tell anyone what to do - and "no route" (404) means the snapshot stays
-       * authoritative, which is a normal outcome, not a failure of the app.
+       * B5: the server sends `{code, message, hint}` per reason, so the page
+       * draws them instead of reverse-engineering intent from a sentence with a
+       * regex (the old `refreshHint()` guessed "401" out of free text, and the
+       * same 401 read differently on three pages). The hint is the server's
+       * canonical wording for that code - one wording, everywhere.
        */
-      refreshHint(error) {
-        const text = String(error || "");
-        if (!text) return "";
-        if (/\b401\b|unauthor|authentication/i.test(text)) {
-          return "The provider rejected the stored key (401): re-enter it below, then refresh again.";
-        }
-        if (/\b403\b|forbidden/i.test(text)) {
-          return "The provider refused this key for model listing (403); the snapshot list stays authoritative.";
-        }
-        if (/\b404\b/.test(text) && !/\b401\b/.test(text)) {
-          return "This provider has no model-list endpoint: the bundled snapshot is the only source.";
-        }
-        return "";
+      refreshProblems(problems) {
+        const list = Array.isArray(problems) ? problems : [];
+        return list
+          .filter((p) => p && typeof p === "object")
+          .map((p) => ({
+            code: String(p.code || ""),
+            message: String(p.message || ""),
+            hint: String(p.hint || ""),
+          }));
       },
 
       /** One line about where the model list came from (never blank). */

@@ -260,17 +260,18 @@ GET /api/llm/catalog/:providerId
 → 404 { error }
 
 GET /api/llm/catalog/:providerId/refresh
-→ 200 { provider: string, models: CatalogModel[], error: string | null,
-        fetchedAt: number | null }
-→ 404 { error }                              // provider 未知（error 为空且 models 为空时）
+→ 200 { provider: string, models: CatalogModel[], problems: Problem[], fetchedAt: number | null }
+→ 400 { error, problems: Problem[] }    // 请求没法照做（no_credential / unknown_provider）
+→ 502 { error, problems: Problem[] }    // 上游 provider 失败（401/403/404/连不上）
 说明：
 - `models` 是**快照 + live 覆盖层**的合并结果；`source: "live"` 的条目来自 provider 自己的
   /models 端点，其 `priceKnown: false`（价格未知，不是 0 元），`api`/上下文/上限借自同族模型。
-- `error` 形如 `"<url> → HTTP 401; <url> → HTTP 404"`：**试过哪些 URL、各自为什么失败**。
-  失败时 `models` 保留上一次已知列表（端点说不出话 ≠ 模型消失了）。
-- 该端点**永不抛错**；"没有凭据所以跳过刷新"也走 `error` 说明（pi-ai 会静默跳过）。
-- 刷新结果由 pi-ai 的 `ModelsStore` 持久化到 `<dataDir>/models-cache.json`，agent 进程
-  启动时能恢复同一份覆盖层（否则"列表是新的但模型跑不起来"）。
+- `problems[]` 是**结构化**的失败原因（`{code, message, hint}`）：`message` 带上试过的 URL 与
+  状态（`<url> → HTTP 401`），`hint` 是服务端给的**下一步**。失败时 `models` 保留上次已知列表
+  （端点说不出话 ≠ 模型消失了）。**状态码说明是谁的错**（400 = 缺凭据，502 = 上游失败）。
+- 该端点**永不抛错**；"没有凭据所以跳过刷新"也走 `problems[]`（pi-ai 会静默跳过）。
+- 刷新结果由 pi-ai 的 `ModelsStore` 持久化到 `<dataDir>/models-cache.json`，agent 进程启动时
+  能恢复同一份覆盖层。
 
 DELETE /api/llm/credentials/:providerId
 → 200 { ok: true }
@@ -287,6 +288,8 @@ GET /api/telemetry → 200 TelemetrySnapshot
 ```
 GET /api/sessions
 → 200 { sessions: SessionMeta[] }          // newest first；读 index.json
+  每局的 `outcome` 额外带**具名**结果类：`{ class, label, hint }`
+  （服务端判定，见 SPEC §10.122；页面照抄，不再自己猜"这局算成功还是失败"）。
 
 GET /api/sessions/:id
 → 200 {
@@ -298,11 +301,9 @@ GET /api/sessions/:id
 → 404 { error }
 ```
 
-
 ### 3.4 旧字段的处置
 
 `GET /api/llm` 的旧字段已收敛进 `selection` / `status`，**不保留双形状**（避免第二个事实源）。
-
 ---
 
 ## 4. WS 协议
@@ -541,7 +542,9 @@ GET /api/compare?models=A,B&seed=7&backend=harness
 → 200 {
     conditions: BenchConditions,
     models: [{ model, requestedModels, runs, excluded, excludedReasons,
-               ability, efficiency, stability, growth }],   // 四轴（scorecard.ts）
+               ability, efficiency, stability: { …, outcomeDistribution:
+                 [{ code, label, hint, count }] },   // 十类结局（服务端命名）
+               growth }],   // 四轴（scorecard.ts）
     exclusions: [{ reason, count }],                        // 排除**按原因计数**
     comparison: { design: "paired", modelA, modelB, pairs, meanDiff, diffCi95,
                   verdict, message } | null,                 // 两个模型才有
@@ -585,11 +588,12 @@ POST /api/run/preview
 - 仅预览有的补充事实：`providerId` / `maxTokens` / `seed` / `gameDays` / `scenario` / `memoryArm`。
 
 跑完才知道的字段（`servedModel` / `payloadHash` / `payloadShapeHash` / `payloadCount`）
-**不在预览里**：预览只承诺它能兑现的（D79）。
-
-**预览与启动用同一条闸**：无法执行的花费上限（模型无价目表）在预览里就被拒，
-不会预览出一局跑不起来的运行。
+**不在预览里**：预览只承诺它能兑现的（D79）。**预览与启动用同一条闸**：无法执行的花费上限
+（模型无价目表）在预览里就被拒，不会预览出一局跑不起来的运行。
 
 **问题码**（`src/agent/problems.ts`）：`invalid_knob`（旋钮非法）·
-`unpriced_with_cost_cap`（无价目表却设了费用上限）· `unknown_provider` /
-`unknown_model` / `no_credential` / `invalid_base_url` / `provider_unavailable`。
+`unpriced_with_cost_cap`（无价目表却设了费用上限）· `unknown_provider` / `unknown_model` /
+`no_credential`（没凭据）/ `invalid_base_url` / `provider_unavailable`（连不上）·
+`endpoint_401`（key 被拒）/ `endpoint_403`（key 无权列模型）/ `no_model_endpoint`（没有
+/models 端点）。**每个 code 只有一个规范 hint**（`problemHint`）：生产方只写"发生了什么"，
+"下一步做什么"由词表给——同一个错在任何页面都长一个样，页面**不再用正则猜**。

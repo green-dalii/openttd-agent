@@ -93,7 +93,9 @@ export function buildCompareView(
 		return true;
 	});
 
-	// The four axes: from the scorecard, never recomputed here.
+	// The four axes: from the scorecard, never recomputed here. The scorecard also
+	// carries the outcome classes with the server's own names (B5), so this module
+	// has no vocabulary of its own.
 	const models = buildScorecard(filtered, opts.conditions ? { conditions: opts.conditions } : {}).models;
 
 	// The exclusions: counted by the existing reason enum.

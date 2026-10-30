@@ -59,10 +59,19 @@
           </p>
           <p class="hint" x-show="modelsNote">
             <span x-text="modelsNote" style="display:block"></span>
-            <!-- Its own line: the raw URLs are evidence, the hint is the action. -->
-            <span class="dim" style="display:block;margin-top:.25rem"
-                  x-show="refreshHint(modelsNote)" x-text="refreshHint(modelsNote)"></span>
           </p>
+          <!-- B5: the reasons the refresh did not work, **as the server sent them**
+               (code + what happened + what to do). The page no longer guesses
+               intent from the wording of an error. -->
+          <div class="problems" x-show="refreshProblems(refreshProblemsList).length">
+            <template x-for="p in refreshProblems(refreshProblemsList)" :key="'rp-' + p.code + '-' + p.message">
+              <div class="problem">
+                <span class="badge warn" x-text="p.code"></span>
+                <span class="problem-msg" x-text="p.message"></span>
+                <span class="dim problem-hint" x-text="p.hint"></span>
+              </div>
+            </template>
+          </div>
         </div>
 
         <div>

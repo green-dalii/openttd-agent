@@ -39,6 +39,12 @@
         modelsRefreshing: false,
         /** What the last refresh said (error, or "N models, M new"). */
         modelsNote: "",
+        /**
+         * Why the last refresh did not work, **as the server sent it**
+         * (`[{code, message, hint}]`). B5: the page renders by code; it never
+         * guesses what an error string meant.
+         */
+        refreshProblemsList: [],
         /** When the list currently shown was fetched from the provider (ms). */
         modelsFetchedAt: 0,
 
@@ -163,13 +169,16 @@
           }
           this.modelsRefreshing = true;
           this.modelsNote = "";
+          this.refreshProblemsList = [];
           try {
             const r = await fetch(`/api/llm/catalog/${encodeURIComponent(id)}/refresh`);
             const data = await r.json().catch(() => ({}));
             if (data && Array.isArray(data.models)) this.models = data.models;
             this.modelsFetchedAt = Number(data.fetchedAt || 0);
-            if (data && data.error) {
-              this.modelsNote = String(data.error);
+            // The reasons come structured (code + message + hint).
+            this.refreshProblemsList = Array.isArray(data && data.problems) ? data.problems : [];
+            if (this.refreshProblemsList.length) {
+              this.modelsNote = "The provider did not answer with a model list.";
               U.toast("Could not refresh the model list", "warn", 6000);
             } else {
               const live = this.models.filter((m) => m && m.source === "live").length;
@@ -218,7 +227,13 @@
             });
             const out = await r.json().catch(() => ({}));
             if (!r.ok) {
-              this.setMsg("Save failed: " + (out.error || r.status), "err");
+              // B5: a refusal carries `problems[]` (code + message + hint) — show
+              // what to do, not just the sentence the server produced.
+              const problems = Array.isArray(out && out.problems) ? out.problems : [];
+              const text = problems.length
+                ? problems.map((p) => `${p.message}${p.hint ? " — " + p.hint : ""}`).join("; ")
+                : String((out && out.error) || r.status);
+              this.setMsg("Save failed: " + text, "err");
               U.toast("Save failed", "err");
               return;
             }

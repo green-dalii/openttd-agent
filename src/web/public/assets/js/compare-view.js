@@ -69,7 +69,23 @@
         known: Boolean(m.growth && m.growth.verdict),
       },
       growthMessage: m.growth && m.growth.message ? String(m.growth.message) : "",
-      outcomes: m.stability && m.stability.outcomes ? m.stability.outcomes : {},
+      outcomes: outcomeRows(m),
+    }));
+  }
+
+  /**
+   * The outcome classes, with the **server's** names (B5).
+   *
+   * 页面不重写词表：十类成因的名字与含义由服务端给（`describeOutcome`），这里只照抄。
+   * 旧记录里没有这一项（`outcomeDistribution`）时退回空数组——不是自己编一份。
+   */
+  function outcomeRows(m) {
+    const list = m && m.stability && Array.isArray(m.stability.outcomeDistribution) ? m.stability.outcomeDistribution : [];
+    return list.map((o) => ({
+      code: String(o && o.code ? o.code : ""),
+      label: String(o && o.label ? o.label : ""),
+      hint: String(o && o.hint ? o.hint : ""),
+      count: typeof (o && o.count) === "number" ? o.count : 0,
     }));
   }
 

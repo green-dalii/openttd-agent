@@ -30,6 +30,7 @@ interface CompareView {
 		efficiency: { label: string; text: string; known: boolean }[];
 		stability: { label: string; text: string; known: boolean }[];
 		growth: { label: string; text: string; known: boolean };
+		outcomes: { code: string; label: string; hint: string; count: number }[];
 	}[];
 	exclusionRows(payload: unknown): { reason: string; count: number }[];
 	comparison(payload: unknown): { verdict: string; message: string; pairs: number; known: boolean } | null;
@@ -62,7 +63,14 @@ const PAYLOAD = {
 				secondsPerRun: 300,
 				costPerRun: null,
 			},
-			stability: { toolFailureRate: 0.1, outcomes: { delivered: 3 }, gsErrorsPerRun: 1 },
+			stability: {
+				toolFailureRate: 0.1,
+				gsErrorsPerRun: 1,
+				outcomeDistribution: [
+					{ code: "delivered", label: "Delivered", hint: "the run delivered cargo", count: 3 },
+					{ code: "refused", label: "Every tool call was refused", hint: "never got to act", count: 1 },
+				],
+			},
 			growth: { verdict: "not determinable", slopePerRun: null, message: "too few runs" },
 		},
 	],
@@ -122,6 +130,25 @@ describe("CompareView", () => {
 	it("shows the exclusion counts by reason", () => {
 		const v = load();
 		expect(v.exclusionRows(PAYLOAD)).toEqual([{ reason: "stopped (paused)", count: 1 }]);
+	});
+
+	it("shows every outcome class the server counted, with the server's names", () => {
+		const v = load();
+		const row = v.modelRows(PAYLOAD)[0]!;
+		// The page draws the classes it is given - it never reclassifies a run.
+		expect(row.outcomes).toEqual([
+			{ code: "delivered", label: "Delivered", hint: "the run delivered cargo", count: 3 },
+			{ code: "refused", label: "Every tool call was refused", hint: "never got to act", count: 1 },
+		]);
+	});
+
+	it("shows no outcome classes when the server sent none", () => {
+		const v = load();
+		const payload = {
+			...PAYLOAD,
+			models: PAYLOAD.models.map((m) => ({ ...m, stability: { ...m.stability, outcomeDistribution: [] } })),
+		};
+		expect(v.modelRows(payload)[0]!.outcomes).toEqual([]);
 	});
 
 	it("repeats the server's verdict instead of making one up", () => {

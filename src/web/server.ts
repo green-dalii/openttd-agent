@@ -52,7 +52,7 @@ export type WireMessage =
 	refreshModels?: (
 		providerId: string,
 		opts: { force?: boolean },
-	) => Promise<{ models: unknown[]; error: string | null; fetchedAt: number | null }>;
+	) => Promise<{ models: unknown[]; problems: unknown[]; fetchedAt: number | null }>;
 	/** Forget a stored credential (logout). */
 	deleteCredential: (providerId: string) => void;
 }
@@ -557,8 +557,16 @@ export class WebServer {
 				if (segments[4] === "refresh") {
 					if (!this.catalogHooks.refreshModels) return json(404, { error: "live refresh disabled" });
 					const result = await this.catalogHooks.refreshModels(id, { force: true });
-					if (result.error === null && !result.models.length) {
-						return json(404, { error: `unknown provider "${id}"` });
+					const problems = Array.isArray(result.problems) ? result.problems : [];
+					// B5: the reasons are **structured** (code + message + hint), so the
+					// page renders them instead of guessing from a sentence. The status
+					// says whose fault it is: 400 = the request cannot be honored as
+					// asked (no key), 502 = the upstream provider failed.
+					if (problems.length) {
+						const codes = problems.map((p) => (p as { code?: string }).code);
+						const status = codes.includes("no_credential") ? 400 : codes.includes("unknown_provider") ? 404 : 502;
+						const message = problems.map((p) => (p as { message?: string }).message).filter(Boolean).join("; ");
+						return json(status, { error: message, problems, provider: id, models: result.models, fetchedAt: result.fetchedAt });
 					}
 					return json(200, { provider: id, ...result });
 				}
