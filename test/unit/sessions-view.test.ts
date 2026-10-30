@@ -57,6 +57,14 @@ interface Model {
 		tone: string;
 		title?: string;
 	}>;
+	manifestRows(session: unknown): Array<{
+		k: string;
+		v: string;
+		tone?: string;
+		title?: string;
+		copy?: string;
+	}>;
+	manifestChips(session: unknown): Array<{ k: string; v: string; tone: string; title?: string }>;
 }
 
 /** Load the component module with a recording UI stub. */
@@ -676,5 +684,154 @@ describe("sessions 模板：训练面板被渲染（算了但没渲染是本页�
 		expect(html).toContain("trainingSeries(");
 		// 排除原因必须逐条列出，不许合并成一个数字（D56）
 		expect(html).toContain("excludedCounts");
+	});
+});
+
+/* ------------------------------ B6: the manifest + grouping ------------------------------ */
+
+describe("History 的 manifest（B6）：一局能回答三个问题", () => {
+	/** The view module's pure functions (loaded the same way as the component). */
+	function loadView(): {
+		manifestRows(s: unknown): Array<{ k: string; v: string; tone?: string; title?: string; copy?: string }>;
+		manifestChips(s: unknown): Array<{ k: string; v: string; tone: string; title?: string }>;
+	} {
+		const sandbox: Record<string, unknown> = {
+			console,
+			JSON,
+			Object,
+			Array,
+			Number,
+			String,
+			Math,
+			Set,
+			Map,
+			document: { getElementById: () => null, addEventListener: () => {}, querySelectorAll: () => [] },
+		};
+		sandbox.UI = {
+			fmtInt: (v: unknown) => (v === null || v === undefined ? "—" : String(v)),
+			fmtMoney: (v: unknown) => `£${v}`,
+			fmtTok: (v: unknown) => `${v}t`,
+			fmtCostKnown: (v: unknown, known?: boolean) => (known === false ? "unknown" : `$${v}`),
+			fmtDuration: (v: unknown) => `${v}ms`,
+			fmtAgo: (v: unknown) => `${v}ago`,
+			fmtClock: (v: unknown) => `c${v}`,
+			fmtPct: (v: number, d?: number) => `${(v * 100).toFixed(d ?? 1)}%`,
+			fmtGameDate: (v: unknown) => String(v),
+			esc: (v: unknown) => String(v),
+			toast: () => {},
+			getPref: (_k: string, dflt: unknown) => dflt,
+			setPref: () => {},
+			$: () => null,
+			renderNav: () => "",
+		};
+		sandbox.window = sandbox;
+		sandbox.globalThis = sandbox;
+		vm.createContext(sandbox);
+		vm.runInContext(SRC, sandbox);
+		return (sandbox.window as never as { SessionsView: never }).SessionsView as never;
+	}
+
+	const RUN = {
+		id: "r1",
+		seed: 7,
+		gameVersion: "15.3",
+		manifest: {
+			model: "MiniMax-M3.1-Flash",
+			servedModel: "MiniMax-M3.1-Flash",
+			api: "openai-completions",
+			contextWindow: 128000,
+			costKnown: true,
+			backend: "agent",
+			thinkingLevel: "off",
+			toolBudget: 12,
+			scaffoldHash: "7956ab6d8c86fa60",
+			payloadHash: "abc123def456",
+			payloadShapeHash: "5bcce03557235e25",
+			payloadCount: 3,
+			tokenLimit: 9000,
+			costLimit: null,
+		},
+	};
+
+	it("shows the world, the scaffold and the caps", () => {
+		const rows = loadView().manifestRows(RUN);
+		const byKey = Object.fromEntries(rows.map((r) => [r.k, r.v]));
+		expect(byKey["Seed"]).toBe("7");
+		expect(byKey["Game version"]).toBe("15.3");
+		expect(byKey["Scaffold hash"]).toContain("7956ab6d");
+		expect(byKey["Payload shape"]).toContain("5bcce035");
+		expect(byKey["Token cap"]).toBe("9000");
+		expect(byKey["Cost cap"]).toBe("none");
+	});
+
+	it("flags a served model that differs from the requested one", () => {
+		const rows = loadView().manifestRows({
+			...RUN,
+			manifest: { ...RUN.manifest, servedModel: "some-other-model" },
+		});
+		const served = rows.find((r) => r.k === "Model (served)")!;
+		expect(served.v).toBe("some-other-model");
+		expect(served.tone).toBe("warn");
+		expect(served.title).toContain("MiniMax-M3.1-Flash");
+	});
+
+	it("writes a missing reading as 'not measured' (never 0)", () => {
+		const rows = loadView().manifestRows({ id: "r2", seed: 7 });
+		const byKey = Object.fromEntries(rows.map((r) => [r.k, r.v]));
+		expect(byKey["Game version"]).toBe("not measured");
+		expect(byKey["Scaffold hash"]).toBe("not measured");
+		expect(byKey["Token cap"]).toBe("none");
+	});
+
+	it("copies the FULL hash, not the shortened one", () => {
+		const rows = loadView().manifestRows(RUN);
+		const scaffold = rows.find((r) => r.k === "Scaffold hash")!;
+		expect(scaffold.copy).toBe("7956ab6d8c86fa60");
+		expect(scaffold.v.length).toBeLessThan(scaffold.copy!.length);
+	});
+
+	it("says an unpriced model has no price table (not '$0')", () => {
+		const rows = loadView().manifestRows({
+			...RUN,
+			manifest: { ...RUN.manifest, costKnown: false },
+		});
+		expect(rows.find((r) => r.k === "Price table")!.v).toContain("none");
+	});
+
+	it("lists the identity chips, flagging a substitution", () => {
+		const chips = loadView().manifestChips({
+			...RUN,
+			manifest: { ...RUN.manifest, servedModel: "some-other-model" },
+		});
+		const model = chips.find((c) => c.k === "model")!;
+		expect(model.v).toContain("some-other-model");
+		expect(model.tone).toBe("warn");
+		expect(chips.some((c) => c.k === "backend")).toBe(true);
+	});
+});
+
+describe("History 的分组（B6）：键来自服务端", () => {
+	it("filters the visible runs by the server's group", () => {
+		const { model } = load([
+			{ id: "a", status: "completed", mode: "agent" },
+			{ id: "b", status: "completed", mode: "agent" },
+			{ id: "c", status: "completed", mode: "agent" },
+		]);
+		// The model reads `groups`/`groupKey` off `this` — the Alpine component
+		// owns them, so the test drives them the same way.
+		(model as unknown as { groups: unknown[] }).groups = [
+			{ key: "model-a", count: 2, sessions: ["a", "b"] },
+		];
+		(model as unknown as { groupKey: string }).groupKey = "model-a";
+		expect(model.visible().map((s) => s.id)).toEqual(["a", "b"]);
+		(model as unknown as { groupKey: string }).groupKey = "";
+		expect(model.visible().length).toBe(3);
+	});
+
+	it("shows nothing when the selected group is not on the server's list", () => {
+		const { model } = load([{ id: "a", status: "completed", mode: "agent" }]);
+		(model as unknown as { groups: unknown[] }).groups = [];
+		(model as unknown as { groupKey: string }).groupKey = "gone";
+		expect(model.visible()).toEqual([]);
 	});
 });

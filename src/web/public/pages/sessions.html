@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>openttd-agent · sessions</title>
+<title>openttd-agent · history</title>
 <link rel="stylesheet" href="/assets/css/style.css" />
 <!-- Vendored third-party (uPlot, MIT, zero dependencies). Synced by `pnpm run vendor`. -->
 <link rel="stylesheet" href="/assets/vendor/uplot/uPlot.min.css" />
@@ -69,6 +69,24 @@
             <span>completed only</span>
           </label>
         </div>
+        <!-- B6: grouping by the ledger's own fields (model / seed / backend).
+             The **keys come from the server** — "which model" has two sources
+             (requested vs served), and a gateway substitute makes them differ. -->
+        <div class="group-by">
+          <span class="dim">group by</span>
+          <template x-for="axis in ['model', 'seed', 'backend']" :key="axis">
+            <button type="button" class="btn sm" :class="{ primary: groupBy === axis }"
+                    @click="setGroupBy(axis)" x-text="axis"></button>
+          </template>
+        </div>
+        <div class="group-chips" x-show="groups.length">
+          <button type="button" class="chip" :class="{ sel: groupKey === '' }" @click="groupKey = ''"
+                  x-text="`all (${sessions.length})`"></button>
+          <template x-for="g in groups" :key="'g-' + g.key">
+            <button type="button" class="chip" :class="{ sel: groupKey === g.key }"
+                    @click="pickGroup(g.key)" x-text="`${g.key} (${g.count})`"></button>
+          </template>
+        </div>
         <ul class="pick-list">
           <template x-for="s in visible()" :key="s.id">
             <li class="pick" :class="{ sel: s.id === selected }" @click="open(s.id)">
@@ -93,6 +111,10 @@
                 <template x-for="f in runFacts(s)" :key="f.k">
                   <span class="fact" :class="f.tone" :title="f.title || f.k + ': ' + f.v"
                         x-text="f.k + ' ' + f.v"></span>
+                </template>
+                <template x-for="c in manifestChips(s)" :key="'mc-' + c.k">
+                  <span class="fact" :class="c.tone" :title="c.title || c.k + ': ' + c.v"
+                        x-text="c.k + ' ' + c.v"></span>
                 </template>
               </div>
             </li>
@@ -180,6 +202,28 @@
               <p class="hint" x-show="!outcomeRows().length">
                 This run recorded no outcome fields — nothing to show (not "all zeros").
               </p>
+
+              <!-- B6: the full manifest — "what this run actually was".
+                   Three questions it answers: the same world (seed + gameVersion),
+                   the same scaffold (scaffoldHash / payloadShapeHash), and whether
+                   the run was capped (tokenLimit / costLimit). -->
+              <h3>Manifest <span class="dim">what this run actually was</span></h3>
+              <table class="kv manifest-table">
+                <tbody>
+                  <template x-for="r in manifestRows()" :key="r.k">
+                    <tr>
+                      <td x-text="r.k"></td>
+                      <td>
+                        <span :class="r.tone" x-text="r.v"></span>
+                        <button type="button" class="btn sm" x-show="r.copy"
+                                @click="copyManifest(r.copy, r.k)"
+                                :title="r.title || ('copy the full value: ' + r.copy)"
+                                x-text="copied === r.k ? 'copied' : 'copy'"></button>
+                      </td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
 
               <h3>Token breakdown</h3>
               <div class="chart-box" x-show="tokenSlices().length">
@@ -297,6 +341,131 @@
       </div>
     </section>
   </main>
+
+    <!-- ===================== Memory（曾是 "Evolution" 页）=====================
+         名字与位置要对得上内容：它管的是**记忆**（lessons / strategies），
+         所以它住在 History 里，而不是一个叫 "Evolution" 的独立页（F9）。 -->
+    <section class="memory-section" x-data="evolution" x-init="init()">
+    <div class="group" id="memory"><h2>Memory</h2><div class="rule"></div>
+      <span class="dim">what the agent remembers across games — the lessons and the strategy candidates</span></div>
+
+    <p class="notice" x-show="error" x-text="error"></p>
+    <p class="dim" x-show="loading">Loading…</p>
+
+    <p class="notice" x-show="empty()">
+      Nothing recorded yet. Finish a game with <code>--agent</code> and its metrics,
+      lessons and strategy candidates will appear here.
+    </p>
+
+    <!-- ===================== ① is the memory working? ===================== -->
+    <section class="panel" x-show="!loading && !error && !empty()">
+      <div class="panel-head">
+        <h2>Is it working? <span class="dim">记忆有没有用</span></h2>
+        <span class="dim">same seed, with vs without lessons — SPEC §5.2 #3</span>
+      </div>
+      <!-- The verdict comes from the server. Below MIN_LESSON_SAMPLE per arm it
+           says what is missing instead of showing a difference nobody should
+           believe yet (SPEC §5.3 forbids speculative conclusions). -->
+      <p class="verdict" :class="verdictOk() ? 'ok' : 'dim'" x-text="verdictText()"></p>
+      <div class="grid two">
+        <template x-for="a in armCards()" :key="a.label">
+          <div class="panel arm-card">
+            <div class="arm-label" x-text="a.label"></div>
+            <div class="kpis">
+              <div class="kpi"><div class="kpi-k">Runs</div><div class="kpi-v" x-text="a.runs"></div></div>
+              <div class="kpi"><div class="kpi-k">Mean cash</div><div class="kpi-v" x-text="a.money"></div></div>
+              <div class="kpi"><div class="kpi-k">Mean tokens</div><div class="kpi-v" x-text="a.tokens"></div></div>
+              <div class="kpi"><div class="kpi-k">Built</div><div class="kpi-v" x-text="a.built"></div></div>
+            </div>
+            <div class="kpi-hint" x-text="a.hint"></div>
+          </div>
+        </template>
+      </div>
+    </section>
+
+    <!-- ========================= ② across games ========================= -->
+    <section class="panel" x-show="!loading && !error && metrics().length">
+      <div class="panel-head">
+        <h2>Across games <span class="dim">跨局</span></h2>
+        <span class="dim" x-text="gameRows().length + ' recorded'"></span>
+      </div>
+      <div class="chart-box"><div id="evo-chart" x-ref="evoChart" x-effect="drawCurve()"></div></div>
+      <div class="tbl-wrap">
+        <table class="tbl">
+          <thead><tr>
+            <th>Session</th><th>Seed</th><th>LLM</th><th>Memory</th>
+            <th>Cash</th><th>Decisions</th><th>Tokens</th><th>Cost</th>
+          </tr></thead>
+          <tbody>
+            <template x-for="r in gameRows()" :key="r.id">
+              <tr>
+                <td class="mono" x-text="r.id"></td>
+                <td x-text="r.seed"></td>
+                <td x-text="r.llm"></td>
+                <td :class="r.hasMemory ? 'pos' : 'dim'" x-text="r.memory"></td>
+                <td x-text="r.money"></td>
+                <td x-text="r.decisions"></td>
+                <td x-text="r.tokens"></td>
+                <td x-text="r.cost"></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ========================== ③ lessons ========================== -->
+    <section class="panel" x-show="!loading && !error && lessons().length">
+      <div class="panel-head">
+        <h2>Lessons <span class="dim">教训库</span></h2>
+        <span class="dim">distilled from finished games; injected when confirmed</span>
+      </div>
+      <ol class="mem-library">
+        <template x-for="l in lessonRows()" :key="l.text">
+          <li :class="l.kind === 'dont' ? 'mem-dont' : 'mem-do'">
+            <span class="mem-kind" x-text="l.kindLabel"></span>
+            <span class="mem-body">
+              <span x-text="l.text"></span>
+              <span class="dim" x-text="'confidence ' + l.confidence + ' · seed ' + l.seed"></span>
+              <span class="dim" x-text="'evidence: ' + l.evidence"></span>
+            </span>
+            <span class="dim" x-show="l.superseded">superseded</span>
+          </li>
+        </template>
+      </ol>
+    </section>
+
+    <!-- ========================= ④ strategies ========================= -->
+    <section class="panel" x-show="!loading && !error && strategies().length">
+      <div class="panel-head">
+        <h2>Strategy candidates <span class="dim">策略候选</span></h2>
+        <span class="dim" x-text="injectableCount() + ' injectable'"></span>
+      </div>
+      <p class="dim">
+        Injection needs <strong>both</strong> gates: the evidence gate
+        (value above threshold and verified in ≥ 2 games) and human confirmation.
+        The engine only advises — nothing takes effect until you tick it.
+      </p>
+      <ol class="mem-library">
+        <template x-for="s in strategyRows()" :key="s.id">
+          <li class="mem-strat">
+            <span class="mem-kind" x-text="s.injectable ? 'live' : s.promoted ? 'confirmed?' : 'candidate'"></span>
+            <span class="mem-body">
+              <span x-text="s.label"></span>
+              <span class="dim" x-text="s.runs + ' game(s) · avg ' + s.value"></span>
+              <span class="dim" x-show="s.reason" x-text="s.reason"></span>
+            </span>
+            <label class="mem-toggle">
+              <input type="checkbox" :checked="s.enabled" :disabled="busy === s.id"
+                     @change="toggle(s.id, $event.target.checked)">
+              <span>inject</span>
+            </label>
+          </li>
+        </template>
+      </ol>
+    </section>
+  
+    </section>
 </div>
 
 <script src="/assets/js/common.js"></script>
@@ -308,6 +477,8 @@
 <script src="/assets/vendor/alpinejs/alpine.min.js" defer></script>
 <script src="/assets/js/alpine-bridge.js"></script>
 <script src="/assets/js/sessions-view.js"></script>
+<script src="/assets/js/evolution-view.js"></script>
 <script src="/assets/js/sessions.js"></script>
+<script src="/assets/js/evolution.js"></script>
 </body>
 </html>

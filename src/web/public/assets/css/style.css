@@ -314,6 +314,15 @@ button { font-family: inherit; }
 .chip:hover { color: var(--ink); }
 .chip.off { opacity: .35; text-decoration: line-through; }
 .chip .n { font-variant-numeric: tabular-nums; opacity: .75; margin-left: 3px; }
+/* The selected group (B6): the page filters the runs by the server's keys. */
+.chip.sel { color: var(--ink); border-color: var(--accent); background: var(--panel-2); }
+/* A manifest row that must be noticed (e.g. the served model differs from the
+   requested one). Scoped to the manifest table: a bare `.warn` has no colour
+   rule of its own, so the flag would be invisible. */
+.manifest-table .warn { color: var(--warn, #e5c07b); }
+/* The grouping axis + the group chips (History, B6). */
+.group-by { display: flex; gap: .35rem; align-items: center; flex-wrap: wrap; margin-bottom: .35rem; }
+.group-chips { display: flex; gap: .3rem; flex-wrap: wrap; margin-bottom: .5rem; }
 label.check { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--muted); cursor: pointer; }
 label.check input { accent-color: var(--accent); }
 

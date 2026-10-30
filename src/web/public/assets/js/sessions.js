@@ -42,19 +42,33 @@
         detailError: "",
         compareOpen: false,
         evSearch: "",
+        /** How the runs are grouped (B6): the server owns the keys. */
+        groupBy: "model",
+        /** The groups the server sent for `groupBy`. */
+        groups: [],
+        /** The selected group key ("" = all groups). */
+        groupKey: "",
 
         /* ------------------------------- init ------------------------------- */
         async init() {
           // 训练面板（P0-3）：跨局账本。失败不挡页面（面板显示空态说明）。
-          fetch("/api/metrics")
-            .then((r) => (r.ok ? r.json() : []))
-            .then((rows) => { this.metrics = Array.isArray(rows) ? rows : []; })
+          //
+          // 事实（2026-10-30 修）：这里原来取的是 `/api/metrics` —— **那个端点从来
+          // 不存在**（账本一直挂在 `/api/evolution` 的 `metrics` 字段里），所以面板
+          // 一直在读 404，并显示“no metrics ledger yet”——**而账本里明明有行**。
+          // 一个假的空态比没有这个面板更坏：它说“你的局没被记下来”。
+          fetch("/api/evolution", { headers: { accept: "application/json" } })
+            .then((r) => (r.ok ? r.json() : null))
+            .then((data) => {
+              this.metrics = data && Array.isArray(data.metrics) ? data.metrics : [];
+            })
             .catch(() => { this.metrics = []; });
           // 页头（标题+导航）只有这一个来源：common.js 的 renderChrome()。
           // 它由 common.js 定义，所以不需要"桥没加载"的回退分支（那会让 #nav
           // 以一个 HTML 里已不存在的元素为依赖，被 web-assets 守卫抓住）。
           U.renderChrome();
           await this.load();
+          await this.loadGroups();
           // The segmented control is created imperatively (it predates Alpine and
           // is shared with the Live page), so it is mounted once here.
           this.$nextTick(() => {
@@ -97,6 +111,37 @@
             this.sessions = [];
             this.detailError = `Could not list runs: ${e}`;
           }
+        },
+
+        /**
+         * The runs grouped by the ledger's own fields (B6).
+         *
+         * The **keys come from the server** (`/api/sessions/groups`): "which model"
+         * has two sources (the requested one and the one that served the run), and
+         * a gateway substitute makes them differ — so the page must not group the
+         * runs by a guess of its own.
+         */
+        async loadGroups() {
+          try {
+            const r = await fetch(`/api/sessions/groups?by=${encodeURIComponent(this.groupBy)}`);
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            const data = await r.json();
+            this.groups = Array.isArray(data.groups) ? data.groups : [];
+          } catch {
+            this.groups = [];
+          }
+        },
+
+        /** Switch the grouping (and forget a key that belongs to another axis). */
+        async setGroupBy(by) {
+          this.groupBy = by;
+          this.groupKey = "";
+          await this.loadGroups();
+        },
+
+        /** Pick (or un-pick) a group; picking the same one again clears it. */
+        pickGroup(key) {
+          this.groupKey = this.groupKey === key ? "" : key;
         },
 
         async open(id) {
@@ -168,6 +213,14 @@
         savegamePath() { const sg = this.savegameInfo(); return sg && sg.path ? sg.path : "—"; },
         /** 列表项的索引事实（模块级纯函数；不为每行新建 model）。 */
         runFacts(session) { return window.SessionsView.runFacts(session); },
+
+        /** The run's manifest rows (B6): what this run actually was. */
+        manifestRows() {
+          return window.SessionsView.manifestRows(this.meta());
+        },
+
+        /** The manifest's identity as list chips (B6). */
+        manifestChips(session) { return window.SessionsView.manifestChips(session); },
         /**
          * 存档状态一句话。**"还没写"不等于"路径不存在"**：
          * 路径照给（用户可以先去看目录），只是文件还没落盘。
@@ -178,6 +231,21 @@
           if (!sg.exists) return "not written yet — the run saves when it ends (or from the live page's controls)";
           return `${U.fmtInt(sg.bytes)} bytes · written ${U.fmtAgo(sg.mtimeMs)}`;
         },
+        /**
+         * Copy one manifest value (the full hash — the short form cannot decide
+         * whether two runs asked the same thing).
+         */
+        async copyManifest(value, which) {
+          if (!value) return;
+          try {
+            await navigator.clipboard.writeText(String(value));
+            this.copied = which;
+            setTimeout(() => { if (this.copied === which) this.copied = ""; }, 1500);
+          } catch {
+            U.toast("Could not copy — select the value and copy manually.", "warn", 3000);
+          }
+        },
+
         async copySavegame() {
           const sg = this.savegameInfo();
           if (!sg || !sg.path) return;

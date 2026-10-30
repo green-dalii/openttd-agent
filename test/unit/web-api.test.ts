@@ -479,6 +479,26 @@ describe("WebServer REST", () => {
 		}
 	});
 
+	it("GET /api/sessions/groups returns the server's groups (and rejects an unknown axis)", async () => {
+		await start({
+			evolution: {
+				metrics: () => [],
+				lessons: () => [],
+				strategies: () => [],
+				arms: () => null,
+				setStrategyEnabled: () => false,
+				compare: () => null,
+				groups: (by: string) => [{ key: by === "seed" ? "7" : "model-a", count: 2, sessions: ["s1", "s2"] }],
+			},
+		});
+		const r = await req("GET", "/api/sessions/groups?by=model");
+		expect(r.status).toBe(200);
+		expect(r.body.by).toBe("model");
+		expect((r.body.groups as { key: string }[])[0]!.key).toBe("model-a");
+		const bad = await req("GET", "/api/sessions/groups?by=nope");
+		expect(bad.status).toBe(400);
+	});
+
 	it("GET /api/compare returns the server-computed comparison (and 404s without the hook)", async () => {
 		const asked: { models?: string[]; seed?: number; backend?: string }[] = [];
 		await start({

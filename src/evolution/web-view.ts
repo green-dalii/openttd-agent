@@ -15,6 +15,7 @@
 import { classifyOutcome } from "./outcome.js";
 import { type CompareBy, compareArms, metricExclusion, type GameMetric} from "./metrics.js";
 import { buildCompareView } from "./compare-view.js";
+import { historyGroups, type GroupBy } from "./history-groups.js";
 import { evaluatePromotion, type StrategyCard } from "./strategies.js";
 import { readLessons, readMetrics, readStrategies, setStrategyEnabled } from "./store.js";
 import type { ArmComparison } from "./metrics.js";
@@ -86,6 +87,7 @@ export function evolutionHooks(dataDir: string): {
 	arms: () => unknown;
 	setStrategyEnabled: (id: string, enabled: boolean) => boolean;
 	compare: (opts: { models?: string[]; seed?: number; backend?: string }) => unknown;
+	groups: (by: GroupBy) => unknown;
 } {
 	return {
 		// Read fresh on each request: the page must reflect games that finished
@@ -97,6 +99,9 @@ export function evolutionHooks(dataDir: string): {
 		arms: () => evolutionView(dataDir).arms,
 		setStrategyEnabled: (id: string, enabled: boolean) => setStrategyEnabled(dataDir, id, enabled),
 		compare: (opts) => buildCompareView(readMetricsSafe(dataDir), opts),
+		// The runs grouped by the ledger's own fields (B6). The page does not
+		// group them itself: the key has to be the one the ledger records.
+		groups: (by) => historyGroups(readMetricsSafe(dataDir), by),
 	};
 }
 

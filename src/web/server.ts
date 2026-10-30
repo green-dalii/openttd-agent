@@ -98,6 +98,12 @@ export interface EvolutionHooks {
 	 * judgement (that is `scorecard.ts` / `bench-stats.ts`).
 	 */
 	compare?: (opts: { models?: string[]; seed?: number; backend?: string }) => unknown;
+	/**
+	 * The runs grouped by the ledger's own fields (B6): `model` / `seed` /
+	 * `backend`. The key comes from the metric row, so the page cannot group
+	 * the runs by a guess of its own.
+	 */
+	groups?: (by: "model" | "seed" | "backend") => unknown;
 }
 
 /**
@@ -196,7 +202,6 @@ export const PAGES: Record<string, string> = {
 	"/compare": "pages/compare.html",
 	"/providers": "pages/providers.html",
 	"/sessions": "pages/sessions.html",
-	"/evolution": "pages/evolution.html",
 };
 
 /**
@@ -205,6 +210,18 @@ export const PAGES: Record<string, string> = {
  */
 export const PAGE_ALIASES: Record<string, string> = {
 	"/llm": "/providers",
+};
+
+/**
+ * URLs that **moved** — answered with a redirect, not a second copy of the page.
+ *
+ * `/evolution` became the "Memory" section inside History (B6): the old page
+ * managed the agent's *memory* (lessons / strategies), so its name did not match
+ * its content, and it did not belong next to "Is it getting better?" (CoDesign
+ * F9). Keeping a second copy would be two memory pages that drift apart.
+ */
+export const PAGE_REDIRECTS: Record<string, string> = {
+	"/evolution": "/sessions#memory",
 };
 
 export class WebServer {
@@ -396,6 +413,12 @@ export class WebServer {
 			}
 			let p = decodeURIComponent(url.pathname);
 			if (p.endsWith("/") && p !== "/") p = p.slice(0, -1);
+			// A page that moved: redirect to where it lives now (one copy, not two).
+			const moved = PAGE_REDIRECTS[p];
+			if (moved) {
+				res.writeHead(302, { location: moved }).end();
+				return;
+			}
 			// Legacy URLs resolve to their current page before the route lookup.
 			if (PAGE_ALIASES[p]) p = PAGE_ALIASES[p]!;
 			// Page route table first (see PAGES); then plain static files.
@@ -593,6 +616,17 @@ export class WebServer {
 				if (!this.sessionHooks) return json(404, { error: "sessions disabled" });
 				if (req.method !== "GET") return json(405, { error: "method not allowed" });
 				if (segments.length === 2) return json(200, { sessions: this.sessionHooks.list() });
+				// GET /api/sessions/groups?by=model|seed|backend — the runs grouped
+				// by the ledger's own fields (B6). The key comes from the server:
+				// the page must not group the runs itself.
+				if (segments[2] === "groups") {
+					if (!this.evolutionHooks?.groups) return json(404, { error: "groups disabled" });
+					const by = url.searchParams.get("by") ?? "model";
+					if (by !== "model" && by !== "seed" && by !== "backend") {
+						return json(400, { error: `unknown grouping "${by}"` });
+					}
+					return json(200, { by, groups: this.evolutionHooks.groups(by) });
+				}
 				const id = decodeURIComponent(segments[2] ?? "");
 				// GET /api/sessions/:id/timeline — the causal timeline (B3).
 				if (segments[3] === "timeline") {
