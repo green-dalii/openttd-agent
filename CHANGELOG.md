@@ -10,6 +10,21 @@
 ## [Unreleased]
 ### Added
 
+- **A run can now explain itself.** The run's detail shows the **full manifest**: the same world
+  (seed + game version), the same scaffold (scaffold / payload-shape hashes), and whether the run
+  was capped (token / cost limit). When the provider answered with a different model than the one
+  requested - a substituting gateway - that is flagged instead of hidden. Hashes are shown short
+  and copied in full.
+
+- **The runs can be grouped** by model, seed or backend. The group keys come from the server
+  (the ledger's own fields), because "which model" has two sources - the one requested and the
+  one that served the run - and a page that guesses will disagree with the ledger.
+
+- **The navigation follows the four questions now**: Run / Compare / History / Configure. The
+  "Evolution" page was renamed **Memory** and moved into History, because it manages what the
+  agent *remembers* (lessons, strategy candidates), not "evolution"; `/evolution` redirects to
+  `/sessions#memory` instead of keeping a second copy.
+
 - **Every run now says what kind of run it was.** The backend could already name ten outcomes,
   but the pages showed a fraction of them - and the most actionable one ("every tool call was
   refused" - the signal that a model is flailing) was invisible. The vocabulary is now **closed**
@@ -31,15 +46,6 @@
   judges nothing; a missing reading reads "not measured", and an unpriced model's cost reads
   "not measured" rather than $0.
 
-### Fixed
-
-- **The evolution hooks had drifted into two copies.** The runner re-attaches its own hooks when
-  a run starts, and only the server's copy carried the per-row exclusion reason - so the same run
-  could show a different exclusion depending on which path served the page. They are built in one
-  place now, and a guard keeps them there.
-
-### Added
-
 - **The Run page now reads as three bands, and one decision is one row.** The page answers "is it
   playing" (health, score, the current goal), then "what just happened" - a **causal timeline**
   where a row is a decision and expanding it shows the four pieces of evidence together: the
@@ -48,19 +54,11 @@
   timestamps. The newest 20 rows are shown; older ones load on demand. The diagnostics (cash,
   fleet, cargo, towns, tokens, wire detail, raw log) moved into a collapsed band - folded, not
   deleted.
+
 - **The timeline is a server fact.** `GET /api/sessions/:id/timeline` returns the rows; the page
   only draws them, and a reading the server did not have is shown as "not measured" rather than
   as zero. The GS phases are now archived with the session, so a finished run can still be
   explained - before this they existed only in the live stream.
-
-### Fixed
-
-- **The timeline did not survive the start of a run.** The runner re-attaches its own session
-  hooks when a run starts, which **replaced** the server's hooks with a narrower copy - so the
-  feature worked on an idle dashboard and vanished the moment a run began. The hooks are now
-  built in one place, and a guard keeps them there.
-
-### Added
 
 - **The dashboard can start a run, and says what the next run will use.** The run knobs (seed,
   game days, scenario, memory arm, thinking level, tool budget, token and cost caps, backend) are
@@ -71,21 +69,69 @@
   manifest" is a contract a test can check field by field. An illegal knob is refused with a
   reason and a hint, before any game process starts.
 
+- **Benchmark mode (D5)**: a matrix planner that gives every cell its own data dir and
+  refuses to run before the comparison is pre-registered, a four-axis scorecard, paired
+  bootstrap comparison, and JSON + Markdown reports (`scripts/bench.ts`).
+
+- **Run manifest**: every run records the served model, backend, thinking level, tool
+  budget, scaffold fingerprint, real payload fingerprint, first-payload shape, game
+  version and spend caps - in `meta.json` **and** the metrics row (SPEC §10.114–§10.115).
+
+- **Named outcomes**: every run ends with a reason (`delivered`, `delivered_nothing`,
+  `no_construction`, `refused`, `paused_by_agent`, `world_frozen`, `wall_clock_cap`,
+  `token_cap`, `cost_cap`, `unknown`), so a zero is never a bare number.
+
+- **Spend caps**: `LLM_TOKEN_LIMIT` / `LLM_COST_LIMIT` (and CLI flags) stop a run at a
+  decision boundary; a cost cap on an unpriced model refuses to start.
+
+- **Second decision backend**: `AGENT_HARNESS=1` drives the same scaffold through
+  pi-agent-core's `AgentHarness` (replayable transcript, retry/fault visibility). Both
+  backends were verified to send byte-identical system prompts and the same tool set.
+
+- **Scaffold knobs**: `--thinking` and `--tool-budget` (recorded as *resolved* values).
+
+- **Score visibility**: the decision context carries the project's own score, deltas keep
+  `null` instead of folding to 0, and past runs' scores are injected (the control arm
+  `--no-memory` disables the injection too).
+
+- **Dashboard**: manifest comparison rows (backend / scaffold / payload), a "Wire" health
+  KPI, industry & cargo panel, towns panel, minimap, chart zoom/pan, run control from the
+  page, per-session archive with savegame location.
+
+- **`capabilities()`**: the agent can ask which actions exist before trying them.
 ### Fixed
+
+- **The training panel had been reading an endpoint that never existed.** It asked for
+  `/api/metrics` while the ledger has always lived under `/api/evolution` - so the panel showed
+  "no metrics ledger yet" while the ledger was full of runs. A false empty state is worse than
+  no panel: it says your runs were never recorded.
+
+- **The manifest's "served a different model" flag was invisible.** The warning colour was scoped
+  to the list chips, so the detail table showed the substituted model in plain text.
+
+- **The evolution hooks had drifted into two copies.** The runner re-attaches its own hooks when
+  a run starts, and only the server's copy carried the per-row exclusion reason - so the same run
+  could show a different exclusion depending on which path served the page. They are built in one
+  place now, and a guard keeps them there.
+
+- **The timeline did not survive the start of a run.** The runner re-attaches its own session
+  hooks when a run starts, which **replaced** the server's hooks with a narrower copy - so the
+  feature worked on an idle dashboard and vanished the moment a run began. The hooks are now
+  built in one place, and a guard keeps them there.
 
 - **A cost cap the model cannot enforce is now a bad request, not a conflict.** Setting a cost cap
   on a model without a price table could never fire, so it was refused before the game started —
   but the refusal was reported as "409 conflict", which told the user their request collided with
   a running game. It is now `400` with the structured reason `unpriced_with_cost_cap`, and the
   preview refuses it too (a preview must not promise a run that cannot start).
+
 - **The run knobs form renders.** Alpine's `x-for` has to sit on a `<template>`; on a plain element
   the loop variable is not in scope for that element's own directives, so the whole form rendered
   empty while the page looked fine (the errors only appear in `console.warn`). The knob fields
   also had two controls sharing one id, so `#knob-toolBudget` resolved to the hidden one.
+
 - **The preview follows the form.** It was fetched once on load, so the panel kept showing the
   values of the previous knobs while claiming to describe the next run.
-
-### Fixed
 
 - **One resolver for the run configuration.** The view, the save path, the startup gate and the
   runner now derive the selection from the same function, so they cannot answer differently. The
@@ -94,8 +140,6 @@
   and no run could start. The view also reports the model's own api/context/limits instead of the
   values the settings file happened to carry.
 
-### Fixed
-
 - **A saved run configuration is now the one that runs.** `GET /api/llm` re-reads `llm.json` on
   every call instead of re-merging a snapshot taken at process start, so a save is visible without a
   restart; the `POST` response is the post-save view; a catalog save stores the model's own
@@ -103,66 +147,6 @@
   model is rejected with `400 {error, problems[]}` without touching the file. Restoring a persisted
   live-model overlay no longer requires a credential, so a model the page listed stays selectable
   after a restart.
-
-### Changed
-
-- **Outward-facing text is English from now on**: issues, pull requests, review replies and release
-  notes (`AGENTS.md` §8.1). Repository documents and code comments stay Chinese - that is the working
-  language of this repo, not the public face. The six dashboard issues created in this session were
-  rewritten the same day, and the open S7 comment was too.
-
-### Docs
-
-- **Whole-dashboard CoDesign** (`docs/DASHBOARD-CODESIGN.md`): the backend became a
-  configurable evaluation harness while the dashboard stayed a data mirror. Eight knobs,
-  the entire bench flow, half the manifest and six of ten outcome classes have no UI, and
-  one decision's evidence is split across six blocks. The document defines the four
-  questions a harness dashboard must answer, maps every backend capability to what the UI
-  actually shows, and proposes four destinations with a shippable B1-B6 order. Design only;
-  three owner decisions at the end.
-
-### Docs
-
-- **Selection-state CoDesign** (`docs/SELECTION-STATE-CODESIGN.md`): the run configuration
-  currently has four copies (file, process-start snapshot, page state, catalog object) and
-  three validators, so the page can show one model while the run uses another. The document
-  records the reproduced bug (save `MiniMax-M3.1-Flash` -> the API keeps answering
-  `MiniMax-M3.1` until restart), the other findings of the same shape, and a plan built on
-  one resolver shared by the view, save validation, preflight and the runner. Design only;
-  awaiting three owner decisions.
-
-
-> 0.6.0 之后的工作（2026-09-11 → 2026-10-24）。逐 PR 的开发日记已归档到
-> [`docs/archive/CHANGELOG-DEV-DIARY.md`](docs/archive/CHANGELOG-DEV-DIARY.md)：
-> 技术事实在 `SPEC.md` §10，过程教训在 `MEMORY.md`，逐次提交在 `git log v0.6.0..main`。
-> 本文件只写**使用者能感知的变化**。
-
-### Added
-
-- **Benchmark mode (D5)**: a matrix planner that gives every cell its own data dir and
-  refuses to run before the comparison is pre-registered, a four-axis scorecard, paired
-  bootstrap comparison, and JSON + Markdown reports (`scripts/bench.ts`).
-- **Run manifest**: every run records the served model, backend, thinking level, tool
-  budget, scaffold fingerprint, real payload fingerprint, first-payload shape, game
-  version and spend caps - in `meta.json` **and** the metrics row (SPEC §10.114–§10.115).
-- **Named outcomes**: every run ends with a reason (`delivered`, `delivered_nothing`,
-  `no_construction`, `refused`, `paused_by_agent`, `world_frozen`, `wall_clock_cap`,
-  `token_cap`, `cost_cap`, `unknown`), so a zero is never a bare number.
-- **Spend caps**: `LLM_TOKEN_LIMIT` / `LLM_COST_LIMIT` (and CLI flags) stop a run at a
-  decision boundary; a cost cap on an unpriced model refuses to start.
-- **Second decision backend**: `AGENT_HARNESS=1` drives the same scaffold through
-  pi-agent-core's `AgentHarness` (replayable transcript, retry/fault visibility). Both
-  backends were verified to send byte-identical system prompts and the same tool set.
-- **Scaffold knobs**: `--thinking` and `--tool-budget` (recorded as *resolved* values).
-- **Score visibility**: the decision context carries the project's own score, deltas keep
-  `null` instead of folding to 0, and past runs' scores are injected (the control arm
-  `--no-memory` disables the injection too).
-- **Dashboard**: manifest comparison rows (backend / scaffold / payload), a "Wire" health
-  KPI, industry & cargo panel, towns panel, minimap, chart zoom/pan, run control from the
-  page, per-session archive with savegame location.
-- **`capabilities()`**: the agent can ask which actions exist before trying them.
-
-### Fixed
 
 - **The model list never refreshed.** The list on the Providers page came from the
   **bundled pi-ai snapshot** (generated 2026-09-04), and pi-ai's `refresh()` skips static
@@ -174,40 +158,27 @@
   the provider knows are marked "live · price unknown" (their limits are borrowed from a
   sibling and their price is not measured), and they are persisted so the agent process can
   run them.
+
 - Runs could be **stopped and look like failures**: pause attribution, world-frozen runs
   and unfinished horizons are now named and excluded from comparisons.
+
 - **Deltas folded unread readings to zero** - the model read "no change" where nothing had
   been measured.
+
 - **Fleet counts disagreed with themselves** (route table vs company stats).
+
 - **Charts flickered and grew** (per-frame `devicePixelRatio` multiplication; width→height
   feedback loop) - fixed and guarded by a time-series smoke check at dpr=2.
+
 - **World clock came from a `Monthly` channel** and could be stale for a whole month.
+
 - **Partial GS failure was silent**: one bad API call could kill a whole reply.
+
 - `--serve` kept a stale `llm.json`, so Start after saving a provider still said
   "not configured".
+
 - **`test:live` was red on main** (it picked `events.jsonl` as the newest session) and
   left OpenTTD running when it failed, which silently disabled 13 preflight tests.
-
-### Changed
-
-- **Executor runs only inside the GameScript** (`docs/EXECUTOR-ARCHITECTURE.md`); the AI
-  slot keeps the company shell. Route economics, fleet attribution and construction
-  progress come from the GS.
-- **Documentation structure**: `docs/` reduced to one authority per topic with a registry
-  test; SPEC gained a topic index; ROADMAP keeps only unfinished work; MEMORY keeps an
-  index plus recent detail (older narratives archived).
-
-### Docs
-
-- **Main documents got budgets and a subtraction rule** (`AGENTS.md` §9.1b). MEMORY went
-  2081 → 664 lines and CHANGELOG 1846 → 495 with the untouched detail frozen under
-  `docs/archive/`; SPEC's largest entry was cut to a fact table. `repo-hygiene` now fails
-  the gate when any main document exceeds its budget, so "only ever append" cannot happen
-  silently again.
-- `docs/HARNESS-MIGRATION.md` (why two backends, verified library facts, invariants),
-  `docs/SCAFFOLD-CONTRACT.md` §9 (the four remaining world-fact gaps), and
-  `docs/RL-HARNESS-SCOPE-AUDIT.md` (the J1–J4 boundary argument).
-
 ## [0.6.0] - 2026-09-11
 
 > **本轮的主要工作是"把实现拉回 SPEC"**，而不是加功能。审计真机 Session 日志发现，

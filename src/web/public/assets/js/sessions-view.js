@@ -276,12 +276,24 @@
       onlyDone: Boolean(s.onlyDone),
       stepFilter: "all",
       stepRaw: false,
+      /** The groups the server sent (B6): [{ key, count, sessions }]. */
+      groups: s.groups || [],
+      /** The selected group key ("" = all groups). */
+      groupKey: s.groupKey || "",
 
       /* ---------------------------- derivation ---------------------------- */
       visible() {
-        return this.onlyDone
+        const base = this.onlyDone
           ? this.sessions.filter((x) => x.status === "completed")
           : this.sessions;
+        const key = this.groupKey;
+        if (!key) return base;
+        // The group's membership comes from the server (the ledger's own fields);
+        // the page only filters by the ids it was given.
+        const group = (this.groups || []).find((g) => g && g.key === key);
+        if (!group) return [];
+        const ids = new Set(Array.isArray(group.sessions) ? group.sessions : []);
+        return base.filter((x) => ids.has(x.id));
       },
 
       /**
@@ -419,12 +431,110 @@
     return parts.length <= 2 ? s : "…/" + parts.slice(-2).join("/");
   }
 
+  /** The text for a reading the server did not have (never 0). */
+  const NOT_MEASURED = "not measured";
+
+  /** A number that may be missing: missing → "not measured", never 0. */
+  function maybeNum(v) {
+    return typeof v === "number" && Number.isFinite(v) ? U.fmtInt(v) : NOT_MEASURED;
+  }
+
+  /**
+   * A hash, shown short (8 characters) and copyable in full.
+   *
+   * 为什么只显示 8 位：16 位的哈希在表格里会换行；完整值在 title 里，复制的是**完整值**
+   * （短哈希无法用来判定两次运行是不是同一件事）。
+   */
+  function hashText(value) {
+    const s = value === null || value === undefined ? "" : String(value);
+    if (!s) return { text: NOT_MEASURED, copy: "", short: false };
+    return { text: s.length > 8 ? s.slice(0, 8) + "…" : s, copy: s, short: s.length > 8 };
+  }
+
+  /**
+   * The run's manifest — "what this run actually was" (B6).
+   *
+   * 这三组回答了"两局能不能比"：**同一个世界**（seed + gameVersion）、
+   * **同一副脚手架**（scaffoldHash / payloadShapeHash）、**有没有被闸住**
+   * （tokenLimit / costLimit）。
+   *
+   * 铁律: 缺读数写 `not measured`（不是 0）；`servedModel` 与请求的模型不同就**标出来**
+   * （网关替身会让两者不同，而那一行的"模型"到底是谁，是比较的前提）。
+   */
+  function manifestRows(session) {
+    const row = session || {};
+    const m = row.manifest || {};
+    const requested = m.model || (row.llm && row.llm.model) || "";
+    const served = m.servedModel || "";
+    const substituted = Boolean(served && requested && served !== requested);
+    const out = [];
+    const push = (k, v, extra) => out.push(Object.assign({ k, v }, extra || {}));
+
+    push("Seed", row.seed === null || row.seed === undefined ? NOT_MEASURED : String(row.seed));
+    push("Game version", row.gameVersion ? String(row.gameVersion) : NOT_MEASURED, {
+      title: "the same seed on another OpenTTD build is another world",
+    });
+    push("Model (requested)", requested || NOT_MEASURED);
+    push("Model (served)", served || NOT_MEASURED, {
+      tone: substituted ? "warn" : "",
+      title: substituted ? `the provider answered with "${served}" instead of "${requested}"` : "",
+    });
+    push("API", m.api || NOT_MEASURED);
+    push("Context window", maybeNum(m.contextWindow));
+    push("Price table", m.costKnown === false ? "none (cost not measured)" : m.costKnown === true ? "known" : NOT_MEASURED);
+    push("Backend", m.backend || NOT_MEASURED);
+    push("Thinking level", m.thinkingLevel || NOT_MEASURED);
+    push("Tool budget", maybeNum(m.toolBudget));
+    const scaffold = hashText(m.scaffoldHash);
+    push("Scaffold hash", scaffold.text, { copy: scaffold.copy, title: scaffold.copy ? `full: ${scaffold.copy}` : "" });
+    const payload = hashText(m.payloadHash);
+    push("Payload hash", payload.text, { copy: payload.copy, title: payload.copy ? `full: ${payload.copy}` : "" });
+    const shape = hashText(m.payloadShapeHash);
+    push("Payload shape", shape.text, {
+      copy: shape.copy,
+      title: shape.copy ? `the same question apart from the world's numbers — full: ${shape.copy}` : "",
+    });
+    push("Payload requests", maybeNum(m.payloadCount));
+    push("Token cap", m.tokenLimit === null || m.tokenLimit === undefined ? "none" : maybeNum(m.tokenLimit));
+    push("Cost cap", m.costLimit === null || m.costLimit === undefined ? "none" : maybeNum(m.costLimit));
+    return out;
+  }
+
+  /**
+   * The manifest's identity, as list chips (B6).
+   *
+   * 列表是**索引**：一局“是哪一局”得在那里就看得见。模型名是最重要的一个
+   * （网关替身时标出来），其余（seed/backend）已经在列表行里。
+   */
+  function manifestChips(session) {
+    const row = session || {};
+    const m = row.manifest || {};
+    const out = [];
+    const requested = m.model || (row.llm && row.llm.model) || "";
+    const served = m.servedModel || "";
+    if (served) {
+      const substituted = Boolean(requested && served !== requested);
+      out.push({
+        k: "model",
+        v: substituted ? `${served} (not ${requested})` : served,
+        tone: substituted ? "warn" : "dim",
+        title: substituted ? `the provider answered with "${served}" instead of "${requested}"` : "",
+      });
+    }
+    if (m.backend) out.push({ k: "backend", v: String(m.backend), tone: "dim" });
+    const shape = hashText(m.scaffoldHash);
+    if (shape.copy) out.push({ k: "scaffold", v: shape.text, tone: "dim", title: `full: ${shape.copy}` });
+    return out;
+  }
+
   window.SessionsView = {
     create: create,
     TOKEN_SLICES: TOKEN_SLICES,
     STATUS_INFO: STATUS_INFO,
     shortPath: shortPath,
     runFacts: runFacts,
+    manifestRows: manifestRows,
+    manifestChips: manifestChips,
     trainingSeries: trainingSeries,
     trainingChartSvg: trainingChartSvg,
   };

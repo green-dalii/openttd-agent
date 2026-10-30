@@ -40,35 +40,31 @@
 ```
 src/web/public/
   pages/                 # 一个页面一个 HTML（只放 HTML）
-    live.html            #   Live  ：实时游戏 + agent 遥测
-    providers.html       #   Providers：provider 目录选型 + 密钥
-    sessions.html        #   Sessions：历史局管理 / 复盘
-  assets/
-    css/style.css        # 全部样式（单文件，无预处理器）
-    js/
-      common.js          # 共享：DOM/格式化/事件分类/WS 客户端/绘图/导航
-      live.js            # 页面脚本：live.html
-      providers.js       # 页面脚本：providers.html
-      sessions.js        # 页面脚本：sessions.html
+    live.html            #   Run      ：实时游戏 + agent 遥测
+    compare.html         #   Compare  ：模型比较（四轴 / 配对判定）
+    providers.html       #   Configure：provider 选型 + 密钥 + 运行旋钮
+    sessions.html        #   History  ：历史局管理 / 复盘 / 记忆
+  assets/css/style.css   # 全部样式（单文件，无预处理器）
+  assets/js/*.js         # common.js（共享）+ 每页一个脚本
 ```
 
 **URL 路由表**（`src/web/server.ts` 的 `PAGES`，单一事实源）:
 
 | URL | 文件 | 职责 |
 |---|---|---|
-| `GET /` | `pages/live.html` | Live：实时游戏 + agent 遥测 |
-| `GET /providers` | `pages/providers.html` | Providers：provider 目录选型 + 密钥（独立子页） |
+| `GET /` | `pages/live.html` | Run：实时游戏 + agent 遥测 |
+| `GET /compare` | `pages/compare.html` | Compare：模型比较（四轴 / 配对判定） |
+| `GET /providers` | `pages/providers.html` | Configure：provider 选型 + 密钥 + 运行旋钮 |
+| `GET /sessions` | `pages/sessions.html` | History：历史局管理 / 复盘 / 记忆 |
 | `GET /llm` | *(别名 → `/providers`)* | v0.3 的旧 URL，保留以免书签/文档失效 |
-| `GET /sessions` | `pages/sessions.html` | Sessions：历史局管理 / 复盘 |
+| `GET /evolution` | *(302 → `/sessions#memory`)* | 旧的 "Evolution" 页 → History 的记忆区 |
 
-- URL 保持**扁平**（`/providers` 而非 `/pages/providers.html`）——文件可自由挪动，链接不会断。
-- 更名/迁移页面时，把旧 URL 加进 `PAGE_ALIASES`（服务端 301 式内部重写，不产生 404）。
-- 新增一个页面 = `pages/` 加一个 HTML + `assets/js/` 加一个脚本 + `PAGES` 加一行。
-- 强制约束（单测锁定 `web-api.test.ts`）:
-  - `public/` 根目录**不得**再有散落的 html/css/js；
-  - 每个 `PAGES` 目标文件必须存在且返回 200（路由不会静默 404）；
-  - HTML 里的每个 `/xxx` 引用必须指向真实存在的文件（防手误改路径）；
-  - `pages/**` 只放 `.html`、`assets/css/**` 只放 `.css`、`assets/js/**` 只放 `.js`。
+- 导航按**四个问题**（CoDesign §4）：Run / Compare / History / Configure。URL 保持**扁平**（`/providers` 而非 `/pages/providers.html`）——文件可自由挪动，链接不会断。
+- 更名/迁移页面时：内容没变就加进 `PAGE_ALIASES`（内部重写），**内容搬走了**就用
+  `PAGE_REDIRECTS`（302）——不留第二份，两份必然漂移。
+- 强制约束（单测锁定 `web-api.test.ts`）: `public/` 根目录**不得**再有散落的 html/css/js；
+  每个 `PAGES` 目标文件必须存在且返回 200；HTML 里的每个 `/xxx` 引用必须指向真实存在的文件；
+  `pages/**` 只放 `.html`、`assets/css/**` 只放 `.css`、`assets/js/**` 只放 `.js`。
 - **禁止引入构建链**（无 bundler/预处理/外部 CDN，离线可用）。
 
 ---
@@ -293,13 +289,19 @@ GET /api/sessions
 
 GET /api/sessions/:id
 → 200 {
-    meta: SessionMeta,
+    meta: SessionMeta,                      // 含完整 manifest + gameVersion
     telemetry: TelemetrySnapshot,           // 该局结束时的最终遥测
     events: GameEvent[],                    // 该局最近 N 条（默认 300，可 ?limit=）
     audit: { type: string; ts: number; [k: string]: unknown }[]   // audit.jsonl 解析
   }
 → 404 { error }
+
+GET /api/sessions/groups?by=model|seed|backend
+→ 200 { by: string, groups: [{ key, count, sessions: string[] }] }
+→ 400 { error }                            // 未知的分组维度
 ```
+分组键**由服务端给**（读度量行自己的字段）："哪个模型"有两个来源（请求的 vs 实际服务的），
+页面自己按字符串猜就会和账本对不上。`model` 用 `manifest.servedModel`。
 
 ### 3.4 旧字段的处置
 
@@ -579,13 +581,11 @@ POST /api/run/preview
 → 404 { error }                                       // 服务端未装配 run hook
 ```
 
-**`NextRunPreview` 的字段名 = manifest 的字段名**（同名同义）：
-
-- 解析后的模型事实：`model` / `api` / `contextWindow` / `costKnown`
-  （不是配置文件里可能过时的值）。
-- 本局生效的旋钮：`thinkingLevel` / `toolBudget` / `tokenLimit` / `costLimit` / `backend`。
-- `scaffoldHash`：提示词 + 工具 schema 的指纹（**不用开游戏**就能算出）。
-- 仅预览有的补充事实：`providerId` / `maxTokens` / `seed` / `gameDays` / `scenario` / `memoryArm`。
+**`NextRunPreview` 的字段名 = manifest 的字段名**（同名同义）：解析后的模型事实 `model` /
+`api` / `contextWindow` / `costKnown`（不是配置文件里可能过时的值）；本局生效的旋钮
+`thinkingLevel` / `toolBudget` / `tokenLimit` / `costLimit` / `backend`；`scaffoldHash`
+（提示词 + 工具 schema 的指纹，**不用开游戏**就能算出）；仅预览有的补充事实 `providerId` /
+`maxTokens` / `seed` / `gameDays` / `scenario` / `memoryArm`。
 
 跑完才知道的字段（`servedModel` / `payloadHash` / `payloadShapeHash` / `payloadCount`）
 **不在预览里**：预览只承诺它能兑现的（D79）。**预览与启动用同一条闸**：无法执行的花费上限
