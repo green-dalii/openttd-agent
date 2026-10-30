@@ -348,7 +348,7 @@ describe("图表尺寸回读守卫", () => {
  * 本测试守住这个结构（往任何页面重新手写 h1/nav 都会红）。
  */
 describe("页头结构：单一来源", () => {
-	const pages = ["live", "providers", "sessions", "evolution"];
+	const pages = ["live", "compare", "providers", "sessions"];
 	for (const page of pages) {
 		it(`pages/${page}.html 只声明 brand 占位符，不手写标题/导航`, () => {
 			const html = readFileSync(join(PUBLIC_DIR, "pages", `${page}.html`), "utf8");

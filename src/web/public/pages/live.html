@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>openttd-agent · live</title>
+<title>openttd-agent · run</title>
 <link rel="stylesheet" href="/assets/css/style.css" />
 <!-- Vendored third-party (uPlot, MIT, zero dependencies). Synced by `pnpm run vendor`. -->
 <link rel="stylesheet" href="/assets/vendor/uplot/uPlot.min.css" />
@@ -734,10 +734,10 @@
       </ul>
     </section>
 
-    <!-- What this game was TOLD. Kept on the Live page (not just the Evolution
-         page) because it is per-game context: without it, the agent's decisions
-         are not explainable, and `lessonsInjected: 1` in the ledger is an
-         unverifiable count. -->
+    <!-- What this game was TOLD. Kept on the Run page (not just in History's
+         Memory section) because it is per-game context: without it, the agent's
+         decisions are not explainable, and `lessonsInjected: 1` in the ledger is
+         an unverifiable count. -->
     <!-- Shown whenever the server has told us what this game was given, INCLUDING
          the zero case: "nothing" is the control arm of the experiment and is a
          statement worth reading, not a blank. Hidden only before any snapshot

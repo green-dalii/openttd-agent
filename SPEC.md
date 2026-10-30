@@ -331,7 +331,7 @@ OpenTTD 有**两个动作面**，能力完全不同：
 | **D 观测面与测量** | 10.1 动作面 · 10.53 NEXT-2 N2-1：线路经济… · 10.55 NEXT-2 N2-4：主指标换… · 10.59 工具必须能观测自己的效果：rco… · 10.65 流量指标的测量缺陷：`deliv… · 10.67 校准 #2：仪器缺陷不是方差来源… · 10.71 G2 落地：把"决定结局的那个过… · 10.72 S0 oracle 梯度：杠杆存… · 10.73 S1/G4 落地：预建场景 · 10.98 城镇与存档：两条"数据一直在、只… · 10.100 P1+P2 实测：产业/货种/公… · 10.105 车队数必须跨线路去重：同屏两个"… · 10.114 D1a：模型看得见自己这局的分 | 14 |
 | **E 记忆与进化** | 10.22 RL Harness 范围 · 10.31 M3 对照实验结果 · 10.34 M3 第二次 A/B：把决策权交… · 10.41 决策→结果账本接入反思 · 10.42 M3 A/B 第三次重跑：手眼账… · 10.43 为什么记忆无收益：全链路审计 · 10.76 R2 实施结果：经验 = 带实测… · 10.77 R2b 实施结果：反思改走 Ag… · 10.78 M1：反思产出率变成可诊断、可重… · 10.79 M2：把计分规则作为事实写进提示… · 10.80 M3 能力盘点：环境到底允许 a… · 10.82 第一性原理复检：能力面、空缺与协… · 10.84 M3-1b：车队杠杆真正的两处缺… · 10.85 第一性原理复审：离"自主 + 自… · 10.86 M3-2a：每线路登记表 + 退… · 10.87 M3-2b：披露粘滞——让事件相… · 10.88 M3-2c：车队请求对已登记的旧… · 10.89 M4a：`recall` 按需检… · 10.91 AB-1：`capabiliti… | 19 |
 | **F 实验方法与统计** | 10.32 第一性原理：M3 测不出差异，是… · 10.33 把决策权交还 agent：城镇对… · 10.52 每局存档+ M3 第五/六次重跑 · 10.56 N2-5 首轮 A/B 判废：臂… · 10.57 N2-5 有效轮次与两个结论 · 10.58 N2-5 oracle 探测：任… · 10.62 NEXT-2 收尾：首个干净判据… · 10.63 校准轮：窗口是方差的主因，实验设… · 10.64 顺序检验 block #1：CI… · 10.70 G3 落地：车队请求的静默无效变… · 10.81 M3-1 真机结果：车队杠杆被阶… · 10.112 P2-3：统计预登记 · 10.113 P2-1/P2-2 代码侧：实验… | 14 |
-| **G 产品面与前端** | 10.17 v0.3.0 实现: Dashb… · 10.94 Live 页面运行期的滚动失控与… · 10.95 图表渲染路径：三个真因与"图表健… · 10.96 长跑实测 · 10.97 uPlot 1.6.32 的交互… · 10.104 图表手势、区间读数与列表索引 · 10.117 一份运行配置真值 · 10.118 一份运行配置解析器 | 6 · 10.119 页面起一局：旋钮、预览与“预览即承诺”… · 10.120 因果时间线：一次决策一行，四段证据由 job 连接… · 10.121 Compare 视图是投影：四轴/判定/排除都不是页面算的… · 10.122 结局词表封闭，错误的 hint 只有一份… |
+| **G 产品面与前端** · 10.123 一局能自证：manifest 全字段 + 分组键来自账本… | 10.17 v0.3.0 实现: Dashb… · 10.94 Live 页面运行期的滚动失控与… · 10.95 图表渲染路径：三个真因与"图表健… · 10.96 长跑实测 · 10.97 uPlot 1.6.32 的交互… · 10.104 图表手势、区间读数与列表索引 · 10.117 一份运行配置真值 · 10.118 一份运行配置解析器 | 6 · 10.119 页面起一局：旋钮、预览与“预览即承诺”… · 10.120 因果时间线：一次决策一行，四段证据由 job 连接… · 10.121 Compare 视图是投影：四轴/判定/排除都不是页面算的… · 10.122 结局词表封闭，错误的 hint 只有一份… |
 | **H 里程碑与实施流水** | 10.6 M0 实测结果 · 10.7 M1 实测结果 · 10.8 里程碑进度 · 10.9 M1.5 崩溃调查 | 5 |
 
 ### 10.1 动作面（回答"Admin Port 做不到的操作怎么办"）
@@ -1240,17 +1240,9 @@ compaction 冲突）在 `docs/HARNESS-MIGRATION.md` §3（带坐标），此处�
 ### 10.119 页面起一局：旋钮、预览与"预览即承诺"（B2，2026-10-25）
 
 - 事实：**旋钮只有一处规则**（`src/agent/run-knobs.ts`）：thinking 档位与工具预算走
-  `resolveScaffoldKnobs`，花费上限走 `resolveRunLimits`——与 CLI 同源。页面字符串**原样**
-  进服务端（`"12abc"` 不被悄悄改成 12）；空字段 = 不改，沿用进程设置。
-- 事实：**预览的字段名 = manifest 的字段名**（`PREVIEW_MANIFEST_FIELDS`，10 个）。为此
-  manifest 补了 `model`/`api`/`contextWindow`/`costKnown`——否则"逐字段相同"无从比对
-  （D79：缺的一方要补，不许把预览悄悄缩小）。**跑完才知道的事实不在预览里**：
-  `servedModel`（provider 实际应答名）与 `payload*`。`scaffoldHash`
-  （`7956ab6d8c86fa60`）**不用开游戏就能算出**：指纹只覆盖工具的名称/描述/schema。
-- 事实：**无法执行的花费上限在启动前被拒**（无价目表的模型 + 费用上限），**预览也拒**
-  ——同一条闸（`costCapProblem`），错误码 `unpriced_with_cost_cap` → HTTP **400**（坏请求，
-  不是 409 冲突）。**harness 后端受进程门禁**：页面只能在进程允许时选它，否则 400 +
-  `AGENT_HARNESS=1`。
+  `resolveScaffoldKnobs`，花费上限走 `resolveRunLimits`——与 CLI 同源。页面字符串**原样**进服务端（`"12abc"` 不被悄悄改成 12）；空字段 = 不改，沿用进程设置。
+- 事实：**预览的字段名 = manifest 的字段名**（`PREVIEW_MANIFEST_FIELDS`，10 个）。为此 manifest 补了 `model`/`api`/`contextWindow`/`costKnown`（D79：缺的一方要补，不许把预览悄悄缩小）。**跑完才知道的事实不在预览里**：`servedModel`（provider 实际应答名）与 `payload*`。`scaffoldHash`（`7956ab6d8c86fa60`）**不用开游戏就能算出**：指纹只覆盖工具的名称/描述/schema。
+- 事实：**无法执行的花费上限在启动前被拒**（无价目表的模型 + 费用上限），**预览也拒**——同一条闸（`costCapProblem`），错误码 `unpriced_with_cost_cap` → HTTP **400**（坏请求，不是 409 冲突）。**harness 后端受进程门禁**：页面只能在进程允许时选它，否则 400 + `AGENT_HARNESS=1`。
 - 真机（隔离 data dir，provider `minimax-cn`、模型 `MiniMax-M3.1-Flash`）：页面填
   seed 4242 / gameDays 40 / prebuilt / control / thinking high / toolBudget 5 / tokenLimit 9000
   → 点 Start → 跑完的 `meta.json` 与**页面显示的预览 10 个字段逐字段相同**；token 上限**真的
@@ -1265,10 +1257,7 @@ compaction 冲突）在 `docs/HARNESS-MIGRATION.md` §3（带坐标），此处�
 - 事实：**一行 = 一次决策**（`src/agent/causal-timeline.ts`）：四段 = decision（触发/时刻/
   目标）→ tools → job/相位 → effect（本窗口增量）。归属**靠窗口**（上一次决策之后、下一次
   决策之前）；**连接键是 `job`**（D3a）。
-- 事实：**GS 相位必须归档**才可复盘：`signal-hub` 把每个非心跳 exec 事件写成 `gs_exec`
-  审计记录（此前只在实时流里，跑完的局就查不到了）。**effect = 与下一次决策快照的差**
-  （钱/收入/车/站/交付/游戏日）；最后一个决策没有"下一个快照" ⇒ effect = `null`
-  （**没测到**，不是"什么都没变"，D60）。**会话 hook 只有一处构造**
+- 事实：**GS 相位必须归档**才可复盘：`signal-hub` 把每个非心跳 exec 事件写成 `gs_exec` 审计记录（此前只在实时流里，跑完的局就查不到了）。**effect = 与下一次决策快照的差**（钱/收入/车/站/交付/游戏日）；最后一个决策没有"下一个快照" ⇒ effect = `null`（**没测到**，D60）。**会话 hook 只有一处构造**
   （`sessionHooks(dataDir)`）：runner 的 `web.attach({sessions})` 会**替换**掉 server 的 hook
   ——两份构造曾让时间线在**run 一开始就从页面上消失**；`repo-hygiene` 有守卫。
 - 真机（隔离 data dir，`minimax-cn` / `MiniMax-M3.1-Flash`）：freeform 局里决策 2 下了 4 个
@@ -1278,21 +1267,28 @@ compaction 冲突）在 `docs/HARNESS-MIGRATION.md` §3（带坐标），此处�
 
 - 事实：`GET /api/compare` 是**只读**的：四轴来自 `buildScorecard`，配对判定来自
   `pairedComparison`，排除原因来自 `metricExclusion`——**页面一个数都不重算、也不下判断**。
-  分组用**实际服务的模型**（`manifest.servedModel`），请求的模型另列（`requestedModels`）⇒
-  网关替换**可见**；每局能下钻到 History（`/sessions?run=<id>`）。
+  分组用**实际服务的模型**（`manifest.servedModel`）⇒ 网关替换**可见**；每局能下钻到
+  History（`/sessions?run=<id>`）。
 - 真机（隔离 data dir，`minimax-cn` / `MiniMax-M3.1-Flash` + 本地 stub，各 2 个 seed）：两模型
-  × 两 seed 出四轴 + 配对判定（2 对 ⇒ "not determinable"），无价目表一侧 `Cost / run` 写
-  `not measured`。
+  × 两 seed 出四轴 + 配对判定（2 对 ⇒ "not determinable"），无价目表一侧写 `not measured`。
 
 ### 10.122 结局词表是**封闭**的，错误的 hint 也只有**一份**（B5，2026-10-25）
 
 - 事实：结局词表**封闭**（`OUTCOME_CLASSES`，十类不多不少），名字与含义由**服务端**给
-  （`describeOutcome`）：页面自己写一份词表 = 两份实现。最可行动的一类（`refused`）此前不可见。
-- 事实：一局的结局类**派生而非存储**（`classifyOutcome`）：读数缺失 ⇒ `unknown`（"没测到"，不是"什么都没发生"，D60）；History 每局带这个类，Compare 每模型带**按类计数**。
+  （`describeOutcome`）：页面自己写一份词表 = 两份实现。一局的结局类**派生而非存储**
+  （`classifyOutcome`）：读数缺失 ⇒ `unknown`（"没测到"，D60）；History 每局带这个类，
+  Compare 每模型带**按类计数**。
 - 事实：失败是 `{problems: [{code, message, hint}]}`，且**每个 code 只有一个规范 hint**
   （`problemHint`）：生产方只写"发生了什么"（哪个 provider、哪个 URL）；`endpoint_401`/
   `endpoint_403`/`no_model_endpoint`/`no_credential`/`provider_unavailable` 都按 HTTP 状态判定
   （**不对错误文案做正则**）。刷新端点的状态码说明**是谁的错**：400 = 请求没法照做、502 =
-  上游 provider 失败；`repo-hygiene` 有守卫禁止前端再用正则猜 401。
+  上游失败；`repo-hygiene` 有守卫禁止前端再用正则猜 401。
 - 真机（隔离 data dir，坏 key + 7 个不同结局的局）：刷新返回 502 + 三个带 code 的 problem；Compare 与 History 画出八种结局类（真实 Chrome 0 console）。
 
+### 10.123 一局能自证：manifest 全字段 + 分组键来自账本 + 导航按四个问题（B6，2026-10-29）
+
+- 事实：History 的单局详情显示**完整 manifest**：同一个世界（seed + gameVersion）、同一副脚手架（scaffoldHash / payloadShapeHash）、有没有被闸住（tokenLimit / costLimit）；**servedModel 与请求的模型不同就标出来**（网关替身），哈希显示 8 位、**复制的是完整值**。
+- 事实：分组（model / seed / backend）的**键由服务端给**（`historyGroups` 读度量行自己的字段）："哪个模型"有两个来源（请求的 vs 实际服务的），页面自己按字符串猜就会和账本对不上。
+- 事实：导航按**四个问题**（Run / Compare / History / Configure）；"Evolution" 改名 **Memory** 并搬进 History（它管的是**记忆**），`/evolution` → 302 `/sessions#memory`（一份，不留副本）。
+- 事实：训练面板此前取的是**从未存在**的 `/api/metrics` ⇒ 一直是空态（还谎称"账本里没有"）；账本一直挂在 `/api/evolution` 的 `metrics` 里。
+- 真机（隔离 data dir，3 局，其中一局被网关替身）：详情列出全部字段、替身被标黄、复制拿到完整哈希；分组把列表从 3 局缩到 1 局；Memory 区在 History 里；真实 Chrome 0 console。

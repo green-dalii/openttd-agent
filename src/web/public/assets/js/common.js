@@ -810,21 +810,29 @@ function connectWs(handlers) {
 function renderChrome() {
   const el = document.querySelector("[data-brand]");
   if (!el) return;
+  // Idempotent: the History page carries two Alpine roots (the runs and the
+  // memory section), and both call this. Rendering twice would rewrite the
+  // same header with the same content - harmless, but wasteful.
+  if (el.getAttribute("data-chrome") === "1") return;
+  el.setAttribute("data-chrome", "1");
   const page = el.getAttribute("data-brand") || "";
-  const active = { live: "/", compare: "/compare", providers: "/providers", sessions: "/sessions", evolution: "/evolution" }[page];
+  const active = { live: "/", compare: "/compare", providers: "/providers", sessions: "/sessions" }[page];
+  // The four questions (CoDesign §4): Run / Compare / History / Configure.
+  // The brand label follows the nav label, so the page says the same word as
+  // the tab that leads to it.
+  const label = { live: "Run", compare: "Compare", providers: "Configure", sessions: "History" }[page] || page;
   // 注意：原先 evolution 页的 `.brand` 里有个 `#app-version` 元素，而
   // `window.APP_VERSION` **从来没有任何地方赋值** —— 那段是死代码（版本永远不显示）。
   // 统一页头时删掉，而不是把它复制到另外三页。
-  el.innerHTML = `<h1>openttd-agent <span class="dim">${esc(page)}</span></h1>` + renderNav(active);
+  el.innerHTML = `<h1>openttd-agent <span class="dim">${esc(label)}</span></h1>` + renderNav(active);
 }
 
 function renderNav(active) {
   const items = [
-    ["/", "Live"],
+    ["/", "Run"],
     ["/compare", "Compare"],
-    ["/providers", "Providers"],
-    ["/sessions", "Sessions"],
-    ["/evolution", "Evolution"],
+    ["/sessions", "History"],
+    ["/providers", "Configure"],
   ];
   return `<nav class="nav">${items
     .map(([href, label]) =>
