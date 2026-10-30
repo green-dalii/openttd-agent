@@ -42,7 +42,7 @@ interface Model {
 	providerOptions(): { id: string; group: string; sub: string; search: string }[];
 	modelOptions(): { id: string; search: string; sub?: string }[];
 	modelsFreshness(): string;
-	refreshHint(error: string): string;
+	refreshProblems(problems: unknown): { code: string; message: string; hint: string }[];
 	setMsg(t: string, k: string): void;
 }
 
@@ -103,18 +103,21 @@ describe("模型列表刷新（P5：列表不能只是构建时的快照）", ()
 		expect(opt.sub).toContain("price unknown");
 	});
 
-	it("turns a 401 into an action instead of a raw status", () => {
+	it("draws the reasons the server sent, with their code and action", () => {
+		// B5: the page renders by code. The hint is the server's canonical
+		// wording for that code - it is not guessed from the message.
 		const m = load();
-		expect(m.refreshHint("https://x/v1/models → HTTP 401")).toMatch(/re-enter it/i);
+		const rows = m.refreshProblems([
+			{ code: "endpoint_401", message: "https://x/v1/models → HTTP 401", hint: "re-enter the key" },
+		]);
+		expect(rows).toEqual([
+			{ code: "endpoint_401", message: "https://x/v1/models → HTTP 401", hint: "re-enter the key" },
+		]);
 	});
 
-	it("treats 404 as a normal outcome: the snapshot stays authoritative", () => {
-		const m = load();
-		expect(m.refreshHint("https://x/anthropic/models → HTTP 404")).toMatch(/no model-list endpoint/i);
-	});
-
-	it("says nothing extra when there is no error", () => {
-		expect(load().refreshHint("")).toBe("");
+	it("shows nothing when there was no problem", () => {
+		expect(load().refreshProblems([])).toEqual([]);
+		expect(load().refreshProblems(null)).toEqual([]);
 	});
 });
 

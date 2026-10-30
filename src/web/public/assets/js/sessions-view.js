@@ -196,6 +196,21 @@
     const out = [];
     const int = (v) => (v === null || v === undefined || v === "" ? "—" : U.fmtInt(v));
 
+    // ⓪ B5：**具名**结果类（服务端判定，页面照拄）。列表里的第一颗珠子就是
+    //    “这局是哪一类”——十类里最可行动的一类（refused）以前根本看不见。
+    if (o.class) {
+      const cls = String(o.class);
+      const tone =
+        cls === "delivered"
+          ? "ok"
+          : cls === "paused_by_agent" || cls === "world_frozen"
+            ? "bad"
+            : cls === "unknown"
+              ? "dim"
+              : "warn";
+      out.push({ k: "outcome", v: String(o.label || cls), tone, title: String(o.hint || "") });
+    }
+
     // ① 交付量（本项目的主结果；跨季度积分的 deliveredRun 才是可比的量）
     if (o.deliveredRun !== undefined && o.deliveredRun !== null) {
       out.push({

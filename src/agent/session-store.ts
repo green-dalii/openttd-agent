@@ -13,6 +13,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync, append
 // 存档文件名规则只有一处实现（`savegameName`）：这里复用它，避免两套命名分叉。
 import { savegameName } from "./runner-helpers.js";
 import { appendMetric } from "../evolution/store.js";
+import { classifyOutcome, describeOutcome } from "../evolution/outcome.js";
 import { buildCausalTimeline, type TimelineRow } from "./causal-timeline.js";
 import path from "node:path";
 import type { TelemetrySnapshot } from "./telemetry.js";
@@ -692,14 +693,49 @@ export function sessionHooks(dataDir: string): {
 	timeline: (id: string, opts: { limit?: number; offset?: number }) => SessionTimelinePage | null;
 } {
 	return {
-		list: () => listSessions(dataDir).map((s) => ({ ...s, savegame: savegameInfo(dataDir, s.id) })),
+		list: () => listSessions(dataDir).map((s) => ({ ...s, savegame: savegameInfo(dataDir, s.id), outcome: withOutcomeClass(s) })),
 		read: (id, limit) => {
 			const one = readSession(dataDir, id, limit ? { limit } : {});
-			return one ? { ...one, savegame: savegameInfo(dataDir, id) } : one;
+			return one
+				? { ...one, savegame: savegameInfo(dataDir, id), outcome: withOutcomeClass(one.meta) }
+				: one;
 		},
 		stageFile: (id, file) => readStageFile(dataDir, id, file),
 		timeline: (id, opts) => readSessionTimeline(dataDir, id, opts),
 	};
+}
+
+/**
+ * The session's outcome, **named** (B5).
+ *
+ * 派生而非存储：类由事实算出（`classifyOutcome`），所以它不可能与事实不一致；
+ * 名字与解释由服务端给（`describeOutcome`），页面不必自己写一份词表。
+ * 缺读数 → `unknown`（"没测到"），不是"什么都没发生"（D60）。
+ */
+function withOutcomeClass(meta: SessionMeta): SessionMeta["outcome"] & {
+	class?: string;
+	label?: string;
+	hint?: string;
+} {
+	const o = meta.outcome ?? {};
+	const t = meta.totals;
+	const d = describeOutcome(
+		classifyOutcome({
+			deliveredRun: o.deliveredRun ?? null,
+			constructionDone: o.constructionDone ?? null,
+			toolCalls: t?.toolCalls ?? null,
+			toolFailures: t?.toolFailures ?? null,
+			gsErrors: o.gsErrors ?? null,
+			reachedHorizon: o.reachedHorizon ?? null,
+			blockedByPause: o.blockedByPause ?? null,
+			worldFrozen: o.worldFrozen ?? null,
+			totalTokens: t?.usage?.totalTokens ?? null,
+			costTotal: t?.usage?.costTotal ?? null,
+			costKnown: t?.usage?.costKnown !== false,
+			manifest: meta.manifest ?? null,
+		}),
+	);
+	return { ...o, class: d.code, label: d.label, hint: d.hint };
 }
 
 /**

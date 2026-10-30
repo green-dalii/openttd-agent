@@ -706,3 +706,24 @@ button[disabled] { opacity: .45; cursor: not-allowed; }
 .cmp-sub { font-size: 11px; margin-top: 2px; }
 .cmp-ax { display: flex; gap: 6px; align-items: baseline; white-space: nowrap; }
 .cmp-ax .dim { font-size: 11px; }
+/* The outcome classes: a name, how many, and what it means. The hint is the
+   explanation, so it may wrap instead of pushing the table wider. */
+.cmp-oc { white-space: normal; }
+.cmp-oc .cmp-oc-hint { flex: 1 1 100%; opacity: 0.75; }
+/* The chips in the table cell: the name + the count, the meaning on hover. */
+.cmp-oc-row { display: flex; gap: .3rem; flex-wrap: wrap; margin-top: .35rem; }
+.chip { border: 1px solid var(--line-strong); border-radius: 999px; padding: 0 7px;
+        font-size: 11px; line-height: 1.7; white-space: nowrap; }
+/* The Outcomes panel: one row per class, with its meaning in full. */
+.oc-list { display: grid; gap: .9rem; }
+.oc-model { display: grid; gap: .2rem; }
+.oc-row { display: flex; gap: .6rem; align-items: baseline; font-size: 12.5px; }
+.oc-name { flex: 0 0 220px; }
+.oc-count { flex: 0 0 2rem; text-align: right; }
+.oc-hint { flex: 1 1 auto; min-width: 0; }
+
+/* Structured problems (B5): a code badge, what happened, what to do. */
+.problems { display: flex; flex-direction: column; gap: .35rem; margin-top: .4rem; }
+.problem { display: flex; gap: .5rem; align-items: baseline; flex-wrap: wrap; font-size: 12px; }
+.problem-msg { flex: 1 1 240px; min-width: 0; overflow-wrap: anywhere; }
+.problem-hint { flex: 1 1 100%; }

@@ -64,6 +64,15 @@
                   <template x-for="a in row.stability" :key="a.label">
                     <div class="cmp-ax"><span class="dim" x-text="a.label"></span><span x-text="a.text"></span></div>
                   </template>
+                  <!-- B5: the outcome classes as chips (the meaning is in the
+                       Outcomes panel below; the chip's tooltip carries it too). -->
+                  <div class="cmp-oc-row" x-show="row.outcomes.length">
+                    <template x-for="o in row.outcomes" :key="'oc-' + o.code">
+                      <span class="chip" :title="o.hint">
+                        <span x-text="o.label"></span><span class="dim" x-text="' ×' + o.count"></span>
+                      </span>
+                    </template>
+                  </div>
                 </td>
                 <td>
                   <div class="cmp-ax"><span x-text="row.growth.text"></span></div>
@@ -73,6 +82,32 @@
             </template>
           </tbody>
         </table>
+      </div>
+    </section>
+
+    <!-- ===================== ①b what the runs ended up being =====================
+         The ten outcome classes, with the server's own names and meanings.
+         A separate panel on purpose: the explanations are sentences, and
+         sentences inside a table cell squeeze the whole table. -->
+    <section class="panel" x-show="!loading && !error && hasRuns()">
+      <div class="panel-head">
+        <h2>Outcomes <span class="dim">每一类结果各有多少局（服务端判定）</span></h2>
+        <span class="dim" x-text="outcomeModelCount() + ' model(s)'"></span>
+      </div>
+      <div class="oc-list">
+        <template x-for="row in modelRows()" :key="'oclist-' + row.model">
+          <div class="oc-model">
+            <div class="cmp-model" x-text="row.model"></div>
+            <template x-for="o in row.outcomes" :key="'ocd-' + row.model + '-' + o.code">
+              <div class="oc-row">
+                <span class="oc-name" x-text="o.label"></span>
+                <span class="oc-count dim" x-text="o.count"></span>
+                <span class="dim oc-hint" x-text="o.hint"></span>
+              </div>
+            </template>
+            <p class="hint" x-show="!row.outcomes.length">No run of this model has an outcome yet.</p>
+          </div>
+        </template>
       </div>
     </section>
 

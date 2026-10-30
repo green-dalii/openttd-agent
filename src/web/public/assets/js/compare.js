@@ -91,6 +91,11 @@
         hasRuns() {
           return this.runRows().length > 0;
         },
+
+        /** How many models the Outcomes panel lists. */
+        outcomeModelCount() {
+          return this.modelRows().filter((r) => r.outcomes.length).length;
+        },
       };
     });
   });
