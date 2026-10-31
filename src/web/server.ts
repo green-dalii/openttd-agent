@@ -200,7 +200,7 @@ export interface WebServerOptions {
 export const PAGES: Record<string, string> = {
 	"/": "pages/live.html",
 	"/compare": "pages/compare.html",
-	"/providers": "pages/providers.html",
+	"/configure": "pages/providers.html",
 	"/sessions": "pages/sessions.html",
 };
 
@@ -209,7 +209,7 @@ export const PAGES: Record<string, string> = {
  * the providers page; kept so bookmarks and docs do not 404 (docs §0).
  */
 export const PAGE_ALIASES: Record<string, string> = {
-	"/llm": "/providers",
+	"/llm": "/configure",
 };
 
 /**
@@ -222,6 +222,10 @@ export const PAGE_ALIASES: Record<string, string> = {
  */
 export const PAGE_REDIRECTS: Record<string, string> = {
 	"/evolution": "/sessions#memory",
+	// The page used to be called "providers" because it listed providers and
+	// their models. It answers a different question now - "how is this run
+	// configured?" - so it is named after that. Old links still resolve.
+	"/providers": "/configure",
 };
 
 export class WebServer {
