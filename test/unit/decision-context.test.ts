@@ -185,10 +185,10 @@ describe("towns 必须在每轮决策上下文里（SPEC §10.34 的教训）", 
 		const ctx = buildDecisionContext({
 			trigger: "start",
 			now: { date: "1950-01-01", companies: [] },
-			towns: [{ id: 9, pop: 2279, x: 97, y: 162 }],
+			towns: [{ id: 9, pop: 2279, name: "Kingsport", x: 97, y: 162 }],
 			since: emptyTracker(),
 		});
-		expect(ctx.towns).toEqual([{ id: 9, pop: 2279, x: 97, y: 162 }]);
+		expect(ctx.towns).toEqual([{ id: 9, pop: 2279, name: "Kingsport", x: 97, y: 162 }]);
 	});
 
 	it("没有 towns 时不出现在上下文里（不伪造空数组）", () => {

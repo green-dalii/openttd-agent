@@ -102,6 +102,13 @@ export async function runDecision(
 		// alternative: towns reachable only via observe() meant the model sat through
 		// whole games without ever seeing its siting options.
 		towns: facts.towns,
+		// The cargo world rides along in EVERY decision context (SPEC §10.124):
+		// the score is cargo tonnes, and a model that cannot see the cargo has
+		// nothing to aim at. Same projection as observe() - one fact, one shape.
+		...(facts.cargoTotals.length > 0 || facts.industries.length > 0
+			? { cargo: { totals: facts.cargoTotals, industries: facts.industries } }
+			: {}),
+		...(facts.engines.length > 0 ? { engines: facts.engines } : {}),
 		// Same lesson, new signal (N2-2b): the economics of the lines already
 		// ordered ride along too, so "is my route actually working" is visible
 		// without a tool call. A route with no reading yet is simply absent.

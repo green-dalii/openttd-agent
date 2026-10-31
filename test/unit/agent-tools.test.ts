@@ -388,6 +388,35 @@ describe("observe tool", () => {
 		expect(res.details.ok).toBe(true);
 		expect((res.details.data as Record<string, unknown>).date).toBe("1950-03-01");
 	});
+
+	/**
+	 * 2026-10-30 真实模型局：模型自己说过"observe 输出没有 cargo 标签和车型表"，
+	 * 于是建了客运线，分数（货物吨数）读 0。**模型读的是 summary 文本**
+	 * （`toResult()` 只把 summary 放进 content[0]），所以事实必须出现在这段文本里。
+	 */
+	it("模型读到的文本里有城镇名字、货种总量、产业与车型（不然事实等于没给）", async () => {
+		const tool = observeTool(
+			deps({
+				state: fakeState({
+					towns: [{ id: 23, name: "Plunbury", population: 2419, x: 40, y: 169 }],
+					industries: [
+						{ id: 13, cargo: "COAL", name: "Lonningbury Coal Mine", produced: 168, transported: 0, stock: null },
+					],
+					cargoTotals: [{ label: "COAL", produced: 624, transported: 0 }],
+					engines: [{ id: 153, name: "Balogh Armoured Truck", speed: 48 }],
+				}),
+			}),
+		);
+		const text = textOf(await tool.execute("c1", {}));
+		expect(text).toContain("Plunbury");
+		expect(text).toContain("COAL");
+		expect(text).toContain("Lonningbury Coal Mine");
+		expect(text).toContain("Balogh Armoured Truck");
+		// 货种标签也要在——工具描述让模型从 observe() 读 cargo 标签。
+		expect(text).toContain("cargoTotals=");
+		expect(text).toContain("industries=");
+		expect(text).toContain("engines=");
+	});
 });
 
 describe("createTools", () => {

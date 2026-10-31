@@ -14,6 +14,7 @@
  */
 
 import { decodePhaseWindow } from "../game/executor-status.js";
+import type { CargoFact, EngineFact, IndustryFact } from "./world-facts.js";
 
 /**
  * One route as the model sees it. `townA/townB` are present only when the
@@ -43,6 +44,7 @@ import type { CompanyFact, TownFact } from "./world-facts.js";
  */
 export type TownSummary = TownFact;
 export type CompanyNumbers = CompanyFact;
+export type { CargoFact, EngineFact, IndustryFact };
 
 /**
  * Snapshot used as the baseline for the next delta.
@@ -103,6 +105,26 @@ export interface DecisionContextInput {
 	 * position - never a ranking beyond population order.
 	 */
 	towns?: TownSummary[];
+	/**
+	 * The cargo world: per-cargo totals and the industries the engine sampled.
+	 *
+	 * Present in EVERY decision context, for the same measured reason `towns` is
+	 * (SPEC §10.34): the score is **cargo tonnes**, so a model that cannot see
+	 * the cargo has nothing to aim at. Measured 2026-10-30 (a real model read the
+	 * score line, found no cargo in its world, built a passenger line, and the
+	 * delivery reading stayed 0). Facts only - labels, ids and counts.
+	 */
+	cargo?: {
+		/** Per-cargo totals across the map. */
+		totals: CargoFact[];
+		/** The industries the engine sampled (top by production). */
+		industries: IndustryFact[];
+	};
+	/**
+	 * The road engines the game offers (id/name/speed) - the options a fleet can
+	 * be built from. Present for the same reason as `cargo` (SPEC §10.124).
+	 */
+	engines?: EngineFact[];
 	/**
 	 * How much wall-clock session remains, in seconds. A FACT about the episode
 	 * boundary (like a human knowing how long the session lasts), not advice:
@@ -260,6 +282,11 @@ export function buildDecisionContext(input: DecisionContextInput): {
 	trigger: DecisionTrigger;
 	now: { date: string | null; companies: CompanyNumbers[] };
 	towns?: TownSummary[];
+	cargo?: {
+		totals: CargoFact[];
+		industries: IndustryFact[];
+	};
+	engines?: EngineFact[];
 	session?: {
 		/** Wall-clock seconds left; absent when no wall cap is set. */
 		secondsRemaining?: number;
@@ -338,6 +365,8 @@ export function buildDecisionContext(input: DecisionContextInput): {
 		now: input.now,
 		...(input.score ? { score: input.score } : {}),
 		...(input.towns ? { towns: input.towns } : {}),
+		...(input.cargo ? { cargo: input.cargo } : {}),
+		...(input.engines ? { engines: input.engines } : {}),
 		...(input.routes && input.routes.length > 0 ? { routes: input.routes } : {}),
 		...(input.executor ? { executor: input.executor } : {}),
 		...(input.session ? { session: input.session } : {}),

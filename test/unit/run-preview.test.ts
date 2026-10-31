@@ -87,10 +87,13 @@ describe("the preview and the manifest agree", () => {
 	it("predicts the scaffold hash without a running game (it is a source-level fact)", () => {
 		const knobs = resolveRunKnobs({}, DEFAULTS, ["agent"]);
 		const preview = buildNextRunPreview(knobs, SELECTION);
-		// The value the real run recorded (SPEC §10.116 / the live session of
-		// 2026-10-25). If a tool's description or schema ever depends on the
+		// The value the real run recorded (SPEC §10.124 / the live session of
+		// 2026-10-30). If a tool's description or schema ever depends on the
 		// world, this test fails instead of the preview quietly lying.
-		expect(preview.scaffoldHash).toBe("7956ab6d8c86fa60");
+		//
+		// 2026-10-30: 7956ab6d8c86fa60 → 3da8a64e1fbe818e（observe 的描述改写：
+		// 它现在说清楚自己带哪些事实——城镇名字、货种总量、产业、车型）。
+		expect(preview.scaffoldHash).toBe("3da8a64e1fbe818e");
 	});
 
 	it("keeps the cost-known fact honest (a live-only model has no price table)", () => {
