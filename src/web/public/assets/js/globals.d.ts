@@ -79,6 +79,8 @@ interface UiModule {
 	 * object without it and pages that load the bridge get it.
 	 */
 	renderChrome?(): void;
+	/** The language switch (EN / 中文), rendered once by the chrome. */
+	renderLangSwitch?(header: HTMLElement): void;
 }
 
 interface ChartsUtil {
