@@ -118,11 +118,15 @@ export interface GameMetric {
 	 */
 	income: number | null;
 	/**
-	 * Cargo delivered (N2-4b). The admin packet's `income` is NET of expenses, so
-	 * during construction it is always negative and inherits money's confound;
-	 * deliveredCargo measures whether anything actually moved - unaffected by
-	 * building costs and loans, and 0 is a legitimate reading (built, delivered
+	 * Cargo + passengers delivered (N2-4b). The admin packet's `income` is NET of
+	 * expenses, so during construction it is always negative and inherits money's
+	 * confound; deliveredCargo measures whether anything actually moved - unaffected
+	 * by building costs and loans, and 0 is a legitimate reading (built, delivered
 	 * nothing) distinct from a missing one.
+	 *
+	 * 口径：它是 OpenTTD **按货种的交付数组的求和**（`cur_economy.delivered_cargo`），
+	 * 客运（CT_PASSENGERS）也在里面 ⇒ 这个数**同时含货物与客运**，不是纯货物吨数。
+	 * 按货种拆分另有来源（GS 的 cargo monitor），口径不同，不可与之相加。
 	 */
 	delivered: number | null;
 	/** Integrated past the quarterly reset; the comparable flow outcome (SPEC §10.65). */
