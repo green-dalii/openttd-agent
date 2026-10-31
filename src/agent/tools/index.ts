@@ -43,7 +43,7 @@ export function observeTool(deps: AgentDeps): AgentTool<typeof ObserveSchema, Ac
 		name: "observe",
 		label: "Observe Game State",
 		description:
-			"Read the current normalized game state: date, companies (money/loan/income/vehicles/stations), and the candidate towns (id, population, x, y) that build_bus_route can connect.",
+			"Read the current normalized game state: date, companies (money/loan/income/vehicles/stations), the candidate towns (id, name, population, x, y) that build_bus_route can connect, the cargo world (per-cargo produced/transported totals and the industries the engine sampled, with their cargo label and id), and the road engines a fleet can be built from (id/name/speed).",
 		parameters: ObserveSchema,
 		execute: async () => {
 			const snap = deps.state.snapshot();
@@ -58,9 +58,17 @@ export function observeTool(deps: AgentDeps): AgentTool<typeof ObserveSchema, Ac
 				// anything left in `details` is effectively invisible. Putting the
 				// candidates here is what turns "build a route" from a single
 				// button press into a choice (SPEC §10.32).
+				//
+				// The cargo facts belong here for the same reason (SPEC §10.124):
+				// the score is cargo tonnes, and until the cargo facts were
+				// visible the model had no cargo to aim at - it built a passenger
+				// line and the delivery reading stayed 0.
 				summary:
 					`date=${facts.date ?? "?"} companies=${JSON.stringify(facts.companies)} ` +
-					`towns=${JSON.stringify(facts.towns)}`,
+					`towns=${JSON.stringify(facts.towns)} ` +
+					`cargoTotals=${JSON.stringify(facts.cargoTotals)} ` +
+					`industries=${JSON.stringify(facts.industries)} ` +
+					`engines=${JSON.stringify(facts.engines)}`,
 				data: facts,
 			};
 			return toResult(r);
