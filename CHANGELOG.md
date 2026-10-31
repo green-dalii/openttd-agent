@@ -9,6 +9,14 @@
 
 ## [Unreleased]
 ### Added
+- **The dashboard speaks two languages now.** A switch in the header flips the whole interface between
+  English and Chinese, and the choice is remembered. The English text stays where it always was (the
+  translation table is keyed by it, the gettext way), so there is no second copy of the wording to keep
+  in sync - and a guard test fails the build when a translation no longer matches its source. Raw
+  evidence (the JSON in the agent steps) is left alone: translating a log would be rewriting the
+  record. The server's own vocabulary - the outcome classes, the error hints - also stays as the
+  server wrote it, because the server is the one place that owns it.
+
 - **The model can finally see the cargo.** The Bridge GS has been reporting the industries, the
   per-cargo totals, the road engines and the town names all along - and the agent side was
   parsing them - but the model-visible projection dropped them, so the agent only ever saw
