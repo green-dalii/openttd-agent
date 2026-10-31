@@ -9,7 +9,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { WebSocket } from "ws";
-import { PAGES, PAGE_ALIASES, PUBLIC_DIR, WebServer } from "../../src/web/server.js";
+import { PAGES, PAGE_ALIASES, PAGE_REDIRECTS, PUBLIC_DIR, WebServer } from "../../src/web/server.js";
 import { createTools } from "../../src/agent/tools/index.js";
 import { sessionHooks } from "../../src/agent/session-store.js";
 import type { AgentDeps } from "../../src/agent/types.js";
@@ -587,6 +587,20 @@ describe("WebServer REST", () => {
 		}
 	});
 
+	it("redirects the old /providers URL to /configure (one page, one name)", async () => {
+		// 页面回答的是「这局怎么配」⇒ 名字跟问题走；旧地址重定向，不是第二份副本。
+		await start();
+		const status = await new Promise<number>((res, rej) => {
+			http
+				.get(`http://127.0.0.1:${port}/providers`, (r) => {
+					r.resume();
+					r.on("end", () => res(r.statusCode ?? 0));
+				})
+				.on("error", rej);
+		});
+		expect(status).toBe(302);
+	});
+
 	it("serves legacy page aliases without a 404", async () => {
 		await start();
 		for (const [path, needle] of [
@@ -736,10 +750,13 @@ describe("WebServer checkpoints", () => {
 		expect(snap.checkpoints).toHaveLength(1);
 	});
 
-	it("resolves the legacy /llm URL to the providers page", async () => {
+	it("resolves the legacy /llm URL to the configure page", async () => {
 		await startWithCheckpoints();
-		expect(PAGE_ALIASES["/llm"]).toBe("/providers");
-		expect(PAGES["/providers"]).toBe("pages/providers.html");
+		expect(PAGE_ALIASES["/llm"]).toBe("/configure");
+		expect(PAGES["/configure"]).toBe("pages/providers.html");
+		// 旧地址 `/providers` 不再是页面，而是重定向（页面的名字跟它回答的问题走）。
+		expect(PAGE_REDIRECTS["/providers"]).toBe("/configure");
+		expect(PAGES["/providers"]).toBeUndefined();
 		const r = await new Promise<{ status: number; body: string }>((resolve, reject) => {
 			http
 				.get({ host: "127.0.0.1", port, path: "/llm" }, (res) => {

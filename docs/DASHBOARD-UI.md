@@ -129,7 +129,7 @@ window.Charts = {
 [Stages]         阶段性总结时间线（**运行中持续追加**，不再是 shutdown 才写）
 ```
 
-### 5.2 Providers（`/providers`，`/llm` 为兼容别名）
+### 5.2 Configure（`/configure`；`/llm` 为兼容别名，`/providers` 302 重定向）
 ```
 [选择器]  模式 segmented（内置 / 自定义端点）
           Provider combobox（分组：Ready now / Needs a key）

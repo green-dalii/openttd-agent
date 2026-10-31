@@ -9,6 +9,11 @@
 
 ## [Unreleased]
 ### Added
+- **The configuration page is now called what it does.** The page that used to live at `/providers`
+  answers "how is this run configured?" - provider, key, run knobs - so it is now at `/configure`
+  and the nav links there. The old URL still works: `/providers` answers with a redirect, and the
+  older `/llm` alias keeps resolving. One page, one name, no second copy.
+
 - **The score now says what it actually counts.** The delivery counter the harness reads is
   OpenTTD's *per-cargo-type* array summed up - and OpenTTD keeps passengers in that same array,
   so the number has always counted **cargo and passengers**, not tonnes of freight. The scorecard,

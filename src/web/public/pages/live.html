@@ -76,7 +76,7 @@
         <span x-text="notice().body"></span>
         <div class="notice-actions" x-show="notice().canStart">
           <button type="button" class="btn sm primary" @click="startRun('agent')">Start agent</button>
-          <a class="btn sm" href="/providers">Configure provider</a>
+          <a class="btn sm" href="/configure">Configure provider</a>
         </div>
         <div class="notice-actions" x-show="notice().hint">
           <span class="dim" x-text="notice().hint"></span>
