@@ -2332,7 +2332,15 @@ class BridgeV1 extends GSController {
                 local now = GSController.GetTick();
                 // 事实每 1000 tick 重算一次（心跳仍每 200 tick）：扫全图产业 +
                 // 监视所有城镇/产业是重活，不能挂在每个心跳上。
-                if (this._facts_tick + 1000 < now) {
+                //
+                // **第一次心跳就算**（2026-10-30 真机证伪）：原来等 `tick > 1000`
+                // 才第一次算，于是开局的前 1000 tick 里事实是空的——而那正是
+                // **模型第一轮观测**的窗口（它因此建了客运线，见 SPEC §10.124）。
+                // `_facts_tick == 0` 是"还没算过"（Squirrel 没有 null 判断，用
+                // 计数器当标志；首次成功后会置为 now，之后每 1000 tick 一次）。
+                // 失败时 `_facts = null` 且 `_facts_tick = now` ⇒ 1000 tick 后重试，
+                // 不会每次心跳都扫。
+                if (this._facts_tick == 0 || this._facts_tick + 1000 < now) {
                     this._facts_tick = now;
                     try { this._facts = this.CollectFacts(); }
                     catch (e) { this._facts = null; }

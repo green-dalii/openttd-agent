@@ -113,6 +113,13 @@
 - **`capabilities()`**: the agent can ask which actions exist before trying them.
 ### Fixed
 
+- **The cargo facts are there from the first heartbeat now.** The Bridge GS recomputed its
+  industry / cargo / delivery facts every 1000 ticks, so the first thousand ticks of every game
+  reported no cargo at all - and the first thing an agent does is look at the world. The GS now
+  computes them on its first heartbeat, so the very first observation already answers "what is
+  produced here, and has any of it moved". Verified on a real machine: the first `observe()` of a
+  fresh game now carries the cargo totals and the industries.
+
 - **The training panel had been reading an endpoint that never existed.** It asked for
   `/api/metrics` while the ledger has always lived under `/api/evolution` - so the panel showed
   "no metrics ledger yet" while the ledger was full of runs. A false empty state is worse than
