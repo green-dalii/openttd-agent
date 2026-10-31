@@ -320,15 +320,15 @@ describe("反思输入必须包含产出指标与窗口长度", () => {
 
 	it("有读数时打印交付量与每游戏日速率", () => {
 		const { user } = buildReflectionPrompt(facts({ delivered: 300, simulatedDays: 150, episodeStop: "horizon" }));
-		expect(user).toMatch(/cargo delivered during the run: 300/);
+		expect(user).toMatch(/cargo \+ passengers delivered during the run: 300/);
 		expect(user).toMatch(/2\.00\/game day/);
 		expect(user).toMatch(/episode ended because: horizon/);
 	});
 
 	it("没有读数时说 not measured，而不是印 0", () => {
 		const { user } = buildReflectionPrompt(facts({ delivered: null }));
-		expect(user).toMatch(/cargo delivered during the run: not measured/);
-		expect(user).not.toMatch(/cargo delivered during the run: 0/);
+		expect(user).toMatch(/cargo \+ passengers delivered during the run: not measured/);
+		expect(user).not.toMatch(/cargo \+ passengers delivered during the run: 0/);
 	});
 });
 

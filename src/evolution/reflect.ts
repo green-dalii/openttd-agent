@@ -33,7 +33,7 @@ export interface ReflectionFacts {
 	summary: {
 		money: number;
 		/**
-		 * Cargo delivered during the run (the harness's own outcome metric, SPEC
+		 * Cargo + passengers delivered during the run (the harness's own outcome metric, SPEC
 		 * §10.65) and the simulated length of the episode.
 		 *
 		 * Why they belong here: the reflection used to see only money, which is
@@ -154,13 +154,13 @@ export function buildReflectionPrompt(facts: ReflectionFacts): ReflectionPrompt 
 		// The outcome the harness actually scores. Printed only when measured.
 		...(typeof s.delivered === "number"
 			? [
-					`- cargo delivered during the run: ${s.delivered}${
+					`- cargo + passengers delivered during the run: ${s.delivered}${
 						typeof s.simulatedDays === "number" && s.simulatedDays > 0
 							? ` over ${s.simulatedDays} game days (${(s.delivered / s.simulatedDays).toFixed(2)}/game day)`
 							: ""
 					}`,
 				]
-			: ["- cargo delivered during the run: not measured"]),
+			: ["- cargo + passengers delivered during the run: not measured"]),
 		...(s.episodeStop ? [`- the episode ended because: ${s.episodeStop}`] : []),
 		`- vehicles: ${s.vehicleCount}, stations: ${s.stationCount}`,
 		`- construction completed: ${s.constructionDone === null ? "unknown" : String(s.constructionDone)}`,

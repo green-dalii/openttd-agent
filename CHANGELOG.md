@@ -9,6 +9,14 @@
 
 ## [Unreleased]
 ### Added
+- **The score now says what it actually counts.** The delivery counter the harness reads is
+  OpenTTD's *per-cargo-type* array summed up - and OpenTTD keeps passengers in that same array,
+  so the number has always counted **cargo and passengers**, not tonnes of freight. The scorecard,
+  the benchmark report, the History page and the model-facing system prompt all said "cargo", which
+  was simply untrue, and the prompt version told the model it was judged on freight alone. The
+  wording now comes from one place on the server (`DELIVERED_MEASURE`), the page copies it, and the
+  scaffold fingerprint moved (`3da8a64e1fbe818e` -> `74f2e64d1e930df3`) because the prompt changed.
+
 - **The dashboard speaks two languages now.** A switch in the header flips the whole interface between
   English and Chinese, and the choice is remembered. The English text stays where it always was (the
   translation table is keyed by it, the gettext way), so there is no second copy of the wording to keep

@@ -32,7 +32,7 @@ export interface CompareRun {
 	status: string;
 	/** Why the run was left out (null = it counts). */
 	excluded: string | null;
-	/** Cargo delivered per game day (null when either side is unknown). */
+	/** Cargo + passengers delivered per game day (null when either side is unknown). */
 	deliveredPerGameDay: number | null;
 	deliveredRun: number | null;
 	simulatedDays: number | null;
@@ -67,7 +67,7 @@ function servedModel(m: GameMetric): string {
 	return m.manifest?.servedModel || m.llmModel || "unknown";
 }
 
-/** Cargo delivered per game day, or null when either side is unknown. */
+/** Cargo + passengers delivered per game day, or null when either side is unknown. */
 function perDay(m: GameMetric): number | null {
 	if (typeof m.deliveredRun !== "number" || typeof m.simulatedDays !== "number" || m.simulatedDays <= 0) return null;
 	return m.deliveredRun / m.simulatedDays;
