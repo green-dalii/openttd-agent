@@ -93,7 +93,9 @@ describe("the preview and the manifest agree", () => {
 		//
 		// 2026-10-30: 7956ab6d8c86fa60 → 3da8a64e1fbe818e（observe 的描述改写：
 		// 它现在说清楚自己带哪些事实——城镇名字、货种总量、产业、车型）。
-		expect(preview.scaffoldHash).toBe("3da8a64e1fbe818e");
+		// 2026-10-31: 3da8a64e1fbe818e → 74f2e64d1e930df3（系统提示改成说清
+		// 「分数同时计入货物与客运」——旧的措辞让模型以为自己只被货物打分）。
+		expect(preview.scaffoldHash).toBe("74f2e64d1e930df3");
 	});
 
 	it("keeps the cost-known fact honest (a live-only model has no price table)", () => {

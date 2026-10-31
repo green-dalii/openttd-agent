@@ -528,7 +528,8 @@ OpenTTD 有**两个动作面**，能力完全不同：
 
 ### 10.65 流量指标的**测量缺陷**：`deliveredCargo` 是当季计数器（2026-09-18）
 **仍为真**（测量缺陷，最常咬人）：`ServerCompanyEconomy.deliveredCargo` 是**本季度已运出**的计数器，**每季度归零**（u16）。所以 `deliveredRun` 是**跨季积分**，`deliveredRunComplete=true` 表示整段无 gap；两臂必须同源，否则回落到 `raw` 并标 `ArmComparison.deliveredSource`。
-依据：`src/game/delivery-meter.ts`、`src/evolution/metrics.ts`；教训 `MEMORY.md` D14。
+**它同时含客运**（2026-10-31 核对 OpenTTD 15.3 源码）：admin 发的是 `cur_economy.delivered_cargo` 这个**按货种的数组**的求和，而 OpenTTD 把客运也记进同一数组（`src/economy.cpp`：`cur_economy.delivered_cargo[cargo_type] += accepted_total`）⇒ `deliveredRun` **已经是"货物 + 客运"**，旧措辞 "cargo delivered" 是在说谎；分数轴与系统提示都改口（措辞由服务端 `DELIVERED_MEASURE` 给出）。按货种拆分另有来源（GS 的 cargo monitor），**口径不同，不可与之相加**。
+依据：`src/game/delivery-meter.ts`、`src/evolution/metrics.ts`、`src/evolution/scorecard.ts`；教训 `MEMORY.md` D14。
 
 ### 10.66 GS 通道的**部分失效**：`GSStation.IsStationTile` 不存在（2026-09-18）
 **仍为真**（GS 通道会**部分**失效）：`GSStation.IsStationTile` **不存在** → 用 `GSStation.IsValidStation(id)`；判据是 `signalHub.getGsErrors()`（`GameMetric.gsErrors`）。通道健康**必须在收益声明之前**打印。
@@ -630,8 +631,7 @@ OpenTTD 有**两个动作面**，能力完全不同：
 
 ### 10.94 Live 页面运行期的**滚动失控**与**版面失控**：机制与修法（2026-09-22）
 **⚠️ 部分推翻**：本节曾把「Live 页面纵向伸缩」归因为 uPlot + `aspect-ratio` + `.snap-img { max-height }`。
-- **`max-height` 那条是错的**：它破坏了快照的正方形（叠加层 `preserveAspectRatio="none"` 会拉伸、底图按宽度缩放 → 标记与地图错位），**已回退**；
-- 滚动锚定、列表上限、`sameEventList` 等**仍是有效修复**（见 `docs/DASHBOARD-UI.md` §8 契约）；
+- **`max-height` 那条是错的**：它破坏了快照的正方形（叠加层 `preserveAspectRatio="none"` 会拉伸、底图按宽度缩放 → 标记与地图错位），**已回退**； 滚动锚定、列表上限、`sameEventList` 等**仍是有效修复**（见 `docs/DASHBOARD-UI.md` §8 契约）；
 - 但**用户报的「纵向爆炸」另有真因** → §10.95。
 
 ### 10.95 图表渲染路径：三个真因与"图表健康"断言（2026-09-22）
@@ -1190,7 +1190,7 @@ compaction 冲突）在 `docs/HARNESS-MIGRATION.md` §3（带坐标），此处�
   `servedModel` 取 provider 实际作答（`responseModel ?? model`）；`scaffoldHash` =
   sha256(系统提示词 + 工具集[name/description/schema]，按顺序) 前 16 位。真机：
   `{"servedModel":"faux-1","thinkingLevel":"off","toolBudget":12,
-  "scaffoldHash":"7956ab6d8c86fa60"}`。
+  "scaffoldHash":"74f2e64d1e930df3"}`。
 - `classifyOutcome`（派生不存盘）：优先级 人为停止 > 环境事件 > 结果读数，缺失 →
   `unknown`；封闭词表（十类）见 §10.122。
 
@@ -1241,7 +1241,7 @@ compaction 冲突）在 `docs/HARNESS-MIGRATION.md` §3（带坐标），此处�
 
 - 事实：**旋钮只有一处规则**（`src/agent/run-knobs.ts`）：thinking 档位与工具预算走
   `resolveScaffoldKnobs`，花费上限走 `resolveRunLimits`——与 CLI 同源。页面字符串**原样**进服务端（`"12abc"` 不被悄悄改成 12）；空字段 = 不改，沿用进程设置。
-- 事实：**预览的字段名 = manifest 的字段名**（`PREVIEW_MANIFEST_FIELDS`，10 个）。为此 manifest 补了 `model`/`api`/`contextWindow`/`costKnown`（D79：缺的一方要补，不许把预览悄悄缩小）。**跑完才知道的事实不在预览里**：`servedModel`（provider 实际应答名）与 `payload*`。`scaffoldHash`（`7956ab6d8c86fa60`）**不用开游戏就能算出**：指纹只覆盖工具的名称/描述/schema。
+- 事实：**预览的字段名 = manifest 的字段名**（`PREVIEW_MANIFEST_FIELDS`，10 个）。为此 manifest 补了 `model`/`api`/`contextWindow`/`costKnown`（D79：缺的一方要补，不许把预览悄悄缩小）。**跑完才知道的事实不在预览里**：`servedModel`（provider 实际应答名）与 `payload*`。`scaffoldHash`（`74f2e64d1e930df3`）**不用开游戏就能算出**：指纹只覆盖工具的名称/描述/schema。
 - 事实：**无法执行的花费上限在启动前被拒**（无价目表的模型 + 费用上限），**预览也拒**——同一条闸（`costCapProblem`），错误码 `unpriced_with_cost_cap` → HTTP **400**（坏请求，不是 409 冲突）。**harness 后端受进程门禁**：页面只能在进程允许时选它，否则 400 + `AGENT_HARNESS=1`。
 - 真机（隔离 data dir，provider `minimax-cn`、模型 `MiniMax-M3.1-Flash`）：页面填
   seed 4242 / gameDays 40 / prebuilt / control / thinking high / toolBudget 5 / tokenLimit 9000
@@ -1296,4 +1296,4 @@ compaction 冲突）在 `docs/HARNESS-MIGRATION.md` §3（带坐标），此处�
 ### 10.124 模型看不见的事实：投影是最后一道闸（真实模型局证伪，2026-10-30）
 
 - 事实：GS 早就在报 `town_list.name` / `industry_list` / `cargo_totals` / `engines`，hub 早就在解析——**但模型可见的投影（`worldFacts()`）把它们全丢了**：模型只看得到 `date` + `companies` + `towns[{id,pop,x,y}]`。
-- 事实：模型自己发现了（局 `20261030-214801-seed4242` 第 3 轮）："observe 输出没有 cargo 标签和车型表（看起来被截断了）"。分数是**货物吨数** ⇒ 它建了客运线、`delivered=0`（客运线确实在赚钱：线路 profit +76，但货物计数器不记乘客）。补上投影后，同一局开始引用事实：按镇名分组、挑车型（"只有 MPS Regal Bus(id 116) 能拉客"）、谈产业（"COAL/LVST/GRAI/WOOD 存在但运量 0"）。观测面变了 ⇒ **脚手架指纹变了**（`7956ab6d8c86fa60` → `3da8a64e1fbe818e`，前后两局只能当"不同脚手架"看）；但产业**没有坐标**、GS 不报城镇的货种 ⇒ 模型知道"有煤"、不知道"煤在哪"，且 GS 的事实每 1000 tick 才重算 ⇒ **开局第一轮看不到货物**——**已修**：GS 现在第一次心跳就算（真机：第一轮 `observe()` 已带货物）；修完后模型自己推出「货物—车型」的对应（LVST→Talbott Livestock Van、GRAI→Hereford Grain Truck、COAL→Balogh Coal Truck…），并按**产业名里的镇名**（Rawood Oil Wells ⇒ Rawood）选货路线。另一条实测事实：`deliveredCargo` **只记货物不记乘客**（同局客运线在游戏自己的季度计数器上是 9，而 admin 侧读 0）⇒ 分数轴只能靠货物路线挣到，而建路到矿区就要 30–40 游戏日 ⇒ **60 日视界装不下一次货物经营**。
+- 事实：模型自己发现了（局 `20261030-214801-seed4242` 第 3 轮）："observe 输出没有 cargo 标签和车型表（看起来被截断了）"。分数是**货物吨数** ⇒ 它建了客运线、`delivered=0`（客运线确实在赚钱：线路 profit +76，但货物计数器不记乘客）。补上投影后，同一局开始引用事实：按镇名分组、挑车型（"只有 MPS Regal Bus(id 116) 能拉客"）、谈产业（"COAL/LVST/GRAI/WOOD 存在但运量 0"）。观测面变了 ⇒ **脚手架指纹变了**（`7956ab6d8c86fa60` → `74f2e64d1e930df3`，前后两局只能当"不同脚手架"看）；但产业**没有坐标**、GS 不报城镇的货种 ⇒ 模型知道"有煤"、不知道"煤在哪"，且 GS 的事实每 1000 tick 才重算 ⇒ **开局第一轮看不到货物**——**已修**：GS 现在第一次心跳就算（真机：第一轮 `observe()` 已带货物）；修完后模型自己推出「货物—车型」的对应（LVST→Talbott Livestock Van、GRAI→Hereford Grain Truck、COAL→Balogh Coal Truck…），并按**产业名里的镇名**（Rawood Oil Wells ⇒ Rawood）选货路线。另一条实测事实：`deliveredCargo` **只记货物不记乘客**（同局客运线在游戏自己的季度计数器上是 9，而 admin 侧读 0）⇒ 分数轴只能靠货物路线挣到，而建路到矿区就要 30–40 游戏日 ⇒ **60 日视界装不下一次货物经营**。

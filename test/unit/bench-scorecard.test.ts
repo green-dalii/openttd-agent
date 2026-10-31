@@ -78,6 +78,22 @@ describe("buildScorecard（四轴，缺失不折零）", () => {
 		expect(card.models.find((m) => m.model === "b")!.efficiency.deliveredPerMillionTokens).toBeNull();
 	});
 
+	it("两条轴都自报「交付」到底算什么（服务端措辞，页面照抄）", () => {
+		// admin 的 deliveredCargo 是 OpenTTD **按货种的交付数组的求和**，客运也在里面
+		// ⇒ 它**已经**同时计入货物与客运；写 "cargo" 是在说谎（SPEC §10.65）。
+		const card = buildScorecard([row({ llmModel: "a" })]);
+		const a = card.models.find((m) => m.model === "a")!;
+		expect(a.ability.measure).toBe("cargo + passengers delivered");
+		expect(a.efficiency.measure).toBe("cargo + passengers delivered");
+	});
+
+	it("「没测到」时仍然报出计量口径（口径是事实，不随数值消失）", () => {
+		const card = buildScorecard([row({ llmModel: "a", deliveredRun: null, simulatedDays: 0 })]);
+		const a = card.models.find((m) => m.model === "a")!;
+		expect(a.ability.mean).toBeNull();
+		expect(a.ability.measure).toBe("cargo + passengers delivered");
+	});
+
 	it("稳定性轴：结果分类分布 + 工具失败率", () => {
 		const card = buildScorecard([
 			row({ llmModel: "a", deliveredRun: 0, constructionDone: false, toolCalls: 4, toolFailures: 4 }),

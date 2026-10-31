@@ -56,7 +56,7 @@ export interface CompanyState {
 	 */
 	history: CompanyHistoryPoint[];
 	/**
-	 * Cargo delivered since this session started, integrated across OpenTTD's
+	 * Cargo + passengers delivered since this session started, integrated across OpenTTD's
 	 * quarterly reset of `economy.deliveredCargo` (SPEC §10.65).
 	 *
 	 * `economy.deliveredCargo` alone is a **per-quarter** counter, so reading it

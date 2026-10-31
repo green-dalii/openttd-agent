@@ -56,8 +56,9 @@ const PAYLOAD = {
 			runs: 4,
 			excluded: 1,
 			excludedReasons: ["stopped (paused)"],
-			ability: { runs: 4, mean: 12.5, median: 12, stations: 3, vehicles: 6 },
+			ability: { runs: 4, measure: "cargo + passengers delivered", mean: 12.5, median: 12, stations: 3, vehicles: 6 },
 			efficiency: {
+				measure: "cargo + passengers delivered",
 				deliveredPerMillionTokens: 42,
 				tokensPerDecision: 1234,
 				secondsPerRun: 300,
@@ -176,6 +177,24 @@ describe("CompareView", () => {
 	it("offers the models the server sent (the page does not invent one)", () => {
 		const v = load();
 		expect(v.modelNames(PAYLOAD)).toEqual(["model-a"]);
+	});
+
+	it("labels the delivery readings with the server's own wording", () => {
+		// 交付数**同时含货物与客运**（OpenTTD 把两者记在同一个按货种的数组里），
+		// 措辞归服务端 —— 页面自己写 "Delivered" 就是第二份词表，迟早漂移。
+		const v = load();
+		const rows = v.modelRows(PAYLOAD);
+		expect(rows[0]!.ability[0]!.label).toBe("cargo + passengers delivered / game day");
+		expect(rows[0]!.efficiency[0]!.label).toBe("cargo + passengers delivered / M tokens");
+	});
+
+	it("falls back to a neutral label when the server sent no wording", () => {
+		const v = load();
+		const payload = {
+			models: [{ model: "m", ability: { mean: 1 }, efficiency: { deliveredPerMillionTokens: 1 } }],
+		};
+		const rows = v.modelRows(payload);
+		expect(rows[0]!.ability[0]!.label).toBe("Delivered / game day");
 	});
 
 	it("survives an empty payload", () => {

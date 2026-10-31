@@ -90,10 +90,10 @@ export interface SessionMeta {
 		constructionDone?: boolean;
 		/** Company income at finalize (N2-4); absent when the packet never arrived. */
 		income?: number;
-		/** Cargo/passengers delivered (N2-4b) - the least confounded outcome. */
+		/** Cargo + passengers delivered (N2-4b) - the least confounded outcome. */
 		delivered?: number;
 		/**
-		 * Cargo delivered across the whole session, integrated past OpenTTD's
+		 * Cargo + passengers delivered across the whole session, integrated past OpenTTD's
 		 * quarterly reset (SPEC §10.65). The comparable flow outcome.
 		 */
 		deliveredRun?: number;

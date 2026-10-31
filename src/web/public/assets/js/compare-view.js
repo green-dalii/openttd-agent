@@ -42,35 +42,42 @@
    */
   function modelRows(payload) {
     const models = payload && Array.isArray(payload.models) ? payload.models : [];
-    return models.map((m) => ({
-      model: String(m.model ?? "unknown"),
-      requested: Array.isArray(m.requestedModels) ? m.requestedModels.join(", ") : "",
-      runs: typeof m.runs === "number" ? m.runs : 0,
-      excluded: typeof m.excluded === "number" ? m.excluded : 0,
-      ability: [
-        reading("Delivered / game day", m.ability && m.ability.mean),
-        reading("Median", m.ability && m.ability.median),
-        reading("Stations", m.ability && m.ability.stations, 1),
-        reading("Vehicles", m.ability && m.ability.vehicles, 1),
-      ],
-      efficiency: [
-        reading("Delivered / M tokens", m.efficiency && m.efficiency.deliveredPerMillionTokens, 1),
-        reading("Tokens / decision", m.efficiency && m.efficiency.tokensPerDecision, 0),
-        reading("Seconds / run", m.efficiency && m.efficiency.secondsPerRun, 0),
-        reading("Cost / run", m.efficiency && m.efficiency.costPerRun, 4),
-      ],
-      stability: [
-        reading("Tool failure rate", pct(m.stability && m.stability.toolFailureRate).text, 0),
-        reading("GS errors / run", m.stability && m.stability.gsErrorsPerRun, 1),
-      ],
-      growth: {
-        label: "Growth",
-        text: m.growth && m.growth.verdict ? String(m.growth.verdict) : NOT_MEASURED,
-        known: Boolean(m.growth && m.growth.verdict),
-      },
-      growthMessage: m.growth && m.growth.message ? String(m.growth.message) : "",
-      outcomes: outcomeRows(m),
-    }));
+    return models.map((m) => {
+      // What "delivered" counts is the **server's** wording (it sums cargo *and*
+      // passengers - OpenTTD keeps both in one per-cargo-type array). The page
+      // copies it instead of writing a second label that would drift.
+      const abilityMeasure = m.ability && m.ability.measure ? String(m.ability.measure) : "Delivered";
+      const efficiencyMeasure = m.efficiency && m.efficiency.measure ? String(m.efficiency.measure) : abilityMeasure;
+      return {
+        model: String(m.model ?? "unknown"),
+        requested: Array.isArray(m.requestedModels) ? m.requestedModels.join(", ") : "",
+        runs: typeof m.runs === "number" ? m.runs : 0,
+        excluded: typeof m.excluded === "number" ? m.excluded : 0,
+        ability: [
+          reading(`${abilityMeasure} / game day`, m.ability && m.ability.mean),
+          reading("Median", m.ability && m.ability.median),
+          reading("Stations", m.ability && m.ability.stations, 1),
+          reading("Vehicles", m.ability && m.ability.vehicles, 1),
+        ],
+        efficiency: [
+          reading(`${efficiencyMeasure} / M tokens`, m.efficiency && m.efficiency.deliveredPerMillionTokens, 1),
+          reading("Tokens / decision", m.efficiency && m.efficiency.tokensPerDecision, 0),
+          reading("Seconds / run", m.efficiency && m.efficiency.secondsPerRun, 0),
+          reading("Cost / run", m.efficiency && m.efficiency.costPerRun, 4),
+        ],
+        stability: [
+          reading("Tool failure rate", pct(m.stability && m.stability.toolFailureRate).text, 0),
+          reading("GS errors / run", m.stability && m.stability.gsErrorsPerRun, 1),
+        ],
+        growth: {
+          label: "Growth",
+          text: m.growth && m.growth.verdict ? String(m.growth.verdict) : NOT_MEASURED,
+          known: Boolean(m.growth && m.growth.verdict),
+        },
+        growthMessage: m.growth && m.growth.message ? String(m.growth.message) : "",
+        outcomes: outcomeRows(m),
+      };
+    });
   }
 
   /**

@@ -21,9 +21,24 @@ export interface BenchConditions {
 	repeats: number;
 }
 
+/**
+ * What "delivered" counts, in the **server's** words.
+ *
+ * 为什么不能写 "cargo"：admin 的 `company_economy.deliveredCargo` 是
+ * `cur_economy.delivered_cargo` 这个**按货种的数组**的求和，而 OpenTTD 把客运
+ * （CT_PASSENGERS）也记进同一个数组（`src/economy.cpp` 的
+ * `cur_economy.delivered_cargo[cargo_type] += accepted_total`）。
+ * 所以这个数**已经同时计入货物与客运**——旧标签写 "cargo" 是在说谎。
+ *
+ * 页面照抄这句话，不自己另写一份措辞（一份词表 ⇒ 一处漂移）。
+ */
+export const DELIVERED_MEASURE = "cargo + passengers delivered";
+
 export interface AbilityAxis {
 	runs: number;
-	/** Cargo delivered per game day: mean and median over comparable runs. */
+	/** What the delivery numbers count (server's wording; see DELIVERED_MEASURE). */
+	measure: string;
+	/** Cargo + passengers delivered per game day: mean and median over comparable runs. */
 	mean: number | null;
 	median: number | null;
 	/** Mean stations / vehicles at the end (capacity built). */
@@ -32,6 +47,8 @@ export interface AbilityAxis {
 }
 
 export interface EfficiencyAxis {
+	/** What the delivery numbers count (server's wording; see DELIVERED_MEASURE). */
+	measure: string;
 	deliveredPerMillionTokens: number | null;
 	tokensPerDecision: number | null;
 	/** Wall-clock seconds per run (mean). */
@@ -152,6 +169,7 @@ export function buildScorecard(
 
 		const ability: AbilityAxis = {
 			runs: used.length,
+			measure: DELIVERED_MEASURE,
 			mean: mean(days),
 			median: median(days),
 			stations: mean(used.map((m) => (typeof m.stations === "number" ? m.stations : null))),
@@ -159,6 +177,7 @@ export function buildScorecard(
 		};
 
 		const efficiency: EfficiencyAxis = {
+			measure: DELIVERED_MEASURE,
 			deliveredPerMillionTokens:
 				tokensSum > 0 && deliveredSum > 0 ? (deliveredSum / tokensSum) * 1_000_000 : null,
 			tokensPerDecision: mean(

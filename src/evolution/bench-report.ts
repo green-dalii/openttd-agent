@@ -45,7 +45,12 @@ export function renderReportMarkdown(card: Scorecard, generatedAt = new Date()):
 	// ---- ability + efficiency ----
 	lines.push("## Ability and efficiency");
 	lines.push("");
-	lines.push("| model | runs | delivered/game-day (mean) | (median) | stations | vehicles | delivered per 1M tokens | tokens/decision | s/run |");
+	// 表头写清「交付」到底算什么（服务端措辞）：admin 的计数含客运，
+	// 只写 "delivered" 会让人以为是纯货物吨数（SPEC §10.65）。
+	lines.push(
+		`| model | runs | ${card.models[0]?.ability.measure ?? "delivered"}/game-day (mean) | (median) | stations | vehicles | ` +
+			`${card.models[0]?.efficiency.measure ?? "delivered"} per 1M tokens | tokens/decision | s/run |`,
+	);
 	lines.push("|---|---|---|---|---|---|---|---|---|");
 	for (const m of card.models) {
 		lines.push(
