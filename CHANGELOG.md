@@ -9,6 +9,18 @@
 
 ## [Unreleased]
 ### Added
+- **The model can finally see the cargo.** The Bridge GS has been reporting the industries, the
+  per-cargo totals, the road engines and the town names all along - and the agent side was
+  parsing them - but the model-visible projection dropped them, so the agent only ever saw
+  `date`, the companies and `towns[{id,pop,x,y}]`. A real model noticed and said so ("the observe
+  output doesn't include engine list or cargo labels here"), then built a **passenger** line,
+  because the score counts cargo tonnes and it could not see a single crate. The projection now
+  carries the cargo world, the engine catalogue and the town names into `observe()` and into
+  every decision context; missing readings stay `null` (never 0), and a town without a name stays
+  without a name rather than being labelled with its id. The observation surface changed, so the
+  scaffold fingerprint changed with it (`7956ab6d8c86fa60` -> `3da8a64e1fbe818e`): runs before
+  and after it are different scaffolds and are compared as such.
+
 
 - **A run can now explain itself.** The run's detail shows the **full manifest**: the same world
   (seed + game version), the same scaffold (scaffold / payload-shape hashes), and whether the run
