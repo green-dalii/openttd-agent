@@ -15,6 +15,7 @@
 | [`AGENT-LOOP-AND-CONTROL.md`](AGENT-LOOP-AND-CONTROL.md) | 框架**如何驱动 LLM**（决策循环契约）与 Dashboard 运行控制 | 循环契约、触发器、快照/增量汇报、运行控制 | 脚手架对模型的承诺（→ 契约）；游戏内执行器实现（→ 执行器文档） |
 | [`EXECUTOR-ARCHITECTURE.md`](EXECUTOR-ARCHITECTURE.md) | **为什么执行器必须运行在 GS 内**（决策依据） | GS-only 的论证、AI 只保留公司外壳的原因 | 当前系统事实（→ `SPEC.md` §10.107+）；计划（→ `ROADMAP.md`） |
 | [`EVOLUTION.md`](EVOLUTION.md) | **跨局记忆系统**的设计与数据契约 | lesson/strategy/fact 的数据契约、三道闸、反思约束、注入路径 | 模型侧观测面（→ 契约）；实现细节与进度 |
+| [`DASHBOARD-AUDIT-2026-10-31.md`](DASHBOARD-AUDIT-2026-10-31.md) | **一次呈现面审计的结论与优化方案**（审计 + 方案） | 实测证据（16 条）、第一性原理的四页视觉主角、P0/P1/P2 优化项、验收方式 | 四问 IA 的**决定**（→ `DASHBOARD-CODESIGN.md`）；视觉规范（→ `DASHBOARD-UI.md`）；接口契约（→ `DASHBOARD-API.md`） |
 | [`DASHBOARD-API.md`](DASHBOARD-API.md) | 前后端**机器契约**（冻结） | 页面路由、类型、REST、WS 帧、模块契约 | UI 视觉与交互（→ UI 文档）；指标口径（→ `SPEC.md`） |
 | [`DASHBOARD-UI.md`](DASHBOARD-UI.md) | dashboard **人机契约**（设计） | 设计 token、组件契约、图表 API、页面信息架构、可达性基线、更新契约 | 协议形状（→ API 文档）；库取舍（→ `FRONTEND.md`） |
 | [`FRONTEND.md`](FRONTEND.md) | **前端怎么做、为什么这样取舍** | 结构改造 S1–S4、依赖取舍与教训、UnoCSS 决定与实测、D3 澄清、新页面完成定义 | 页面与 API 形状（→ dashboard 文档）；图表系统事实（→ `SPEC.md` §10.97） |
