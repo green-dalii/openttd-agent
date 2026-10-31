@@ -54,12 +54,12 @@ src/web/public/
 |---|---|---|
 | `GET /` | `pages/live.html` | Run：实时游戏 + agent 遥测 |
 | `GET /compare` | `pages/compare.html` | Compare：模型比较（四轴 / 配对判定） |
-| `GET /providers` | `pages/providers.html` | Configure：provider 选型 + 密钥 + 运行旋钮 |
+| `GET /configure` | `pages/providers.html` | Configure：provider 选型 + 密钥 + 运行旋钮 |
 | `GET /sessions` | `pages/sessions.html` | History：历史局管理 / 复盘 / 记忆 |
-| `GET /llm` | *(别名 → `/providers`)* | v0.3 的旧 URL，保留以免书签/文档失效 |
+| `GET /llm` | *(别名 → `/configure`)*；`GET /providers` | *(302 → `/configure`)* | v0.3 的旧 URL 与旧地址：保留/重定向，页面的名字跟它回答的问题走 |
 | `GET /evolution` | *(302 → `/sessions#memory`)* | 旧的 "Evolution" 页 → History 的记忆区 |
 
-- 导航按**四个问题**（CoDesign §4）：Run / Compare / History / Configure。URL 保持**扁平**（`/providers` 而非 `/pages/providers.html`）——文件可自由挪动，链接不会断。
+- 导航按**四个问题**（CoDesign §4）：Run / Compare / History / Configure。URL 保持**扁平**（`/configure` 而非 `/pages/providers.html`）——文件可自由挪动，链接不会断。
 - 更名/迁移页面时：内容没变就加进 `PAGE_ALIASES`（内部重写），**内容搬走了**就用
   `PAGE_REDIRECTS`（302）——不留第二份，两份必然漂移。
 - 强制约束（单测锁定 `web-api.test.ts`）: `public/` 根目录**不得**再有散落的 html/css/js；

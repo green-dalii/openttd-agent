@@ -816,7 +816,7 @@ function renderChrome() {
   if (el.getAttribute("data-chrome") === "1") return;
   el.setAttribute("data-chrome", "1");
   const page = el.getAttribute("data-brand") || "";
-  const active = { live: "/", compare: "/compare", providers: "/providers", sessions: "/sessions" }[page];
+  const active = { live: "/", compare: "/compare", providers: "/configure", sessions: "/sessions" }[page];
   // The four questions (CoDesign §4): Run / Compare / History / Configure.
   // The brand label follows the nav label, so the page says the same word as
   // the tab that leads to it.
@@ -870,7 +870,7 @@ function renderNav(active) {
     ["/", "Run"],
     ["/compare", "Compare"],
     ["/sessions", "History"],
-    ["/providers", "Configure"],
+    ["/configure", "Configure"],
   ];
   return `<nav class="nav">${items
     .map(([href, label]) =>
