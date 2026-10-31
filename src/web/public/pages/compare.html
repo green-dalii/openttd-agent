@@ -27,7 +27,7 @@
     <!-- ===================== ① the four axes ===================== -->
     <section class="panel" x-show="!loading && !error && hasRuns()">
       <div class="panel-head">
-        <h2>Four axes per model <span class="dim">成绩 / 效率 / 可靠性 / 成长</span></h2>
+        <h2>Four axes per model <span class="dim">Result / Efficiency / Reliability / Growth</span></h2>
         <span class="dim" x-text="modelRows().length + ' model(s)'"></span>
       </div>
       <!-- The numbers come from the scorecard (server-side). A missing reading
@@ -201,6 +201,8 @@
   </main>
 
   <script src="/assets/vendor/alpinejs/alpine.min.js" defer></script>
+  <script src="/assets/js/locales.js"></script>
+  <script src="/assets/js/i18n.js"></script>
   <script src="/assets/js/common.js"></script>
   <script src="/assets/js/alpine-bridge.js"></script>
   <script src="/assets/js/compare-view.js"></script>

@@ -825,6 +825,44 @@ function renderChrome() {
   // `window.APP_VERSION` **从来没有任何地方赋值** —— 那段是死代码（版本永远不显示）。
   // 统一页头时删掉，而不是把它复制到另外三页。
   el.innerHTML = `<h1>openttd-agent <span class="dim">${esc(label)}</span></h1>` + renderNav(active);
+  renderLangSwitch(el.parentElement || el);
+}
+
+/**
+ * 语言切换（EN / 中文）——**一处生成**（页头的最后一个元素）。
+ *
+ * 为什么在 JS 里而不是每个页面写一遍：页头本来就是一处生成的（renderChrome），
+ * 切换器跟着它走 ⇒ 四页不会长出四份副本。
+ */
+function renderLangSwitch(header) {
+  if (!header || header.querySelector(".lang-switch")) return;
+  const current = window.I18n ? window.I18n.locale() : "en";
+  const wrap = document.createElement("div");
+  wrap.className = "lang-switch";
+  wrap.setAttribute("role", "group");
+  wrap.setAttribute("aria-label", "Language");
+  wrap.innerHTML = ["en", "zh"]
+    .map(
+      (l) =>
+        `<button type="button" class="lang-btn${l === current ? " active" : ""}" data-locale="${l}"` +
+        ` aria-pressed="${l === current ? "true" : "false"}">${l === "zh" ? "中文" : "EN"}</button>`,
+    )
+    .join("");
+  wrap.addEventListener("click", (ev) => {
+    const btn = ev.target instanceof Element ? ev.target.closest("[data-locale]") : null;
+    if (!btn || !window.I18n) return;
+    window.I18n.setLocale(btn.getAttribute("data-locale"));
+  });
+  header.appendChild(wrap);
+  if (window.I18n) {
+    window.I18n.onChange((locale) => {
+      for (const btn of wrap.querySelectorAll("[data-locale]")) {
+        const on = btn.getAttribute("data-locale") === locale;
+        btn.classList.toggle("active", on);
+        btn.setAttribute("aria-pressed", on ? "true" : "false");
+      }
+    });
+  }
 }
 
 function renderNav(active) {
@@ -899,5 +937,5 @@ window.UI = {
   utilTotals: (items) => (items || []).reduce(
     (a, it) => a + (it.values || []).reduce((x, v) => x + (Number(v) || 0), 0), 0),
   // infra
-  connectWs, renderNav, renderChrome,
+  connectWs, renderNav, renderChrome, renderLangSwitch,
 };
