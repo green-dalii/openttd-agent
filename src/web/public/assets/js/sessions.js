@@ -61,6 +61,8 @@
             .then((r) => (r.ok ? r.json() : null))
             .then((data) => {
               this.metrics = data && Array.isArray(data.metrics) ? data.metrics : [];
+              // Legend rows the ledger dropped (Issue #58). Shown, not swallowed.
+              this.collisions = data && Array.isArray(data.collisions) ? data.collisions : [];
             })
             .catch(() => { this.metrics = []; });
           // 页头（标题+导航）只有这一个来源：common.js 的 renderChrome()。

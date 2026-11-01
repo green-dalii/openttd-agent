@@ -270,6 +270,8 @@
       /* ------------------------------ state ------------------------------ */
       sessions: s.sessions || [],
       metrics: s.metrics || [],
+      /** 账本丢行报告（Issue #58）：`[{id, dropped}]`，由 `/api/evolution` 给出。 */
+      collisions: s.collisions || [],
       data: s.data || null,
       compareData: s.compareData || null,
       compareWith: s.compareWith || null,
@@ -396,6 +398,211 @@
       toggleOnlyDone(value) {
         this.onlyDone = Boolean(value);
         U.setPref("sessions.onlyDone", this.onlyDone);
+      },
+
+      /**
+       * 顶部结论 KPI（审计 A9/A10）：先给结论，再给证据。
+       *
+       * 为什么只统计**可比**的局：账本里的 `excluded` 是服务端给的排除原因
+       * （暂停、世界冻结、没到视界、没测到）。把被排除的局算进中位数，等于
+       * 让"被中断的局"参与"这一版好不好"的判断。
+       *
+       * 三条口径纪律：
+       *   ① 一个读数都没有 ⇒ `not measured`，不是 0；
+       *   ② 中位数用**比值**（交付/游戏日、token/决策）而不是总和，样本长度不同；
+       *   ③ 花费只要有任一局没有价目表 ⇒ `unknown`（部分和不是测量）。
+       */
+      conclusionKpis() {
+        const rows = (Array.isArray(this.metrics) ? this.metrics : []).filter((m) => m && typeof m === "object");
+        const comparable = rows.filter((m) => m.excluded === null);
+        const median = (xs) => {
+          if (!xs.length) return null;
+          const sorted = xs.slice().sort((a, b) => a - b);
+          const mid = sorted.length >> 1;
+          return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+        };
+        const perDay = comparable
+          .filter((m) => Number.isFinite(m.deliveredRun) && Number(m.simulatedDays) > 0)
+          .map((m) => Number(m.deliveredRun) / Number(m.simulatedDays));
+        const tokensPerDecision = comparable
+          .filter((m) => Number(m.decisions) > 0 && Number.isFinite(Number(m.totalTokens)))
+          .map((m) => Number(m.totalTokens) / Number(m.decisions));
+        const spendKnown = comparable.length ? comparable.every((m) => m.costKnown !== false) : null;
+        const spend = comparable
+          .filter((m) => m.costKnown !== false)
+          .reduce((a, m) => a + (Number(m.costTotal) || 0), 0);
+        const pd = median(perDay);
+        const tpd = median(tokensPerDecision);
+        return [
+          {
+            k: "Comparable runs",
+            v: U.fmtInt(comparable.length),
+            hint: `${rows.length} archived · ${rows.length - comparable.length} excluded`,
+          },
+          {
+            k: "Delivered / game day",
+            v: pd === null ? "not measured" : pd.toFixed(2),
+            hint: `${perDay.length} comparable run(s) with both readings`,
+          },
+          {
+            k: "Tokens / decision",
+            v: tpd === null ? "not measured" : U.fmtInt(Math.round(tpd)),
+            hint: `${tokensPerDecision.length} comparable run(s) with both readings`,
+          },
+          {
+            k: "Spend",
+            v: spendKnown === null ? "not measured" : U.fmtCostKnown(spend, spendKnown),
+            hint:
+              spendKnown === false
+                ? "at least one run had no price table"
+                : `${comparable.length} comparable run(s)`,
+          },
+        ];
+      },
+
+      /**
+       * 账本里因 session id 撞号被丢掉的行（Issue #58）。
+       *
+       * 为什么 History 要显示：顶部 KPI 的"可比局数"就是**去重之后**的样本，
+       * 页面如果说"3 局"而账本里有 6 行，读者会以为另外 3 行被静默丢了——
+       * 它们确实被丢了，只是必须说出来（沉默缩小样本是基准最会骗人的方式）。
+       */
+      ledgerCollisions() {
+        const list = Array.isArray(this.collisions) ? this.collisions : [];
+        return list
+          .filter((c) => c && Number(c.dropped) > 0)
+          .map((c) => ({ id: String(c.id || ""), dropped: Number(c.dropped) }));
+      },
+
+      /** 一句话说明被丢掉的行（空串 = 没有丢行）。 */
+      collisionNote() {
+        const list = this.ledgerCollisions();
+        if (!list.length) return "";
+        const dropped = list.reduce((a, c) => a + c.dropped, 0);
+        return (
+          `${dropped} ledger row${dropped === 1 ? "" : "s"} dropped as duplicate session ids ` +
+          `(${list.map((c) => c.id).join(", ")}) — they are not part of any number above.`
+        );
+      },
+
+      /**
+       * 训练图是否**贴底全 0**（审计 A11）。
+       *
+       * 一张 900×300 的空图 + 一条 0 线传达 0 字节信息，还会让人以为"图坏了"。
+       * 全 0 时页面应给一句陈述句（几局、都没交付），而不是画图。
+       * 注意：**"没测到"不是全 0**（`deliveredRun === null`），所以只有确实测到 0 才算。
+       */
+      trainingFlat() {
+        const series = this.trainingSeries(this.metrics);
+        const vals = series.runs.map((r) => r.deliveredRun).filter((v) => v !== null);
+        return series.runs.length > 0 && vals.length > 0 && vals.every((v) => v === 0);
+      },
+
+      /**
+       * 选中局的**结论头**（审计 A10：先结论，再证据）。
+       *
+       * 用户点开一局，第一眼要回答"这局怎么样"，而不是先读 25 行 manifest。
+       * 结论头只放**读数**，不重算服务端的判断：
+       *   - 交付与游戏日来自账本（与 History 顶部 KPI 同源）；
+       *   - 结局类来自账本的 `outcomeClass`（B5 闭集）；
+       *   - 现金/车队/token/失败来自这一局的 meta。
+       * 账本没有这一局（例如演示局或旧局）时，交付与游戏日写 `not measured`。
+       */
+      conclusionHead() {
+        const meta = (this.data && this.data.meta) || null;
+        if (!meta) return null;
+        const id = meta.id || this.selected || null;
+        const row = id
+          ? (Array.isArray(this.metrics) ? this.metrics : []).find((m) => m && m.id === id) || null
+          : null;
+        // 账本行属于**同一局**才算数。2026-10-31 之前的账本会因 session id 撞号
+        // "同 id 取最新"，于是同一个 id 可能指向另一个模型/另一个 seed 的局
+        // （真机实测：列表里 £60.39k，结论头却显示 £160.33k）。宁可写 not measured，
+        // 也不能把别人那局的交付量说成这一局的。
+        const rowSeed = row && Number(row.seed);
+        const metaSeed = Number(meta.seed);
+        const mismatched =
+          Boolean(row) &&
+          Number.isFinite(rowSeed) &&
+          Number.isFinite(metaSeed) &&
+          rowSeed > 0 &&
+          metaSeed > 0 &&
+          rowSeed !== metaSeed;
+        const ledgerRow = mismatched ? null : row;
+        const delivered = ledgerRow && Number.isFinite(ledgerRow.deliveredRun) ? Number(ledgerRow.deliveredRun) : null;
+        const days = ledgerRow && Number.isFinite(ledgerRow.simulatedDays) ? Number(ledgerRow.simulatedDays) : null;
+        const rate = delivered !== null && days !== null && days > 0 ? delivered / days : null;
+        const totals = meta.totals || {};
+        const usage = totals.usage || {};
+        const outcome = meta.outcome || {};
+        return {
+          badge: mismatched ? null : id ? this.outcomeBadge({ id }) : null,
+          note: mismatched
+            ? "This run's ledger row has a colliding session id and belongs to another run, so its delivered reading is not shown as this run's."
+            : "",
+          tiles: [
+            {
+              k: "Delivered",
+              v: delivered === null ? "not measured" : U.fmtInt(delivered),
+              hint: "cargo + passengers in the run window",
+            },
+            {
+              k: "Game days",
+              v: days === null ? "not measured" : U.fmtInt(days),
+              hint: rate === null ? "rate not measured" : `${rate.toFixed(2)} delivered / game day`,
+            },
+            { k: "Cash", v: U.fmtMoney(outcome.money), hint: "" },
+            {
+              k: "Fleet",
+              v: U.fmtInt(outcome.vehicles),
+              hint: `${U.fmtInt(outcome.stations)} stations`,
+            },
+            {
+              k: "Tokens",
+              v: U.fmtTok(usage.totalTokens),
+              hint: U.fmtCostKnown(usage.costTotal, usage.costKnown),
+            },
+            {
+              k: "Tool failures",
+              v: U.fmtInt(totals.toolFailures),
+              hint: `${U.fmtInt(totals.toolCalls)} calls`,
+            },
+          ],
+        };
+      },
+
+      /** 结论头的瓦片（**永远返回数组**：`x-for` 会独立求值，D45）。 */
+      conclusionTiles() {
+        const head = this.conclusionHead();
+        return head && Array.isArray(head.tiles) ? head.tiles : [];
+      },
+
+      /** 结论头的诚实提示（账本行撞号、属于别的局时说明原因；空串 = 无需说明）。 */
+      conclusionNote() {
+        const head = this.conclusionHead();
+        return head && typeof head.note === "string" ? head.note : "";
+      },
+
+      /** 结论头的结局徽标；账本没有这一局时返回 null（模板用 `x-if` 判断）。 */
+      conclusionBadge() {
+        const head = this.conclusionHead();
+        return head ? head.badge : null;
+      },
+
+      /**
+       * 列表里的结果徽标：结局词表来自**账本的 `outcomeClass`**（B5 的闭集），
+       * 页面只决定颜色，不解释、不改写（服务端才是唯一文案来源）。
+       */
+      outcomeBadge(session) {
+        const id = session && session.id;
+        if (!id) return null;
+        const row = (Array.isArray(this.metrics) ? this.metrics : []).find((m) => m && m.id === id);
+        const label = row && typeof row.outcomeClass === "string" ? row.outcomeClass : "";
+        if (!label) return null;
+        const bad = label === "refused" || label === "world_frozen";
+        const ok = label === "delivered";
+        const dim = label === "unknown";
+        return { label, tone: bad ? "bad" : ok ? "ok" : dim ? "dim" : "warn" };
       },
 
       /** 训练面板（委托给模块级纯函数）。 */
