@@ -529,7 +529,7 @@ OpenTTD 有**两个动作面**，能力完全不同：
 ### 10.65 流量指标的**测量缺陷**：`deliveredCargo` 是当季计数器（2026-09-18）
 **仍为真**（测量缺陷，最常咬人）：`ServerCompanyEconomy.deliveredCargo` 是**本季度已运出**的计数器，**每季度归零**（u16）。所以 `deliveredRun` 是**跨季积分**，`deliveredRunComplete=true` 表示整段无 gap；两臂必须同源，否则回落到 `raw` 并标 `ArmComparison.deliveredSource`。
 **它同时含客运**（2026-10-31 核对 OpenTTD 15.3 源码）：admin 发的是 `cur_economy.delivered_cargo` 这个**按货种的数组**的求和，而 OpenTTD 把客运也记进同一数组（`src/economy.cpp`：`cur_economy.delivered_cargo[cargo_type] += accepted_total`）⇒ `deliveredRun` **已经是"货物 + 客运"**，旧措辞 "cargo delivered" 是在说谎；分数轴与系统提示都改口（措辞由服务端 `DELIVERED_MEASURE` 给出）。按货种拆分另有来源（GS 的 cargo monitor），**口径不同，不可与之相加**。
-**可以拆开**（2026-10-31）：GS 的 cargo monitor 按货种分桶（含 `PASS`＝客运），但它返回的是**自上次读取以来的增量** ⇒ 之前每次只看到最后一个窗口 ⇒ 一直为空。GS 现在自己累加 ⇒ 度量行有 `deliveredByCargo` ⇒ 分数轴的 `cargoDelivered` / `passengersDelivered` **分开报**（monitor 口径＝卸到被监视城镇/产业的量，**与 admin 的被接受量不同口径，不可相加**）；**没拆分到就是 `null`**（半个样本也说不出全样本的数）。
+**拆不开**（2026-11-01 核对 OpenTTD 15.3 源码）：脚本 API **没有 cargo monitor**（`GSCargoMonitor.*` 调用**不报错**、只返回 null ⇒ 症状是"拆分一直是空的"，极易被误读成"还没交付"），admin 的 `deliveredCargo` 又是按货种数组的**求和** ⇒ **公司的交付无法按货种分开**。⇒ 分数轴只有**合计**（货物+客运），`cargoDelivered`/`passengersDelivered` 恒为 `null`（= 没测到，不是 0）；守卫 `squirrel-api-guard` 登记该 API 不存在，GS 不得再调它。
 依据：`src/game/delivery-meter.ts`、`src/evolution/metrics.ts`、`src/evolution/scorecard.ts`、`src/game/squirrel/bridge-gs/main.nut`；教训 `MEMORY.md` D14。
 
 ### 10.66 GS 通道的**部分失效**：`GSStation.IsStationTile` 不存在（2026-09-18）
