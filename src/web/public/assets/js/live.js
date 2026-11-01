@@ -496,6 +496,9 @@
               // `key` 标识"这张图画的是什么"：切换指标时 format 都是函数，
               // ucharts 的复用判断只能靠这个键，否则会把 cost 画成 money。
               key: "cash:" + this.cashMetric,
+              // 决策标记：每次决策在曲线上的一根竖线（x = 采样序号）。
+              // 标记放在**配置**里 ⇒ 新决策只重画竖线，不重建图（保住读者的缩放）。
+              markers: this.decisionMarkers(),
             });
           });
         },

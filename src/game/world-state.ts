@@ -85,6 +85,8 @@ export interface CompanyHistoryPoint {
 	/** Game date at sample time (for axis labels); null before the first date event. */
 	year: number | null;
 	month: number | null;
+	/** Day of month (the day-precise label and the decision markers need it). */
+	day: number | null;
 	money: number;
 	loan: number;
 	income: number;
@@ -291,6 +293,7 @@ export class WorldState {
 						at: ev.ts,
 						year: this.date?.year ?? null,
 						month: this.date?.month ?? null,
+						day: this.date?.day ?? null,
 						money: Number(p.money),
 						loan: Number(p.loan),
 						income: Number(p.income),
