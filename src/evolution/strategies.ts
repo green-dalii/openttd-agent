@@ -14,8 +14,49 @@ import type { StrategyCard } from "./types.js";
 
 export type { StrategyCard };
 
-/** 价值门槛:一局至少多赚这么多钱,这个模式才值得记下来。 */
-export const MIN_STRATEGY_VALUE = 5000;
+/**
+ * 门槛：平均**每游戏日利润增量**至少这么多，这个模式才值得记下来。
+ *
+ * 单位从"一局多赚多少钱"换成"每日利润"，原因有两个：
+ *   ① 余额会被贷款、初始资金、造价时点主导（D86 的同类教训：拿最容易被混淆的量
+ *      当成绩），而**利润**才是这一版业绩的口径；
+ *   ② 每局的游戏日长度不同（60 日 vs 300 日），用"每局总额"比较等于奖励长局。
+ * 数值沿用旧门槛的经济含义：旧值是"一局(≈300 日)多赚 5000" ⇒ 约 16.7/日。
+ */
+export const MIN_STRATEGY_PROFIT_PER_DAY = 5000 / 300;
+
+/**
+ * 模型能"证明"的只有**真动作**：词表由代码拥有（与 `ACTION_EFFECTS` 的写动作同源）。
+ *
+ * 为什么（2026-11-01）：旧 id 直接对模型写的自由文本做哈希，于是同一个想法换一种
+ * 措辞就变成新卡 ⇒ `MIN_VERIFIED_RUNS = 2` 在结构上不可达。身份必须归代码所有，
+ * 模型只提供事实与证据；它也不能靠改措辞决定"这是一张新卡"。
+ * 守卫：`test/unit/evolution-strategies.test.ts` 会核对这张表与工具目录一致。
+ */
+export const STRATEGY_ACTIONS = [
+	"build_bus_route",
+	"set_route_vehicles",
+	"set_route_cargo",
+	"set_route_engine",
+	"retire_route",
+	"set_pause",
+] as const;
+
+/**
+ * 参与身份的**少量**参数（其余参数是证据，不是身份）。
+ *
+ * 只有真正改变"这是一个什么模式"的参数才进来：运什么货、用什么车、什么模式。
+ * 镇号/线路号这类每次都会变的参数**不进身份**，否则每条线路都是一张新卡。
+ */
+export const STRATEGY_IDENTITY_PARAMS = ["cargo", "engine", "mode"] as const;
+
+/** 这条 action 能不能当身份；不能就返回给模型看的原因（不是静默丢弃）。 */
+export function strategyIdentityProblem(action: unknown): string | null {
+	if (typeof action !== "string" || !action.trim()) return "action is required";
+	const name = action.trim();
+	if ((STRATEGY_ACTIONS as readonly string[]).includes(name)) return null;
+	return `action must be one of: ${STRATEGY_ACTIONS.join(", ")}`;
+}
 
 /** SPEC §5.3 硬性要求:至少两个独立局验证过。 */
 export const MIN_VERIFIED_RUNS = 2;
@@ -27,8 +68,13 @@ export const MAX_STRATEGIES_INJECTED = 4;
 export interface StrategySample {
 	action: string;
 	params: Record<string, number | string>;
-	/** That game's payoff for this pattern (money delta). */
-	value: number;
+	/**
+	 * 这一局的**利润增量速率**（每游戏日，正数=赚钱）。
+	 *
+	 * 由代码从这一局的记录里盖上（`reflect-run.ts`：income/365），模型不能自带
+	 * 一个数字——它只能提供模式与证据。缺这个读数 ⇒ 这条采样不可用于晋升。
+	 */
+	profitPerDay?: number;
 	/** Game facts backing it; empty evidence means the sample is dropped. */
 	evidence: string[];
 	sessionId: string;
@@ -51,8 +97,16 @@ function canonicalParams(params: unknown): string {
  * the same idea and the "verified in N games" gate never trips.
  */
 export function strategyId(action: unknown, params: unknown): string {
-	if (typeof action !== "string" || !action.trim()) return "";
-	const raw = `${action.trim()}|${canonicalParams(params)}`;
+	if (strategyIdentityProblem(action) !== null) return "";
+	// 身份只吃白名单参数：模型写多少别的字段都不改变这一张卡的身份。
+	const identity: Record<string, unknown> = {};
+	if (params && typeof params === "object" && !Array.isArray(params)) {
+		for (const k of STRATEGY_IDENTITY_PARAMS) {
+			const v = (params as Record<string, unknown>)[k];
+			if (v !== undefined && v !== null && v !== "") identity[k] = v;
+		}
+	}
+	const raw = `${String(action).trim()}|${canonicalParams(identity)}`;
 	let h = 0x811c9dc5;
 	for (let i = 0; i < raw.length; i++) {
 		h ^= raw.charCodeAt(i);
@@ -75,12 +129,12 @@ function cleanList(v: unknown): string[] {
 	return out;
 }
 
-/** A usable sample needs an action, a finite value, evidence, and a source game. */
+/** A usable sample needs a known action, a measured profit rate, evidence, a source game. */
 function isValidSample(s: unknown): s is StrategySample {
 	if (!s || typeof s !== "object") return false;
 	const v = s as StrategySample;
-	if (typeof v.action !== "string" || !v.action.trim()) return false;
-	if (!Number.isFinite(Number(v.value))) return false;
+	if (strategyIdentityProblem(v.action) !== null) return false;
+	if (!Number.isFinite(Number(v.profitPerDay))) return false;
 	if (typeof v.sessionId !== "string" || !v.sessionId) return false;
 	if (cleanList(v.evidence).length === 0) return false;
 	return true;
@@ -132,7 +186,7 @@ export function mergeStrategySamples(
 				name: s.action,
 				action: s.action,
 				params: { ...(s.params || {}) },
-				valuePerRun: [Number(s.value)],
+				profitPerDayPerRun: [Number(s.profitPerDay)],
 				evidence,
 				sourceSessionIds: [s.sessionId],
 				createdAt: Number.isFinite(Number(s.createdAt)) ? Number(s.createdAt) : now,
@@ -146,7 +200,7 @@ export function mergeStrategySamples(
 		const sessions = new Set([...(prev.sourceSessionIds || []), s.sessionId]);
 		byId.set(id, {
 			...prev,
-			valuePerRun: [...(prev.valuePerRun || []), Number(s.value)],
+			profitPerDayPerRun: [...(prev.profitPerDayPerRun || []), Number(s.profitPerDay)],
 			evidence: mergedEvidence,
 			sourceSessionIds: [...sessions].sort(),
 			createdAt: Math.min(Number(prev.createdAt) || now, Number(s.createdAt) || now),
@@ -158,7 +212,7 @@ export function mergeStrategySamples(
 
 export interface PromotionResult {
 	promoted: boolean;
-	/** Mean payoff across verified games (0 when there are no usable samples). */
+	/** Mean **profit per game day** across verified games (0 when there are no usable samples). */
 	value: number;
 	/** How many games verified it. */
 	runs: number;
@@ -180,11 +234,15 @@ export function evaluatePromotion(
 	card: StrategyCard,
 	opts: PromotionOptions = {},
 ): PromotionResult {
-	const minValue = Number.isFinite(Number(opts.minValue)) ? Number(opts.minValue) : MIN_STRATEGY_VALUE;
+	const minValue = Number.isFinite(Number(opts.minValue))
+		? Number(opts.minValue)
+		: MIN_STRATEGY_PROFIT_PER_DAY;
 	const minRuns = Number.isFinite(Number(opts.minRuns)) ? Number(opts.minRuns) : MIN_VERIFIED_RUNS;
 
-	const values = (Array.isArray(card?.valuePerRun) ? card.valuePerRun : []).filter((v) =>
-		Number.isFinite(Number(v)),
+	// 旧卡（2026-11-01 之前）只有模型自报的 `valuePerRun`：**没有**利润读数 ⇒ 不可晋升。
+	// 那是"没测到"，不是"测到 0"——所以不给它们一个值。
+	const values = (Array.isArray(card?.profitPerDayPerRun) ? card.profitPerDayPerRun : []).filter(
+		(v) => Number.isFinite(Number(v)),
 	);
 	const runs = values.length;
 	const value = runs ? values.reduce((a, b) => a + Number(b), 0) / runs : 0;
@@ -194,7 +252,10 @@ export function evaluatePromotion(
 			promoted: false,
 			value,
 			runs,
-			reason: `verified in ${runs} game(s), needs >= ${minRuns}`,
+			reason:
+				runs === 0
+					? `no measured profit yet (needs ${minRuns} games with a profit reading)`
+					: `verified in ${runs} game(s) with a profit reading, needs >= ${minRuns}`,
 		};
 	}
 	if (!(value > minValue)) {
@@ -202,14 +263,14 @@ export function evaluatePromotion(
 			promoted: false,
 			value,
 			runs,
-			reason: `value ${Math.round(value)} does not exceed threshold ${minValue}`,
+			reason: `profit ${value.toFixed(1)}/game day does not exceed ${minValue.toFixed(1)}/day`,
 		};
 	}
 	return {
 		promoted: true,
 		value,
 		runs,
-		reason: `value ${Math.round(value)} over ${runs} games`,
+		reason: `+${value.toFixed(1)} profit/game day across ${runs} games`,
 	};
 }
 
@@ -270,6 +331,6 @@ export function formatStrategiesForInjection(list: StrategyCard[]): string[] {
 		.map((c) => {
 			const params = canonicalParams(c.params).replace(/[ns]:/g, "");
 			const value = Math.round(evaluatePromotion(c).value);
-			return `WORKED: ${c.action}${params === "{}" ? "" : ` with ${params}`} (avg +${value}/game)`;
+			return `WORKED: ${c.action}${params === "{}" ? "" : ` with ${params}`} (avg +${value} profit/game day in runs where it appeared)`;
 		});
 }

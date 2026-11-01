@@ -27,7 +27,7 @@ import {
 	strategiesPath,
 } from "../../src/evolution/store.js";
 import { lessonId, type Lesson } from "../../src/evolution/lessons.js";
-import { MIN_STRATEGY_VALUE, strategyId } from "../../src/evolution/strategies.js";
+import { MIN_STRATEGY_PROFIT_PER_DAY, strategyId } from "../../src/evolution/strategies.js";
 import type { StrategyCard } from "../../src/evolution/types.js";
 
 let dir: string;
@@ -60,7 +60,7 @@ function card(over: Partial<StrategyCard> = {}): StrategyCard {
 		name: over.action ?? "build_bus_route",
 		action: over.action ?? "build_bus_route",
 		params,
-		valuePerRun: [MIN_STRATEGY_VALUE + 1000, MIN_STRATEGY_VALUE + 2000],
+		profitPerDayPerRun: [MIN_STRATEGY_PROFIT_PER_DAY + 10, MIN_STRATEGY_PROFIT_PER_DAY + 20],
 		evidence: ["money +18000"],
 		sourceSessionIds: ["s1"],
 		createdAt: 1000,
@@ -165,23 +165,23 @@ describe("learning store: strategies", () => {
 		expect(readStrategies(dir)).toEqual([]);
 	});
 
-	it("写入后能读回(含 valuePerRun 与 enabled 状态)", () => {
+	it("写入后能读回(含 profitPerDayPerRun 与 enabled 状态)", () => {
 		const c = card({ enabled: true });
 		appendStrategies(dir, [c]);
 		const out = readStrategies(dir);
 		expect(out).toHaveLength(1);
-		expect(out[0]!.valuePerRun).toEqual(c.valuePerRun);
+		expect(out[0]!.profitPerDayPerRun).toEqual(c.profitPerDayPerRun);
 		expect(out[0]!.enabled).toBe(true);
 	});
 
 	it("同一 id 后来者胜(卡片是累积后的完整快照)", () => {
-		appendStrategies(dir, [card({ valuePerRun: [MIN_STRATEGY_VALUE + 1] })]);
+		appendStrategies(dir, [card({ profitPerDayPerRun: [MIN_STRATEGY_PROFIT_PER_DAY + 1] })]);
 		appendStrategies(dir, [
-			card({ valuePerRun: [MIN_STRATEGY_VALUE + 1, MIN_STRATEGY_VALUE + 2] }),
+			card({ profitPerDayPerRun: [MIN_STRATEGY_PROFIT_PER_DAY + 1, MIN_STRATEGY_PROFIT_PER_DAY + 2] }),
 		]);
 		const out = readStrategies(dir);
 		expect(out).toHaveLength(1);
-		expect(out[0]!.valuePerRun).toHaveLength(2);
+		expect(out[0]!.profitPerDayPerRun).toHaveLength(2);
 	});
 
 	it("保留人工确认状态(不能因为重写而丢失)", () => {
@@ -191,9 +191,9 @@ describe("learning store: strategies", () => {
 	});
 
 	it("单行损坏不丢整本库", () => {
-		appendStrategies(dir, [card({ action: "a" })]);
+		appendStrategies(dir, [card({ action: "build_bus_route" })]);
 		appendFileSync(strategiesPath(dir), "}}}broken\n", "utf8");
-		appendStrategies(dir, [card({ action: "b", params: { x: 1 } })]);
+		appendStrategies(dir, [card({ action: "set_route_cargo", params: { cargo: "PASS" } })]);
 		expect(readStrategies(dir)).toHaveLength(2);
 	});
 
@@ -230,11 +230,14 @@ describe("learning store: setStrategyEnabled(人工确认 guardrail)", () => {
 	});
 
 	it("只影响目标卡片", () => {
-		appendStrategies(dir, [card({ action: "a" }), card({ action: "b", params: { q: 1 } })]);
-		setStrategyEnabled(dir, card({ action: "a" }).id, true);
+		appendStrategies(dir, [
+			card({ action: "build_bus_route" }),
+			card({ action: "set_route_cargo", params: { cargo: "PASS" } }),
+		]);
+		setStrategyEnabled(dir, card({ action: "build_bus_route" }).id, true);
 		const out = readStrategies(dir);
-		expect(out.find((c) => c.action === "a")!.enabled).toBe(true);
-		expect(out.find((c) => c.action === "b")!.enabled).toBe(false);
+		expect(out.find((c) => c.action === "build_bus_route")!.enabled).toBe(true);
+		expect(out.find((c) => c.action === "set_route_cargo")!.enabled).toBe(false);
 	});
 });
 

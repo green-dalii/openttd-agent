@@ -72,11 +72,11 @@ export interface OutcomeClassCount extends OutcomeDescription {
 const DESCRIPTIONS: Record<OutcomeClass, { label: string; hint: string }> = {
 	delivered: {
 		label: "Delivered",
-		hint: "the run delivered cargo - a real result",
+		hint: "the run delivered cargo and passengers - a real result",
 	},
 	delivered_nothing: {
 		label: "Built, delivered nothing",
-		hint: "construction finished but no cargo moved - look at the route and the vehicles",
+		hint: "construction finished but nothing was delivered - look at the route and the vehicles",
 	},
 	no_construction: {
 		label: "Nothing built",

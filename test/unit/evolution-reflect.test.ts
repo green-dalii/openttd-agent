@@ -192,6 +192,32 @@ describe("reflect-tools: 记录工具就是校验点", () => {
 		expect(sink.rejections).toHaveLength(1);
 	});
 
+	it("record_strategy 只接受真实动作名，并把可选词表交回模型", async () => {
+		// 身份归代码所有（2026-11-01）：模型不能靠编一个动作名造一张新卡，
+		// 但它必须知道该怎么办 —— 拒绝理由里带完整词表。
+		const bad = await call("record_strategy", {
+			action: "build_truck_route",
+			evidence: ["e"],
+		});
+		expect(bad.error).toMatch(/must be one of: .*build_bus_route/);
+		expect(bad.sink.strategies).toHaveLength(0);
+		expect(bad.sink.rejections).toHaveLength(1);
+
+		const ok = await call("record_strategy", { action: "build_bus_route", evidence: ["e"] });
+		expect(ok.error).toBeNull();
+		expect(ok.sink.strategies).toHaveLength(1);
+	});
+
+	it("record_strategy 不再收模型自报的 value（利润由代码盖章）", async () => {
+		const { error } = await call("record_strategy", {
+			action: "build_bus_route",
+			value: 999999,
+			evidence: ["e"],
+		});
+		// The schema no longer has `value`; an extra property is ignored, not trusted.
+		expect(error).toBeNull();
+	});
+
 	it("没有实测读数 → 抛错并说明要什么", async () => {
 		const { error } = await call("record_lesson", { text: "x happened", evidence: ["e"] });
 		expect(error).toMatch(/outcome is required/i);
@@ -206,19 +232,17 @@ describe("reflect-tools: 记录工具就是校验点", () => {
 		expect(error).toMatch(/evidence/i);
 	});
 
-	it("策略工具要求实测 value 与证据", async () => {
-		const bad = await call("record_strategy", { action: "build_bus_route", value: Number.NaN, evidence: ["e"] });
-		expect(bad.error).toMatch(/value/i);
-		const noEvidence = await call("record_strategy", { action: "build_bus_route", value: 10, evidence: [] });
+	it("策略工具要动作名与证据；利润不由模型提供", async () => {
+		const noEvidence = await call("record_strategy", { action: "build_bus_route", evidence: [] });
 		expect(noEvidence.error).toMatch(/evidence/i);
 		const good = await call("record_strategy", {
 			action: "build_bus_route",
 			params: { distance: 20 },
-			value: 20000,
 			evidence: ["money +20000"],
 		});
 		expect(good.error).toBeNull();
-		expect(good.sink.strategies[0]!.value).toBe(20000);
+		// The sample carries no value: the harness stamps the measured profit later.
+		expect(good.sink.strategies[0]).not.toHaveProperty("value");
 	});
 
 	it("同一条观察在同一个反思里只记一次", async () => {

@@ -57,19 +57,31 @@ SPEC §5.2 #2：把"高收益动作模板"存为卡片（参数化的成功模�
 
 ```ts
 interface StrategyCard {
-  id: string;
+  id: string;                                    // 由**代码**从 action + 白名单参数派生
   name: string;                                  // 如 "bus_route_medium_town"
-  action: string;                                // 对应工具名，如 "build_bus_route"
-  params: Record<string, number | string>;       // 参数化成功模式
-  valuePerRun: number[];                         // **每局**一个收益样本
+  action: string;                                // 必须是工具目录里的写动作
+  params: Record<string, number | string>;       // 参数化成功模式（证据，不是身份）
+  profitPerDayPerRun?: number[];                 // **每局**一个利润速率（每游戏日）
   evidence: string[];
   sourceSessionIds: string[];
   createdAt: number;
 }
 ```
 
-**入库门槛（SPEC §5.3 硬性）**：`价值 > 阈值` **且** `已验证局 ≥ 2`。
-`valuePerRun.length` 就是"已验证局数"——存数组而不是标量，使门槛可判定而不是靠印象。
+**身份归代码所有（2026-11-01）**：`id` 只由 `action`（封闭词表，`STRATEGY_ACTIONS`，
+必须与 `ACTION_EFFECTS` 的写动作一致）加**白名单参数**（`cargo` / `engine` / `mode`）派生。
+旧实现把模型写的自由文本＋全部参数一起哈希，于是同一个想法换个镇号或换种措辞就是新卡，
+`已验证局 ≥ 2` 在**结构上不可达**。模型现在只能提供模式与证据，不能决定"这是不是一张新卡"；
+它写一个不存在的动作名会被**拒绝**，理由里带完整词表。
+
+**入库门槛（SPEC §5.3 硬性）**：`每游戏日利润 > 阈值` **且** `已验证局 ≥ 2`。
+`profitPerDayPerRun.length` 就是"已验证局数"——存数组而不是标量，使门槛可判定而不是靠印象。
+
+**价值口径是利润增量，且由代码盖章**：每局的读数来自这一局自己的记录
+（`income / 365`，即"每游戏日利润"），**不是模型自报的金额**。理由与 D86 同类：
+余额被贷款、初始资金与造价时点主导，拿它当成绩等于让最容易混淆的量决定记忆。
+每局长度不同（60 日 vs 300 日），所以单位必须是速率。
+旧卡（只有模型自报 `valuePerRun`）**没有**利润读数 ⇒ 不可晋升：那是"没测到"，不是"测到 0"。
 
 > **`strategies.jsonl` 是候选池，不只是"已入库"的赢家。**
 > 门槛要求两局验证，所以第一局的样本**必须有个地方存**——早期实现只写通过门槛的卡片，

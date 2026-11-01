@@ -54,6 +54,12 @@ export interface ReflectionFacts {
 		toolFailures: number;
 		constructionDone: boolean | null;
 		durationMs: number;
+		/**
+		 * Profit rate for this run (money per year at the end), or null when the
+		 * game never reported one. The strategy gate is expressed per game day, so
+		 * the orchestrator converts it; reflection itself only sees the fact.
+		 */
+		income?: number | null;
 	};
 	/** Action outcomes / notable events, already reduced to factual statements. */
 	evidence: string[];
@@ -140,7 +146,8 @@ export function buildReflectionPrompt(facts: ReflectionFacts): ReflectionPrompt 
 		"- record_lesson: call it once per observation (it takes text, outcome, evidence,",
 		"  optional confidence and optional supersedes).",
 		"- record_strategy: call it for a parameterised pattern this game provides a",
-		"  measured sample for (action, params, value, evidence).",
+		"  sample for (action, params, evidence). Use one of the action names the tools",
+		"  list; the profit reading is taken from this game's record, not from you.",
 		"Call them as many times as you have entries. A rejected call tells you the",
 		"reason - fix it and call again. If this game recorded nothing worth keeping,",
 		"call nothing at all (that is a valid answer).",

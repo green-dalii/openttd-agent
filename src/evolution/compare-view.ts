@@ -50,6 +50,31 @@ export interface ExclusionCount {
 	count: number;
 }
 
+/**
+ * Did the compared runs answer the **same question**?
+ *
+ * Why this is here and not folded into `scaffoldHash` (2026-11-01 assessment):
+ * `scaffoldHash` covers only the static scaffold (system prompt + tool
+ * name/description/schema) so it can be computed **before** a run - that is what
+ * the next-run preview prints. The observation surface (towns, industries, routes,
+ * the `since` delta) depends on the world and cannot exist before it; folding it
+ * into `scaffoldHash` would make the hash seed-dependent and break the preview.
+ * `payloadShapeHash` already fingerprints the *whole question* (numbers
+ * normalised), so a change in `observe()` moves it.
+ *
+ * What was missing was not the hash but the **comparison**: nothing looked at it.
+ * This block states the fact; excluding runs stays a human decision (the page
+ * only discloses).
+ */
+export interface SurfaceCheck {
+	/** Distinct scaffold hashes among the compared runs (null/absent excluded). */
+	scaffoldHashes: string[];
+	/** Distinct payload-shape hashes (the question actually asked, numbers normalised). */
+	payloadShapeHashes: string[];
+	/** True when the compared runs were not answering the same question. */
+	differs: boolean;
+}
+
 /** Everything the Compare page draws. */
 export interface ComparePayload {
 	conditions: BenchConditions;
@@ -67,6 +92,8 @@ export interface ComparePayload {
 	comparison: PairedComparison | null;
 	/** The runs themselves (the drill-down list). */
 	runs: CompareRun[];
+	/** Whether the compared runs shared a scaffold and an observation surface. */
+	surface: SurfaceCheck;
 }
 
 /** The model that served a run (a gateway substitute must not be credited to the request). */
@@ -141,9 +168,25 @@ export function buildCompareView(
 		}))
 		.sort((a, b) => b.startedAt - a.startedAt);
 
+	const distinct = (pick: (m: GameMetric) => unknown): string[] => {
+		const out = new Set<string>();
+		for (const m of filtered) {
+			const v = pick(m);
+			if (typeof v === "string" && v) out.add(v);
+		}
+		return [...out].sort();
+	};
+	const scaffoldHashes = distinct((m) => m.manifest?.scaffoldHash);
+	const payloadShapeHashes = distinct((m) => m.manifest?.payloadShapeHash);
+
 	return {
 		conditions: opts.conditions ?? { scenario: null, horizonDays: null, seeds: [], repeats: 0 },
 		collisions,
+		surface: {
+			scaffoldHashes,
+			payloadShapeHashes,
+			differs: scaffoldHashes.length > 1 || payloadShapeHashes.length > 1,
+		},
 		models,
 		exclusions,
 		comparison,

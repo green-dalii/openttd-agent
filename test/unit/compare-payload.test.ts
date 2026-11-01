@@ -125,3 +125,53 @@ describe("buildCompareView", () => {
 		expect(buildCompareView(rows, { models: ["nope"] }).runs.length).toBe(0);
 	});
 });
+
+/**
+ * 2026-11-01 评估结论：观测面**不进** `scaffoldHash`（它在跑之前算不出来，
+ * 且会让哈希随 seed 变化、毁掉预览），而由 `payloadShapeHash` 覆盖。
+ * 缺的从来不是哈希，而是**比较**——Compare 现在把它说出来。
+ */
+describe("Compare: did the compared runs answer the same question?", () => {
+	function run(id: string, model: string, scaffold: string | null, shape: string | null) {
+		return {
+			id,
+			seed: 7,
+			llmModel: model,
+			status: "completed",
+			deliveredRun: 100,
+			simulatedDays: 300,
+			manifest: {
+				backend: "native",
+				...(scaffold ? { scaffoldHash: scaffold } : {}),
+				...(shape ? { payloadShapeHash: shape } : {}),
+			},
+		} as never;
+	}
+
+	it("reports no difference when every run shares both hashes", () => {
+		const view = buildCompareView([
+			run("a", "m1", "aaaa1111", "bbbb2222"),
+			run("b", "m2", "aaaa1111", "bbbb2222"),
+		]);
+		expect(view.surface.differs).toBe(false);
+		expect(view.surface.payloadShapeHashes).toEqual(["bbbb2222"]);
+	});
+
+	it("flags a different observation surface even when the scaffold hash matches", () => {
+		const view = buildCompareView([
+			run("a", "m1", "aaaa1111", "bbbb2222"),
+			run("b", "m2", "aaaa1111", "cccc3333"),
+		]);
+		expect(view.surface.differs).toBe(true);
+		expect(view.surface.payloadShapeHashes).toEqual(["bbbb2222", "cccc3333"]);
+	});
+
+	it("ignores runs that recorded no hash (not measured is not a difference)", () => {
+		const view = buildCompareView([
+			run("a", "m1", "aaaa1111", "bbbb2222"),
+			run("b", "m2", null, null),
+		]);
+		expect(view.surface.differs).toBe(false);
+		expect(view.surface.scaffoldHashes).toEqual(["aaaa1111"]);
+	});
+});
