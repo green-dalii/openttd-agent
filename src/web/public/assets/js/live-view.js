@@ -201,7 +201,13 @@
       stageViewsExpanded: false,
       run: null,
       runControl: false,
-      startedAt: null,
+      /**
+       * 每 5 s 递增的时钟。为什么不是 `Date.now()` 直接进模板：模板只在依赖的
+       * 响应式数据变化时重绘，而"现在"不是响应式的——`nowTick` 让运行时长
+       * 自己往前走，且不引入忙轮询（2026-11-01：旧实现的 `startedAt` 从未被赋值，
+       * 于是运行中顶栏的 Elapsed 永远是 "—"）。
+       */
+      nowTick: Date.now(),
       /**
        * 线路事实（后端每个 snapshot 帧都带）。形状见 `toWireSnapshot` 的 extras：
        * `{job, vehicles, waiting, profitYtd, incomePerDay|null, townA?, townB?}`。
@@ -422,6 +428,125 @@
       /** Whether there is any company at all (drives the empty state). */
       companiesEmpty() {
         return Object.keys(this.companies || {}).length === 0;
+      },
+
+      /**
+       * 冷启动：这一局还什么都没发生。
+       *
+       * 为什么需要（2026-11-01 审计 A1/A3）：空页会铺 8 个 `—` 和一个红色
+       * `world frozen`，首屏读起来像"坏了"，而事实只是"还没开跑"。数据区在冷启动
+       * 时**不占版面**（不是画一堆空槽），由三步引导回答"我现在能做什么"。
+       *
+       * 判据只看**已经发生过的事**，不猜：有局在跑、有世界读数、或有过 turn，都不是冷启动。
+       */
+      coldStart() {
+        const runState = (this.run && this.run.state) || "idle";
+        if (runState !== "idle") return false;
+        if (!this.companiesEmpty()) return false;
+        const steps = Array.isArray(this.steps) ? this.steps : [];
+        if (steps.length) return false;
+        const t = this.telemetry || {};
+        if (Number(t.turns) > 0) return false;
+        return true;
+      },
+
+      /**
+       * 冷启动的三步引导：① 选模型 → ② 设上限 → ③ 开跑。
+       *
+       * 为什么是三步而不是一句 "no run is active"：用户要的是**下一步动作**，
+       * 不是对空页的解释。第 1、2 步是链接（配置在另一页），第 3 步是按钮本身
+       * （`start: true`，模板据此渲染 `startRun('agent')`）。
+       *
+       * 何时**不**显示：
+       *   - 没有 run 控制（`--watch`）：页面不能开跑，说了就是假承诺；
+       *   - 已经有一局在跑：引导会与真实读数抢版面；
+       *   - 启动失败：错误卡是此刻唯一值得读的东西，引导会让它被埋掉。
+       */
+      startGuide() {
+        const n = this.notice();
+        const runState = (this.run && this.run.state) || "idle";
+        const show = Boolean(this.runControl) && runState === "idle" && n.show && n.kind !== "err";
+        if (!show) return { show: false, steps: [] };
+        return {
+          show: true,
+          steps: [
+            {
+              n: 1,
+              title: "Choose the model",
+              body: "The provider and model decide how the agent thinks. Keys live in a file outside the repository, never in it.",
+              action: "Open Configure",
+              href: "/configure",
+              start: false,
+            },
+            {
+              n: 2,
+              title: "Set the limits",
+              body: "Seed, game days, token cap and cost cap are optional — an empty field keeps the server's own setting.",
+              action: "Open run settings",
+              href: "/configure#run-settings",
+              start: false,
+            },
+            {
+              n: 3,
+              title: "Start the run",
+              body: "Start agent plays with that model. Observe only records what the built-in AI does, with no model calls at all.",
+              action: "Start agent",
+              href: "",
+              start: true,
+            },
+          ],
+        };
+      },
+
+      /**
+       * 引导步骤（**永远返回数组**）。
+       *
+       * 为什么单独一个函数：`x-for` 会独立求值，而 `startGuide()` 在数据到达前可能
+       * 没有 `steps`，Alpine 会报 "x-for 穿过可空表达式"（D45，与 `healthTiles` 同一个坑）。
+       */
+      startGuideSteps() {
+        const g = this.startGuide();
+        return Array.isArray(g.steps) ? g.steps : [];
+      },
+
+      /**
+       * 本局会话 id（顶栏移到页内之后由这里统一取）。
+       *
+       * 为什么不是直接读 `this.sessionId`：那个字段从来没人写（与 `startedAt` 同一类
+       * 缺陷——注释说"由 live.js 灌入"，实际没有灌）。权威来源是遥测快照，
+       * serve 模式下还有 supervisor 的 `run.sessionId`。
+       */
+      runSessionId() {
+        for (const raw of [this.telemetry && this.telemetry.sessionId, this.run && this.run.sessionId, this.sessionId]) {
+          if (typeof raw === "string" && raw) return raw;
+        }
+        return null;
+      },
+
+      /**
+       * 服务端记录的本局开始时间。
+       *
+       * 两个来源，按可信度排：`run.startedAt`（supervisor，serve 模式控制运行的那一侧）、
+       * `telemetry.startedAt`（遥测快照，agent/watch 直接跑时**没有** `/api/run`）。
+       * 都没有就返回 null —— 页面上写 "—"，不编一个 0 秒。
+       */
+      runStartedAt() {
+        for (const raw of [this.run && this.run.startedAt, this.telemetry && this.telemetry.startedAt]) {
+          const at = Number(raw);
+          if (Number.isFinite(at) && at > 0) return at;
+        }
+        return null;
+      },
+
+      /**
+       * 运行时长。窗口没有开始时间时返回 "—"（**没测到**，不是 0 秒）。
+       * 浏览器时钟落后于服务端时不出现负数。
+       */
+      elapsedText(nowMs) {
+        const at = this.runStartedAt();
+        if (at === null) return "—";
+        const now = Number.isFinite(nowMs) ? nowMs : Date.now();
+        return U.fmtDuration(Math.max(0, now - at));
       },
 
       /**
@@ -963,7 +1088,15 @@
           {
             k: "World",
             v: rate.advancing ? (rate.daysPerMin === null ? "moving" : `${rate.daysPerMin}/min`) : "frozen",
-            state: rate.advancing ? (rate.daysPerMin !== null && rate.daysPerMin < 0.5 ? "warn" : "ok") : "bad",
+            // 暂停导致的冻结是**已知原因**，用警告而不是告警色：把最亮的颜色
+            // 留给"没有原因的不动"（2026-11-01 审计 A3）。
+            state: rate.advancing
+              ? rate.daysPerMin !== null && rate.daysPerMin < 0.5
+                ? "warn"
+                : "ok"
+              : r.state === "paused" || c.pausedByAgent === true
+                ? "warn"
+                : "bad",
             hint: rate.advancing ? "game days per wall-clock minute (from date events)" : "no new game date in the last 90s",
           },
           {
@@ -1475,6 +1608,21 @@
             body: "Start a run to see the agent's decisions, token usage and steps.",
             canStart: true,
             hint: "",
+          };
+        }
+        // 有 brain 但 kind 不是 real ⇒ 这一局是**脚本演示**（`--offline-demo`）：
+        // 决策真的在发生，只是来自固定脚本。以前这里统一说"只在观察内置 AI"，
+        // 对演示局是假的——面板空的原因是"没有模型调用"，不是"没有 agent"。
+        if (brain && brain.kind) {
+          return {
+            show: true,
+            kind: "",
+            title: "This run is a scripted demo",
+            body:
+              "Decisions here come from a fixed script, not from a model, so token usage and " +
+              "reasoning stay empty on purpose. Start a run with a real LLM to measure one.",
+            canStart: this.runControl && runState === "idle",
+            hint: this.runControl ? "" : "Restart with `pnpm run cli --serve` to control runs from here.",
           };
         }
         return {
