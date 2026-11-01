@@ -82,8 +82,11 @@
           this.connect();
           this.loadRun();
           this.loadCapabilities();
-          // Elapsed time must tick without a busy repaint loop.
-          this.elapsedTimer = setInterval(() => { if (this.startedAt) this.elapsed = U.fmtDuration(Date.now() - this.startedAt); }, 5000);
+          // Elapsed must advance without a busy repaint loop. The view model derives
+          // the duration from the server's `run.startedAt`; the tick is only what makes
+          // Alpine re-evaluate it (the old code assigned a value to a getter, which
+          // silently did nothing — Elapsed read "—" even mid-run).
+          this.elapsedTimer = setInterval(() => { this.nowTick = Date.now(); }, 5000);
         },
 
         /* ------------------------------- run ------------------------------- */
@@ -625,7 +628,6 @@
           if (pre) pre.hidden = !pre.hidden;
         },
         togglePause() { this.evPaused = !this.evPaused; },
-        get elapsed() { return this.startedAt ? U.fmtDuration(Date.now() - this.startedAt) : "—"; },
       };
     });
   });

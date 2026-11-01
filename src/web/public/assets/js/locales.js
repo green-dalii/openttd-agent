@@ -21,6 +21,19 @@ window.I18nMessages = {
     "History": "历史",
     "Configure": "配置",
 
+    /* ---- Run 页：冷启动的三步引导 ---- */
+    "Choose the model": "选择模型",
+    "Set the limits": "设定上限",
+    "Start the run": "开始这一局",
+    "Open Configure": "打开配置页",
+    "Open run settings": "打开运行设置",
+    "The provider and model decide how the agent thinks. Keys live in a file outside the repository, never in it.":
+      "provider 与模型决定了 agent 怎么思考。密钥放在仓库之外的文件里，从不进仓库。",
+    "Seed, game days, token cap and cost cap are optional — an empty field keeps the server's own setting.":
+      "seed、游戏日数、token 上限、花费上限都是可选的 —— 留空就沿用服务端自己的设置。",
+    "Start agent plays with that model. Observe only records what the built-in AI does, with no model calls at all.":
+      "Start agent 用那个模型自己打；Observe only 只记录内置 AI 做了什么，不产生任何模型调用。",
+
     /* ---- Compare 页 ---- */
     "same worlds, different models — every number computed by the server": "同一批世界，不同模型 —— 每个数字都由服务端算出",
     "Four axes per model": "每个模型的四个轴",

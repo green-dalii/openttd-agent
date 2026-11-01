@@ -38,18 +38,13 @@
 <div x-data="live" x-init="init()">
   <header>
     <div class="brand" data-brand="live"></div>
+    <!-- 顶栏只回答两个问题：通道活着吗、这一局在跑吗。
+         其余读数（数据新鲜度 / 会话 / 运行时长）移入页内 —— 顶栏不是数据表
+         （2026-11-01 审计 A2：6 个状态 chip 与导航抢同一行）。 -->
     <div class="runbar">
       <div class="item"><span class="lbl">Connection</span>
         <span class="pill" :class="linkOk ? 'ok' : link === 'waiting for server…' ? 'idle' : 'bad'"
               x-text="link"></span></div>
-      <div class="item"><span class="lbl">Data</span>
-        <span class="pill" :class="dataAge().tone === 'bad' ? 'bad' : dataAge().tone === 'warn' ? 'idle' : 'ok'"
-              :title="'time since the last data frame arrived from the harness'"
-              x-text="dataAge().text"></span></div>
-      <div class="item"><span class="lbl">Session</span><span class="val dim" x-text="sessionId || '—'"></span></div>
-      <div class="item"><span class="lbl">Game date</span>
-        <span class="val" x-text="date ? $fmt.gameDate(date) : '—'"></span></div>
-      <div class="item"><span class="lbl">Elapsed</span><span class="val" x-text="elapsed"></span></div>
       <div class="item" x-show="runControl" :hidden="!runControl">
         <span class="lbl">Run</span>
         <span class="pill" :class="runState() === 'running' ? 'ok' : runState() === 'idle' ? 'idle' : 'bad'"
@@ -70,7 +65,8 @@
 
   <main>
     <!-- The honest empty state: SAY why the panels are empty. -->
-    <section class="notice" x-show="notice().show" :class="notice().kind === 'err' ? 'notice err' : 'notice'">
+    <section class="notice" x-show="notice().show && !startGuide().show"
+             :class="notice().kind === 'err' ? 'notice err' : 'notice'">
       <div class="notice-body">
         <strong x-text="notice().title"></strong><br />
         <span x-text="notice().body"></span>
@@ -83,6 +79,43 @@
         </div>
       </div>
     </section>
+
+    <!-- ========================= COLD START =========================
+         什么数据都没有时，页面**只回答一个问题**：我现在能做什么。
+         以前这里铺 8 个破折号 + 一条红色 "WORLD frozen"，首屏像坏了
+         （2026-11-01 审计 A1/A3）。引导共三步，与真实可做的事一一对应。 -->
+    <section class="guide" x-show="startGuide().show" x-cloak>
+      <template x-for="s in startGuideSteps()" :key="s.n">
+        <div class="guide-step">
+          <span class="guide-n" x-text="s.n"></span>
+          <div class="guide-body">
+            <strong x-text="s.title"></strong>
+            <p x-text="s.body"></p>
+            <template x-if="s.start">
+              <button type="button" class="btn sm primary" @click="startRun('agent')" x-text="s.action"></button>
+            </template>
+            <template x-if="!s.start">
+              <a class="btn sm" :href="s.href" x-text="s.action"></a>
+            </template>
+          </div>
+        </div>
+      </template>
+    </section>
+
+    <!-- 数据区在冷启动时**不占版面**（不是画一堆空槽）。 -->
+    <div class="stack" x-show="!coldStart()" x-cloak>
+      <!-- 页内元数据：数据新鲜度 / 会话 / 运行时长（从顶栏移下来）。
+           Game date 不在这里重复 —— 它已经是健康条的瓦片。 -->
+      <div class="run-meta">
+        <span class="item"><span class="lbl">Data</span>
+          <span class="pill" :class="dataAge().tone === 'bad' ? 'bad' : dataAge().tone === 'warn' ? 'idle' : 'ok'"
+                :title="'time since the last data frame arrived from the harness'"
+                x-text="dataAge().text"></span></span>
+        <span class="item"><span class="lbl">Session</span>
+          <span class="val dim" x-text="runSessionId() || '—'"></span></span>
+        <span class="item"><span class="lbl">Elapsed</span>
+          <span class="val" x-text="elapsedText(nowTick)"></span></span>
+      </div>
 
     <!-- ============================= ① RUN =============================
          "它在跑吗"：脑是真是假、最近一次活动、当前意图、上一动作。
@@ -870,6 +903,7 @@
       </details>
     </section>
     </details>
+    </div>
   </main>
 
   <!-- ========================= DRILL-DOWN DRAWER =========================

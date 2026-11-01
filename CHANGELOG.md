@@ -9,18 +9,16 @@
 
 ## [Unreleased]
 ### Added
-- **Corrected: the deliveries cannot be split into cargo and passengers.** An earlier entry in
-  this section claimed they could. Checked against the OpenTTD 15.3 source, they cannot: the script
-  API has **no cargo monitor** at all (`GSCargoMonitor.*` does not fail - it returns null, so the
-  split simply reads as "always empty", which is easy to mistake for "nothing delivered yet"), and
-  the admin's counter is the **sum** over the per-cargo-type array. The score therefore keeps the one
-  number it can measure - cargo and passengers together - and the split fields report "not measured"
-  instead of a fabricated split. The API is now registered in the squirrel-api guard, so the GS cannot
-  call it again.
+- **Corrected: the deliveries cannot be split into cargo and passengers.** An earlier entry here
+  claimed they could. Checked against the OpenTTD 15.3 source, they cannot: the script API has **no
+  cargo monitor** (`GSCargoMonitor.*` does not fail - it returns null, so a split reads as "always
+  empty"), and the admin's counter is the **sum** over the per-cargo-type array. The score keeps the
+  one number it can measure and the split fields report "not measured". The API is registered in the
+  squirrel-api guard so the GS cannot call it again.
 
 - **The first real benchmark matrix is done.** Two models x three seeds x 300 game days, same
-  scaffold, same horizon, every cell reaching the horizon. The harness's own verdict on the
-  primary axis is **"not determinable"** (paired mean difference -0.270 delivered per game day, 95% CI [-1.077, 0.545] includes zero: the variance across seeds dwarfs the difference). The secondary axes do separate them, in opposite directions: **M3.1-Flash needs ~40% fewer tokens per delivered unit** (1635 vs 1033 per million tokens), **M2.5 makes ~4.5x fewer failed tool calls** (2.9% vs 13.1%). Full numbers in issue #1.
+  scaffold and horizon, every cell reaching it. The harness's verdict on the primary axis is
+  **"not determinable"** (paired mean difference -0.270 delivered per game day, 95% CI [-1.077, 0.545] includes zero: the variance across seeds dwarfs the difference). The secondary axes do separate them, in opposite directions: **M3.1-Flash needs ~40% fewer tokens per delivered unit** (1635 vs 1033 per million tokens), **M2.5 makes ~4.5x fewer failed tool calls** (2.9% vs 13.1%). Full numbers in issue #1.
 
 - **The configuration page is now called what it does.** The page that used to live at `/providers`
   answers "how is this run configured?" - provider, key, run knobs - so it is now at `/configure`
@@ -29,24 +27,13 @@
   OpenTTD's *per-cargo-type* array summed up - and OpenTTD keeps passengers in that same array, so
   the number has always counted **cargo and passengers**, not tonnes of freight. The scorecard, the benchmark report, the History page and the model-facing system prompt all said "cargo", which was untrue - and the prompt told the model it was judged on freight alone. The wording now comes from one place on the server (`DELIVERED_MEASURE`), the page copies it, and the scaffold fingerprint moved (`3da8a64e1fbe818e` -> `74f2e64d1e930df3`) because the prompt changed.
 
-- **The dashboard speaks two languages now.** A switch in the header flips the whole interface between
-  English and Chinese, and the choice is remembered. The English text stays where it always was (the
-  translation table is keyed by it, the gettext way), so there is no second copy of the wording to keep
-  in sync - and a guard test fails the build when a translation no longer matches its source. Raw evidence (the JSON in the agent steps) is left alone: translating a log would be rewriting the record. The server's own vocabulary - outcome classes, error hints - stays as the server wrote it.
+- **The dashboard speaks two languages now.** A switch in the header flips the whole interface between English and Chinese, and the choice is remembered. The English text stays where it always was (the translation table is keyed by it, the gettext way), so there is no second copy to keep in sync, and a guard test fails the build when a translation no longer matches its source. Raw evidence stays raw (the JSON in the agent steps is not translated) and so does the server's own vocabulary.
 
-- **The model can finally see the cargo.** The Bridge GS has been reporting the industries, the
-  per-cargo totals, the road engines and the town names all along - and the agent side parsed them -
-  but the model-visible projection dropped them, so the agent only ever saw `date`, the companies
-  and `towns[{id,pop,x,y}]`. A real model noticed ("the observe output doesn't include engine list or cargo labels here") and built a **passenger** line because it could not see a single crate. The projection now carries the cargo world, the engine catalogue and the town names into `observe()` and every decision context; missing readings stay `null` (never 0), and a town without a name stays nameless. The observation surface changed, so the fingerprint changed with it (`7956ab6d8c86fa60` -> `3da8a64e1fbe818e`): runs before and after it are compared as such.
-- **A run can now explain itself.** The run's detail shows the **full manifest**: the same world
-  (seed + game version), the same scaffold (scaffold / payload-shape hashes), and whether the run
-  was capped (token / cost limit). When the provider answered with a different model than the one
-  requested - a substituting gateway - that is flagged instead of hidden. Hashes are shown short,
-  copied in full.
+- **The model can finally see the cargo.** The Bridge GS reported the industries, the per-cargo totals, the road engines and the town names all along, and the agent side parsed them - but the model-visible projection dropped them, so the agent only saw `date`, the companies and `towns[{id,pop,x,y}]`. A real model noticed and built a **passenger** line because it could not see a single crate. `observe()` and every decision context now carry the cargo world, the engine catalogue and the town names; missing readings stay `null` (never 0) and a town without a name stays nameless. The observation surface changed, so the fingerprint moved with it (`7956ab6d8c86fa60` -> `3da8a64e1fbe818e`).
+- **A run can now explain itself.** The run's detail shows the **full manifest**: the same world (seed + game version), the same scaffold (scaffold / payload-shape hashes), and whether the run was capped (token / cost limit). When the provider answered with a different model than the one requested - a substituting gateway - that is flagged instead of hidden. Hashes are shown short, copied in full.
 
-- **The runs can be grouped** by model, seed or backend. The group keys come from the server
-  (the ledger's own fields), because "which model" has two sources - the one requested and the
-  one that served the run - and a page that guesses will disagree with the ledger.
+- **The runs can be grouped** by model, seed or backend. The keys come from the ledger, because
+  "which model" has two sources - requested and served - and a guessing page would disagree.
 
 - **The navigation follows the four questions now**: Run / Compare / History / Configure. The
   "Evolution" page was renamed **Memory** and moved into History, because it manages what the
@@ -58,28 +45,19 @@
   refused" - the signal that a model is flailing) was invisible. The vocabulary is now **closed**
   (ten classes, no more, no less) and its names and meanings come from the server, so History
   shows each run's class and Compare shows how many runs of each class a model has. A run whose readings are missing reads "unknown" - not "nothing happened".
-- **Errors carry a code instead of a sentence.** A failed model-list refresh, a rejected key, a
-  missing credential, an unknown model: each now arrives as `{code, message, hint}`, and **each
-  code has exactly one canonical hint** - so the same 401 reads the same way wherever it appears.
-  The refresh endpoint's status says whose fault it is: 400 when the request cannot be honored
-  (no key), 502 when the provider upstream failed. The pages render by code; the page no longer reverse-engineers intent from the wording of an error, and a guard keeps it that way.
-- **A Compare page.** It answers "how do these models compare on the same worlds": one row per
-  model across the four axes (result, efficiency, reliability, growth), the excluded runs counted
-  **by reason**, and - once two models are picked - the paired verdict with its interval or the
-  reason it cannot be decided. Every run in the list drills through to that run in History.
+- **Errors carry a code instead of a sentence.** A failed model-list refresh, a rejected key, a missing credential, an unknown model: each now arrives as `{code, message, hint}`, and **each code has exactly one canonical hint**. The refresh endpoint's status says whose fault it is: 400 when the request cannot be honored (no key), 502 when the provider upstream failed. Pages render by code and never reverse-engineer intent from the wording; a guard keeps it that way.
+- **A Compare page.** It answers "how do these models compare on the same worlds": one row per model across the four axes (result, efficiency, reliability, growth), the excluded runs counted **by reason**, and - once two models are picked - the paired verdict with its interval or the reason it cannot be decided. Every run in the list drills through to that run in History.
   The numbers are the server's: the four axes come from the scorecard, the paired verdict from the paired comparison, the exclusion reasons from the existing enum. The page computes nothing and judges nothing; a missing reading reads "not measured", and an unpriced model's cost reads "not measured" rather than $0.
 
 - **The Run page now reads as three bands, and one decision is one row.** The page answers "is it
   playing" (health, score, the current goal), then "what just happened" - a **causal timeline**
-  where a row is a decision and expanding it shows the four pieces of evidence together: the
-  tools it called, the GS job those tools ordered (with the phases it went through), and what
-  changed until the next decision. The pieces are joined **by the job id**, not by guessing from
-  timestamps. The newest 20 rows are shown; older ones load on demand. The diagnostics (cash, fleet, cargo, towns, tokens, wire detail, raw log) moved into a collapsed band - folded, not deleted.
+  where a row is a decision and expanding it shows the four pieces of evidence together: the tools it called, the GS job they ordered (with its phases), and what changed until the next decision. The pieces are joined **by the job id**, not by guessing from timestamps. The newest 20 rows are shown, older ones load on demand, and the diagnostics moved into a collapsed band.
 
-- **The timeline is a server fact.** `GET /api/sessions/:id/timeline` returns the rows; the page
-  only draws them, and a reading the server did not have is shown as "not measured" rather than
-  as zero. The GS phases are now archived with the session, so a finished run can still be
-  explained - before this they existed only in the live stream.
+- **The Run page starts with three steps instead of a screen of dashes.** With nothing measured it showed eight "-" and a red "world frozen" tile, which reads as "this is broken" rather than "nothing has started". It now answers the only question an empty page can answer - choose the model, set the limits, start - and keeps the world sections out of the layout until they have something to say.
+
+- **The timeline is a server fact.** `GET /api/sessions/:id/timeline` returns the rows and the page
+  only draws them; a reading the server did not have reads "not measured", never zero. The GS phases
+  are archived with the session, so a finished run can still be explained.
 
 - **The dashboard can start a run, and says what the next run will use.** The run knobs (seed,
   game days, scenario, memory arm, thinking level, tool budget, token and cost caps, backend) are
@@ -119,6 +97,8 @@
 
 - **`capabilities()`**: the agent can ask which actions exist before trying them.
 ### Fixed
+- **The Run header stopped lying about elapsed time and the session id.** Both displayed fields the page never wrote, so they read "-" even mid-run; they now come from the server (the telemetry snapshot, or the supervisor's run record) and the elapsed time actually ticks.
+
 - **The Compare page has a chart now, and the model picker sits on top.** The four axes used to
   be a table and nothing else. Each axis gets its own chart - one bar per model, scaled against
   that axis' own maximum, because the axes have different units and a shared scale would

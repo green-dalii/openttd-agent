@@ -14,7 +14,7 @@
 
 | # | 问题 | 页面位置 | 呈现形式 |
 |---|---|---|---|
-| 1 | **它活着吗？在跑吗？** | 顶部常驻条 | 连接 pill + session + 模式 + 运行时长 |
+| 1 | **它活着吗？在跑吗？** | 顶部常驻条 | 连接 pill + 运行状态（+ 控制按钮） |
 | 2 | **它在赚钱吗？** | KPI 条（首屏） | 6 个 tile：大数字 + 环比 delta + sparkline |
 | 3 | **agent 表现正常吗？** | Agent 面板 | token 构成环图、失败率、工具延迟、思考流 |
 | 4 | **刚刚发生了什么？** | 底部长列表 | 步骤流 + 事件流（可过滤/暂停/搜索） |
@@ -118,16 +118,29 @@ window.Charts = {
 ## 5. 页面信息架构
 
 ### 5.1 Live（`/`）
+
+**顶栏只回答两个问题**：通道活着吗、这一局在跑吗。其余读数（数据新鲜度 / 会话 /
+运行时长）在页内一行 `.run-meta` 里——顶栏不是数据表（审计 A2/A3）。
+
 ```
-[sticky header]  brand + nav | link pill · session · mode/brain · elapsed
-[KPI strip]      Cash · Income/yr · Company value · Vehicles · Stations · Tokens
-[Action surface] agent 现在能做的事；读/写徽标 + 门控 + 原因（详见 §5.5）
-[Economy]        (2/3) 多序列折线（money/loan + 图例 + hover tooltip）
-[Agent]          (1/3) 运行状态 · token 环图 · 成本 · 失败率
-[Throughput]     每 turn token 柱状 + 工具调用/延迟表
-[Activity]       Steps（过滤：全部/LLM/工具/失败） | Events（类别 chips + 搜索 + 暂停）
-[Stages]         阶段性总结时间线（**运行中持续追加**，不再是 shutdown 才写）
+[sticky header]  brand + nav | Connection · Run(+start/pause/stop)   ← 只有这两项
+[冷启动]          三步引导：① 选模型 → ② 设上限 → ③ 开跑（无读数时**只有这一块**）
+[页内元数据]      Data · Session · Elapsed（从顶栏移下来；Game date 由健康条承担）
+[health]          4 瓦片：World · Agent · Game date · Decision + 一句"下一步"
+[Run]             Brain / Last decision / Turns / Phase + Current goal / Last action
+[Cash history]    **主角**：游戏日 × 钱/贷款/收入；决策点是竖虚线（可缩放/复位）
+[Result]          6 KPI（现金/年收入/估值/贷款/车队/车站；严格不含成本）
+[Just happened]   一行一决策：decision → tools → job/相位 → effect（B3）
+[Routes][Cargo & industry][Towns]  GS 读数；不可得写 "not readable"，绝不写 0
+[Progress]        阶段总结 + 阶段画面
+[Cost]            token / 成本（与 Result 分开）
+[Agent activity]  动作面 · 记忆注入 · Steps · 推理
+[Detail]          原始日志（默认折叠）
 ```
+
+**空态的规则（审计 A1/A3）**：没有局、没有读数时，数据区整块不出现（不是画一屏 `—`），
+页面只显示引导；"world frozen" 这类颜色只在**有局却没在推进**时出现，且已知原因
+（暂停）用警告色而非告警色。
 
 ### 5.2 Configure（`/configure`；`/llm` 为兼容别名，`/providers` 302 重定向）
 ```
