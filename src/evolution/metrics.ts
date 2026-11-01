@@ -601,7 +601,7 @@ export interface ArmComparison {
 	 * money is spending-dominated, income is what the lines earn.
 	 */
 	incomeDelta: number | null;
-	/** Right minus left of mean delivered cargo (N2-4b). */
+	/** Right minus left of mean delivered (cargo + passengers, N2-4b). */
 	deliveredDelta: number | null;
 	/**
 	 * Which figure `delivered*` fields describe: the run-integrated flow metric

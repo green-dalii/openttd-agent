@@ -255,6 +255,10 @@ export async function runFinalizeAndReflect(args: FinalizeAndReflectArgs): Promi
 						toolCalls: finalTelemetry.totals.toolCalls,
 						toolFailures: finalTelemetry.totals.toolFailures,
 						constructionDone: reachedDone,
+						// The game's own yearly profit. Strategy promotion is gated on a
+						// **measured** profit rate (2026-11-01), so the fact has to reach the
+						// reflection layer that stamps it. Missing stays null.
+						income: c0?.economy && Number.isFinite(Number(c0.economy.income)) ? Number(c0.economy.income) : null,
 						durationMs: Math.max(0, Date.now() - Number(session.current().startedAt || Date.now())),
 					},
 					evidence: [

@@ -73,8 +73,17 @@ export interface StrategyCard {
 	/** Tool/action this pattern applies to, e.g. "build_bus_route". */
 	action: string;
 	params: Record<string, number | string>;
-	/** One payoff sample per verified game. */
-	valuePerRun: number[];
+	/**
+	 * One **measured profit rate** per verified game (per game day).
+	 *
+	 * Stamped by code from the run's record (`income / 365`), never by the model.
+	 * Cards written before 2026-11-01 carry `valuePerRun` (the model's own money
+	 * claim) instead and are therefore **not** promotable: no profit reading is
+	 * "not measured", not "measured 0".
+	 */
+	profitPerDayPerRun?: number[];
+	/** Legacy field (pre-2026-11-01 pools). Read for display only; never gates. */
+	valuePerRun?: number[];
 	evidence: string[];
 	sourceSessionIds: string[];
 	createdAt: number;

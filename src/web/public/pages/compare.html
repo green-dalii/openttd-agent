@@ -56,6 +56,15 @@
       <!-- Data loss must be said out loud: the ledger reports the session ids it
            had to drop (Issue #58). A silently shrinking sample is how a benchmark
            ends up lying about n. -->
+      <!-- Same scaffold hash is not enough: the observation surface lives in the
+           payload shape hash. If the compared runs differ, say so - comparing two
+           questions is how a benchmark lies (2026-11-01 assessment). -->
+      <div class="cmp-warn" x-show="surfaceDiff()">
+        <template x-if="surfaceDiff()">
+          <p x-text="surfaceDiff().text"></p>
+        </template>
+      </div>
+
       <div class="cmp-warn" x-show="collisionRows().length">
         <template x-for="c in collisionRows()" :key="'coll-' + c.id">
           <p>

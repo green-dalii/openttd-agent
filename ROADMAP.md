@@ -85,11 +85,11 @@
 | 9 | 预提交孤儿符号误报刷屏（25 个/次）淹没真孤儿 —— **2026-10-30 已查清：卡在工具上**（pi-shazam 的项目配置只认 `verify.maxFiles`，没有 ignore 规则；分析器只数**调用**，前端 `window.*` 导出在模板里被调用 ⇒ 假孤儿）。它**不拦提交**（咨询性），故只剩噪声；已记 MEMORY D85 防止误删 | 要么工具支持 ignore，要么接受噪声 | P3（等工具） |
 | 12 | **界面 i18n 收尾**：运行时与切换器已落地（`assets/js/i18n.js` + `locales.js`，EN/中文，源文本作键，守卫测住漂移）；**待补**：服务端词汇按 id 本地化（结局十类、问题码）、带插值的动态句子（`{0}`）、页面上剩余的文案 | 四页任一语言下**没有半句没翻**；原文证据与服务端文案保持原样 | `docs/DASHBOARD-AUDIT-2026-10-31.md` §3 P2 |
 | 11 | **Dashboard 呈现面审计与改造**（2026-10-31 审计完，方案在 `docs/DASHBOARD-AUDIT-2026-10-31.md`）：16 条实测问题（13 个破折号的空态、Compare 四轴是纯文字表、主功能藏在区块里、History 10 屏无层级、Configure 空选择报假警…）| 四页各有**唯一视觉主角**（Run 时间轴图 / Compare 四轴横条 / History 结论头 / Configure 摘要卡）；`not measured` 在视觉上与 0 不同；真实 Chrome + 有数据状态下 0 console | `docs/DASHBOARD-AUDIT-2026-10-31.md` §3 |
-| 10 | **策略库从未观察到晋升**（每轮 `0 strategy card(s) promoted`，自进化第二条腿未运行） | 一次真实运行里确认晋升路径可用，或调整晋升门槛并报出理由 | `SPEC.md` §5.3 |
+| 10 | **策略库晋升**：身份归代码（封闭动作词表 + 白名单参数）与利润增量口径（`income/365`，代码盖章）已就位；**仍需一次真实运行证明晋升真的会发生**，否则说明门槛或样本量还有问题 | 一次真机运行里 `strategiesPromoted > 0`，或写明为何在当前门槛下不可能 | `docs/EVOLUTION.md` §2.2 |
+| 13 | **观测面在默认后端没有指纹**：`payloadShapeHash` 只来自 harness 的 `before_payload`（真机账本 6 行全 `null`）⇒ 默认后端的两局是否"回答同一个问题"无从判断。做法见 `docs/SCAFFOLD-CONTRACT.md` §7.1 末尾 | 决策点的 `observationHash` 进 manifest，两种后端都有值；Compare 能据此披露 | `docs/SCAFFOLD-CONTRACT.md` §7.1 |
 
-**实验与真机约束**（细节见 `MEMORY.md`）：真机实验用**隔离 data dir 与端口**
-（如 `/tmp/pXX`、admin `3991`、game `3993`、web `8198`）；**不跑宽泛 pkill**；
-实验进行期间不跑 gate（D5）；block 运行期间不改 `src/`（D12）。
+**实验与真机约束**（细节见 `MEMORY.md`）：隔离 data dir 与端口（`/tmp/pXX`、admin `3991`、
+game `3993`、web `8198`）；**不跑宽泛 pkill**；实验期间不跑 gate（D5）；block 期间不改 `src/`（D12）。
 
 ---
 

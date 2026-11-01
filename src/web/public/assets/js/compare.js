@@ -92,6 +92,11 @@
           return window.CompareView.axisCharts(this.payload);
         },
 
+        /** Different scaffold / observation surface among the compared runs. */
+        surfaceDiff() {
+          return window.CompareView.surfaceDiff(this.payload);
+        },
+
         /** The ledger collisions the server reported (rows it had to drop). */
         collisionRows() {
           return window.CompareView.collisionRows(this.payload);

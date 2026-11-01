@@ -219,7 +219,19 @@ export async function runReflection(opts: RunReflectionOptions): Promise<Reflect
 	}
 
 	const lessons = sink.lessons;
-	const samples = sink.strategies;
+	/**
+	 * Stamp the run's **measured profit rate** onto every sample (2026-11-01).
+	 *
+	 * Why here and not in the tool: a tool call cannot know how the run ended, and
+	 * asking the model for the number made the promotion gate read a self-report.
+	 * `income` is the game's own yearly profit; per-game-day is the unit the gate
+	 * and the scorecard already use elsewhere.
+	 */
+	const income = Number(opts.facts.summary.income);
+	const profitPerDay = Number.isFinite(income) ? income / 365 : null;
+	const samples = profitPerDay === null
+		? sink.strategies
+		: sink.strategies.map((s) => ({ ...s, profitPerDay }));
 
 	let lessonsSaved = 0;
 	let lessonsSuperseded = 0;
@@ -254,6 +266,14 @@ export async function runReflection(opts: RunReflectionOptions): Promise<Reflect
 		// unreachable (game 1's sample was discarded, so game 2 only ever saw
 		// itself). Injectability is enforced in selectStrategies(), which requires
 		// BOTH the gate and the human flag.
+		if (profitPerDay === null && samples.length > 0) {
+			// 没有利润读数 ⇒ 这些采样进不了晋升闸。说出来，而不是安静地丢掉。
+			// eslint-disable-next-line no-console
+			console.log(
+				`[evolution] reflection: ${samples.length} strategy sample(s) dropped - this game ` +
+					"recorded no profit reading (the gate is a profit rate, not a model claim)",
+			);
+		}
 		const pool = mergeStrategySamples(samples, merged, now);
 		appendStrategies(opts.dataDir, pool);
 		strategiesPromoted = pool.filter((c) => evaluatePromotion(c).promoted).length;

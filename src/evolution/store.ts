@@ -218,7 +218,7 @@ function isStrategyCard(v: unknown): v is StrategyCard {
 		typeof c.id === "string" &&
 		c.id !== "" &&
 		typeof c.action === "string" &&
-		Array.isArray(c.valuePerRun)
+		(Array.isArray(c.profitPerDayPerRun) || Array.isArray(c.valuePerRun))
 	);
 }
 

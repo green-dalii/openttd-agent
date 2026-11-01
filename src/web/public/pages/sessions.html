@@ -478,7 +478,8 @@
       </div>
       <p class="dim">
         Injection needs <strong>both</strong> gates: the evidence gate
-        (value above threshold and verified in ≥ 2 games) and human confirmation.
+        (measured profit above threshold, in ≥ 2 games) and human confirmation.
+        The profit reading comes from each run's record — never from the model's own claim.
         The engine only advises — nothing takes effect until you tick it.
       </p>
       <ol class="mem-library">
@@ -487,7 +488,7 @@
             <span class="mem-kind" x-text="s.injectable ? 'live' : s.promoted ? 'confirmed?' : 'candidate'"></span>
             <span class="mem-body">
               <span x-text="s.label"></span>
-              <span class="dim" x-text="s.runs + ' game(s) · avg ' + s.value"></span>
+              <span class="dim" x-text="s.runs + ' game(s) · avg ' + s.value + ' profit/game day'"></span>
               <span class="dim" x-show="s.reason" x-text="s.reason"></span>
             </span>
             <label class="mem-toggle">
