@@ -224,6 +224,9 @@
       data: rows,
       opts: lineOpts(c, series, labels),
       range: { unit: c.rangeUnit || "points", label: c.rangeLabel || labels },
+      // 决策标记（可选）：画成曲线上的一根根竖线。放在配置里 ⇒ 新决策只重画竖线，
+      // 不重建图（重建会丢掉读者刚拖出来的缩放）。
+      markers: Array.isArray(c.markers) ? c.markers : [],
     };
   }
 
@@ -261,6 +264,45 @@
     };
   }
 
+
+  /**
+   * Decision markers: a vertical line per decision on the x axis.
+   *
+   * The markers live in the chart's **config** (not in the options), so a new
+   * decision re-draws the lines **without rebuilding the chart** - rebuilding on
+   * every decision would throw away the reader's zoom (the same trap the data
+   * path avoids with `setData(data, false)`).
+   *
+   * The marker x is the **sample index** the caller computed (the curve's x axis
+   * is the sample index; the caller maps the decision's game date onto it).
+   */
+  function decisionMarkerPlugin() {
+    return {
+      hooks: {
+        draw: function (u) {
+          // 标记挂在**实例**上（uPlot 的 `u` 就是实例）：宿主元素可能被 uPlot
+          // 包了一层，按元素查表会找不到。
+          const markers = Array.isArray(u.__markers) ? u.__markers : [];
+          if (!markers.length) return;
+          const ctx = u.ctx;
+          ctx.save();
+          ctx.strokeStyle = theme().muted;
+          ctx.lineWidth = 1;
+          ctx.setLineDash([3, 3]);
+          for (const m of markers) {
+            const x = u.valToPos(m.x, "x", true);
+            if (!Number.isFinite(x)) continue;
+            ctx.beginPath();
+            ctx.moveTo(x, u.bbox.top);
+            ctx.lineTo(x, u.bbox.top + u.bbox.height);
+            ctx.stroke();
+          }
+          ctx.restore();
+        },
+      },
+    };
+  }
+
   function lineOpts(c, series, labels) {
     const t = theme();
     const axis = axisStyle(t);
@@ -276,6 +318,8 @@
       // cursor. Enabling it replaces both the custom tooltip this project used to
       // hand-write and the page's separate colour key.
       legend: { show: true, live: true },
+      // 决策标记（可选）：调用方把标记放进 chartCfg，插件每次 draw 时读最新的。
+      plugins: [decisionMarkerPlugin()],
       scales: { x: { time: false } },
       axes: [
         {
@@ -1113,6 +1157,12 @@
           prev.setData(built.data, prev.__zoomedByUser === true ? false : true);
         }
         prev.__lastWidth = el.clientWidth || prev.__lastWidth;
+        // 复用路径：配置（区间读数 + 决策标记）仍要更新 —— 新的一次决策不该
+        // 为了多一根竖线就重建整张图（重建会丢掉读者刚拖出来的缩放）。
+        chartCfg.set(el, Object.assign({}, built.range || {}, { markers: built.markers || [] }));
+        // 标记变了：更新实例上的标记并重画（不重建图 ⇒ 读者的缩放保住）。
+        prev.__markers = built.markers || [];
+        try { prev.redraw(false, true); } catch { /* redraw is best-effort */ }
         return prev;
       }
     }
@@ -1127,11 +1177,16 @@
       // 才收回 271px。用户看到的就是"闪一下 → 很长 → 变回来"，而且每次重建都来一遍。
       const mountW =
         Math.max(el.clientWidth || 0, (el.parentElement && el.parentElement.clientWidth) || 0) || 600;
+      // 配置必须在**构造之前**写入：uPlot 构造时就会 draw 一次，
+      // 插件的 draw hook 在那一刻就要读得到标记（否则第一帧没有竖线）。
+      chartCfg.set(el, Object.assign({}, built.range || {}, { markers: built.markers || [] }));
       const mountOpts = Object.assign({}, built.opts, {
         width: mountW,
         height: built.opts.height,
       });
       const instance = new window.uPlot(mountOpts, built.data, el);
+      // 决策标记挂在实例上（插件每次 draw 读最新的）。
+      instance.__markers = built.markers || [];
       // 形状/数据签名存下来，供下一次复用判断
       try {
         instance.__shape = shapeSignature(built.kind || "line", built.opts);
@@ -1157,7 +1212,7 @@
       }
       instances.set(el, instance);
       // 区间读数的配置（单位/标签）来自调用方：图知道数据，不知道怎么念它。
-      chartCfg.set(el, built.range || {});
+      // （上面在构造前已写过一次；这里补上重建后的最新值。）
       ensureZoomUi(el, instance);
       // 首帧也要有区间读数：否则"full range"只在用户第一次交互后才出现，
       // 而用户正是靠这一行判断"现在看的是不是全部"。

@@ -289,6 +289,15 @@
         return this.companies["0"] || this.companies[ids[0]] || {};
       },
 
+      /**
+       * The decisions' positions on the cash curve (for the vertical markers).
+       *
+       * 纯函数在 LiveView.decisionMarkers 里（可单测）；这里只把两边的数据递过去。
+       */
+      decisionMarkers() {
+        return window.LiveView.decisionMarkers(this.primaryHistory(), (this.timeline && this.timeline.rows) || []);
+      },
+
       /** Server-owned history of the primary company (oldest → newest). */
       primaryHistory() {
         return this.primaryCompany().history || [];
@@ -1788,7 +1797,56 @@
     };
   }
 
+
+  /**
+   * Where the decisions sit on the cash curve.
+   *
+   * The curve's x axis is the **sample index** (server-side history, oldest →
+   * newest); each decision carries the **game date** it was taken on. So a
+   * decision is marked on the last sample that is not newer than it.
+   *
+   * Why not "the sample nearest to it": a decision happens between two samples,
+   * and the honest placement is "the curve as of that moment" - the last sample
+   * that already contains it.
+   *
+   * A decision whose date is unknown, or that predates the whole history, gets
+   * **no marker** (not a marker at x=0 - that would say the decision happened
+   * before the run started).
+   */
+  function decisionMarkers(history, rows) {
+    const hist = Array.isArray(history) ? history : [];
+    const list = Array.isArray(rows) ? rows : [];
+    if (!hist.length || !list.length) return [];
+    const out = [];
+    for (const row of list) {
+      const date = row && typeof row.gameDate === "string" ? row.gameDate : "";
+      const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+      if (!m) continue;
+      const y = Number(m[1]);
+      const mo = Number(m[2]);
+      const d = Number(m[3]);
+      let idx = -1;
+      for (let i = 0; i < hist.length; i++) {
+        const h = hist[i] || {};
+        if (h.year == null || h.month == null) continue;
+        // "not newer than the decision" = the sample is on or before that day.
+        const sample = h.year * 10000 + h.month * 100 + (h.day || 1);
+        const day = y * 10000 + mo * 100 + d;
+        if (sample <= day) idx = i;
+        else break;
+      }
+      if (idx < 0) continue;
+      out.push({
+        x: idx,
+        label: row.trigger ? String(row.trigger) : "decision",
+        turn: row.turn == null ? null : Number(row.turn),
+      });
+    }
+    return out;
+  }
+
   window.LiveView = {
+    decisionMarkers: decisionMarkers,
     upsertStageView: upsertStageView,
     create: create,
     CASH_METRICS: CASH_METRICS,

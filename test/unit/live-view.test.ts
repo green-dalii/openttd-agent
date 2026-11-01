@@ -224,14 +224,22 @@ interface LiveModel {
 }
 
 /** The LiveView module itself (module-level pure helpers live on it). */
-function liveViewModule(): { upsertStageView: (l: unknown, x: unknown) => unknown } {
+function liveViewModule(): {
+	upsertStageView: (l: unknown, x: unknown) => unknown;
+	decisionMarkers: (history: unknown, rows: unknown) => { x: number; label: string; turn: number | null }[];
+} {
 	const sandbox: Record<string, unknown> = { console, JSON, Object, Array, Number, String, Math, Date, Set, Map, Intl };
 	sandbox.UI = uiStub();
 	sandbox.window = sandbox;
 	sandbox.globalThis = sandbox;
 	vm.createContext(sandbox);
 	vm.runInContext(SRC, sandbox);
-	return (sandbox.window as { LiveView: { upsertStageView: (l: unknown, x: unknown) => unknown } }).LiveView;
+	return (sandbox.window as {
+		LiveView: {
+			upsertStageView: (l: unknown, x: unknown) => unknown;
+			decisionMarkers: (history: unknown, rows: unknown) => { x: number; label: string; turn: number | null }[];
+		};
+	}).LiveView;
 }
 
 function load(): { model: LiveModel } {
@@ -276,6 +284,37 @@ const TELEMETRY = {
 		byTool: [{ tool: "build_bus_route", calls: 3, failures: 1, avgDurationMs: 1200 }],
 	},
 };
+
+describe("决策标记在现金曲线上的位置（纯函数）", () => {
+	const hist = [
+		{ year: 1950, month: 1, day: 10 },
+		{ year: 1950, month: 1, day: 20 },
+		{ year: 1950, month: 2, day: 5 },
+		{ year: 1950, month: 2, day: 15 },
+	];
+
+	it("标在「不晚于该决策的最后一个采样点」上", () => {
+		// 决策发生在两次采样之间 ⇒ 诚实的位置是「截至那一刻曲线已经到的那个点」。
+		const marks = liveViewModule().decisionMarkers(hist, [{ gameDate: "1950-01-18", trigger: "start", turn: 1 }]);
+		expect(marks).toEqual([{ x: 0, label: "start", turn: 1 }]);
+		// 晚于最后一点的决策 ⇒ 落在最后一点（曲线还没走到那一步）。
+		const late = liveViewModule().decisionMarkers(hist, [{ gameDate: "1950-03-01", trigger: "tick" }]);
+		expect(late).toEqual([{ x: 3, label: "tick", turn: null }]);
+	});
+
+	it("早于整段历史的决策不画标记（不能画在 x=0，那等于说它发生在开跑前）", () => {
+		expect(liveViewModule().decisionMarkers(hist, [{ gameDate: "1949-12-01", trigger: "start" }])).toEqual([]);
+	});
+
+	it("没有日期的决策不画标记", () => {
+		expect(liveViewModule().decisionMarkers(hist, [{ trigger: "start" }])).toEqual([]);
+	});
+
+	it("没有历史或没有决策 ⇒ 没有标记", () => {
+		expect(liveViewModule().decisionMarkers([], [{ gameDate: "1950-01-18" }])).toEqual([]);
+		expect(liveViewModule().decisionMarkers(hist, [])).toEqual([]);
+	});
+});
 
 describe("Live view model", () => {
 	describe("result vs cost are separate questions", () => {

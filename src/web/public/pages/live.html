@@ -136,6 +136,24 @@
       </div>
     </section>
 
+    <!-- ================== ① THE CURVE ==================
+         这一局在变好还是变差：**这是 Run 页的主角**（审计 P0-2）。
+         以前它被折叠在诊断带里 ⇒ 首屏只有一个状态格，看不出任何趋势。
+         竖直虚线 = 一次决策（决策点由服务端时间线的游戏日期映射到采样序号）。
+         A <div>, never a <canvas>: uPlot injects its chart as DOM children, and
+         a canvas host would make them fallback content nobody renders. -->
+    <section class="panel run-curve" x-show="!companiesEmpty()">
+      <div class="panel-head">
+        <h2>Cash history</h2>
+        <div class="actions"><div x-ref="cashMetric"></div></div>
+      </div>
+      <div class="chart-box"><div id="chart" x-ref="cashChart" x-effect="drawCash()"></div></div>
+      <div class="legend">
+        <span class="lg dim" x-text="'showing ' + cashMetric"></span>
+        <span class="lg dim">dashed lines mark decisions · drag across the time axis to zoom · shift+drag to pan · double-click or ⟲ to reset</span>
+      </div>
+    </section>
+
     <!-- =========================== ② RESULT ===========================
          "公司赢了吗"：结果口径，**严格不含成本**（成本在 ⑤）。
          可下钻的卡片带 `.clickable` 与键盘可达（Enter/Space）——没有载荷的卡片不做成可点。 -->
@@ -252,19 +270,6 @@
          动作面、注入的记忆、原始事件流。 -->
     <details class="diag-band">
       <summary>Diagnostics <span class="dim">— cash, fleet, cargo, towns, tokens, wire detail, raw log</span></summary>
-    <section class="panel">
-      <div class="panel-head">
-        <h2>Cash history</h2>
-        <div class="actions"><div x-ref="cashMetric"></div></div>
-      </div>
-      <!-- A <div>, never a <canvas>: uPlot injects its chart as DOM children, and
-           a canvas host would make them fallback content nobody renders. -->
-      <div class="chart-box"><div id="chart" x-ref="cashChart" x-effect="drawCash()"></div></div>
-      <div class="legend">
-        <span class="lg dim" x-text="'showing ' + cashMetric"></span>
-        <span class="lg dim">drag across the time axis to zoom · shift+drag to pan · wheel to zoom · double-click or ⟲ to reset</span>
-      </div>
-    </section>
     <!-- 构成（车队/车站按类型 + 绩效）：`stats.breakdown` 一直在快照里，
          此前只显示了总数，于是"17 辆车"看不出是 15 公交 + 2 卡车。堆叠条一眼给出构成。 -->
     <section class="grid two" x-show="!companiesEmpty()">
