@@ -22,6 +22,10 @@ import { globSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { globSync } from "node:fs";
+
+const GSFILES = globSync("src/game/squirrel/*/*.nut").sort();
 
 const PACKS = ["src/game/squirrel/bridge-gs", "src/game/squirrel/executor-ai"];
 
@@ -756,5 +760,21 @@ describe("线路读数带上 id 与站号（否则仪表盘只能重复计数）
 		expect(bridge).toMatch(/vehIds\.append\(v\)/);
 		// 两端都要收：一条线的车可能停在任一端
 		expect(bridge.match(/vehIds\.append\(v\)/g) ?? []).toHaveLength(2);
+	});
+});
+
+describe("GS 源码的语法雷区（2026-10-31 真机踩到）", () => {
+	it("不用 `??`（OpenTTD 自带的 Squirrel 不支持 ⇒ 整个 GS 编译失败）", () => {
+		// 真机后果：`main.nut:2260 expression expected` ⇒ **GS 从未加载** ⇒
+		// 运行日志只说 "GS never heartbeated"，模型看不到任何事实 ⇒ 整局作废。
+		// 语法错误在真机之前完全看不出来，所以这里静态挡住。
+		for (const file of GSFILES) {
+			// 注释里提到这个运算符是允许的（说明为什么不用它）⇒ 只查代码。
+			const code = readFileSync(file, "utf8")
+				.split("\n")
+				.map((line) => line.replace(/\/\/.*$/, ""))
+				.join("\n");
+			expect(code.includes("??"), file).toBe(false);
+		}
 	});
 });
