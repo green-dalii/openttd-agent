@@ -29,7 +29,7 @@ import { createFauxCore, fauxAssistantMessage, fauxToolCall } from "@earendil-wo
 import { pruningTransformContext } from "../../src/agent/context.js";
 import { appendLessons, appendStrategies, readLessons, readStrategies } from "../../src/evolution/store.js";
 import { lessonId, type Lesson } from "../../src/evolution/lessons.js";
-import { MIN_STRATEGY_VALUE, selectStrategies, strategyId } from "../../src/evolution/strategies.js";
+import { MIN_STRATEGY_PROFIT_PER_DAY, selectStrategies, strategyId } from "../../src/evolution/strategies.js";
 import type { StrategyCard } from "../../src/evolution/types.js";
 
 const NOW = 1_700_000_000_000;
@@ -64,7 +64,7 @@ function card(over: Partial<StrategyCard> = {}): StrategyCard {
 		name: over.action ?? "build_bus_route",
 		action: over.action ?? "build_bus_route",
 		params,
-		valuePerRun: [MIN_STRATEGY_VALUE + 1000, MIN_STRATEGY_VALUE + 2000],
+		profitPerDayPerRun: [MIN_STRATEGY_PROFIT_PER_DAY + 10, MIN_STRATEGY_PROFIT_PER_DAY + 20],
 		evidence: ["money +18000"],
 		sourceSessionIds: ["s1"],
 		createdAt: NOW - 1000,
@@ -85,6 +85,10 @@ const FACTS = {
 		toolFailures: 0,
 		constructionDone: true,
 		durationMs: 60000,
+		// The strategy gate is a **profit rate** (2026-11-01): without this reading a
+		// sample cannot be judged, so the pool must stay empty. Tests that exercise
+		// promotion therefore need a measured income.
+		income: 365 * 40,
 	},
 	evidence: ["1950-01: built bus route, ok"],
 };
@@ -115,7 +119,6 @@ const GOOD_CALLS = () => [
 		fauxToolCall("record_strategy", {
 			action: "build_bus_route",
 			params: { distance: 20 },
-			value: 20000,
 			evidence: ["money +20000"],
 		}),
 	]),
@@ -240,14 +243,14 @@ describe("reflection-run: runReflection(局终反思编排)", () => {
 		// sample must persist somewhere or the gate is unreachable.
 		const pool = readStrategies(dir);
 		expect(pool).toHaveLength(1);
-		expect(pool[0]!.valuePerRun).toHaveLength(1);
+		expect(pool[0]!.profitPerDayPerRun).toHaveLength(1);
 		expect(pool[0]!.enabled).toBe(false);
 	});
 
 	it("未通过门槛的候选不得被注入(池子本身不可注入)", () => {
 		// The pool holds candidates; injection must still require the gate. Without
 		// this, a single game's sample would be teachable advice.
-		const candidate: StrategyCard = { ...card(), enabled: true, valuePerRun: [999999] };
+		const candidate: StrategyCard = { ...card(), enabled: true, profitPerDayPerRun: [999999] };
 		const mem = { lessons: [], strategies: selectStrategies([candidate]), lines: [] };
 		expect(mem.strategies).toEqual([]);
 	});
@@ -267,7 +270,7 @@ describe("reflection-run: runReflection(局终反思编排)", () => {
 		});
 		const cards = readStrategies(dir);
 		expect(cards).toHaveLength(1);
-		expect(cards[0]!.valuePerRun).toHaveLength(2);
+		expect(cards[0]!.profitPerDayPerRun).toHaveLength(2);
 	});
 
 	it("没有证据的反思不落盘", async () => {

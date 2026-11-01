@@ -88,6 +88,10 @@
 
 - **`capabilities()`**: the agent can ask which actions exist before trying them.
 ### Fixed
+- **Compare now says when the runs did not answer the same question.** The manifest recorded two fingerprints but nothing compared them; runs whose payload shape differs now print the distinct hashes. The observation surface stays out of `scaffoldHash` on purpose: it depends on the world (unknowable before a run, and it would make the hash seed-dependent) and belongs to `payloadShapeHash` - which today is only recorded on the harness backend, so the check is silent rather than wrong for default-backend runs (follow-up tracked in ROADMAP).
+
+- **A strategy card's identity belongs to the code now, not to the model's wording.** The id used to be a hash of a free-text action plus *every* parameter, so a different town id or a rephrased sentence became a new card - which made "verified in 2 games" structurally unreachable. Identity is now the action name (a closed vocabulary that mirrors the tool catalogue) plus three whitelisted parameters; an unknown action is rejected with the list in the error. Its value is a **measured profit rate per game day** (`income / 365`, stamped from the run's own record), not a number the model reports about itself; cards without that reading stay unpromotable rather than being treated as zero.
+
 - **The Configure page leads with what the next run would use**, and an empty selection is a state,
   not an error. A fresh install used to show a red `unknown_provider` before a single field was
   touched: the server now answers with a `needs` marker ("no model selected yet") instead of a

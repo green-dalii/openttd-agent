@@ -258,3 +258,40 @@ describe("CompareView", () => {
 		expect(v.modelNames({})).toEqual([]);
 	});
 });
+
+describe("CompareView: a different observation surface is disclosed, not judged", () => {
+	it("says nothing when the server reports no difference", () => {
+		expect(window2().surfaceDiff({ surface: { differs: false } })).toBeNull();
+		expect(window2().surfaceDiff({})).toBeNull();
+	});
+
+	it("surfaces the distinct hashes when the runs answered different questions", () => {
+		const d = window2().surfaceDiff({
+			surface: { differs: true, scaffoldHashes: ["aaaa"], payloadShapeHashes: ["bbbb", "cccc"] },
+		});
+		expect(d!.scaffold).toEqual(["aaaa"]);
+		expect(d!.payloadShape).toEqual(["bbbb", "cccc"]);
+		expect(d!.text).toContain("payload shape: bbbb, cccc");
+		expect(d!.text).toMatch(/across two scaffolds/);
+	});
+
+	it("says 'not recorded' rather than implying the surfaces matched", () => {
+		const d = window2().surfaceDiff({
+			surface: { differs: true, scaffoldHashes: ["aaaa", "dddd"], payloadShapeHashes: [] },
+		});
+		expect(d!.text).toContain("payload shape was not recorded");
+		expect(d!.text).toContain("scaffold: aaaa, dddd");
+	});
+});
+
+/** Load the page module the same way the other tests in this file do. */
+function window2(): {
+	surfaceDiff: (payload: unknown) => { scaffold: string[]; payloadShape: string[]; text: string } | null;
+} {
+	const sandbox: Record<string, unknown> = { console, JSON, Object, Array, Number, String, Math, Date, Intl };
+	sandbox.window = sandbox;
+	sandbox.globalThis = sandbox;
+	vm.createContext(sandbox);
+	vm.runInContext(SRC, sandbox);
+	return (sandbox.window as { CompareView: never })["CompareView"] as never;
+}

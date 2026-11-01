@@ -19,7 +19,7 @@ import { Type } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { validateLesson, type ReflectionContext } from "./lessons.js";
 import type { Lesson } from "./types.js";
-import type { StrategySample } from "./strategies.js";
+import { strategyIdentityProblem, type StrategySample } from "./strategies.js";
 
 /** 反思阶段收集到的、已通过校验的条目。 */
 export interface ReflectionSink {
@@ -66,9 +66,16 @@ const LessonParams = Type.Object({
 });
 
 const StrategyParams = Type.Object({
-	action: Type.String({ description: "Tool name the pattern used, e.g. build_bus_route" }),
+	action: Type.String({
+		description:
+			"Tool name the pattern used. Must be one the agent can actually call " +
+			"(build_bus_route, set_route_vehicles, set_route_cargo, set_route_engine, " +
+			"retire_route, set_pause).",
+	}),
 	params: Type.Optional(Type.Record(Type.String(), Type.Union([Type.Number(), Type.String()]))),
-	value: Type.Number({ description: "Measured value of the outcome (money delta), from the record" }),
+	// No `value` field: the profit reading is stamped by the harness from the run's
+	// own record. A number the model writes about its own performance is not a
+	// measurement, and it silently became the promotion gate's input (2026-11-01).
 	evidence: Type.Array(Type.String(), { minItems: 1 }),
 });
 
@@ -110,19 +117,26 @@ export function createReflectionTools(sink: ReflectionSink, ctx: ReflectionConte
 		parameters: StrategyParams,
 		execute: async (_id, params) => {
 			const action = typeof params.action === "string" ? params.action.trim() : "";
-			if (!action) throw new Error("record_strategy rejected: action is required");
-			if (!Number.isFinite(params.value)) {
-				throw new Error("record_strategy rejected: value must be a measured number");
+			const identityProblem = strategyIdentityProblem(action);
+			if (identityProblem) {
+				// 拒绝必须可观测（和 record_lesson 一样）：一局里"全部被拒"
+				// 与"本来就没什么可记"是两件事。
+				sink.rejections.push(`record_strategy: ${identityProblem}`);
+				throw new Error(`record_strategy rejected: ${identityProblem}`);
 			}
 			const evidence = (Array.isArray(params.evidence) ? params.evidence : [])
 				.map((e) => String(e).replace(/\s+/g, " ").trim())
 				.filter(Boolean);
-			if (evidence.length === 0) throw new Error("record_strategy rejected: evidence is required");
+			if (evidence.length === 0) {
+				sink.rejections.push("record_strategy: evidence is required");
+				throw new Error("record_strategy rejected: evidence is required");
+			}
 			const paramsIn = params.params && typeof params.params === "object" ? params.params : {};
 			sink.strategies.push({
 				action,
 				params: paramsIn as Record<string, number | string>,
-				value: params.value,
+				// Filled by the orchestrator from the finished run's record; a tool
+				// call cannot know the run's profit, and must not invent one.
 				evidence: [...new Set(evidence)],
 				sessionId: ctx.sessionId,
 				createdAt: ctx.now,

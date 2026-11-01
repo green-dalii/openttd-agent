@@ -197,6 +197,38 @@
     }));
   }
 
+  /**
+   * Did the compared runs answer the same question?
+   *
+   * Returns null when they did (or when there is nothing to compare), and
+   * `{scaffold, payloadShape}` (the distinct hashes) when they did not.
+   * The page discloses; it does not exclude or judge - that is the server's
+   * and the reviewer's call (2026-11-01 assessment of the fingerprint scope).
+   */
+  function surfaceDiff(payload) {
+    const s = payload && payload.surface;
+    if (!s || s.differs !== true) return null;
+    const scaffold = Array.isArray(s.scaffoldHashes) ? s.scaffoldHashes : [];
+    const payloadShape = Array.isArray(s.payloadShapeHashes) ? s.payloadShapeHashes : [];
+    const parts = [];
+    if (scaffold.length) parts.push(`scaffold: ${scaffold.join(", ")}`);
+    // "not recorded" is not "the same": the payload fingerprint only exists on the
+    // harness backend, so a default-backend pair has nothing to compare here.
+    parts.push(
+      payloadShape.length
+        ? `payload shape: ${payloadShape.join(", ")}`
+        : "payload shape was not recorded for these runs",
+    );
+    return {
+      scaffold,
+      payloadShape,
+      text:
+        "These runs did not all answer the same question (" +
+        parts.join("; ") +
+        "). Treat the comparison as across two scaffolds.",
+    };
+  }
+
   /** The runs (the drill-down list). */
   function runRows(payload) {
     const runs = payload && Array.isArray(payload.runs) ? payload.runs : [];
@@ -226,6 +258,7 @@
     modelNames,
     axisCharts,
     collisionRows,
+    surfaceDiff,
     reading,
     num,
     NOT_MEASURED,
