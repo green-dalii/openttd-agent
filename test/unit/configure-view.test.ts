@@ -44,6 +44,12 @@ interface Model {
 	knobBody(): { knobs: Record<string, string> };
 	previewRows(): [string, string][];
 	previewStatus(): { kind: string; text: string };
+	/** 空选择的状态（服务端 `needs`）。 */
+	needs: { reason: string; message: string; hint: string } | null;
+	canStart(): boolean;
+	startBlockedReason(): string;
+	/** 顶部摘要卡（审计 A13/A14）：下一局会用什么。 */
+	summaryTiles(): { k: string; v: string; hint: string }[];
 	problemHints(): { code: string; message: string; hint: string }[];
 	refreshPreview(): Promise<void>;
 	schedulePreview(): void;
@@ -281,5 +287,86 @@ describe("ConfigureView: starting a run with the knobs", () => {
 		expect(model.runMsg.kind).toBe("err");
 		expect(model.runMsg.text).toContain("seed must be a whole number");
 		expect(toasts.some((t) => t.kind === "err")).toBe(true);
+	});
+});
+
+/**
+ * 2026-11-01 审计 A13：初装（什么都没选）不能显示红色错误，也不该假装能开跑。
+ * 服务端把"还没选模型"作为 `needs` 返回（不是 `problems`），页面照抄，不猜。
+ */
+describe("ConfigureView: an empty selection is a state, not an error", () => {
+	const needs = { reason: "no_model", message: "No model is selected yet.", hint: "Pick a provider and a model above." };
+
+	it("shows the server's guidance instead of a red problem", async () => {
+		const { model } = load({ body: { preview: null, problems: [], needs } });
+		await model.refreshPreview();
+		const s = model.previewStatus();
+		expect(s.kind).toBe("idle");
+		expect(s.text).toContain("No model is selected yet.");
+		expect(model.problemHints()).toEqual([]);
+	});
+
+	it("does not offer to start a run it knows cannot start", async () => {
+		const { model } = load({ body: { preview: null, problems: [], needs } });
+		await model.refreshPreview();
+		expect(model.canStart()).toBe(false);
+		expect(model.startBlockedReason()).toContain("Pick a provider");
+	});
+
+	it("clears the state as soon as the server can resolve a model", async () => {
+		const { model } = load({
+			body: { preview: { providerId: "openai", model: "gpt-x", costKnown: true }, problems: [] },
+		});
+		await model.refreshPreview();
+		expect(model.canStart()).toBe(true);
+		expect(model.previewStatus().kind).toBe("ok");
+	});
+
+	it("still reports real problems as problems", async () => {
+		const { model } = load({
+			status: 400,
+			body: { error: "bad", problems: [{ code: "bad_tool_budget", message: "toolBudget must be >= 1", hint: "use 1..64" }] },
+		});
+		await model.refreshPreview();
+		expect(model.previewStatus().kind).toBe("err");
+		expect(model.problemHints()[0]!.code).toBe("bad_tool_budget");
+	});
+});
+
+describe("ConfigureView: the summary card answers 'what will the next run use'", () => {
+	it("reports not configured before anything is selected", async () => {
+		const { model } = load({ body: { preview: null, problems: [], needs: { reason: "no_model", message: "No model is selected yet.", hint: "" } } });
+		await model.refreshPreview();
+		const tiles = model.summaryTiles();
+		expect(tiles.map((t) => t.k)).toEqual(["Model", "Caps", "Price", "Backend"]);
+		expect(tiles.find((t) => t.k === "Model")!.v).toBe("not configured");
+		expect(tiles.find((t) => t.k === "Price")!.v).toBe("not measured");
+		expect(tiles.find((t) => t.k === "Backend")!.v).toBe("—");
+	});
+
+	it("copies the preview's own values", async () => {
+		const { model } = load({
+			body: {
+				preview: {
+					providerId: "minimax-cn",
+					model: "MiniMax-M2.5",
+					api: "anthropic-messages",
+					costKnown: true,
+					tokenLimit: 500000,
+					costLimit: null,
+					gameDays: 300,
+					seed: 7,
+					backend: "native",
+					scaffoldHash: "74f2e64d1e930df3",
+				},
+				problems: [],
+			},
+		});
+		await model.refreshPreview();
+		const tiles = Object.fromEntries(model.summaryTiles().map((t) => [t.k, t.v]));
+		expect(tiles["Model"]).toBe("minimax-cn / MiniMax-M2.5");
+		expect(tiles["Caps"]).toContain("500000t");
+		expect(tiles["Price"]).toBe("known");
+		expect(tiles["Backend"]).toBe("native");
 	});
 });
