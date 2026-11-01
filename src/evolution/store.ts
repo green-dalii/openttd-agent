@@ -54,27 +54,61 @@ export function appendMetric(
  * the whole history.
  */
 export function readMetrics(dataDir: string): GameMetric[] {
+	return readMetricsWithCollisions(dataDir).rows;
+}
+
+/**
+ * One session id that the ledger saw more than once.
+ *
+ * `dropped` = how many rows the "newest wins per id" rule swallowed. Reporting it
+ * is the point: a silently shrinking sample is the worst kind of bug for a
+ * benchmark (Issue #58).
+ */
+export interface LedgerCollision {
+	/** The session id that appeared more than once. */
+	id: string;
+	/** How many rows were dropped for it. */
+	dropped: number;
+}
+
+/**
+ * Read the ledger, newest wins per id - **and report the ids that collided**.
+ *
+ * 同一秒 + 同 seed 的两局曾经拿到同一个 session id ⇒ 账本只留一行 ⇒ 另一行
+ * **静默消失**（Issue #58）。现在这次丢失**被报告出来**（`collisions`），
+ * 页面可以说「有 N 行因为 id 撞号没进统计」。
+ */
+export function readMetricsWithCollisions(dataDir: string): { rows: GameMetric[]; collisions: LedgerCollision[] } {
 	const file = metricsPath(dataDir);
-	if (!existsSync(file)) return [];
+	if (!existsSync(file)) return { rows: [], collisions: [] };
 	let raw: string;
 	try {
 		raw = readFileSync(file, "utf8");
 	} catch {
-		return [];
+		return { rows: [], collisions: [] };
 	}
 	const byId = new Map<string, GameMetric>();
+	const seen = new Map<string, number>();
 	for (const line of raw.split("\n")) {
 		const t = line.trim();
 		if (!t) continue;
 		try {
 			const parsed = JSON.parse(t) as GameMetric;
-			if (parsed && typeof parsed.id === "string") byId.set(parsed.id, parsed);
+			if (parsed && typeof parsed.id === "string") {
+				byId.set(parsed.id, parsed);
+				seen.set(parsed.id, (seen.get(parsed.id) ?? 0) + 1);
+			}
 		} catch {
 			// Skip the damaged line; keep the rest of the ledger.
 		}
 	}
+	const collisions: LedgerCollision[] = [...seen.entries()]
+		.filter(([, n]) => n > 1)
+		.map(([id, n]) => ({ id, dropped: n - 1 }))
+		.sort((a, b) => b.dropped - a.dropped || a.id.localeCompare(b.id));
 	// Oldest first, so a chart reads left-to-right in time.
-	return [...byId.values()].sort((a, b) => a.startedAt - b.startedAt);
+	const rows = [...byId.values()].sort((a, b) => a.startedAt - b.startedAt);
+	return { rows, collisions };
 }
 
 /**

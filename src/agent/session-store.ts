@@ -16,6 +16,7 @@ import { appendMetric } from "../evolution/store.js";
 import { classifyOutcome, describeOutcome } from "../evolution/outcome.js";
 import { buildCausalTimeline, type TimelineRow } from "./causal-timeline.js";
 import path from "node:path";
+import { randomBytes } from "node:crypto";
 import type { TelemetrySnapshot } from "./telemetry.js";
 import type { GameEvent } from "../types.js";
 import type { RunManifest } from "./manifest.js";
@@ -281,12 +282,23 @@ function pad(n: number, width = 2): string {
 	return String(n).padStart(width, "0");
 }
 
-/** Build a sortable, filesystem-safe session id: "20260910-213000-seed7". */
-export function newSessionId(seed: number, at: Date = new Date()): string {
+/**
+ * Build a sortable, filesystem-safe session id: "20260910-213000-seed7-a3f1".
+ *
+ * **Why the nonce (Issue #58)**: the id used to be `<stamp>-seed<n>`, and the stamp
+ * has **second** resolution - so two runs started in the same second on the same
+ * seed (two models side by side, a re-run) got **the same id**. The metric ledger
+ * keeps "newest wins per id", so one of the two runs **disappeared without a
+ * trace**: the worst kind of bug for a benchmark, because the sample shrinks and
+ * nothing says so. The nonce makes the id unique per run; the ledger also
+ * *reports* collisions (see `readMetricsWithCollisions`).
+ */
+export function newSessionId(seed: number, at: Date = new Date(), nonce?: string): string {
 	const stamp =
 		`${at.getFullYear()}${pad(at.getMonth() + 1)}${pad(at.getDate())}` +
 		`-${pad(at.getHours())}${pad(at.getMinutes())}${pad(at.getSeconds())}`;
-	return `${stamp}-seed${seed}`;
+	const tag = (nonce ?? randomBytes(2).toString("hex")).toLowerCase();
+	return `${stamp}-seed${seed}-${tag}`;
 }
 
 function sessionsDir(dataDir: string): string {

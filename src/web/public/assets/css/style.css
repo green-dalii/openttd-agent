@@ -719,6 +719,18 @@ button[disabled] { opacity: .45; cursor: not-allowed; }
 .cmp-table th { font-size: 10.5px; text-transform: uppercase; letter-spacing: .08em;
   color: var(--muted); text-align: left; font-weight: 600; vertical-align: bottom; }
 .cmp-table td { vertical-align: top; font-size: 12.5px; }
+/* Compare: data loss must be visible (Issue #58). */
+.cmp-warn {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 179, 71, 0.45);
+  border-left-width: 3px;
+  border-radius: 8px;
+  background: rgba(255, 179, 71, 0.08);
+}
+.cmp-warn p { margin: 0; font-size: 12px; }
+.cmp-warn code { font-family: var(--mono); font-size: 11px; }
+
 /* Compare: the four axes as charts (one per axis - the axes have different
    units, so a shared scale would be a lie). A bar the server did not measure is
    an EMPTY dashed slot, never a zero-length solid bar: "not measured" and

@@ -11,20 +11,14 @@
 ### Added
 - **The first real benchmark matrix is done.** Two models x three seeds x 300 game days, same
   scaffold, same horizon, every cell reaching the horizon. The harness's own verdict on the
-  primary axis is **"not determinable"** (paired mean difference -0.270 delivered per game day,
-  95% CI [-1.077, 0.545] includes zero: the variance across seeds dwarfs the difference). The
-  secondary axes do separate them, in opposite directions: **M3.1-Flash needs ~40% fewer tokens
-  per delivered unit** (1635 vs 1033 per million tokens), **M2.5 makes ~4.5x fewer failed tool
-  calls** (2.9% vs 13.1%). Full numbers in issue #1.
+  primary axis is **"not determinable"** (paired mean difference -0.270 delivered per game day, 95% CI [-1.077, 0.545] includes zero: the variance across seeds dwarfs the difference). The secondary axes do separate them, in opposite directions: **M3.1-Flash needs ~40% fewer tokens per delivered unit** (1635 vs 1033 per million tokens), **M2.5 makes ~4.5x fewer failed tool calls** (2.9% vs 13.1%). Full numbers in issue #1.
 
 - **The configuration page is now called what it does.** The page that used to live at `/providers`
   answers "how is this run configured?" - provider, key, run knobs - so it is now at `/configure`
-  and the nav links there. The old URL still works (`/providers` answers with a redirect, the
-  older `/llm` alias keeps resolving): one page, one name, no second copy.
+  and the nav links there. The old URL still works (`/providers` answers with a redirect, the older `/llm` alias keeps resolving): one page, one name, no second copy.
 - **The score now says what it actually counts.** The delivery counter the harness reads is
   OpenTTD's *per-cargo-type* array summed up - and OpenTTD keeps passengers in that same array, so
-  the number has always counted **cargo and passengers**, not tonnes of freight. The scorecard, the
-  benchmark report, the History page and the model-facing system prompt all said "cargo", which was
+  the number has always counted **cargo and passengers**, not tonnes of freight. The scorecard, the benchmark report, the History page and the model-facing system prompt all said "cargo", which was
   untrue - and the prompt told the model it was judged on freight alone. The wording now comes from
   one place on the server (`DELIVERED_MEASURE`), the page copies it, and the scaffold fingerprint
   moved (`3da8a64e1fbe818e` -> `74f2e64d1e930df3`) because the prompt changed.
@@ -32,16 +26,14 @@
 - **The dashboard speaks two languages now.** A switch in the header flips the whole interface between
   English and Chinese, and the choice is remembered. The English text stays where it always was (the
   translation table is keyed by it, the gettext way), so there is no second copy of the wording to keep
-  in sync - and a guard test fails the build when a translation no longer matches its source. Raw
-  evidence (the JSON in the agent steps) is left alone: translating a log would be rewriting the
+  in sync - and a guard test fails the build when a translation no longer matches its source. Raw evidence (the JSON in the agent steps) is left alone: translating a log would be rewriting the
   record. The server's own vocabulary - outcome classes, error hints - stays as the server wrote it.
 
 - **The model can finally see the cargo.** The Bridge GS has been reporting the industries, the
   per-cargo totals, the road engines and the town names all along - and the agent side parsed them -
   but the model-visible projection dropped them, so the agent only ever saw `date`, the companies
   and `towns[{id,pop,x,y}]`. A real model noticed ("the observe output doesn't include engine list
-  or cargo labels here") and built a **passenger** line because it could not see a single crate.
-  The projection now carries the cargo world, the engine catalogue and the town names into
+  or cargo labels here") and built a **passenger** line because it could not see a single crate. The projection now carries the cargo world, the engine catalogue and the town names into
   `observe()` and every decision context; missing readings stay `null` (never 0), and a town
   without a name stays nameless. The observation surface changed, so the fingerprint changed with
   it (`7956ab6d8c86fa60` -> `3da8a64e1fbe818e`): runs before and after it are compared as such.
@@ -77,8 +69,7 @@
   **by reason**, and - once two models are picked - the paired verdict with its interval or the
   reason it cannot be decided. Every run in the list drills through to that run in History.
   The numbers are the server's: the four axes come from the scorecard, the paired verdict from the
-  paired comparison, the exclusion reasons from the existing enum. The page computes nothing and
-  judges nothing; a missing reading reads "not measured", and an unpriced model's cost reads
+  paired comparison, the exclusion reasons from the existing enum. The page computes nothing and judges nothing; a missing reading reads "not measured", and an unpriced model's cost reads
   "not measured" rather than $0.
 
 - **The Run page now reads as three bands, and one decision is one row.** The page answers "is it
@@ -135,6 +126,14 @@
 
 - **`capabilities()`**: the agent can ask which actions exist before trying them.
 ### Fixed
+- **The metric ledger no longer loses runs to a session-id collision.** Two runs started in the
+  same second on the same seed - two models side by side, or a re-run - used to get the *same*
+  session id, and the ledger keeps "newest wins per id", so one of them disappeared without a
+  trace. In the first benchmark matrix that silently swallowed three of six runs: the Compare
+  page showed "1 model(s)" and said nothing about losing data. Session ids now carry a short
+  random suffix, and the ledger *reports* the collisions, so the Compare page says out loud
+  which runs were dropped and that they are in none of the numbers below.
+
 
 - **The cargo facts are there from the first heartbeat now.** The Bridge GS recomputed its
   industry / cargo / delivery facts every 1000 ticks, so the first thousand ticks of every game
