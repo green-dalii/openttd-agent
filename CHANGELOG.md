@@ -9,6 +9,16 @@
 
 ## [Unreleased]
 ### Added
+- **The deliveries can now be split into cargo and passengers.** The score counts both - OpenTTD
+  books them into the same per-cargo-type array - but the number could not say which was which. The
+  GS's cargo monitor buckets deliveries per cargo type, including `PASS`; it had been reporting nothing because the monitor returns the amount delivered *since the last query* and the GS read it
+  every 1000 ticks, so each read only saw the last window. The GS now accumulates the deltas, and
+  the scorecard reports cargo and passengers separately, in the monitor's own measure (what was
+  unloaded at the monitored towns and industries - not the admin's accepted counter, so the two are
+  never added together). A run without a split reports "not measured", and if only some of the
+  comparable runs have one, the whole split is "not measured" - half a sample cannot be presented as
+  the whole one.
+
 - **The first real benchmark matrix is done.** Two models x three seeds x 300 game days, same
   scaffold, same horizon, every cell reaching the horizon. The harness's own verdict on the
   primary axis is **"not determinable"** (paired mean difference -0.270 delivered per game day, 95% CI [-1.077, 0.545] includes zero: the variance across seeds dwarfs the difference). The secondary axes do separate them, in opposite directions: **M3.1-Flash needs ~40% fewer tokens per delivered unit** (1635 vs 1033 per million tokens), **M2.5 makes ~4.5x fewer failed tool calls** (2.9% vs 13.1%). Full numbers in issue #1.
@@ -18,8 +28,7 @@
   and the nav links there. The old URL still works (`/providers` answers with a redirect, the older `/llm` alias keeps resolving): one page, one name, no second copy.
 - **The score now says what it actually counts.** The delivery counter the harness reads is
   OpenTTD's *per-cargo-type* array summed up - and OpenTTD keeps passengers in that same array, so
-  the number has always counted **cargo and passengers**, not tonnes of freight. The scorecard, the benchmark report, the History page and the model-facing system prompt all said "cargo", which was untrue - and the prompt told the model it was judged on freight alone. The wording now comes from one place on the server (`DELIVERED_MEASURE`), the page copies it, and the scaffold fingerprint
-  moved (`3da8a64e1fbe818e` -> `74f2e64d1e930df3`) because the prompt changed.
+  the number has always counted **cargo and passengers**, not tonnes of freight. The scorecard, the benchmark report, the History page and the model-facing system prompt all said "cargo", which was untrue - and the prompt told the model it was judged on freight alone. The wording now comes from one place on the server (`DELIVERED_MEASURE`), the page copies it, and the scaffold fingerprint moved (`3da8a64e1fbe818e` -> `74f2e64d1e930df3`) because the prompt changed.
 
 - **The dashboard speaks two languages now.** A switch in the header flips the whole interface between
   English and Chinese, and the choice is remembered. The English text stays where it always was (the
@@ -29,9 +38,7 @@
 - **The model can finally see the cargo.** The Bridge GS has been reporting the industries, the
   per-cargo totals, the road engines and the town names all along - and the agent side parsed them -
   but the model-visible projection dropped them, so the agent only ever saw `date`, the companies
-  and `towns[{id,pop,x,y}]`. A real model noticed ("the observe output doesn't include engine list or cargo labels here") and built a **passenger** line because it could not see a single crate. The projection now carries the cargo world, the engine catalogue and the town names into `observe()` and every decision context; missing readings stay `null` (never 0), and a town
-  without a name stays nameless. The observation surface changed, so the fingerprint changed with
-  it (`7956ab6d8c86fa60` -> `3da8a64e1fbe818e`): runs before and after it are compared as such.
+  and `towns[{id,pop,x,y}]`. A real model noticed ("the observe output doesn't include engine list or cargo labels here") and built a **passenger** line because it could not see a single crate. The projection now carries the cargo world, the engine catalogue and the town names into `observe()` and every decision context; missing readings stay `null` (never 0), and a town without a name stays nameless. The observation surface changed, so the fingerprint changed with it (`7956ab6d8c86fa60` -> `3da8a64e1fbe818e`): runs before and after it are compared as such.
 - **A run can now explain itself.** The run's detail shows the **full manifest**: the same world
   (seed + game version), the same scaffold (scaffold / payload-shape hashes), and whether the run
   was capped (token / cost limit). When the provider answered with a different model than the one
@@ -56,22 +63,19 @@
   missing credential, an unknown model: each now arrives as `{code, message, hint}`, and **each
   code has exactly one canonical hint** - so the same 401 reads the same way wherever it appears.
   The refresh endpoint's status says whose fault it is: 400 when the request cannot be honored
-  (no key), 502 when the provider upstream failed. The pages render by code; the page no longer
-  reverse-engineers intent from the wording of an error, and a guard keeps it that way.
+  (no key), 502 when the provider upstream failed. The pages render by code; the page no longer reverse-engineers intent from the wording of an error, and a guard keeps it that way.
 - **A Compare page.** It answers "how do these models compare on the same worlds": one row per
   model across the four axes (result, efficiency, reliability, growth), the excluded runs counted
   **by reason**, and - once two models are picked - the paired verdict with its interval or the
   reason it cannot be decided. Every run in the list drills through to that run in History.
-  The numbers are the server's: the four axes come from the scorecard, the paired verdict from the
-  paired comparison, the exclusion reasons from the existing enum. The page computes nothing and judges nothing; a missing reading reads "not measured", and an unpriced model's cost reads "not measured" rather than $0.
+  The numbers are the server's: the four axes come from the scorecard, the paired verdict from the paired comparison, the exclusion reasons from the existing enum. The page computes nothing and judges nothing; a missing reading reads "not measured", and an unpriced model's cost reads "not measured" rather than $0.
 
 - **The Run page now reads as three bands, and one decision is one row.** The page answers "is it
   playing" (health, score, the current goal), then "what just happened" - a **causal timeline**
   where a row is a decision and expanding it shows the four pieces of evidence together: the
   tools it called, the GS job those tools ordered (with the phases it went through), and what
   changed until the next decision. The pieces are joined **by the job id**, not by guessing from
-  timestamps. The newest 20 rows are shown; older ones load on demand. The diagnostics (cash,
-  fleet, cargo, towns, tokens, wire detail, raw log) moved into a collapsed band - folded, not deleted.
+  timestamps. The newest 20 rows are shown; older ones load on demand. The diagnostics (cash, fleet, cargo, towns, tokens, wire detail, raw log) moved into a collapsed band - folded, not deleted.
 
 - **The timeline is a server fact.** `GET /api/sessions/:id/timeline` returns the rows; the page
   only draws them, and a reading the server did not have is shown as "not measured" rather than
@@ -83,9 +87,7 @@
   now settable from the Providers page, and `POST /api/run/start` carries them with the run. The
   rules are the ones the command line already used — the page cannot introduce a second set. A
   next-run preview (`POST /api/run/preview`) resolves the knobs server-side and shows the values
-  the next run would use; its field names are the manifest's own, so "the preview equals the
-  manifest" is a contract a test can check field by field. An illegal knob is refused with a
-  reason and a hint, before any game process starts.
+  the next run would use; its field names are the manifest's own, so "the preview equals the manifest" is a contract a test can check field by field. An illegal knob is refused with a reason and a hint, before any game process starts.
 
 - **Benchmark mode (D5)**: a matrix planner that gives every cell its own data dir and
   refuses to run before the comparison is pre-registered, a four-axis scorecard, paired
@@ -122,8 +124,7 @@
   be a table and nothing else. Each axis gets its own chart - one bar per model, scaled against
   that axis' own maximum, because the axes have different units and a shared scale would
   misrepresent them - while the table keeps the exact values. A reading the server did not
-  measure is an empty dashed slot, never a zero-length bar: "not measured" and "measured: 0" must
-  not look the same. The picker moved to the top of the page, so asking for a comparison is one
+  measure is an empty dashed slot, never a zero-length bar: "not measured" and "measured: 0" must not look the same. The picker moved to the top of the page, so asking for a comparison is one
   click away instead of a scroll down.
 
 - **The metric ledger no longer loses runs to a session-id collision.** Two runs started in the
