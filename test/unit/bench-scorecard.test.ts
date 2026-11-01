@@ -31,6 +31,7 @@ function row(over: Partial<GameMetric> = {}): GameMetric {
 		delivered: 10,
 		deliveredRun: 120,
 		deliveredRunComplete: true,
+		deliveredByCargo: null,
 		gsErrors: 0,
 		toolBudgetBlocks: 0,
 		worldFrozenMs: null,
@@ -85,6 +86,35 @@ describe("buildScorecard（四轴，缺失不折零）", () => {
 		const a = card.models.find((m) => m.model === "a")!;
 		expect(a.ability.measure).toBe("cargo + passengers delivered");
 		expect(a.efficiency.measure).toBe("cargo + passengers delivered");
+	});
+
+	it("按货种拆分：货物与客运分列，各自 null = 没测到", () => {
+		// monitor 口径与 admin 口径不同 ⇒ 只分开报，不与主轴相加（SPEC §10.65）。
+		const card = buildScorecard([
+			row({ llmModel: "a", deliveredByCargo: [{ label: "COAL", amount: 30 }, { label: "PASS", amount: 12 }] }),
+			row({ llmModel: "a", deliveredByCargo: [{ label: "COAL", amount: 10 }, { label: "PASS", amount: 4 }] }),
+		]);
+		const a = card.models.find((m) => m.model === "a")!;
+		expect(a.ability.cargoDelivered).toBe(40);
+		expect(a.ability.passengersDelivered).toBe(16);
+		expect(a.ability.splitMeasure).toContain("by cargo type");
+	});
+
+	it("没有拆分的局 ⇒ 拆分报 null（不是 0）", () => {
+		const card = buildScorecard([row({ llmModel: "a", deliveredByCargo: null })]);
+		const a = card.models.find((m) => m.model === "a")!;
+		expect(a.ability.cargoDelivered).toBeNull();
+		expect(a.ability.passengersDelivered).toBeNull();
+	});
+
+	it("只有一部分局有拆分 ⇒ 整体报 null（半个样本不能说成全样本）", () => {
+		const card = buildScorecard([
+			row({ llmModel: "a", deliveredByCargo: [{ label: "COAL", amount: 5 }] }),
+			row({ llmModel: "a", deliveredByCargo: null }),
+		]);
+		const a = card.models.find((m) => m.model === "a")!;
+		expect(a.ability.cargoDelivered).toBeNull();
+		expect(a.ability.passengersDelivered).toBeNull();
 	});
 
 	it("「没测到」时仍然报出计量口径（口径是事实，不随数值消失）", () => {
