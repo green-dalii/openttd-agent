@@ -97,6 +97,24 @@
 
 - **`capabilities()`**: the agent can ask which actions exist before trying them.
 ### Fixed
+- **History answers "which run matters" before it shows a single field.** The page is now three bands:
+  four conclusion KPIs from the ledger (comparable runs, delivered per game day, tokens per decision,
+  spend), a compact run list whose rows carry the ledger's own outcome class, and - for the selected
+  run - a conclusion head (outcome, delivered, game days, cash, fleet, tokens, failures) with the
+  evidence folded behind it (outcome, manifest, token breakdown, staged summaries, event log). A page
+  that used to be ~9,800px of equally-weighted tables is ~2,900px of conclusions, and the same numbers
+  stop appearing twice: the header keeps run counts, the strip keeps the measured rates.
+- **A training chart that is flat at 0 is now a sentence.** A 900x300 plot with one line on the floor
+  carries no information and reads as a rendering failure; when every comparable run delivered 0 the
+  page says so instead of drawing it.
+- **Dropped ledger rows are disclosed on History too.** The ledger keeps the newest row per session id;
+  on pre-2026-10-31 data that silently halved the sample. `/api/evolution` now returns the collisions
+  and the page prints how many rows are missing and which ids, so its "N comparable runs" cannot be
+  read as the whole ledger. When a colliding row belongs to a different run, the selected run's
+  delivered reading says "not measured" instead of borrowing a stranger's number.
+- **Spend reads "unknown" rather than a partial sum** when any comparable run had no price table
+  (the same rule the header already applied, now applied to the conclusion).
+
 - **The Run header stopped lying about elapsed time and the session id.** Both displayed fields the page never wrote, so they read "-" even mid-run; they now come from the server (the telemetry snapshot, or the supervisor's run record) and the elapsed time actually ticks.
 
 - **The Compare page has a chart now, and the model picker sits on top.** The four axes used to

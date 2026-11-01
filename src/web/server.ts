@@ -82,6 +82,8 @@ export interface SessionHooks {
 export interface EvolutionHooks {
 	/** The metrics ledger (one entry per finished game). */
 	metrics: () => unknown[];
+	/** Ledger rows dropped as duplicate session ids (Issue #58) — `[{id, dropped}]`. */
+	collisions?: () => unknown[];
 	/** Distilled lessons. */
 	lessons: () => unknown[];
 	/** The strategy candidate pool (already annotated with the promotion verdict). */
@@ -680,6 +682,9 @@ export class WebServer {
 				if (req.method !== "GET") return json(405, { error: "method not allowed" });
 				return json(200, {
 					metrics: this.evolutionHooks.metrics(),
+					// Rows the ledger dropped as duplicate ids (Issue #58). Additive:
+					// a page that ignores it behaves as before, but History must show it.
+					collisions: this.evolutionHooks.collisions ? this.evolutionHooks.collisions() : [],
 					lessons: this.evolutionHooks.lessons(),
 					strategies: this.evolutionHooks.strategies(),
 					arms: this.evolutionHooks.arms ? this.evolutionHooks.arms() : null,

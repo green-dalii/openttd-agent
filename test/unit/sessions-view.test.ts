@@ -65,6 +65,23 @@ interface Model {
 		copy?: string;
 	}>;
 	manifestChips(session: unknown): Array<{ k: string; v: string; tone: string; title?: string }>;
+	/** 顶部结论 KPI（审计 A9）：先给结论，再给证据。 */
+	conclusionKpis(): { k: string; v: string; hint: string }[];
+	/** 训练图全 0 → 用陈述句代替一条贴底的平线（审计 A11）。 */
+	trainingFlat(): boolean;
+	/** 列表里的结果徽标（结局词表来自账本，页面不猜）。 */
+	outcomeBadge(session: SessionLike): { label: string; tone: string } | null;
+	/** 选中局的结论头（先结论，再证据；审计 A10）。 */
+	conclusionHead(): { badge: { label: string; tone: string } | null; tiles: { k: string; v: string; hint: string }[] } | null;
+	conclusionTiles(): { k: string; v: string; hint: string }[];
+	conclusionBadge(): { label: string; tone: string } | null;
+	conclusionNote(): string;
+	/** 账本行（页面在 init 里灌入）。 */
+	metrics: unknown[];
+	/** 账本丢行报告（Issue #58）。 */
+	collisions: unknown[];
+	ledgerCollisions(): { id: string; dropped: number }[];
+	collisionNote(): string;
 }
 
 /** Load the component module with a recording UI stub. */
@@ -833,5 +850,167 @@ describe("History 的分组（B6）：键来自服务端", () => {
 		(model as unknown as { groups: unknown[] }).groups = [];
 		(model as unknown as { groupKey: string }).groupKey = "gone";
 		expect(model.visible()).toEqual([]);
+	});
+});
+
+/**
+ * 审计 A9–A12（History 三段式）：顶部结论 KPI / 紧凑列表的结果徽标 /
+ * 全 0 的训练图要改成陈述句。
+ *
+ * 原则不变：没有可比的局就写 "not measured"（D60），不能写 0 ——
+ * "一局都没跑"和"跑了但交付 0"是两件事。
+ */
+describe("History: 顶部结论 KPI（先给结论，再给证据）", () => {
+	const rows = [
+		{ id: "a", startedAt: 1, excluded: null, deliveredRun: 120, simulatedDays: 300, decisions: 10, totalTokens: 10000, costTotal: 1.5, costKnown: true, outcomeClass: "delivered" },
+		{ id: "b", startedAt: 2, excluded: null, deliveredRun: 180, simulatedDays: 300, decisions: 20, totalTokens: 30000, costTotal: 2.5, costKnown: true, outcomeClass: "delivered" },
+		{ id: "c", startedAt: 3, excluded: "wall_clock_cap", deliveredRun: 999, simulatedDays: 60, decisions: 5, totalTokens: 5000, costTotal: 9, costKnown: true, outcomeClass: "wall_clock_cap" },
+	];
+
+	it("says not measured on an empty ledger instead of reporting zeros", () => {
+		const { model } = load();
+		model.metrics = [];
+		const kpis = model.conclusionKpis();
+		expect(kpis).toHaveLength(4);
+		// Counting zero runs is a real measurement; the *rates* are not measured.
+		expect(kpis.find((k) => k.k === "Comparable runs")!.v).toBe("0");
+		expect(kpis.find((k) => k.k === "Delivered / game day")!.v).toBe("not measured");
+		expect(kpis.find((k) => k.k === "Tokens / decision")!.v).toBe("not measured");
+		expect(kpis.find((k) => k.k === "Spend")!.v).toBe("not measured");
+	});
+
+	it("reports the median over comparable runs only", () => {
+		const { model } = load();
+		model.metrics = rows;
+		const kpis = model.conclusionKpis();
+		// 120/300 = 0.4, 180/300 = 0.6 → median 0.5. The excluded 999 must not count.
+		expect(kpis.find((k) => k.k === "Delivered / game day")!.v).toBe("0.50");
+		expect(kpis.find((k) => k.k === "Comparable runs")!.v).toBe("2");
+	});
+
+	it("reports tokens per decision over comparable runs", () => {
+		const { model } = load();
+		model.metrics = rows;
+		// 10000/10 = 1000, 30000/20 = 1500 → median 1250 (the stub's fmtInt does not group)
+		expect(model.conclusionKpis().find((k) => k.k === "Tokens / decision")!.v).toBe("1250");
+	});
+
+	it("marks spend unknown when any comparable run had no price table", () => {
+		const { model } = load();
+		model.metrics = [{ ...rows[0] }, { ...rows[1], costKnown: false, costTotal: 0 }];
+		expect(model.conclusionKpis().find((k) => k.k === "Spend")!.v).toBe("unknown");
+	});
+
+	it("does not count an excluded run as a comparable one in the hint", () => {
+		const { model } = load();
+		model.metrics = rows;
+		const hint = model.conclusionKpis().find((k) => k.k === "Comparable runs")!.hint;
+		expect(hint).toContain("3 archived");
+		expect(hint).toContain("1 excluded");
+	});
+});
+
+describe("History: dropped ledger rows are disclosed, not swallowed (Issue #58)", () => {
+	it("says nothing when no rows collided", () => {
+		const { model } = load();
+		model.collisions = [];
+		expect(model.collisionNote()).toBe("");
+	});
+
+	it("names the ids and the count that are missing from every number above", () => {
+		const { model } = load();
+		model.collisions = [{ id: "20261031-214949-seed4242", dropped: 1 }, { id: "x", dropped: 2 }];
+		const note = model.collisionNote();
+		expect(note).toContain("3 ledger rows dropped");
+		expect(note).toContain("20261031-214949-seed4242");
+		expect(note).toMatch(/not part of any number above/);
+	});
+});
+
+describe("History: a flat-at-zero training chart is a sentence, not an empty picture", () => {
+	it("detects that every measured run delivered 0", () => {
+		const { model } = load();
+		model.metrics = [
+			{ id: "a", excluded: null, deliveredRun: 0 },
+			{ id: "b", excluded: null, deliveredRun: 0 },
+		];
+		expect(model.trainingFlat()).toBe(true);
+	});
+
+	it("does not claim flat when a run delivered something", () => {
+		const { model } = load();
+		model.metrics = [{ id: "a", excluded: null, deliveredRun: 12 }];
+		expect(model.trainingFlat()).toBe(false);
+	});
+
+	it("does not claim flat when nothing was measured at all (that is 'not measured')", () => {
+		const { model } = load();
+		model.metrics = [{ id: "a", excluded: null }];
+		expect(model.trainingFlat()).toBe(false);
+	});
+});
+
+describe("History: the selected run opens with a conclusion head", () => {
+	const meta = {
+		id: "a",
+		totals: { decisions: 11, toolCalls: 40, toolFailures: 2, usage: { totalTokens: 123456, costTotal: 4.2, costKnown: true } },
+		outcome: { constructionDone: true, money: 250000, vehicles: 7, stations: 3 },
+	};
+
+	it("leads with the measured result, then the readings behind it", () => {
+		const { model } = load([{ id: "a", status: "completed", mode: "agent" }], { meta });
+		model.metrics = [{ id: "a", excluded: null, deliveredRun: 900, simulatedDays: 300, outcomeClass: "delivered" }];
+		const head = model.conclusionHead()!;
+		expect(head.badge).toEqual({ label: "delivered", tone: "ok" });
+		const tiles = Object.fromEntries(head.tiles.map((t) => [t.k, t.v]));
+		expect(tiles["Delivered"]).toBe("900");
+		expect(tiles["Game days"]).toBe("300");
+		expect(tiles["Cash"]).toBe("£250000");
+		expect(tiles["Fleet"]).toBe("7");
+	});
+
+	it("says not measured for a run the ledger has no row for", () => {
+		const { model } = load([{ id: "a", status: "completed", mode: "agent" }], { meta });
+		model.metrics = [];
+		const tiles = Object.fromEntries(model.conclusionHead()!.tiles.map((t) => [t.k, t.v]));
+		expect(tiles["Delivered"]).toBe("not measured");
+		expect(tiles["Game days"]).toBe("not measured");
+	});
+
+	it("refuses to read another run's numbers when the ledger id collided", () => {
+		// Pre-fix ledgers took "newest wins per id", so the same id can point at a
+		// different model/seed. The list showed £60.39k for that id while the head
+		// showed £160.33k from the other run — a real, observed mismatch.
+		const { model } = load([{ id: "a", status: "completed", mode: "agent", seed: 4243 }], { meta: { ...meta, seed: 4243 } });
+		model.metrics = [{ id: "a", excluded: null, deliveredRun: 211, simulatedDays: 301, seed: 4242, outcomeClass: "delivered" }];
+		const head = model.conclusionHead()!;
+		const tiles = Object.fromEntries(head.tiles.map((t) => [t.k, t.v]));
+		expect(tiles["Delivered"]).toBe("not measured");
+		expect(tiles["Game days"]).toBe("not measured");
+		expect(head.badge).toBeNull();
+		expect(model.conclusionNote()).toMatch(/colliding session id/);
+	});
+
+	it("has no head before a run is loaded", () => {
+		const { model } = load();
+		expect(model.conclusionHead()).toBeNull();
+		// `x-for` iterates a function result, so the array must always exist.
+		expect(model.conclusionTiles()).toEqual([]);
+		expect(model.conclusionBadge()).toBeNull();
+	});
+});
+
+describe("History: the run list carries the outcome class from the ledger", () => {
+	it("shows the closed-set outcome class of the matching ledger row", () => {
+		const { model } = load([{ id: "a", status: "completed", mode: "agent" }]);
+		model.metrics = [{ id: "a", excluded: null, outcomeClass: "no_construction" }];
+		const badge = model.outcomeBadge({ id: "a", status: "completed", mode: "agent" });
+		expect(badge).toEqual({ label: "no_construction", tone: "warn" });
+	});
+
+	it("has no badge when the ledger has no row for that run", () => {
+		const { model } = load([{ id: "a", status: "completed", mode: "agent" }]);
+		model.metrics = [];
+		expect(model.outcomeBadge({ id: "a", status: "completed", mode: "agent" })).toBeNull();
 	});
 });
