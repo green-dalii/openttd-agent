@@ -18,23 +18,18 @@
   and the nav links there. The old URL still works (`/providers` answers with a redirect, the older `/llm` alias keeps resolving): one page, one name, no second copy.
 - **The score now says what it actually counts.** The delivery counter the harness reads is
   OpenTTD's *per-cargo-type* array summed up - and OpenTTD keeps passengers in that same array, so
-  the number has always counted **cargo and passengers**, not tonnes of freight. The scorecard, the benchmark report, the History page and the model-facing system prompt all said "cargo", which was
-  untrue - and the prompt told the model it was judged on freight alone. The wording now comes from
-  one place on the server (`DELIVERED_MEASURE`), the page copies it, and the scaffold fingerprint
+  the number has always counted **cargo and passengers**, not tonnes of freight. The scorecard, the benchmark report, the History page and the model-facing system prompt all said "cargo", which was untrue - and the prompt told the model it was judged on freight alone. The wording now comes from one place on the server (`DELIVERED_MEASURE`), the page copies it, and the scaffold fingerprint
   moved (`3da8a64e1fbe818e` -> `74f2e64d1e930df3`) because the prompt changed.
 
 - **The dashboard speaks two languages now.** A switch in the header flips the whole interface between
   English and Chinese, and the choice is remembered. The English text stays where it always was (the
   translation table is keyed by it, the gettext way), so there is no second copy of the wording to keep
-  in sync - and a guard test fails the build when a translation no longer matches its source. Raw evidence (the JSON in the agent steps) is left alone: translating a log would be rewriting the
-  record. The server's own vocabulary - outcome classes, error hints - stays as the server wrote it.
+  in sync - and a guard test fails the build when a translation no longer matches its source. Raw evidence (the JSON in the agent steps) is left alone: translating a log would be rewriting the record. The server's own vocabulary - outcome classes, error hints - stays as the server wrote it.
 
 - **The model can finally see the cargo.** The Bridge GS has been reporting the industries, the
   per-cargo totals, the road engines and the town names all along - and the agent side parsed them -
   but the model-visible projection dropped them, so the agent only ever saw `date`, the companies
-  and `towns[{id,pop,x,y}]`. A real model noticed ("the observe output doesn't include engine list
-  or cargo labels here") and built a **passenger** line because it could not see a single crate. The projection now carries the cargo world, the engine catalogue and the town names into
-  `observe()` and every decision context; missing readings stay `null` (never 0), and a town
+  and `towns[{id,pop,x,y}]`. A real model noticed ("the observe output doesn't include engine list or cargo labels here") and built a **passenger** line because it could not see a single crate. The projection now carries the cargo world, the engine catalogue and the town names into `observe()` and every decision context; missing readings stay `null` (never 0), and a town
   without a name stays nameless. The observation surface changed, so the fingerprint changed with
   it (`7956ab6d8c86fa60` -> `3da8a64e1fbe818e`): runs before and after it are compared as such.
 - **A run can now explain itself.** The run's detail shows the **full manifest**: the same world
@@ -56,8 +51,7 @@
   but the pages showed a fraction of them - and the most actionable one ("every tool call was
   refused" - the signal that a model is flailing) was invisible. The vocabulary is now **closed**
   (ten classes, no more, no less) and its names and meanings come from the server, so History
-  shows each run's class and Compare shows how many runs of each class a model has. A run whose
-  readings are missing reads "unknown" - not "nothing happened".
+  shows each run's class and Compare shows how many runs of each class a model has. A run whose readings are missing reads "unknown" - not "nothing happened".
 - **Errors carry a code instead of a sentence.** A failed model-list refresh, a rejected key, a
   missing credential, an unknown model: each now arrives as `{code, message, hint}`, and **each
   code has exactly one canonical hint** - so the same 401 reads the same way wherever it appears.
@@ -69,8 +63,7 @@
   **by reason**, and - once two models are picked - the paired verdict with its interval or the
   reason it cannot be decided. Every run in the list drills through to that run in History.
   The numbers are the server's: the four axes come from the scorecard, the paired verdict from the
-  paired comparison, the exclusion reasons from the existing enum. The page computes nothing and judges nothing; a missing reading reads "not measured", and an unpriced model's cost reads
-  "not measured" rather than $0.
+  paired comparison, the exclusion reasons from the existing enum. The page computes nothing and judges nothing; a missing reading reads "not measured", and an unpriced model's cost reads "not measured" rather than $0.
 
 - **The Run page now reads as three bands, and one decision is one row.** The page answers "is it
   playing" (health, score, the current goal), then "what just happened" - a **causal timeline**
@@ -78,8 +71,7 @@
   tools it called, the GS job those tools ordered (with the phases it went through), and what
   changed until the next decision. The pieces are joined **by the job id**, not by guessing from
   timestamps. The newest 20 rows are shown; older ones load on demand. The diagnostics (cash,
-  fleet, cargo, towns, tokens, wire detail, raw log) moved into a collapsed band - folded, not
-  deleted.
+  fleet, cargo, towns, tokens, wire detail, raw log) moved into a collapsed band - folded, not deleted.
 
 - **The timeline is a server fact.** `GET /api/sessions/:id/timeline` returns the rows; the page
   only draws them, and a reading the server did not have is shown as "not measured" rather than
@@ -126,6 +118,14 @@
 
 - **`capabilities()`**: the agent can ask which actions exist before trying them.
 ### Fixed
+- **The Compare page has a chart now, and the model picker sits on top.** The four axes used to
+  be a table and nothing else. Each axis gets its own chart - one bar per model, scaled against
+  that axis' own maximum, because the axes have different units and a shared scale would
+  misrepresent them - while the table keeps the exact values. A reading the server did not
+  measure is an empty dashed slot, never a zero-length bar: "not measured" and "measured: 0" must
+  not look the same. The picker moved to the top of the page, so asking for a comparison is one
+  click away instead of a scroll down.
+
 - **The metric ledger no longer loses runs to a session-id collision.** Two runs started in the
   same second on the same seed - two models side by side, or a re-run - used to get the *same*
   session id, and the ledger keeps "newest wins per id", so one of them disappeared without a
