@@ -9,20 +9,14 @@
 
 ## [Unreleased]
 ### Added
-- **Corrected: the deliveries cannot be split into cargo and passengers.** An earlier entry here
-  claimed they could. Checked against the OpenTTD 15.3 source, they cannot: the script API has **no
-  cargo monitor** (`GSCargoMonitor.*` does not fail - it returns null, so a split reads as "always
-  empty"), and the admin's counter is the **sum** over the per-cargo-type array. The score keeps the
-  one number it can measure and the split fields report "not measured". The API is registered in the
-  squirrel-api guard so the GS cannot call it again.
+- **Corrected: the deliveries cannot be split into cargo and passengers.** An earlier entry here claimed they could. Checked against the OpenTTD 15.3 source, they cannot: the script API has **no cargo monitor** (`GSCargoMonitor.*` does not fail - it returns null, so a split reads as "always empty"), and the admin's counter is the **sum** over the per-cargo-type array. The score keeps the one number it can measure and the split fields report "not measured"; the API is registered in the squirrel-api guard.
 
 - **The first real benchmark matrix is done.** Two models x three seeds x 300 game days, same
   scaffold and horizon, every cell reaching it. The harness's verdict on the primary axis is
   **"not determinable"** (paired mean difference -0.270 delivered per game day, 95% CI [-1.077, 0.545] includes zero: the variance across seeds dwarfs the difference). The secondary axes do separate them, in opposite directions: **M3.1-Flash needs ~40% fewer tokens per delivered unit** (1635 vs 1033 per million tokens), **M2.5 makes ~4.5x fewer failed tool calls** (2.9% vs 13.1%). Full numbers in issue #1.
 
 - **The configuration page is now called what it does.** The page that used to live at `/providers`
-  answers "how is this run configured?" - provider, key, run knobs - so it is now at `/configure`
-  and the nav links there. The old URL still works (`/providers` answers with a redirect, the older `/llm` alias keeps resolving): one page, one name, no second copy.
+  answers "how is this run configured?", so it is now at `/configure`; the old URL redirects (and the older `/llm` alias still resolves).
 - **The score now says what it actually counts.** The delivery counter the harness reads is
   OpenTTD's *per-cargo-type* array summed up - and OpenTTD keeps passengers in that same array, so
   the number has always counted **cargo and passengers**, not tonnes of freight. The scorecard, the benchmark report, the History page and the model-facing system prompt all said "cargo", which was untrue - and the prompt told the model it was judged on freight alone. The wording now comes from one place on the server (`DELIVERED_MEASURE`), the page copies it, and the scaffold fingerprint moved (`3da8a64e1fbe818e` -> `74f2e64d1e930df3`) because the prompt changed.
@@ -35,10 +29,7 @@
 - **The runs can be grouped** by model, seed or backend. The keys come from the ledger, because
   "which model" has two sources - requested and served - and a guessing page would disagree.
 
-- **The navigation follows the four questions now**: Run / Compare / History / Configure. The
-  "Evolution" page was renamed **Memory** and moved into History, because it manages what the
-  agent *remembers* (lessons, strategy candidates), not "evolution"; `/evolution` redirects to
-  `/sessions#memory` instead of keeping a second copy.
+- **The navigation follows the four questions now**: Run / Compare / History / Configure. The "Evolution" page was renamed **Memory** and moved into History, because it manages what the agent *remembers*, not "evolution"; `/evolution` redirects to `/sessions#memory`.
 
 - **Every run now says what kind of run it was.** The backend could already name ten outcomes,
   but the pages showed a fraction of them - and the most actionable one ("every tool call was
@@ -97,6 +88,11 @@
 
 - **`capabilities()`**: the agent can ask which actions exist before trying them.
 ### Fixed
+- **The Configure page leads with what the next run would use**, and an empty selection is a state,
+  not an error. A fresh install used to show a red `unknown_provider` before a single field was
+  touched: the server now answers with a `needs` marker ("no model selected yet") instead of a
+  problem, Start is disabled with the reason beside it, and the file paths moved into a folded note.
+
 - **History answers "which run matters" before it shows a single field.** The page is now three bands:
   four conclusion KPIs from the ledger (comparable runs, delivered per game day, tokens per decision,
   spend), a compact run list whose rows carry the ledger's own outcome class, and - for the selected

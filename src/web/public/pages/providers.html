@@ -30,6 +30,18 @@
 </header>
 
 <main>
+  <!-- ============================ SUMMARY ============================
+       页面唯一的主角："下一局会用什么"（审计 A13）。四个值全部来自服务端预览，
+       页面不重算。空选择时写 not configured / not measured，而不是红色错误。 -->
+  <section class="kpis" id="next-run-summary" aria-label="what the next run would use">
+    <template x-for="t in summaryTiles()" :key="t.k">
+      <div class="kpi">
+        <div class="kpi-k" x-text="t.k"></div>
+        <div class="kpi-v" x-text="t.v"></div>
+        <div class="kpi-hint" x-show="t.hint" x-text="t.hint"></div>
+      </div>
+    </template>
+  </section>
   <div class="group"><h2>Choose how the agent thinks</h2><div class="rule"></div></div>
 
   <section class="grid split-12">
@@ -138,12 +150,15 @@
           <tr><td x-text="k"></td><td x-text="v"></td></tr>
         </template>
       </table>
-      <h3>Where this is stored</h3>
-      <p class="hint">
-        Selection → <code>&lt;OPENTTD_DATA_DIR&gt;/llm.json</code><br />
-        Keys → <code>credentials.json</code> (same directory, mode 0600)<br />
-        Explicit <code>LLM_*</code> environment variables always win over both files.
-      </p>
+      <!-- 实现细节折叠：文件路径与权限是开发者信息，不该和业务表单同层（审计 A14）。 -->
+      <details class="evidence">
+        <summary>Where this is stored <span class="dim">files and precedence</span></summary>
+        <p class="hint">
+          Selection → <code>&lt;OPENTTD_DATA_DIR&gt;/llm.json</code><br />
+          Keys → <code>credentials.json</code> (same directory, mode 0600)<br />
+          Explicit <code>LLM_*</code> environment variables always win over both files.
+        </p>
+      </details>
       <h3>Ready providers</h3>
       <p class="hint">Providers whose key is already present in this machine's environment — no pasting needed.</p>
       <div class="scroll-y">
@@ -212,10 +227,13 @@
           <span x-show="!previewing">Preview</span>
           <span x-show="previewing">Resolving…</span>
         </button>
-        <button type="button" class="btn sm primary" :disabled="runBusy" @click="startRun()">
+        <!-- 空选择时按钮禁用，并把原因写在旁边：一个看起来可点却没反应的按钮
+             等于 bug（MEMORY B8）。 -->
+        <button type="button" class="btn sm primary" :disabled="!canStart()" @click="startRun()">
           <span x-show="!runBusy">Start with these settings</span>
           <span x-show="runBusy">Starting…</span>
         </button>
+        <span class="save-why" x-show="startBlockedReason()" x-text="startBlockedReason()"></span>
         <span class="form-msg" :class="runMsg.kind" x-text="runMsg.text"></span>
       </div>
       <p class="hint">

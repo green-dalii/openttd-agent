@@ -39,6 +39,24 @@ import { harnessEnabled } from "./harness-runtime.js";
 import { assertCostCapEnforceable, costCapProblem } from "./run-budget.js";
 import type { Problem } from "./problems.js";
 
+/**
+ * "No model is selected yet" — a state, not a validation failure.
+ *
+ * Kept next to the preview because that is the only path that needs it: Start
+ * still fails loudly (a run cannot begin without a model), while the preview
+ * panel has nothing to describe and should say so calmly.
+ */
+export interface PreviewNeeds {
+	reason: "no_model";
+	message: string;
+	hint: string;
+}
+const NO_MODEL_NEEDS: PreviewNeeds = {
+	reason: "no_model",
+	message: "No model is selected yet.",
+	hint: "Pick a provider and a model above; this panel then shows exactly what the next run would use.",
+};
+
 export interface ServeOptions {
 	webPort?: number;
 	/** Allow the scripted demo brain (no real LLM). */
@@ -148,7 +166,12 @@ export interface ServeHandle {
 	 * exactly what the start refuses, and the fields it promises must be the
 	 * fields the run records.
 	 */
-	preview(knobs?: RunKnobInput): Promise<{ preview: NextRunPreview | null; problems: Problem[] }>;
+	preview(knobs?: RunKnobInput): Promise<{
+		preview: NextRunPreview | null;
+		problems: Problem[];
+		/** 这个选择还**不能**预览：不是错误，是"还没配"。 */
+		needs?: PreviewNeeds;
+	}>;
 	/** Wait until the process is asked to stop. */
 	done: Promise<void>;
 	stop(): Promise<void>;
@@ -202,11 +225,20 @@ export async function runServe(cfg: Config, opts: ServeOptions = {}): Promise<Se
 	async function previewRun(raw: RunKnobInput | undefined): Promise<{
 		preview: NextRunPreview | null;
 		problems: Problem[];
+		needs?: PreviewNeeds;
 	}> {
 		const parsed = previewRunKnobs(raw ?? {}, knobDefaults(), backends());
 		if (!parsed.knobs) return { preview: null, problems: parsed.problems };
 		const resolved = await llmApi.resolveCurrent();
-		if (!resolved.valid) return { preview: null, problems: resolved.problems };
+		if (!resolved.valid) {
+			// 空选择 = "还没配"，不是"配错了"（2026-11-01 审计 A13）：
+			// 全新 data dir 打开页面时，NEXT RUN 立刻红着报 unknown_provider，
+			// 而用户一个字段都没碰。这不是错误，是下一步要做什么。
+			// 仍然只由服务端说（页面不猜）：`needs` 与 `problems` 是两个字段。
+			const empty = !resolved.intent || (!resolved.intent.providerId && !resolved.intent.model);
+			if (empty) return { preview: null, problems: [], needs: NO_MODEL_NEEDS };
+			return { preview: null, problems: resolved.problems };
+		}
 		// The same refusal Start makes: a preview that promises a cost cap the
 		// run cannot enforce is a lie in a nicer dress. The rule is the SAME
 		// function the runner uses (run-budget.ts), so the two cannot disagree.
