@@ -25,6 +25,29 @@
     </p>
 
     <!-- ===================== ① the four axes ===================== -->
+    <!-- The picker is the page's first control: the model list must be visible
+         before any panel, so "compare two models" is one click away (audit P0-4).
+         It used to live inside the paired-comparison panel, which made the whole
+         comparison a dead end until you scrolled down. -->
+    <section class="panel cmp-picker" x-show="!loading && !error && hasRuns()">
+      <div class="panel-head">
+        <h2>Compare two models</h2>
+        <span class="dim">pick two to get the paired verdict on the same seeds</span>
+      </div>
+      <div class="actions">
+        <template x-for="m in modelNames()" :key="'pick-' + m">
+          <label class="check">
+            <input type="checkbox" :value="m" x-model="picked" />
+            <span x-text="m"></span>
+          </label>
+        </template>
+        <button type="button" class="btn sm primary" :disabled="picked.length !== 2 || loading" @click="comparePicked()">
+          Compare the two
+        </button>
+        <span class="form-msg" x-show="picked.length !== 2" x-text="'pick exactly two models (' + picked.length + ' picked)'"></span>
+      </div>
+    </section>
+
     <section class="panel" x-show="!loading && !error && hasRuns()">
       <div class="panel-head">
         <h2>Four axes per model <span class="dim">Result / Efficiency / Reliability / Growth</span></h2>
@@ -162,18 +185,6 @@
       <div class="panel-head">
         <h2>Paired comparison <span class="dim">同一批 seed 上的配对差异</span></h2>
         <span class="dim" x-text="comparison() ? (comparison().modelA + ' vs ' + comparison().modelB) : ''"></span>
-      </div>
-      <div class="actions">
-        <template x-for="m in modelNames()" :key="'pick-' + m">
-          <label class="check">
-            <input type="checkbox" :value="m" x-model="picked" />
-            <span x-text="m"></span>
-          </label>
-        </template>
-        <button type="button" class="btn sm primary" :disabled="picked.length !== 2 || loading" @click="comparePicked()">
-          Compare the two
-        </button>
-        <span class="form-msg" x-show="picked.length !== 2" x-text="'pick exactly two models (' + picked.length + ' picked)'"></span>
       </div>
       <!-- The verdict is the server's (pairedComparison). The page never
            decides which model is better, and never turns "not determinable"
