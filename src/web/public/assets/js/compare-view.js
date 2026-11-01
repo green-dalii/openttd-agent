@@ -123,6 +123,65 @@
     };
   }
 
+  /**
+   * The four axes as four small charts - one per axis, because the axes have
+   * different units and a single shared scale would be a lie.
+   *
+   * 铁律：
+   *   - **每个数字都来自服务端**（scorecard 的四轴）⇒ 这里只做**布局**（条长），
+   *     不重算任何统计量；
+   *   - **“没测到”不是 0**：没有读数的模型在图上是一个**空槽**（虚线轮廓），
+   *     不是一条长度为 0 的实心条 —— 那样画等于把“没测到”说成“测到是 0”（D60）。
+   */
+  function axisCharts(payload) {
+    const models = payload && Array.isArray(payload.models) ? payload.models : [];
+    /** One axis: the readings the server gave, plus the bar geometry. */
+    function axis(key, title, pick) {
+      const bars = models.map((m) => {
+        const r = pick(m) || {};
+        const value = typeof r.value === "number" && Number.isFinite(r.value) ? r.value : null;
+        return {
+          model: String(m.model ?? "unknown"),
+          label: String(r.label ?? ""),
+          text: r.text ?? NOT_MEASURED,
+          value,
+          known: value !== null,
+        };
+      });
+      // 刻度：这一轴里最大的已知值（0 ⇒ 全部为空槽）。
+      const max = bars.reduce((acc, b) => (b.known && b.value > acc ? b.value : acc), 0);
+      for (const b of bars) {
+        // 条长是**相对这一轴最大值**的百分比（布局，不是判断）。
+        b.width = b.known && max > 0 ? Math.max(2, Math.round((b.value / max) * 100)) : 0;
+      }
+      return { key, title, bars, max };
+    }
+    const m0 = models[0] || {};
+    const abilityMeasure = m0.ability && m0.ability.measure ? String(m0.ability.measure) : "Delivered";
+    return [
+      axis("ability", "Result", (m) => ({
+        label: `${(m.ability && m.ability.measure) || abilityMeasure} / game day`,
+        value: m.ability && m.ability.mean,
+        text: num(m.ability && m.ability.mean, 2),
+      })),
+      axis("efficiency", "Efficiency", (m) => ({
+        label: `${(m.efficiency && m.efficiency.measure) || abilityMeasure} / M tokens`,
+        value: m.efficiency && m.efficiency.deliveredPerMillionTokens,
+        text: num(m.efficiency && m.efficiency.deliveredPerMillionTokens, 0),
+      })),
+      axis("stability", "Reliability", (m) => ({
+        label: "Tool failure rate",
+        value: m.stability && m.stability.toolFailureRate,
+        text: pct(m.stability && m.stability.toolFailureRate).text,
+      })),
+      axis("growth", "Growth", (m) => ({
+        label: "Growth",
+        value: m.growth && m.growth.verdict === "rising" ? 1 : m.growth && m.growth.verdict === "falling" ? -1 : null,
+        text: m.growth && m.growth.verdict ? String(m.growth.verdict) : NOT_MEASURED,
+      })),
+    ];
+  }
+
   /** The runs (the drill-down list). */
   function runRows(payload) {
     const runs = payload && Array.isArray(payload.runs) ? payload.runs : [];
@@ -150,6 +209,7 @@
     comparison,
     runRows,
     modelNames,
+    axisCharts,
     reading,
     num,
     NOT_MEASURED,

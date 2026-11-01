@@ -30,6 +30,33 @@
         <h2>Four axes per model <span class="dim">Result / Efficiency / Reliability / Growth</span></h2>
         <span class="dim" x-text="modelRows().length + ' model(s)'"></span>
       </div>
+      <!-- The four axes as charts: the page's visual protagonist. One chart per
+           axis (the axes have different units), one bar per model. A bar the
+           server did not measure is an EMPTY slot with a dashed outline - not a
+           zero-length solid bar, which would say "measured: 0". -->
+      <div class="cmp-charts">
+        <template x-for="axis in axisCharts()" :key="axis.key">
+          <figure class="cmp-chart">
+            <figcaption>
+              <span x-text="axis.title"></span>
+              <span class="dim" x-text="axis.bars[0] ? axis.bars[0].label : ''"></span>
+            </figcaption>
+            <div class="cmp-bars">
+              <template x-for="b in axis.bars" :key="'bar-' + axis.key + '-' + b.model">
+                <div class="cmp-bar-row">
+                  <span class="cmp-bar-model" x-text="b.model"></span>
+                  <span class="cmp-bar-track">
+                    <span class="cmp-bar" :class="b.known ? '' : 'unknown'"
+                          :style="b.known ? 'width:' + b.width + '%' : ''"></span>
+                  </span>
+                  <span class="cmp-bar-text" :class="b.known ? '' : 'dim'"
+                        x-text="b.text"></span>
+                </div>
+              </template>
+            </div>
+          </figure>
+        </template>
+      </div>
       <!-- The numbers come from the scorecard (server-side). A missing reading
            reads "not measured" — the page never turns it into a zero. -->
       <div class="tbl-wrap">

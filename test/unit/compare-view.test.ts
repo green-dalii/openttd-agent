@@ -36,6 +36,12 @@ interface CompareView {
 	comparison(payload: unknown): { verdict: string; message: string; pairs: number; known: boolean } | null;
 	runRows(payload: unknown): { id: string; model: string; seed: number; link: string }[];
 	modelNames(payload: unknown): string[];
+	axisCharts(payload: unknown): {
+		key: string;
+		title: string;
+		max: number;
+		bars: { model: string; label: string; text: string; value: number | null; known: boolean; width: number }[];
+	}[];
 }
 
 function load(): CompareView {
@@ -195,6 +201,41 @@ describe("CompareView", () => {
 		};
 		const rows = v.modelRows(payload);
 		expect(rows[0]!.ability[0]!.label).toBe("Delivered / game day");
+	});
+
+	it("draws the four axes as charts, one bar per model", () => {
+		const v = load();
+		const axes = v.axisCharts(PAYLOAD);
+		expect(axes.map((a) => a.key)).toEqual(["ability", "efficiency", "stability", "growth"]);
+		expect(axes[0]!.bars.map((b) => b.model)).toEqual(["model-a"]);
+		expect(axes[0]!.bars[0]!.known).toBe(true);
+	});
+
+	it("scales each axis against its own maximum (the axes have different units)", () => {
+		const v = load();
+		const payload = {
+			models: [
+				{ model: "a", ability: { mean: 10 }, efficiency: { deliveredPerMillionTokens: 1 } },
+				{ model: "b", ability: { mean: 2 }, efficiency: { deliveredPerMillionTokens: 100 } },
+			],
+		};
+		const axes = v.axisCharts(payload);
+		// 同一批模型，能力轴按 10 缩放，效率轴按 100 缩放 —— 共享刻度会说谎。
+		expect(axes[0]!.bars[0]!.width).toBe(100);
+		expect(axes[0]!.bars[1]!.width).toBe(20);
+		expect(axes[1]!.bars[0]!.width).toBe(2);
+		expect(axes[1]!.bars[1]!.width).toBe(100);
+	});
+
+	it("draws an unmeasured reading as an empty slot, never as a zero bar", () => {
+		// 「没测到」画成 0 长度的实心条 = 把「没测到」说成「测到是 0」（D60）。
+		const v = load();
+		const payload = { models: [{ model: "a", ability: { mean: null } }] };
+		const axes = v.axisCharts(payload);
+		const bar = axes[0]!.bars[0]!;
+		expect(bar.known).toBe(false);
+		expect(bar.width).toBe(0);
+		expect(bar.text).toBe("not measured");
 	});
 
 	it("survives an empty payload", () => {

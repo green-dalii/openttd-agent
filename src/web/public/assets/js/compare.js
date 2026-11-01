@@ -87,6 +87,11 @@
           return window.CompareView.modelNames(this.payload);
         },
 
+        /** The four axes as charts (one per axis, one bar per model). */
+        axisCharts() {
+          return window.CompareView.axisCharts(this.payload);
+        },
+
         /** Is there anything to compare? */
         hasRuns() {
           return this.runRows().length > 0;
