@@ -107,6 +107,19 @@ interface LiveModel {
 	visibleEvents(): { kind: string }[];
 	categoryChips(): { cat: string; label: string; n: number; off: boolean }[];
 	notice(): { show: boolean; kind: string; title: string; body: string; canStart: boolean };
+	/** 冷启动：没有局、也没有任何读数（审计 A1/A3）。 */
+	coldStart(): boolean;
+	/** 空态的三步引导（替代一屏破折号）。 */
+	startGuide(): {
+		show: boolean;
+		steps: { n: number; title: string; body: string; action: string; href: string; start: boolean }[];
+	};
+	/** 会话 id（遥测快照优先；本地 `sessionId` 从来没人写）。 */
+	runSessionId(): string | null;
+	/** 运行时长（读服务端的 run.startedAt，不是没人赋值的本地字段）。 */
+	elapsedText(nowMs?: number): string;
+	/** 每 5 s 递增的时钟（时钟驱动 `elapsedText` 的重绘，不靠忙轮询）。 */
+	nowTick: number;
 	routes: unknown[];
 	routesAvailable: boolean;
 	routeSortKey: "income" | "job" | "vehicles" | "waiting" | "profit";
@@ -576,7 +589,23 @@ describe("Live view model", () => {
 			const n = model.notice();
 			expect(n.show).toBe(true);
 			expect(n.title).not.toMatch(/no run/i);
-			expect(n.body).toMatch(/observ|scripted/i);
+			// 文案在 2026-11-01 分成了两种诚实说法（脚本演示 / 纯观察内置 AI），
+			// 所以断言看标题+正文的合体，而不是钉死某一句。
+			expect(`${n.title} ${n.body}`).toMatch(/observ|scripted/i);
+		});
+
+		it("never claims a scripted demo is only observing the built-in AI", () => {
+			// `--offline-demo` really does make decisions; they just come from a script.
+			// The old body said the panels are empty because nothing drives the game,
+			// which was false. The honest reason is "no model was called".
+			const { model } = load();
+			model.runControl = true;
+			model.run = { state: "running" };
+			model.telemetry = { brain: { kind: "faux", provider: "faux", model: "faux" } };
+			const n = model.notice();
+			expect(n.title).toMatch(/scripted demo/i);
+			expect(n.body).not.toMatch(/built-in game AI/i);
+			expect(n.body).toMatch(/no model|not from a model/i);
 		});
 
 		it("surfaces a failed start in full", () => {
@@ -1880,5 +1909,143 @@ describe("fleetAttributionRows（FLEET 分解显示）", () => {
 		expect(model.fleetAttributionRows()).toEqual([]);
 		delete model.fleet;
 		expect(model.fleetAttributionRows()).toEqual([]);
+	});
+});
+
+/** The shared clock for the cold-start / elapsed cases below. */
+const NOW = 1_700_000_000_000;
+
+/**
+ * 冷启动（2026-11-01 审计 A1/A2/A3）：Run 页在"什么都没发生"时不该铺一屏破折号。
+ *
+ * 真机证据：serve 模式首页有 8 个 `—` + 一条红色 "WORLD frozen"，用户的第一个印象
+ * 是"这里什么都没有/出错了"，而实际状态只是"还没开跑"。页面此时应当回答问题
+ * "我现在能做什么"，也就是三步引导；世界状态区在没有数据时**不占版面**。
+ */
+describe("cold start: the page before anything has happened", () => {
+	it("is a cold start when there is no run and nothing measured", () => {
+		const { model } = load();
+		model.runControl = true;
+		model.run = { state: "idle" };
+		expect(model.coldStart()).toBe(true);
+	});
+
+	it("stops being a cold start once a run is active", () => {
+		const { model } = load();
+		model.run = { state: "running" };
+		expect(model.coldStart()).toBe(false);
+	});
+
+	it("stops being a cold start once the world has data", () => {
+		// A running game may be attached with no LLM at all (`--watch`): the world
+		// facts are real, so the page must show them instead of the guide.
+		const { model } = load();
+		model.run = { state: "idle" };
+		model.companies = { "0": { info: { name: "AI" }, economy: {}, history: [] } };
+		expect(model.coldStart()).toBe(false);
+	});
+
+	it("stops being a cold start once the agent has produced a turn", () => {
+		const { model } = load();
+		model.run = { state: "idle" };
+		model.telemetry = { turns: 2 };
+		expect(model.coldStart()).toBe(false);
+	});
+});
+
+describe("startGuide: three steps instead of a screen of dashes", () => {
+	it("offers exactly three ordered steps", () => {
+		const { model } = load();
+		model.runControl = true;
+		model.run = { state: "idle" };
+		const g = model.startGuide();
+		expect(g.show).toBe(true);
+		expect(g.steps.map((s) => s.n)).toEqual([1, 2, 3]);
+		expect(g.steps.map((s) => s.title)).toEqual([
+			"Choose the model",
+			"Set the limits",
+			"Start the run",
+		]);
+	});
+
+	it("points the first two steps at the configure page and makes the third start the run", () => {
+		const { model } = load();
+		model.runControl = true;
+		model.run = { state: "idle" };
+		const [first, second, third] = model.startGuide().steps;
+		expect(first?.href).toBe("/configure");
+		expect(second?.href).toBe("/configure#run-settings");
+		// The last step is the action itself: it carries no link, it is a button.
+		expect(third?.start).toBe(true);
+		expect(third?.href).toBe("");
+		expect(first?.start).toBe(false);
+	});
+
+	it("stays hidden while a run is in progress", () => {
+		const { model } = load();
+		model.runControl = true;
+		model.run = { state: "running" };
+		expect(model.startGuide().show).toBe(false);
+	});
+
+	it("stays hidden when this server cannot start runs (plain --watch)", () => {
+		const { model } = load();
+		model.runControl = false;
+		model.run = { state: "idle" };
+		expect(model.startGuide().show).toBe(false);
+	});
+
+	it("gives way to the error card after a failed start", () => {
+		// The reason the start failed is the only thing worth reading; a guide
+		// beside it would bury the message.
+		const { model } = load();
+		model.runControl = true;
+		model.run = { state: "idle", error: "no provider/model configured" };
+		expect(model.startGuide().show).toBe(false);
+	});
+});
+
+/**
+ * Elapsed（2026-11-01 实测缺陷）：live.js 的 getter 读 `this.startedAt`，
+ * 而**全前端没有任何一处给它赋值** —— 运行中顶栏也永远显示 "—"。
+ * 服务端早在 `run.startedAt` 给了开始时间（supervisor.ts:113）。
+ */
+describe("elapsed: the server's start time, not a field nobody writes", () => {
+	it("counts from run.startedAt", () => {
+		const { model } = load();
+		model.run = { state: "running", startedAt: NOW - 125_000 };
+		expect(model.elapsedText(NOW)).toBe(`${125_000}ms`);
+	});
+
+	it("falls back to the telemetry snapshot when there is no /api/run (agent / watch mode)", () => {
+		// `--agent` and `--watch` run in-process: /api/run is 404 there, but the
+		// telemetry snapshot every frame already carries the run's start time.
+		const { model } = load();
+		model.run = null;
+		model.telemetry = { turns: 3, startedAt: NOW - 60_000 };
+		expect(model.elapsedText(NOW)).toBe(`${60_000}ms`);
+	});
+
+	it("names the session from the telemetry snapshot, not from the dead local field", () => {
+		const { model } = load();
+		model.telemetry = { sessionId: "1700000000-seed7-abcd" };
+		expect(model.runSessionId()).toBe("1700000000-seed7-abcd");
+	});
+
+	it("has no session id before the first frame (— rather than a made-up name)", () => {
+		const { model } = load();
+		expect(model.runSessionId()).toBeNull();
+	});
+
+	it("reads as not measured when the server reports no start time", () => {
+		const { model } = load();
+		model.run = { state: "idle", startedAt: null };
+		expect(model.elapsedText(NOW)).toBe("—");
+	});
+
+	it("never goes negative when the browser clock is behind", () => {
+		const { model } = load();
+		model.run = { state: "running", startedAt: NOW + 5_000 };
+		expect(model.elapsedText(NOW)).toBe(`${0}ms`);
 	});
 });

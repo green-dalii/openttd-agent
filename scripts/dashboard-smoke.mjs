@@ -304,6 +304,51 @@ for (const [id, v] of Object.entries(hostTraj)) {
 if (tileSpread > 30) stabilityProblems.push(`KPI 卡片高度极差 ${tileSpread}px（>30 说明网格在反复重排）`);
 if (dprSeen !== 2) stabilityProblems.push(`devicePixelRatio = ${dprSeen}，探针**没有**复现 Retina 条件（必须为 2）`);
 
+/* ======================================================================
+ * 冷启动（2026-11-01 审计 A1/A2/A3）：没有局、也没有读数时，页面只应回答
+ * "我现在能做什么" —— 三步引导 + 两条顶栏信息；数据区**不占版面**。
+ * 这一条必须写在探针里：上一版的"8 个破折号 + 红色 world frozen"从任何单测
+ * 都看不出来（模板没被求值就没有错误，空态也不是"报错"）。
+ * ====================================================================== */
+const cold = await send("Runtime.evaluate", {
+  expression: `(() => {
+    const d = window.Alpine && document.querySelector('[x-data]') ? window.Alpine.$data(document.querySelector('[x-data]')) : null;
+    const guide = document.querySelector('.guide');
+    const stack = document.querySelector('.stack');
+    const steps = guide ? [...guide.querySelectorAll('.guide-step')] : [];
+    const headerItems = [...document.querySelectorAll('header .runbar .item')]
+      .filter((el) => getComputedStyle(el).display !== 'none')
+      .map((el) => (el.querySelector('.lbl')?.textContent || '').trim());
+    const box = (el) => (el ? Math.round(el.getBoundingClientRect().height) : 0);
+    return {
+      cold: d && typeof d.coldStart === 'function' ? d.coldStart() : null,
+      guideVisible: box(guide) > 0,
+      guideSteps: steps.length,
+      stepTitles: steps.map((s) => (s.querySelector('strong')?.textContent || '').trim()),
+      stackVisible: box(stack) > 0,
+      headerItems,
+      elapsed: d && typeof d.elapsedText === 'function' ? d.elapsedText(d.nowTick) : null,
+    };
+  })()`,
+  returnByValue: true,
+});
+const coldView = cold.result?.value || {};
+console.log("COLD START:", JSON.stringify(coldView, null, 2));
+const coldProblems = [];
+// 顶栏只有两个问题：通道活着吗、这一局在跑吗。其余读数移入页内。
+const headerItems = coldView.headerItems || [];
+if (headerItems.join(",") !== "Connection,Run") {
+  coldProblems.push(`顶栏状态项应是 [Connection, Run]，实际 [${headerItems.join(", ")}]`);
+}
+if (coldView.cold === true) {
+  if (!coldView.guideVisible) coldProblems.push("冷启动没有显示三步引导（首屏又变成一屏破折号）");
+  if (coldView.guideSteps !== 3) coldProblems.push(`引导步骤是 ${coldView.guideSteps} 步（应为 3）`);
+  if (coldView.stackVisible) coldProblems.push("冷启动时数据区仍占版面（应整块收起）");
+} else if (coldView.cold === false) {
+  if (coldView.stackVisible !== true) coldProblems.push("数据已经存在，但数据区仍是隐藏的");
+  if (coldView.guideVisible) coldProblems.push("已有读数却仍在显示冷启动引导");
+}
+
 const probe = await send("Runtime.evaluate", {
   expression: `(() => {
     const el = document.getElementById('action-surface');
@@ -409,15 +454,23 @@ console.log("console entries:", logs.length, "| errors/warnings/exceptions:", ba
 for (const b of bad.slice(0, 8)) console.log("  !!", b.level, b.text.slice(0, 200));
 ws.close();
 chrome.kill();
+// 冷启动时 action surface 被数据区一起收起（它只在有动作目录时有内容），
+// 所以"可见"这一条只对**有数据的页面**成立；冷启动的对应断言是引导可见。
+const needsPanels = coldView.cold !== true;
 const ok =
   bad.length === 0 &&
-  probe.result?.value?.visible === true &&
-  probe.result?.value?.rowCount > 0 &&
+  coldProblems.length === 0 &&
+  (needsPanels ? probe.result?.value?.visible === true : true) &&
+  (needsPanels ? probe.result?.value?.rowCount > 0 : true) &&
   chartProblems.length === 0 &&
   stabilityProblems.length === 0;
 if (chartProblems.length) {
   console.error("FAIL（图表健康）:");
   for (const p of chartProblems) console.error("  -", p);
+}
+if (coldProblems.length) {
+  console.error("FAIL（冷启动 / 顶栏）:");
+  for (const p of coldProblems) console.error("  -", p);
 }
 if (stabilityProblems.length) {
   console.error("FAIL（尺寸稳定性 / Retina 条件）:");

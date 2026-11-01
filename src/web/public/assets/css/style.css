@@ -87,7 +87,7 @@ h1 .dim { font-size: 12px; }
 /* runtime status strip */
 .runbar { display: flex; flex-wrap: wrap; gap: var(--sp-4); align-items: center; }
 .runbar .item { display: flex; align-items: baseline; gap: 6px; }
-.runbar .lbl { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.runbar .lbl, .run-meta .lbl { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
 .runbar .val { font-variant-numeric: tabular-nums; font-size: 13px; }
 .pill { font-size: 11px; padding: 2px 9px; border-radius: 999px; display: inline-flex; align-items: center; gap: 5px; }
 .pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
@@ -112,6 +112,28 @@ main { padding: var(--sp-4) var(--sp-5) 64px; max-width: 1360px; margin: 0 auto;
 .notice .notice-body { flex: 1; }
 .notice strong { color: var(--ink); }
 .notice .notice-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+
+/* ------------------------- cold start: the three steps -------------------------
+ * 空页只回答一个问题：“我现在能做什么”。三步与真实可做的事一一对应
+ * （2026-11-01 审计 A1：以前首屏是 8 个破折号 + 一条红色 world frozen）。 */
+.guide { display: flex; flex-direction: column; gap: var(--sp-3); }
+.guide-step { display: flex; gap: var(--sp-3); align-items: flex-start;
+  background: var(--panel-2); border: 1px solid var(--line); border-left: 3px solid var(--accent);
+  border-radius: var(--r-md); padding: var(--sp-3) var(--sp-4); }
+.guide-n { flex: none; width: 22px; height: 22px; border-radius: 50%; background: var(--accent);
+  color: #10151a; font-weight: 700; font-size: 12px; display: grid; place-items: center; }
+.guide-body { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.guide-body strong { font-size: 13px; color: var(--ink); }
+.guide-body p { margin: 0; font-size: 12px; line-height: 1.55; color: var(--ink-dim); }
+.guide-body .btn { align-self: flex-start; margin-top: 2px; }
+
+/* 页内元数据（数据新鲜度 / 会话 / 运行时长）：顶栏只留连接与运行状态。 */
+.run-meta { display: flex; flex-wrap: wrap; gap: var(--sp-4); align-items: baseline;
+  padding: 0 2px; color: var(--muted); }
+.run-meta .item { display: inline-flex; align-items: baseline; gap: 6px; }
+.run-meta .val { font-variant-numeric: tabular-nums; font-size: 12px; }
+/* 数据区的外壳：保留 main 的纵向节奏，同时让冷启动能整块收起。 */
+.stack { display: flex; flex-direction: column; gap: var(--sp-4); }
 
 /* stage snapshot (data-rendered map diagram) */
 /* 列宽被**夹在固定区间**（而不是 1fr 自由伸展）：这样快照正方形的高度有界，
