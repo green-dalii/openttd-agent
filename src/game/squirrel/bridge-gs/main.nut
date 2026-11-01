@@ -1524,6 +1524,9 @@ class BridgeV1 extends GSController {
     _facts = null;
     _facts_tick = 0;
     _core = null;   // ExecCore（P1-1a：施工状态机，标牌邮箱已废）
+    // 公司口径的**累计**交付量（按货种标签）：monitor 每次读取返回的是增量，
+    // 所以累计必须自己做（否则只剩最后一个窗口的量，实测一直是空）。
+    _own_cargo_total = {};
 
     /**
      * Parse an executor company-name phase string into a typed event payload.
@@ -2248,7 +2251,19 @@ class BridgeV1 extends GSController {
                 local ind_amt = GSCargoMonitor.GetIndustryDeliveryAmount(0, c, iid, true);
                 if (ind_amt != null && ind_amt > 0) amt += ind_amt;
             }
-            if (amt > 0) own_by_cargo.append({ label = GSCargo.GetCargoLabel(c), amount = amt });
+            if (amt > 0) {
+                // **累计**（2026-10-31）：monitor 返回的是**自上次读取以来的增量**
+                // （官方语义："The call causes the collected amount to be reset"），
+                // 而 CollectFacts 每 1000 tick 跑一次 ⇒ 只报最后那个窗口的量 ⇒
+                // 真机实测一直是空（交付发生在别的窗口里）。所以自己累加。
+                local label = GSCargo.GetCargoLabel(c);
+                this._own_cargo_total[label] = (this._own_cargo_total[label] ?? 0) + amt;
+            }
+        }
+        // 累加后的表 → 数组（降序）。口径：**卸到城镇/产业站的交付量**（monitor 口径），
+        // 与 admin 的"被接受量"不是一回事，不能相加（见 SPEC §10.65）。
+        foreach (label, amount in this._own_cargo_total) {
+            if (amount > 0) own_by_cargo.append({ label = label, amount = amount });
         }
         own_by_cargo.sort(function(oa, ob) { return ob.amount - oa.amount; });
 

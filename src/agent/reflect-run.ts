@@ -184,6 +184,12 @@ export async function runFinalizeAndReflect(args: FinalizeAndReflectArgs): Promi
 			// "delivered during the run" figure, and it is what comparisons use.
 			deliveredRun: c0?.deliveredRun && c0.deliveredRun.total !== null ? c0.deliveredRun.total : undefined,
 			deliveredRunComplete: c0?.deliveredRun ? c0.deliveredRun.complete : undefined,
+			// 按货种的拆分（monitor 口径）：客运（PASS）单独一项 —— admin 的
+			// 单个计数器把两者加在一起，分不开（SPEC §10.65）。没上报就是没有。
+			deliveredByCargo:
+				snap.companyCargo && Array.isArray(snap.companyCargo.byCargo) && snap.companyCargo.byCargo.length
+					? snap.companyCargo.byCargo
+					: undefined,
 			gsErrors: args.gsErrors,
 			// 暂停收场：记成 outcome 的两个独立事实（是否被暂停结束 / 谁按的），
 			// 缺省是 undefined（"不是这个原因"），不是 false（"确实没暂停过"）——

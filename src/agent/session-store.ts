@@ -101,6 +101,13 @@ export interface SessionMeta {
 		/** False when whole quarters went unseen (total is then a lower bound). */
 		deliveredRunComplete?: boolean;
 		/**
+		 * Delivery split by cargo type (GS cargo-monitor measure: the amounts
+		 * unloaded at the monitored towns/industries, accumulated over the run).
+		 * The passenger entry ("PASS") is the one the admin's single counter
+		 * cannot separate. Absent when the GS never reported a split.
+		 */
+		deliveredByCargo?: { label: string; amount: number }[];
+		/**
 		 * GS error replies during the run (channel health, SPEC §10.66). A
 		 * partially broken GS channel degrades per run, so this must be visible
 		 * next to the outcome it silently affected.

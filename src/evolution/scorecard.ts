@@ -34,10 +34,27 @@ export interface BenchConditions {
  */
 export const DELIVERED_MEASURE = "cargo + passengers delivered";
 
+/**
+ * The passenger label the GS reports (OpenTTD's cargo label for CT_PASSENGERS).
+ */
+export const PASSENGER_CARGO_LABEL = "PASS";
+
 export interface AbilityAxis {
 	runs: number;
 	/** What the delivery numbers count (server's wording; see DELIVERED_MEASURE). */
 	measure: string;
+	/**
+	 * The split, in the **monitor measure** (what the GS's cargo monitor saw
+	 * unloaded at the monitored towns/industries - not the admin's accepted
+	 * counter, so the two must not be added together).
+	 *
+	 * null = **not measured** (the GS never reported a split - every run before
+	 * the monitor accumulation was fixed). "0" would be a different claim.
+	 */
+	cargoDelivered: number | null;
+	passengersDelivered: number | null;
+	/** The split's own wording (so the page does not write a second one). */
+	splitMeasure: string;
 	/** Cargo + passengers delivered per game day: mean and median over comparable runs. */
 	mean: number | null;
 	median: number | null;
@@ -128,6 +145,33 @@ function perDay(m: GameMetric): number | null {
  * (`manifest.servedModel` when present, else the requested `llmModel`) - a
  * gateway answering with another model must not be credited to the request.
  */
+/** How the split is measured, in the server's words. */
+export const SPLIT_MEASURE = "delivered to monitored towns/industries, by cargo type";
+
+/**
+ * Split the deliveries of the comparable runs into cargo and passengers.
+ *
+ * 两家口径：**monitor**（GS 的 cargo monitor：卸到被监视的城镇/产业的量，自己累加）
+ * 与 **admin**（被接受量）不是一回事 ⇒ 只在这里分开报，**不与主轴相加**。
+ * 只有当**每一局**都有拆分时才给数；否则 null（"没测到"），不是 0。
+ */
+export function splitByCargo(rows: GameMetric[]): { cargo: number | null; passengers: number | null } {
+	let cargo = 0;
+	let passengers = 0;
+	let seen = 0;
+	for (const m of rows) {
+		const split = m.deliveredByCargo;
+		if (!Array.isArray(split) || split.length === 0) continue;
+		seen += 1;
+		for (const c of split) {
+			if (c.label === PASSENGER_CARGO_LABEL) passengers += c.amount;
+			else cargo += c.amount;
+		}
+	}
+	if (seen === 0 || seen < rows.length) return { cargo: null, passengers: null };
+	return { cargo, passengers };
+}
+
 export function buildScorecard(
 	metrics: GameMetric[],
 	opts: { conditions?: BenchConditions } = {},
@@ -167,9 +211,14 @@ export function buildScorecard(
 			outcomes[cls] = (outcomes[cls] ?? 0) + 1;
 		}
 
+		// 按货种的拆分（monitor 口径）：货物与客运分列；**没拆分到就是 null**。
+		const split = splitByCargo(used);
 		const ability: AbilityAxis = {
 			runs: used.length,
 			measure: DELIVERED_MEASURE,
+			cargoDelivered: split.cargo,
+			passengersDelivered: split.passengers,
+			splitMeasure: SPLIT_MEASURE,
 			mean: mean(days),
 			median: median(days),
 			stations: mean(used.map((m) => (typeof m.stations === "number" ? m.stations : null))),
