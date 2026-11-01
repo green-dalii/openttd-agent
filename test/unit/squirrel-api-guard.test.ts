@@ -35,6 +35,16 @@ const KNOWN_BAD_CALLS = [
 		use: "GSStation.GetStationID(tile) + GSStation.IsValidStation(id) - the predicate lives on GSTile, not GSStation",
 	},
 	{
+		// 2026-10-31：OpenTTD 15.3 的 **脚本 API 根本没有 cargo monitor**
+		// （`src/script/api/` 里只有 `script_cargomonitor.cpp` 给新的 Script API，
+		//  Squirrel 的 GS* 包装里没有对应物；引擎侧也只有 `GetSum()` 的求和）。
+		// ⇒ 调用**不报错**，只是返回 null ⇒ 症状是「按货种的拆分一直是空的」，
+		// 很容易被误读成「还没交付」。拆分因此**不可测**（SPEC §10.65）。
+		call: "GSCargoMonitor.",
+		reason: "OpenTTD 15.3's Squirrel API has no cargo monitor — the call returns null instead of failing",
+		use: "don't try to split the company's deliveries by cargo type; the admin counter is a sum (SPEC §10.65)",
+	},
+	{
 		// AB-4a (2026-09-19)：GS 不暴露平地常量。`SLOPE_FLAT = 0` 在引擎侧稳定
 		// (`src/slope_type.h`)，代码里用字面量 0 + 注释解释；不要在这里"修正"成
 		// `GSMap.SLOPE_FLAT`——会再次抛 `the index 'SLOPE_FLAT' does not exist`。
@@ -709,13 +719,16 @@ describe("Squirrel 桥：产业/货种/公司口径上报", () => {
 		expect(src).toMatch(/_facts_tick\s*\+\s*1000\s*</);
 	});
 
-	it("GSCargoMonitor 的两次读取都传 keep_monitoring = true（否则静默丢增量）", () => {
-		expect(src).toMatch(/GSCargoMonitor\.GetTownDeliveryAmount\(0,\s*c,\s*\w+,\s*true\)/);
-		expect(src).toMatch(/GSCargoMonitor\.GetIndustryDeliveryAmount\(0,\s*c,\s*\w+,\s*true\)/);
+	it("按货种的拆分**不可测**：不调用 cargo monitor（API 不存在）", () => {
+		// OpenTTD 15.3 的脚本 API 没有 cargo monitor ⇒ 调用返回 null 而不是报错
+		// ⇒ 症状是「拆分一直是空的」，很容易被误读成「还没交付」。
+		// ⇒ GS 里不许再调它（KNOWN_BAD_CALLS 也会拦）。
+		const fn = src.slice(src.indexOf("function CollectFacts("), src.indexOf("function Start("));
+		expect(fn).not.toContain("GSCargoMonitor.");
+		expect(fn).toContain("own_by_cargo = []");
 	});
 
-	it("监视覆盖所有城镇与所有产业（否则'本公司交付量'是不明子集）", () => {
-		// 两个 for-each 都要出现在 CollectFacts 体内（用 GSTownList/GSIndustryList 驱动）
+	it("事实采集仍覆盖所有城镇与所有产业（产业侧的事实不受影响）", () => {
 		const fn = src.slice(src.indexOf("function CollectFacts("), src.indexOf("function Start("));
 		expect(fn).toContain("GSTownList()");
 		expect(fn).toContain("GSIndustryList()");

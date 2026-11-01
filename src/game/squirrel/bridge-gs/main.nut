@@ -1524,9 +1524,7 @@ class BridgeV1 extends GSController {
     _facts = null;
     _facts_tick = 0;
     _core = null;   // ExecCore（P1-1a：施工状态机，标牌邮箱已废）
-    // 公司口径的**累计**交付量（按货种标签）：monitor 每次读取返回的是增量，
-    // 所以累计必须自己做（否则只剩最后一个窗口的量，实测一直是空）。
-    _own_cargo_total = {};
+
 
     /**
      * Parse an executor company-name phase string into a typed event payload.
@@ -2237,38 +2235,13 @@ class BridgeV1 extends GSController {
         local ind_ids = [];
         foreach (iid, _ in all_industries) ind_ids.append(iid);
 
+        // 按货种拆分**不可测**（2026-11-01 核对 OpenTTD 15.3 源码）：
+        // 脚本 API **没有 cargo monitor**（`GSCargoMonitor.*` 调用**不报错**，
+        // 只是返回 null ⇒ 症状是「拆分一直是空的」，很容易被误读成「还没交付」）；
+        // admin 的 `deliveredCargo` 又是按货种数组的**求和** ⇒ 公司的交付
+        // **无法按货种分开**（SPEC §10.65）。
+        // 字段保留（载荷形状恒定，D44），值恒为空数组 —— 空数组 = 「没测到」，不是 0。
         local own_by_cargo = [];
-        for (local c = 0; c < 64; c++) {
-            if (!GSCargo.IsValidCargo(c)) continue;
-            local amt = 0;
-            foreach (tid in town_ids) {
-                // keep_monitoring = true：这次读取**不清空**计量，下一次读到的是增量。
-                // 传 false 会静默丢掉这之间的交付量（monitor 是"读取即重置"的）。
-                local town_amt = GSCargoMonitor.GetTownDeliveryAmount(0, c, tid, true);
-                if (town_amt != null && town_amt > 0) amt += town_amt;
-            }
-            foreach (iid in ind_ids) {
-                local ind_amt = GSCargoMonitor.GetIndustryDeliveryAmount(0, c, iid, true);
-                if (ind_amt != null && ind_amt > 0) amt += ind_amt;
-            }
-            if (amt > 0) {
-                // **累计**（2026-10-31）：monitor 返回的是**自上次读取以来的增量**
-                // （官方语义："The call causes the collected amount to be reset"），
-                // 而 CollectFacts 每 1000 tick 跑一次 ⇒ 只报最后那个窗口的量 ⇒
-                // 真机实测一直是空（交付发生在别的窗口里）。所以自己累加。
-                local label = GSCargo.GetCargoLabel(c);
-                // Squirrel（OpenTTD 自带那版）**不支持 `??`** ⇒ 显式判断。
-                local prev = 0;
-                if (this._own_cargo_total[label] != null) prev = this._own_cargo_total[label];
-                this._own_cargo_total[label] = prev + amt;
-            }
-        }
-        // 累加后的表 → 数组（降序）。口径：**卸到城镇/产业站的交付量**（monitor 口径），
-        // 与 admin 的"被接受量"不是一回事，不能相加（见 SPEC §10.65）。
-        foreach (label, amount in this._own_cargo_total) {
-            if (amount > 0) own_by_cargo.append({ label = label, amount = amount });
-        }
-        own_by_cargo.sort(function(oa, ob) { return ob.amount - oa.amount; });
 
         // 游戏口径的季度总量（全货种，精确）—— 用来和上面的 monitor 累计交叉核对。
         local quarter = null;

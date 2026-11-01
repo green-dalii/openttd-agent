@@ -9,15 +9,14 @@
 
 ## [Unreleased]
 ### Added
-- **The deliveries can now be split into cargo and passengers.** The score counts both - OpenTTD
-  books them into the same per-cargo-type array - but the number could not say which was which. The
-  GS's cargo monitor buckets deliveries per cargo type, including `PASS`; it had been reporting nothing because the monitor returns the amount delivered *since the last query* and the GS read it
-  every 1000 ticks, so each read only saw the last window. The GS now accumulates the deltas, and
-  the scorecard reports cargo and passengers separately, in the monitor's own measure (what was
-  unloaded at the monitored towns and industries - not the admin's accepted counter, so the two are
-  never added together). A run without a split reports "not measured", and if only some of the
-  comparable runs have one, the whole split is "not measured" - half a sample cannot be presented as
-  the whole one.
+- **Corrected: the deliveries cannot be split into cargo and passengers.** An earlier entry in
+  this section claimed they could. Checked against the OpenTTD 15.3 source, they cannot: the script
+  API has **no cargo monitor** at all (`GSCargoMonitor.*` does not fail - it returns null, so the
+  split simply reads as "always empty", which is easy to mistake for "nothing delivered yet"), and
+  the admin's counter is the **sum** over the per-cargo-type array. The score therefore keeps the one
+  number it can measure - cargo and passengers together - and the split fields report "not measured"
+  instead of a fabricated split. The API is now registered in the squirrel-api guard, so the GS cannot
+  call it again.
 
 - **The first real benchmark matrix is done.** Two models x three seeds x 300 game days, same
   scaffold, same horizon, every cell reaching the horizon. The harness's own verdict on the
