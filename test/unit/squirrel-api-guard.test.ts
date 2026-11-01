@@ -22,8 +22,6 @@ import { globSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
-import { globSync } from "node:fs";
 
 const GSFILES = globSync("src/game/squirrel/*/*.nut").sort();
 

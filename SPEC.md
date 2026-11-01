@@ -529,7 +529,8 @@ OpenTTD 有**两个动作面**，能力完全不同：
 ### 10.65 流量指标的**测量缺陷**：`deliveredCargo` 是当季计数器（2026-09-18）
 **仍为真**（测量缺陷，最常咬人）：`ServerCompanyEconomy.deliveredCargo` 是**本季度已运出**的计数器，**每季度归零**（u16）。所以 `deliveredRun` 是**跨季积分**，`deliveredRunComplete=true` 表示整段无 gap；两臂必须同源，否则回落到 `raw` 并标 `ArmComparison.deliveredSource`。
 **它同时含客运**（2026-10-31 核对 OpenTTD 15.3 源码）：admin 发的是 `cur_economy.delivered_cargo` 这个**按货种的数组**的求和，而 OpenTTD 把客运也记进同一数组（`src/economy.cpp`：`cur_economy.delivered_cargo[cargo_type] += accepted_total`）⇒ `deliveredRun` **已经是"货物 + 客运"**，旧措辞 "cargo delivered" 是在说谎；分数轴与系统提示都改口（措辞由服务端 `DELIVERED_MEASURE` 给出）。按货种拆分另有来源（GS 的 cargo monitor），**口径不同，不可与之相加**。
-依据：`src/game/delivery-meter.ts`、`src/evolution/metrics.ts`、`src/evolution/scorecard.ts`；教训 `MEMORY.md` D14。
+**可以拆开**（2026-10-31）：GS 的 cargo monitor 按货种分桶（含 `PASS`＝客运），但它返回的是**自上次读取以来的增量** ⇒ 之前每次只看到最后一个窗口 ⇒ 一直为空。GS 现在自己累加 ⇒ 度量行有 `deliveredByCargo` ⇒ 分数轴的 `cargoDelivered` / `passengersDelivered` **分开报**（monitor 口径＝卸到被监视城镇/产业的量，**与 admin 的被接受量不同口径，不可相加**）；**没拆分到就是 `null`**（半个样本也说不出全样本的数）。
+依据：`src/game/delivery-meter.ts`、`src/evolution/metrics.ts`、`src/evolution/scorecard.ts`、`src/game/squirrel/bridge-gs/main.nut`；教训 `MEMORY.md` D14。
 
 ### 10.66 GS 通道的**部分失效**：`GSStation.IsStationTile` 不存在（2026-09-18）
 **仍为真**（GS 通道会**部分**失效）：`GSStation.IsStationTile` **不存在** → 用 `GSStation.IsValidStation(id)`；判据是 `signalHub.getGsErrors()`（`GameMetric.gsErrors`）。通道健康**必须在收益声明之前**打印。
@@ -1291,8 +1292,7 @@ compaction 冲突）在 `docs/HARNESS-MIGRATION.md` §3（带坐标），此处�
 - 事实：分组（model / seed / backend）的**键由服务端给**（`historyGroups` 读度量行自己的字段）："哪个模型"有两个来源（请求的 vs 实际服务的），页面自己按字符串猜就会和账本对不上。
 - 事实：导航按**四个问题**（Run / Compare / History / Configure）；"Evolution" 改名 **Memory** 并搬进 History（它管的是**记忆**），`/evolution` → 302 `/sessions#memory`（一份，不留副本）。
 - 事实：训练面板此前取的是**从未存在**的 `/api/metrics` ⇒ 一直是空态（还谎称"账本里没有"）；账本一直挂在 `/api/evolution` 的 `metrics` 里。
-- 事实：**账本的键必须每局唯一**（2026-10-31，Issue #58）：session id 原是 `<秒级时间戳>-seed<n>` ⇒ **同一秒 + 同 seed 的两局撞号**（两个模型并行跑必撞）⇒ 账本"同 id 取最新" ⇒ **一行静默消失**（基准最坏的 bug：样本悄悄变少，没人提示）。现在 id 带一个 4 位随机 nonce，且账本**报告碰撞**（`readMetricsWithCollisions`）⇒ Compare 页把"被丢掉的行"写在数字上方。
-- 真机（隔离 data dir，3 局，其中一局被网关替身）：详情列出全部字段、替身被标黄、复制拿到完整哈希；分组把列表从 3 局缩到 1 局；Memory 区在 History 里；真实 Chrome 0 console。
+- 事实：**账本的键必须每局唯一**（2026-10-31，Issue #58）：session id 原是 `<秒级时间戳>-seed<n>` ⇒ **同一秒 + 同 seed 的两局撞号**（两个模型并行跑必撞）⇒ 账本"同 id 取最新" ⇒ **一行静默消失**（基准最坏的 bug：样本悄悄变少，没人提示）。现在 id 带一个 4 位随机 nonce，且账本**报告碰撞**（`readMetricsWithCollisions`）⇒ Compare 页把"被丢掉的行"写在数字上方。 真机（隔离 data dir，3 局，其中一局被网关替身）：详情列出全部字段、替身被标黄、复制拿到完整哈希；分组把列表从 3 局缩到 1 局；Memory 区在 History 里；真实 Chrome 0 console。
 
 ### 10.124 模型看不见的事实：投影是最后一道闸（真实模型局证伪，2026-10-30）
 
