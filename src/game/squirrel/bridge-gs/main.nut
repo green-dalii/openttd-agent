@@ -2257,7 +2257,10 @@ class BridgeV1 extends GSController {
                 // 而 CollectFacts 每 1000 tick 跑一次 ⇒ 只报最后那个窗口的量 ⇒
                 // 真机实测一直是空（交付发生在别的窗口里）。所以自己累加。
                 local label = GSCargo.GetCargoLabel(c);
-                this._own_cargo_total[label] = (this._own_cargo_total[label] ?? 0) + amt;
+                // Squirrel（OpenTTD 自带那版）**不支持 `??`** ⇒ 显式判断。
+                local prev = 0;
+                if (this._own_cargo_total[label] != null) prev = this._own_cargo_total[label];
+                this._own_cargo_total[label] = prev + amt;
             }
         }
         // 累加后的表 → 数组（降序）。口径：**卸到城镇/产业站的交付量**（monitor 口径），
