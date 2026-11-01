@@ -57,6 +57,14 @@
       preview: null,
       /** Structured reasons the server gave (code + message + hint). */
       problems: [],
+      /**
+       * 这个选择还**不能**预览：服务端说"还没选模型"（不是错误）。
+       *
+       * 为什么要单独一个字段（2026-11-01 审计 A13）：初装时预览接口曾返回
+       * `unknown_provider`，页面立刻红着报错——用户一个字段都没碰。
+       * 空选择是状态，配错才是问题；服务端用 `needs` 区分，页面照抄。
+       */
+      needs: null,
       previewError: "",
       previewing: false,
       /**
@@ -163,12 +171,73 @@
        */
       previewStatus() {
         if (this.previewing) return { kind: "idle", text: "Resolving what the next run would use…" };
+        // "还没选模型"先于任何错误显示：它是下一步动作，不是失败。
+        if (this.needs) {
+          return {
+            kind: "idle",
+            text: `${this.needs.message || ""} ${this.needs.hint || ""}`.trim(),
+          };
+        }
         if (this.problems.length) {
           return { kind: "err", text: this.problems.map((p) => p.message).join(" · ") };
         }
         if (this.previewError) return { kind: "err", text: this.previewError };
         if (this.preview) return { kind: "ok", text: "Applies to the next run." };
         return { kind: "idle", text: "No preview yet." };
+      },
+
+      /**
+       * 顶部摘要卡：**下一局会用什么**（审计 A13，页面唯一的主角）。
+       *
+       * 四个值全部来自服务端的预览（`/api/run/preview`），页面不重算：
+       *   Model / Caps / Price / Backend。
+       * 还没有预览时写 "not configured" / "not measured"，不写 0 也不写猜测。
+       */
+      summaryTiles() {
+        const p = this.preview;
+        if (!p) {
+          return [
+            { k: "Model", v: "not configured", hint: "pick a provider and a model below" },
+            { k: "Caps", v: "not measured", hint: "the next run's limits are unknown until a model is chosen" },
+            { k: "Price", v: "not measured", hint: "whether the spend is measurable depends on the model" },
+            // backend 是旋钮（与模型无关），但它的**生效值**只有服务端解析得出；
+            // 没有预览时不编一个默认值，写 "—"（未知 ≠ agent）。
+            { k: "Backend", v: "—", hint: "the server resolves this with the run" },
+          ];
+        }
+        const caps = [];
+        if (p.tokenLimit === null || p.tokenLimit === undefined) caps.push("no token cap");
+        else caps.push(`${U.fmtTok(p.tokenLimit)} token cap`);
+        if (p.costLimit === null || p.costLimit === undefined) caps.push("no cost cap");
+        else caps.push(`$${p.costLimit} cost cap`);
+        return [
+          {
+            k: "Model",
+            v: `${p.providerId || "—"} / ${p.model || "—"}`,
+            hint: p.api || "",
+          },
+          { k: "Caps", v: caps.join(" · "), hint: "" },
+          {
+            k: "Price",
+            v: p.costKnown === false ? "unknown" : "known",
+            hint: p.costKnown === false ? "no price table: a cost cap cannot be enforced" : "",
+          },
+          {
+            k: "Backend",
+            v: p.backend || "—",
+            hint: p.scaffoldHash ? `scaffold ${String(p.scaffoldHash).slice(0, 8)}` : "",
+          },
+        ];
+      },
+
+      /** 空选择时 Start 的真实原因（禁用按钮必须说得出理由，MEMORY B8）。 */
+      startBlockedReason() {
+        return this.needs ? this.needs.hint || this.needs.message || "" : "";
+      },
+
+      /** 能不能点 Start（服务端说还没选模型时就别假装能跑）。 */
+      canStart() {
+        return !this.runBusy && !this.needs;
       },
 
       /** The actionable hints the server gave (one per problem). */
@@ -202,11 +271,13 @@
           if (!r.ok) {
             // A refusal carries `problems[]`; anything else is a plain error.
             this.problems = Array.isArray(out.problems) ? out.problems : [];
+            this.needs = null;
             this.preview = null;
             this.previewError = this.problems.length ? "" : String(out.error || `HTTP ${r.status}`);
             return;
           }
           this.problems = Array.isArray(out.problems) ? out.problems : [];
+          this.needs = out.needs && typeof out.needs === "object" ? out.needs : null;
           this.preview = out.preview || null;
         } catch (e) {
           if (seq !== this.previewSeq) return;

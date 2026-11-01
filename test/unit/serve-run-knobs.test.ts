@@ -166,6 +166,28 @@ describe("B2: 页面起一局", () => {
 		expect(captured.length, "被拒的花费上限竟然启动了游戏进程").toBe(0);
 	});
 
+	it("空选择不是错误：初装时预览说\"还没选模型\"，不报 unknown_provider", async () => {
+		// 2026-11-01 审计 A13：全新 data dir 打开 Configure 页，NEXT RUN 立刻红着
+		// 报 unknown_provider —— 用户一个字段都没碰。空选择是一个**状态**
+		// （还没配），不是一次**失败**（配错了），服务端要分开说。
+		const dir = mkdtempSync(join(tmpdir(), "b2-empty-preview-"));
+		try {
+			await withServe(dir, async (handle) => {
+				const out = (await handle.preview()) as {
+					preview: unknown;
+					problems: { code: string }[];
+					needs?: { reason: string; message: string; hint: string };
+				};
+				expect(out.preview).toBeNull();
+				expect(out.problems, "空选择不该被当成用户错误").toEqual([]);
+				expect(out.needs?.reason).toBe("no_model");
+				expect(out.needs?.message).toMatch(/no model/i);
+			});
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
 	it("预览与启动用同一条花费闸：不能执行的花费上限在预览里就被拒", async () => {
 		const dir = mkdtempSync(join(tmpdir(), "b2-costcap-preview-"));
 		saveProvider(dir);

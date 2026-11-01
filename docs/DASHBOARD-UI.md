@@ -143,13 +143,24 @@ window.Charts = {
 （暂停）用警告色而非告警色。
 
 ### 5.2 Configure（`/configure`；`/llm` 为兼容别名，`/providers` 302 重定向）
+
+页面第一屏回答**"下一局会用什么"**（审计 A13），配置表单与预览在它下面，1:2 版式
+（表单窄、预览宽）。
+
 ```
-[选择器]  模式 segmented（内置 / 自定义端点）
-          Provider combobox（分组：Ready now / Needs a key）
-          Model combobox（搜索 + ctx/价格副行）
-          凭据（按 provider 状态给出不同提示；env 已就绪时明确说"无需粘贴"）
-[摘要]    "agent 将如何运行" 实时预览 + 保存/清除
+[摘要卡]   Model · Caps · Price · Backend —— 四个值全部来自 /api/run/preview
+           空选择：not configured / not measured / "—"，**不是红色错误**
+[选择器]   模式 segmented（内置 / 自定义端点）
+           Provider combobox（分组：Ready now / Needs a key）
+           Model combobox（搜索 + ctx/价格副行）
+           凭据（按 provider 状态给出不同提示；env 已就绪时明确说"无需粘贴"）
+[预览]     "agent 将如何运行" 的 kv 表 + "Where this is stored"（**折叠**：实现细节）
+[旋钮]     Run knobs（表单窄） | Next run（服务端解析的 manifest 同名同义字段）
 ```
+
+**空选择的规则**：服务端返回 `{preview: null, problems: [], needs: {reason:"no_model", …}}` ——
+"还没配"是一个状态，不是一次失败。页面照抄 `needs`、把 Start 禁用并在旁边写出原因；
+配错（非法旋钮、无价目表却设花费上限）仍然走 `problems[]` 的错误样式。
 保留「自定义 OpenAI 兼容端点」作为逃生舱（local llama.cpp / vLLM / gateway）。
 
 ### 5.3 Sessions（`/sessions`）
