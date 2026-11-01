@@ -66,6 +66,8 @@ export interface SessionMetaLike {
 		deliveredRun?: number;
 		/** False when whole quarters went unseen (`deliveredRun` is a lower bound). */
 		deliveredRunComplete?: boolean;
+		/** Delivery split by cargo type (GS cargo-monitor measure); absent = never reported. */
+		deliveredByCargo?: { label: string; amount: number }[];
 		/** GS error replies (channel health, SPEC §10.66). */
 		gsErrors?: number;
 		/** Per-decision tool-budget refusals (R1): >0 means the run hit its ceiling. */
@@ -131,6 +133,12 @@ export interface GameMetric {
 	delivered: number | null;
 	/** Integrated past the quarterly reset; the comparable flow outcome (SPEC §10.65). */
 	deliveredRun: number | null;
+	/**
+	 * Delivery split by cargo type (GS cargo-monitor measure, accumulated over the
+	 * run). "PASS" is the passengers the admin's single counter folds in and
+	 * cannot separate. Null when the GS never reported a split (old rows).
+	 */
+	deliveredByCargo: { label: string; amount: number }[] | null;
 	/** False when whole quarters went unseen; null when not reported. */
 	deliveredRunComplete: boolean | null;
 	/** GS error replies during the run; null when not reported (legacy rows). */
@@ -436,6 +444,14 @@ export function toGameMetric(
 				? Number(o.deliveredRun)
 				: null,
 		deliveredRunComplete: o && typeof o.deliveredRunComplete === "boolean" ? o.deliveredRunComplete : null,
+		deliveredByCargo:
+			o && Array.isArray(o.deliveredByCargo) && o.deliveredByCargo.length
+				? o.deliveredByCargo
+						.filter((c: { label?: unknown; amount?: unknown }) =>
+							c && typeof c.label === "string" && Number.isFinite(Number(c.amount)),
+						)
+						.map((c: { label: string; amount: number }) => ({ label: c.label, amount: Number(c.amount) }))
+				: null,
 		gsErrors: num(o && o.gsErrors),
 		toolBudgetBlocks: num(o && o.toolBudgetBlocks),
 		// 暂停收场（SPEC §10.101）：只记 true（"确实是被暂停结束的"），

@@ -27,6 +27,7 @@ function metric(over: Partial<GameMetric> = {}): GameMetric {
 		delivered: 10,
 		deliveredRun: 120,
 		deliveredRunComplete: true,
+		deliveredByCargo: null,
 		gsErrors: 0,
 		toolBudgetBlocks: 0,
 		simulatedDays: 100,
