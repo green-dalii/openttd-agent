@@ -82,6 +82,8 @@ export { setStrategyEnabled };
  */
 export function evolutionHooks(dataDir: string): {
 	metrics: () => unknown[];
+	/** 账本里因 session id 撞号被丢掉的行（Issue #58：丢行必须可见）。 */
+	collisions: () => unknown[];
 	lessons: () => unknown[];
 	strategies: () => unknown[];
 	arms: () => unknown;
@@ -94,6 +96,10 @@ export function evolutionHooks(dataDir: string): {
 		// after it was loaded. `excluded` is an additive field — the reason comes
 		// from `metricExclusion`, the single writer of that rule (D64/C1).
 		metrics: () => evolutionView(dataDir).metrics.map((m) => ({ ...m, excluded: metricExclusion(m) })),
+		// Issue #58 的可见性：`metrics` 是"同 id 取最新"之后的投影，被丢掉的行
+		// 只能从这里看到。History 的顶部 KPI 用这些行算中位数 ⇒ 必须一并披露，
+		// 否则页面会安静地把样本说小（沉默缩小样本是基准最会骗人的方式）。
+		collisions: () => readMetricsWithCollisions(dataDir).collisions,
 		lessons: () => evolutionView(dataDir).lessons,
 		strategies: () => evolutionView(dataDir).strategies,
 		arms: () => evolutionView(dataDir).arms,

@@ -127,6 +127,27 @@ main { padding: var(--sp-4) var(--sp-5) 64px; max-width: 1360px; margin: 0 auto;
 .guide-body p { margin: 0; font-size: 12px; line-height: 1.55; color: var(--ink-dim); }
 .guide-body .btn { align-self: flex-start; margin-top: 2px; }
 
+/* Training 面板：SVG 必须**有界**。没有 CSS 时 viewBox 会被拉到整列宽（实测 ~1500px），
+ * 一张 3 个点的图占掉半屏，反而把"这一局怎么样"挤出首屏。 */
+.training-chart { max-width: 720px; }
+.training-chart svg { width: 100%; height: auto; display: block; }
+/* `runs` / `3` 是两个 span，没有 gap 时渲染成 "runs3"（真机实测）。 */
+.training-facts { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 8px; font-size: 12px; }
+.training-facts .fact { display: inline-flex; gap: 5px; align-items: baseline; }
+.training-facts .fact .k { color: var(--muted); }
+.training-facts .fact .v { color: var(--ink); font-variant-numeric: tabular-nums; }
+
+/* ------------------------- History: TOC + folded evidence -------------------------
+ * 整页是"结论 → 列表 → 选中局的证据"，需要定位手段（审计 A9）与折叠的证据层（A10/A12）。 */
+.toc { display: flex; flex-wrap: wrap; gap: var(--sp-2); font-size: 11.5px; }
+.toc a { color: var(--muted); text-decoration: none; padding: 2px 9px; border: 1px solid var(--line);
+  border-radius: 999px; }
+.toc a:hover { color: var(--ink); border-color: var(--line-strong); }
+details.evidence { border: 1px solid var(--line); border-radius: var(--r-sm); padding: 6px 10px; margin: 10px 0; }
+details.evidence > summary { cursor: pointer; font-size: 12px; color: var(--ink-dim); }
+details.evidence > summary:hover { color: var(--ink); }
+details.evidence[open] > summary { margin-bottom: 6px; }
+
 /* 页内元数据（数据新鲜度 / 会话 / 运行时长）：顶栏只留连接与运行状态。 */
 .run-meta { display: flex; flex-wrap: wrap; gap: var(--sp-4); align-items: baseline;
   padding: 0 2px; color: var(--muted); }

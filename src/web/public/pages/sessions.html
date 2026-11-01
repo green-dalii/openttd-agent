@@ -26,13 +26,34 @@
       <div class="item"><span class="lbl">Success</span>
         <span class="val" x-text="totals().successRate === null ? '—' : $fmt.pct(totals().successRate, 0)"
               :title="successTitle()">…</span></div>
-      <div class="item"><span class="lbl">Tokens</span><span class="val" x-text="$fmt.tok(totals().tokens)">…</span></div>
-      <div class="item"><span class="lbl">Spend</span>
-        <span class="val" x-text="$fmt.costKnown(totals().cost, totals().costKnown)">…</span></div>
+
     </div>
   </header>
 
   <main>
+    <!-- ============================ ① CONCLUSION ============================
+         三段式的第一段：先给结论。四个数全部来自服务端账本（可比局数 / 每日交付 /
+         token 效率 / 花费）；没有可比局时写 not measured，绝不写 0（D60）。
+         为什么在顶部：整页 ~10 屏，"这一版到底怎么样"必须在首屏回答（审计 A9）。 -->
+    <section class="kpis" id="conclusion" x-show="metrics.length">
+      <template x-for="k in conclusionKpis()" :key="k.k">
+        <div class="kpi">
+          <div class="kpi-k" x-text="k.k"></div>
+          <div class="kpi-v" x-text="k.v"></div>
+          <div class="kpi-hint" x-text="k.hint"></div>
+        </div>
+      </template>
+    </section>
+    <!-- 页内目录（不是站点导航：站点导航只有 common.js 的 renderChrome() 一个来源，
+         见本页的可测守卫）。role=navigation 让它仍是可识别的导航地标。 -->
+    <p class="hint" x-show="collisionNote()" x-text="collisionNote()"></p>
+    <div class="toc" role="navigation" aria-label="sections">
+      <a href="#conclusion" x-show="metrics.length">Conclusion</a>
+      <a href="#training">Training</a>
+      <a href="#runs">Runs</a>
+      <a href="#memory">Memory</a>
+    </div>
+
     <div class="group"><h2>History</h2><div class="rule"></div>
       <span class="dim">every <code>--watch</code> / <code>--agent</code> run is archived here</span></div>
 
@@ -42,7 +63,10 @@
     <section class="panel" id="training">
       <div class="panel-head"><h2>TRAINING</h2>
         <span class="dim" x-text="trainingSeries(metrics).verdict">…</span></div>
-      <div class="training-chart" x-html="trainingChartSvg(trainingSeries(metrics))"></div>
+      <!-- 一张全 0 的图传达 0 字节信息，还像是渲染失败（审计 A11）。全 0 时给陈述句。 -->
+      <div class="training-chart" x-show="!trainingFlat()" x-html="trainingChartSvg(trainingSeries(metrics))"></div>
+      <p class="empty" x-show="trainingFlat()"
+         x-text="'flat at 0: every comparable run delivered nothing — that is a finding, not a drawing error.'"></p>
       <p class="empty" x-show="!trainingSeries(metrics).runs.length"
          x-text="'no metrics ledger yet — one line is appended when a run finalizes'"></p>
       <div class="training-facts" x-show="trainingSeries(metrics).runs.length">
@@ -61,7 +85,7 @@
         hollow points are excluded, each with its named reason (a stopped run is not a failed run).</p>
     </section>
 
-    <section class="grid split-12">
+    <section class="grid split-12" id="runs">
       <div class="panel">
         <div class="panel-head"><h2>Runs</h2>
           <label class="check">
@@ -97,6 +121,10 @@
                 <span class="badge" x-text="s.mode"></span>
                 <span class="badge ok" x-show="isBuilt(s)">built</span>
                 <span class="badge warn" x-show="isIncomplete(s)">incomplete</span>
+                <!-- 结局类来自账本（B5 闭集）；页面只上色，不改写词表。 -->
+                <template x-if="outcomeBadge(s)">
+                  <span class="badge" :class="outcomeBadge(s).tone" x-text="outcomeBadge(s).label"></span>
+                </template>
               </div>
               <div class="pick-sub">
                 <span x-text="`seed ${s.seed} · ${s.companyName || '—'} · `"></span>
@@ -141,30 +169,26 @@
         <div x-show="detailError" class="empty" x-text="detailError"></div>
         <p class="empty" x-show="!selected && !loadingDetail">Pick a run on the left to replay it. The newest run opens automatically.</p>
 
-        <!-- Detail: KPI strip + run facts + token composition + summaries + events -->
+        <!-- Detail: 结论头 + 身份 + 折叠的证据（审计 A10/A12）。
+             以前这里是一个 5 格 KPI 条（还用了样式中不存在的 `.kpi-label`/`.kpi-value`），
+             然后是 25 行 manifest 与原始事件——结论、身份、原始记录挤在同一层。 -->
         <div x-show="data && !loadingDetail">
-          <div class="kpis" style="margin-bottom:12px">
-            <div class="kpi">
-              <div class="kpi-label">Result</div>
-              <div class="kpi-value">
-                <span class="pos" x-show="metaOutcome().constructionDone === true">built</span>
-                <span class="warn" x-show="metaOutcome().constructionDone === false">incomplete</span>
-                <span x-show="metaOutcome().constructionDone !== true && metaOutcome().constructionDone !== false">—</span>
+          <template x-if="conclusionBadge()">
+            <p class="hint" style="margin-bottom:8px">
+              <span class="badge" :class="conclusionBadge().tone" x-text="conclusionBadge().label"></span>
+              <span class="dim">the outcome class the ledger recorded for this run</span>
+            </p>
+          </template>
+          <p class="hint" x-show="conclusionNote()" x-text="conclusionNote()"></p>
+          <section class="kpis" style="margin-bottom:12px">
+            <template x-for="t in conclusionTiles()" :key="t.k">
+              <div class="kpi">
+                <div class="kpi-k" x-text="t.k"></div>
+                <div class="kpi-v" x-text="t.v"></div>
+                <div class="kpi-hint" x-show="t.hint" x-text="t.hint"></div>
               </div>
-              <div class="kpi-hint" x-text="metaOutcome().phase ? `last phase: ${metaOutcome().phase}` : ''"></div>
-            </div>
-            <div class="kpi"><div class="kpi-label">Cash</div>
-              <div class="kpi-value" x-text="$fmt.money(metaOutcome().money)"></div></div>
-            <div class="kpi"><div class="kpi-label">Fleet</div>
-              <div class="kpi-value"><span x-text="$fmt.int(metaOutcome().vehicles)"></span> <span class="dim">veh</span></div>
-              <div class="kpi-hint" x-text="`${$fmt.int(metaOutcome().stations)} stations`"></div></div>
-            <div class="kpi"><div class="kpi-label">Tokens</div>
-              <div class="kpi-value" x-text="$fmt.tok(metaUsage().totalTokens)"></div>
-              <div class="kpi-hint" x-text="$fmt.costKnown(metaUsage().costTotal, metaUsage().costKnown)"></div></div>
-            <div class="kpi"><div class="kpi-label">Tool failures</div>
-              <div class="kpi-value" x-text="$fmt.int(metaTotals().toolFailures)"></div>
-              <div class="kpi-hint" x-text="`${$fmt.int(metaTotals().toolCalls)} calls`"></div></div>
-          </div>
+            </template>
+          </section>
 
           <div class="grid two">
             <div>
@@ -191,23 +215,27 @@
                 </td></tr>
               </table>
 
-              <h3>Outcome <span class="dim">what was measured for this run</span></h3>
-              <table class="kv">
-                <tbody>
-                  <template x-for="r in outcomeRows()" :key="r.k">
-                    <tr><td x-text="r.k"></td><td x-text="r.v"></td></tr>
-                  </template>
-                </tbody>
-              </table>
-              <p class="hint" x-show="!outcomeRows().length">
-                This run recorded no outcome fields — nothing to show (not "all zeros").
-              </p>
+              <details class="evidence">
+                <summary>Outcome <span class="dim">what was measured for this run</span></summary>
+                <table class="kv">
+                  <tbody>
+                    <template x-for="r in outcomeRows()" :key="r.k">
+                      <tr><td x-text="r.k"></td><td x-text="r.v"></td></tr>
+                    </template>
+                  </tbody>
+                </table>
+                <p class="hint" x-show="!outcomeRows().length">
+                  This run recorded no outcome fields — nothing to show (not "all zeros").
+                </p>
+              </details>
 
               <!-- B6: the full manifest — "what this run actually was".
                    Three questions it answers: the same world (seed + gameVersion),
                    the same scaffold (scaffoldHash / payloadShapeHash), and whether
-                   the run was capped (tokenLimit / costLimit). -->
-              <h3>Manifest <span class="dim">what this run actually was</span></h3>
+                   the run was capped (tokenLimit / costLimit).
+                   折叠：它是**身份**，不是结论；需要核对可比性时才展开。 -->
+              <details class="evidence">
+                <summary>Manifest <span class="dim">what this run actually was</span></summary>
               <table class="kv manifest-table">
                 <tbody>
                   <template x-for="r in manifestRows()" :key="r.k">
@@ -224,21 +252,25 @@
                   </template>
                 </tbody>
               </table>
+              </details>
 
-              <h3>Token breakdown</h3>
-              <div class="chart-box" x-show="tokenSlices().length">
-                <canvas x-ref="donut" height="200" x-effect="drawDonut()"></canvas>
-              </div>
-              <div class="legend">
-                <template x-for="t in tokenSlices()" :key="t.label">
-                  <span class="lg"><i :style="`background:${t.color}`"></i>
-                    <span x-text="`${t.label} ${$fmt.tok(t.value)}`"></span></span>
-                </template>
-              </div>
+              <details class="evidence">
+                <summary>Token breakdown</summary>
+                <div class="chart-box" x-show="tokenSlices().length">
+                  <canvas x-ref="donut" height="200" x-effect="drawDonut()"></canvas>
+                </div>
+                <div class="legend">
+                  <template x-for="t in tokenSlices()" :key="t.label">
+                    <span class="lg"><i :style="`background:${t.color}`"></i>
+                      <span x-text="`${t.label} ${$fmt.tok(t.value)}`"></span></span>
+                  </template>
+                </div>
+              </details>
             </div>
 
             <div>
-              <h3>Staged summaries <span class="dim">阶段性总结</span></h3>
+              <details class="evidence">
+              <summary>Staged summaries <span class="dim">阶段性总结</span></summary>
               <template x-if="checkpoints().length">
                 <ol class="timeline">
                   <template x-for="c in checkpoints()" :key="`${c.gameDate}-${c.turn}`">
@@ -250,8 +282,10 @@
                 </ol>
               </template>
               <p class="hint" x-show="!checkpoints().length">No staged summaries recorded for this run.</p>
+              </details>
 
-              <h3>Event log <span class="dim" x-text="`(${archiveEvents().length} archived)`"></span></h3>
+              <details class="evidence">
+              <summary>Event log <span class="dim" x-text="`(${archiveEvents().length} archived)`"></span></summary>
               <input class="filter" type="search" placeholder="Search events…"
                      style="width:100%;margin-bottom:6px" x-model="evSearch" />
               <ol class="events short">
@@ -268,6 +302,7 @@
                 </template>
                 <li class="empty" x-show="!shownEvents().length">No events match.</li>
               </ol>
+              </details>
             </div>
           </div>
         </div>

@@ -153,11 +153,23 @@ window.Charts = {
 保留「自定义 OpenAI 兼容端点」作为逃生舱（local llama.cpp / vLLM / gateway）。
 
 ### 5.3 Sessions（`/sessions`）
+
+三段式：**先结论 → 再索引 → 最后证据**（审计 A9/A10）。整页可以用 `⌘F` 之外的
+页内目录（Conclusion / Training / Runs / Memory）定位。
+
 ```
-[KPI]        总局数 · 完成数 · 成功构建率 · 累计 token · 累计成本
-[列表]       卡片：状态徽章 + 模式 + seed + 时长 + 结果（车/站/现金）+ 元数据
-[复盘]       成绩单 · token 构成 · 阶段性总结时间线 · 步骤流 · 事件流
+[顶栏]      Runs · Completed · Success（身份计数；token/花费不在这里，避免与结论条重复）
+[① 结论]     4 个 KPI：可比局数 · 交付/游戏日 · token/决策 · 花费
+             全部来自账本；没有可比局写 not measured（不是 0）
+             账本丢行（session id 撞号）在这里**明写**：几行、哪些 id、不在任何数字里
+[② Training] 跨局折线；**贴底全 0 时改成陈述句**，不画一张 0 字节的图
+[③ Runs]     紧凑行：状态/模式/结果徽标 + 结局类（账本闭集）+ 事实 chips
+[④ 复盘]     结论头（结局徽标 + 交付/游戏日/现金/车队/token/失败）
+             然后才是**折叠**的证据：Outcome · Manifest · Token 构成 · 阶段总结 · 事件日志
 ```
+
+**诚实规则**：结论头的交付读数只在账本行**确实属于这一局**（seed 一致）时才显示；
+撞号留下的旧行属于另一局，宁可写 `not measured` 并说明原因。
 
 ## 6. 交互与可达性基线
 - 顶栏 `sticky`；连接状态变化用 `aria-live="polite"`。
