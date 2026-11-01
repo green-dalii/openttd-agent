@@ -30,6 +30,22 @@
         <h2>Four axes per model <span class="dim">Result / Efficiency / Reliability / Growth</span></h2>
         <span class="dim" x-text="modelRows().length + ' model(s)'"></span>
       </div>
+      <!-- Data loss must be said out loud: the ledger reports the session ids it
+           had to drop (Issue #58). A silently shrinking sample is how a benchmark
+           ends up lying about n. -->
+      <div class="cmp-warn" x-show="collisionRows().length">
+        <template x-for="c in collisionRows()" :key="'coll-' + c.id">
+          <p>
+            <span x-text="c.dropped"></span>
+            <span x-text="c.dropped === 1 ? 'run' : 'runs'"></span>
+            <span>shared a session id</span>
+            <code x-text="c.id"></code>
+            <span x-text="c.dropped === 1
+                    ? 'was dropped from the ledger — it is not in any number below.'
+                    : 'were dropped from the ledger — they are not in any number below.'"></span>
+          </p>
+        </template>
+      </div>
       <!-- The four axes as charts: the page's visual protagonist. One chart per
            axis (the axes have different units), one bar per model. A bar the
            server did not measure is an EMPTY slot with a dashed outline - not a

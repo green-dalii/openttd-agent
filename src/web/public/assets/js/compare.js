@@ -92,6 +92,11 @@
           return window.CompareView.axisCharts(this.payload);
         },
 
+        /** The ledger collisions the server reported (rows it had to drop). */
+        collisionRows() {
+          return window.CompareView.collisionRows(this.payload);
+        },
+
         /** Is there anything to compare? */
         hasRuns() {
           return this.runRows().length > 0;
