@@ -36,6 +36,7 @@ interface CompareView {
 	comparison(payload: unknown): { verdict: string; message: string; pairs: number; known: boolean } | null;
 	runRows(payload: unknown): { id: string; model: string; seed: number; link: string }[];
 	modelNames(payload: unknown): string[];
+	collisionRows(payload: unknown): { id: string; dropped: number }[];
 	axisCharts(payload: unknown): {
 		key: string;
 		title: string;
@@ -236,6 +237,16 @@ describe("CompareView", () => {
 		expect(bar.known).toBe(false);
 		expect(bar.width).toBe(0);
 		expect(bar.text).toBe("not measured");
+	});
+
+	it("reports the rows the ledger had to drop (Issue #58)", () => {
+		// 样本悄悄变少是基准最容易骗人的方式 ⇒ 丢行必须**说出来**。
+		const v = load();
+		expect(v.collisionRows({ collisions: [{ id: "20261031-214949-seed4242", dropped: 1 }] })).toEqual([
+			{ id: "20261031-214949-seed4242", dropped: 1 },
+		]);
+		expect(v.collisionRows({})).toEqual([]);
+		expect(v.collisionRows(null)).toEqual([]);
 	});
 
 	it("survives an empty payload", () => {

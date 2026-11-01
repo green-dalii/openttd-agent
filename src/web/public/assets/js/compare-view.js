@@ -182,6 +182,21 @@
     ];
   }
 
+  /**
+   * The ledger collisions the server reported (Issue #58).
+   *
+   * 同一秒 + 同 seed 的两局曾经拿到同一个 session id ⇒ 账本只留一行 ⇒ 另一行
+   * **静默消失**。现在服务端把这次丢失报出来，页面**必须说出来** ——
+   * 样本悄悄变少是基准最容易骗人的方式之一。
+   */
+  function collisionRows(payload) {
+    const list = payload && Array.isArray(payload.collisions) ? payload.collisions : [];
+    return list.map((c) => ({
+      id: String(c.id ?? ""),
+      dropped: typeof c.dropped === "number" ? c.dropped : 0,
+    }));
+  }
+
   /** The runs (the drill-down list). */
   function runRows(payload) {
     const runs = payload && Array.isArray(payload.runs) ? payload.runs : [];
@@ -210,6 +225,7 @@
     runRows,
     modelNames,
     axisCharts,
+    collisionRows,
     reading,
     num,
     NOT_MEASURED,

@@ -127,7 +127,9 @@ describe("provider catalog (pi-ai built-ins)", () => {
 describe("session store", () => {
 	it("builds sortable, filesystem-safe session ids", () => {
 		const id = newSessionId(7, new Date("2026-09-10T21:30:00Z"));
-		expect(id).toMatch(/^\d{8}-\d{6}-seed7$/);
+		// The nonce (Issue #58) makes two runs in the same second distinct; the
+		// shape stays sortable and filesystem-safe.
+		expect(id).toMatch(/^\d{8}-\d{6}-seed7-[0-9a-f]{4}$/);
 		expect(id).not.toContain("/");
 		expect(newSessionId(42, new Date("2026-01-02T03:04:05Z"))).toContain("seed42");
 	});

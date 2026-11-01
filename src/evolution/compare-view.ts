@@ -17,6 +17,7 @@
 
 import { metricExclusion, type GameMetric } from "./metrics.js";
 import { buildScorecard, type BenchConditions, type ModelCard } from "./scorecard.js";
+import type { LedgerCollision } from "./store.js";
 import { pairedComparison, type PairedComparison } from "./bench-stats.js";
 
 /** One run, as the Compare page lists it (the drill-down to History). */
@@ -52,6 +53,12 @@ export interface ExclusionCount {
 /** Everything the Compare page draws. */
 export interface ComparePayload {
 	conditions: BenchConditions;
+	/**
+	 * Session ids the ledger saw more than once, and how many rows each one
+	 * swallowed (Issue #58). The page must say this out loud: a silently
+	 * shrinking sample is how a benchmark ends up lying.
+	 */
+	collisions: LedgerCollision[];
 	/** One card per model: the four axes (from `buildScorecard`). */
 	models: ModelCard[];
 	/** The runs left out, counted by reason. */
@@ -83,6 +90,7 @@ function perDay(m: GameMetric): number | null {
 export function buildCompareView(
 	metrics: GameMetric[],
 	opts: { models?: string[]; seed?: number; backend?: string; conditions?: BenchConditions } = {},
+	collisions: LedgerCollision[] = [],
 ): ComparePayload {
 	const rows = (Array.isArray(metrics) ? metrics : []).filter((m) => m && typeof m === "object");
 	const wanted = opts.models && opts.models.length ? new Set(opts.models) : null;
@@ -135,6 +143,7 @@ export function buildCompareView(
 
 	return {
 		conditions: opts.conditions ?? { scenario: null, horizonDays: null, seeds: [], repeats: 0 },
+		collisions,
 		models,
 		exclusions,
 		comparison,

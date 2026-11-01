@@ -17,7 +17,7 @@ import { type CompareBy, compareArms, metricExclusion, type GameMetric} from "./
 import { buildCompareView } from "./compare-view.js";
 import { historyGroups, type GroupBy } from "./history-groups.js";
 import { evaluatePromotion, type StrategyCard } from "./strategies.js";
-import { readLessons, readMetrics, readStrategies, setStrategyEnabled } from "./store.js";
+import { readLessons, readMetrics, readMetricsWithCollisions, readStrategies, setStrategyEnabled } from "./store.js";
 import type { ArmComparison } from "./metrics.js";
 
 /** A strategy card plus the server's verdict on whether it may ever be injected. */
@@ -98,7 +98,12 @@ export function evolutionHooks(dataDir: string): {
 		strategies: () => evolutionView(dataDir).strategies,
 		arms: () => evolutionView(dataDir).arms,
 		setStrategyEnabled: (id: string, enabled: boolean) => setStrategyEnabled(dataDir, id, enabled),
-		compare: (opts) => buildCompareView(readMetricsSafe(dataDir), opts),
+		compare: (opts) => {
+			// The ledger reports the ids that collided (Issue #58): a dropped row
+			// must be visible on the page, not silently shrink the sample.
+			const { rows, collisions } = readMetricsWithCollisions(dataDir);
+			return buildCompareView(rows, opts, collisions);
+		},
 		// The runs grouped by the ledger's own fields (B6). The page does not
 		// group them itself: the key has to be the one the ledger records.
 		groups: (by) => historyGroups(readMetricsSafe(dataDir), by),
