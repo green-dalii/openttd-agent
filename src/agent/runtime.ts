@@ -54,6 +54,9 @@ How the world works (mechanics, not instructions):
   executor then builds stations, roads, depots and vehicles over several game months.
   The executor's current phase is carried in the company name.
 - Money is real: construction spends cash, and loans accrue interest.
+- When the executor starts a construction job it first raises the company's loan to
+  the ceiling the game allows, so a loan reading can jump by that amount at the
+  moment work starts.
 - Passengers waiting at a station are demand that has not been served yet.
 - A tool result reports the outcome of the REQUEST it was given, which is not the same
   as the resulting change in the world. observe() reports the world.

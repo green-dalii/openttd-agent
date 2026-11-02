@@ -68,7 +68,9 @@ export function observeTool(deps: AgentDeps): AgentTool<typeof ObserveSchema, Ac
 					`towns=${JSON.stringify(facts.towns)} ` +
 					`cargoTotals=${JSON.stringify(facts.cargoTotals)} ` +
 					`industries=${JSON.stringify(facts.industries)} ` +
-					`engines=${JSON.stringify(facts.engines)}`,
+					`engines=${JSON.stringify(facts.engines)} ` +
+					// 融资：还能借多少、贷款的最小单位（**利息率引擎不暴露**，不编）。
+					`financing=${JSON.stringify(facts.financing)}`,
 				data: facts,
 			};
 			return toResult(r);

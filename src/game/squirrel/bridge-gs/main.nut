@@ -2351,8 +2351,24 @@ class BridgeV1 extends GSController {
                         engines.append({ id = eid, name = GSEngine.GetName(eid), speed = GSEngine.GetMaxSpeed(eid) });
                     }
                 } catch (e) { engines = []; }
+                // **贷款上限**（2026-11-02，Issue #13）：模型看得见自己的 `loan`，却看不见
+                // "还能借多少"；而**利息率脚本 API 根本没有**（引擎不暴露 ⇒ 那是"没测到"，
+                // 不能猜）。上限只能在**公司模式**里读（`COMPANY_SELF` 在全局脚本里无效），
+                // 所以这里短暂进入一次公司模式；读不到就报 null（不编造）。
+                local loan_ceiling = null;
+                local loan_interval = null;
+                try { loan_interval = GSCompany.GetLoanInterval(); } catch (e) { loan_interval = null; }
+                try {
+                    // 公司 0 = 执行器自己的公司（`ExecCore(this, 0)` 用的是同一个 id）。
+                    local mc = GSCompanyMode(0);
+                    if (GSCompanyMode.IsValid()) {
+                        loan_ceiling = GSCompany.GetMaxLoanAmount();
+                    }
+                } catch (e) { loan_ceiling = null; }
                 GSAdmin.Send({
                     cmd = "state", tick = now,
+                    loan_ceiling = loan_ceiling,
+                    loan_interval = loan_interval,
                     // **观测策略**（2026-11-02，Issue #13）：模型看到的是世界的**哪一部分**
                     // —— 全部城镇，还是人口前 10？这不是"世界的读数"，是**观测面本身的
                     // 事实**：两次运行的策略不同 ⇒ 它们回答的不是同一个问题（哪怕结构

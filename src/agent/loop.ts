@@ -109,6 +109,12 @@ export async function runDecision(
 			? { cargo: { totals: facts.cargoTotals, industries: facts.industries } }
 			: {}),
 		...(facts.engines.length > 0 ? { engines: facts.engines } : {}),
+		// The financing facts ride along too (Issue #13): how much more the
+		// company could borrow. The interest rate is **not** here — the engine
+		// does not expose it, and a made-up rate would be a lie (D60).
+		...(facts.financing.loanCeiling !== null || facts.financing.loanInterval !== null
+			? { financing: facts.financing }
+			: {}),
 		// Same lesson, new signal (N2-2b): the economics of the lines already
 		// ordered ride along too, so "is my route actually working" is visible
 		// without a tool call. A route with no reading yet is simply absent.

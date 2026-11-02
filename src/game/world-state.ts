@@ -140,6 +140,14 @@ export interface WorldSnapshot {
 	 * 两个不同的问题）。null = 没报（"没测到"，不是"全部"）。缺省 = 没报。
 	 */
 	observationPolicy?: string | null;
+	/**
+	 * The company's **loan ceiling** (how much more it could borrow); null = not
+	 * reported. The **interest rate is not exposed by the engine at all**, so it
+	 * is "not measured", never a guess.
+	 */
+	loanCeiling?: number | null;
+	/** The game's loan interval (the granularity of a loan change). */
+	loanInterval?: number | null;
 }
 
 /** One town as the agent sees it - enough to make a real choice. */
@@ -228,6 +236,10 @@ export class WorldState {
 	private townsTotal: number | null = null;
 	/** The GS's own statement of what it exposes (null = not reported). */
 	private observationPolicy: string | null = null;
+	/** The company's loan ceiling (null = not reported). */
+	private loanCeiling: number | null = null;
+	/** The game's loan interval (null = not reported). */
+	private loanInterval: number | null = null;
 	private industries: IndustryInfo[] = [];
 	private industriesTotal: number | null = null;
 	private cargoTotals: CargoAmounts[] = [];
@@ -351,6 +363,8 @@ export class WorldState {
 			engines: [...this.engines],
 			companyCargo: this.companyCargo ? { ...this.companyCargo } : null,
 			observationPolicy: this.observationPolicy,
+			loanCeiling: this.loanCeiling,
+			loanInterval: this.loanInterval,
 		};
 	}
 
@@ -408,6 +422,22 @@ export class WorldState {
 	setObservationPolicy(policy: string | null | undefined): void {
 		if (policy === undefined) return;
 		this.observationPolicy = typeof policy === "string" && policy.trim() !== "" ? policy.trim() : null;
+	}
+
+	/**
+	 * Record the financing facts the GS reports (the loan ceiling and the game's
+	 * loan interval).
+	 *
+	 * The **interest rate** is deliberately absent: the script API does not
+	 * expose it, so it is "not measured" - a number here would be a guess (D60).
+	 */
+	setFinancing(ceiling: number | null | undefined, interval: number | null | undefined): void {
+		if (ceiling !== undefined) {
+			this.loanCeiling = ceiling === null || !Number.isFinite(Number(ceiling)) ? null : Number(ceiling);
+		}
+		if (interval !== undefined) {
+			this.loanInterval = interval === null || !Number.isFinite(Number(interval)) ? null : Number(interval);
+		}
 	}
 
 	setTowns(towns: TownInfo[], total?: number | null): void {
