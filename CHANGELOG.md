@@ -8,12 +8,19 @@
 > 踩过的坑的复盘（→ `MEMORY.md`；此处只写"改了什么"，不写"我为什么犯错"）。
 
 ## [Unreleased]
-### Added
-- **Corrected: the deliveries cannot be split into cargo and passengers.** An earlier entry here claimed they could. Checked against the OpenTTD 15.3 source, they cannot: the script API has **no cargo monitor** (`GSCargoMonitor.*` does not fail - it returns null, so a split reads as "always empty"), and the admin's counter is the **sum** over the per-cargo-type array. The score keeps the one number it can measure and the split fields report "not measured"; the API is registered in the squirrel-api guard.
+### Fixed
+- **The navigation now reaches every page.** A page URL was a hand-written table in the server's
+  memory, so a page added after the server started was unreachable: the browser got a bare "not
+  found" and the page looked like it had never been built. The routes are now **derived from the
+  files** in `public/pages/` (`pages/<name>.html` is served at `/<name>`), a file added while the
+  server runs is picked up, and a URL that is not a page answers with **the list of pages that
+  exist** plus the hint that the process may be older than the files. The smoke check now
+  navigates to all four pages, not just the home page.
 
-- **The first real benchmark matrix is done.** Two models x three seeds x 300 game days, same
-  scaffold and horizon, every cell reaching it. The harness's verdict on the primary axis is
-  **"not determinable"** (paired mean difference -0.270 delivered per game day, 95% CI [-1.077, 0.545] includes zero: the variance across seeds dwarfs the difference). The secondary axes do separate them, in opposite directions: **M3.1-Flash needs ~40% fewer tokens per delivered unit** (1635 vs 1033 per million tokens), **M2.5 makes ~4.5x fewer failed tool calls** (2.9% vs 13.1%). Full numbers in issue #1.
+### Added
+- **Corrected: the deliveries cannot be split into cargo and passengers.** An earlier entry here claimed they could; the OpenTTD 15.3 source says otherwise: the script API has **no cargo monitor** (`GSCargoMonitor.*` does not fail - it returns null, so a split reads as "always empty"), and the admin's counter is the **sum** over the per-cargo-type array. The score keeps the one number it can measure, the split fields report "not measured", and the API is registered in the squirrel-api guard.
+
+- **The first real benchmark matrix is done.** Two models x three seeds x 300 game days, same scaffold and horizon, every cell reaching it. The harness's verdict on the primary axis is **"not determinable"** (paired mean difference -0.270 delivered per game day, 95% CI [-1.077, 0.545] includes zero: the variance across seeds dwarfs the difference). The secondary axes do separate them, in opposite directions: **M3.1-Flash needs ~40% fewer tokens per delivered unit** (1635 vs 1033 per million tokens), **M2.5 makes ~4.5x fewer failed tool calls** (2.9% vs 13.1%). Full numbers in issue #1.
 
 - **The configuration page is now called what it does.** The page that used to live at `/providers`
   answers "how is this run configured?", so it is now at `/configure`; the old URL redirects (and the older `/llm` alias still resolves).
@@ -31,11 +38,7 @@
 
 - **The navigation follows the four questions now**: Run / Compare / History / Configure. The "Evolution" page was renamed **Memory** and moved into History, because it manages what the agent *remembers*, not "evolution"; `/evolution` redirects to `/sessions#memory`.
 
-- **Every run now says what kind of run it was.** The backend could already name ten outcomes,
-  but the pages showed a fraction of them - and the most actionable one ("every tool call was
-  refused" - the signal that a model is flailing) was invisible. The vocabulary is now **closed**
-  (ten classes, no more, no less) and its names and meanings come from the server, so History
-  shows each run's class and Compare shows how many runs of each class a model has. A run whose readings are missing reads "unknown" - not "nothing happened".
+- **Every run now says what kind of run it was.** The backend could already name ten outcomes, but the pages showed a fraction of them - and the most actionable one ("every tool call was refused" - the signal that a model is flailing) was invisible. The vocabulary is now **closed** (ten classes, no more, no less) and its names and meanings come from the server, so History shows each run's class and Compare shows how many runs of each class a model has. A run whose readings are missing reads "unknown" - not "nothing happened".
 - **Errors carry a code instead of a sentence.** A failed model-list refresh, a rejected key, a missing credential, an unknown model: each now arrives as `{code, message, hint}`, and **each code has exactly one canonical hint**. The refresh endpoint's status says whose fault it is: 400 when the request cannot be honored (no key), 502 when the provider upstream failed. Pages render by code and never reverse-engineer intent from the wording; a guard keeps it that way.
 - **A Compare page.** It answers "how do these models compare on the same worlds": one row per model across the four axes (result, efficiency, reliability, growth), the excluded runs counted **by reason**, and - once two models are picked - the paired verdict with its interval or the reason it cannot be decided. Every run in the list drills through to that run in History.
   The numbers are the server's: the four axes come from the scorecard, the paired verdict from the paired comparison, the exclusion reasons from the existing enum. The page computes nothing and judges nothing; a missing reading reads "not measured", and an unpriced model's cost reads "not measured" rather than $0.
@@ -46,16 +49,9 @@
 
 - **The Run page starts with three steps instead of a screen of dashes.** With nothing measured it showed eight "-" and a red "world frozen" tile, which reads as "this is broken" rather than "nothing has started". It now answers the only question an empty page can answer - choose the model, set the limits, start - and keeps the world sections out of the layout until they have something to say.
 
-- **The timeline is a server fact.** `GET /api/sessions/:id/timeline` returns the rows and the page
-  only draws them; a reading the server did not have reads "not measured", never zero. The GS phases
-  are archived with the session, so a finished run can still be explained.
+- **The timeline is a server fact.** `GET /api/sessions/:id/timeline` returns the rows and the page only draws them; a reading the server did not have reads "not measured", never zero. The GS phases are archived with the session, so a finished run can still be explained.
 
-- **The dashboard can start a run, and says what the next run will use.** The run knobs (seed,
-  game days, scenario, memory arm, thinking level, tool budget, token and cost caps, backend) are
-  now settable from the Providers page, and `POST /api/run/start` carries them with the run. The
-  rules are the ones the command line already used — the page cannot introduce a second set. A
-  next-run preview (`POST /api/run/preview`) resolves the knobs server-side and shows the values
-  the next run would use; its field names are the manifest's own, so "the preview equals the manifest" is a contract a test can check field by field. An illegal knob is refused with a reason and a hint, before any game process starts.
+- **The dashboard can start a run, and says what the next run will use.** The run knobs (seed, game days, scenario, memory arm, thinking level, tool budget, token and cost caps, backend) are settable from the Configure page, and `POST /api/run/start` carries them with the run; the rules are the ones the command line already used - the page cannot introduce a second set. A next-run preview (`POST /api/run/preview`) resolves the knobs server-side and shows the values the next run would use; its field names are the manifest's own, so "the preview equals the manifest" is a contract a test can check field by field. An illegal knob is refused with a reason and a hint, before any game process starts.
 
 - **Benchmark mode (D5)**: a matrix planner that gives every cell its own data dir and
   refuses to run before the comparison is pre-registered, a four-axis scorecard, paired
