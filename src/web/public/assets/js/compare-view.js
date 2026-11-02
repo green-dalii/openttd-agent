@@ -209,23 +209,34 @@
     const s = payload && payload.surface;
     if (!s || s.differs !== true) return null;
     const scaffold = Array.isArray(s.scaffoldHashes) ? s.scaffoldHashes : [];
+    const observation = Array.isArray(s.observationShapeHashes) ? s.observationShapeHashes : [];
     const payloadShape = Array.isArray(s.payloadShapeHashes) ? s.payloadShapeHashes : [];
     const parts = [];
     if (scaffold.length) parts.push(`scaffold: ${scaffold.join(", ")}`);
-    // "not recorded" is not "the same": the payload fingerprint only exists on the
-    // harness backend, so a default-backend pair has nothing to compare here.
+    // The observation surface's **shape** is the cross-seed stable fingerprint:
+    // it says whether the runs saw the same set of world facts.
     parts.push(
-      payloadShape.length
-        ? `payload shape: ${payloadShape.join(", ")}`
-        : "payload shape was not recorded for these runs",
+      observation.length
+        ? `observation surface: ${observation.join(", ")}`
+        : "the observation surface was not recorded for these runs",
     );
+    // The advice must name **what** differs: a different scaffold and a
+    // different observation surface are different problems.
+    const what =
+      scaffold.length > 1 && observation.length > 1
+        ? "Treat the comparison as across two scaffolds and two observation surfaces."
+        : scaffold.length > 1
+          ? "Treat the comparison as across two scaffolds."
+          : "Treat the comparison as across two observation surfaces.";
     return {
       scaffold,
+      observation,
       payloadShape,
       text:
         "These runs did not all answer the same question (" +
         parts.join("; ") +
-        "). Treat the comparison as across two scaffolds.",
+        "). " +
+        what,
     };
   }
 

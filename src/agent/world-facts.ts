@@ -18,7 +18,8 @@
  *   看不见任何货物而建了客运线 ⇒ 分数（货物吨数）读 0。事实来源见 SPEC §10.124。
  */
 
-import type { WorldSnapshot } from "../game/world-state.js";
+import type { CompanyState, WorldSnapshot } from "../game/world-state.js";
+import { observationShapeHash as observationShapeHashOf } from "./observation-shape.js";
 
 /** One company's comparable numbers (model-visible). */
 export interface CompanyFact {
@@ -163,6 +164,61 @@ export function worldFacts(snap: WorldSnapshot): WorldFacts {
 		speed: toNumber(e.speed) ?? 0,
 	}));
 	return { date: gameDate(snap), companies, towns, industries, cargoTotals, engines };
+}
+
+/**
+ * A probe world: every branch of the projection filled in.
+ *
+ * 为什么需要它：观测面的**结构**指纹必须**只依赖代码**（跨 seed 稳定），而投影的
+ * 输出形状又取决于"世界里有没有那类东西"（一个没有产业的地图，`industries` 是空
+ * 数组 ⇒ 形状不同）。探针把每条分支都填满，于是"投影多了一个字段"必然改变指纹，
+ * "地图上多了一座城"不会。
+ */
+function observationProbe(): WorldSnapshot {
+	return {
+		date: { raw: 0, year: 1950, month: 1, day: 1 },
+		companies: new Map([
+			[
+				0,
+				{
+					info: {
+						id: 0,
+						name: "probe",
+						manager: "probe",
+						colour: 0,
+						passwordProtected: false,
+						inauguratedYear: 1950,
+						isAi: false,
+					},
+					economy: { id: 0, money: 0n, loan: 0n, income: 0n },
+					stats: { id: 0, vehicles: 0, stations: 0, breakdown: { train: 0, lorry: 0, bus: 0, plane: 0, ship: 0 } },
+					lastEconomyAt: null,
+					history: [],
+					deliveredRun: { total: 0, byCargo: [] },
+				} as unknown as CompanyState,
+			],
+		]),
+		recent: [],
+		totalEvents: 0,
+		towns: [{ id: 1, name: "probe", population: 1, x: 1, y: 1 }],
+		townsTotal: 1,
+		industries: [{ id: 1, cargo: "COAL", name: "probe", produced: 1, transported: 1, stock: 1 }],
+		industriesTotal: 1,
+		cargoTotals: [{ label: "COAL", produced: 1, transported: 1 }],
+		engines: [{ id: 1, name: "probe", speed: 1 }],
+		companyCargo: null,
+	};
+}
+
+/**
+ * The fingerprint of the observation surface — the model's world, structurally.
+ *
+ * Cross-seed stable, code-dependent: two runs that saw the same **shape** of world
+ * are comparable; two runs whose projection changed are not, and the Compare page
+ * says so (SPEC §10.121).
+ */
+export function observationShapeHash(): string {
+	return observationShapeHashOf(worldFacts(observationProbe()));
 }
 
 /**

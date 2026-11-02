@@ -63,6 +63,17 @@ export interface RunManifest {
 	/** Provider requests attempted (a retried request counts once per attempt). */
 	payloadCount: number | null;
 	/**
+	 * The **shape** of the observation surface (the world facts the model sees).
+	 *
+	 * Why a third fingerprint: `scaffoldHash` covers the prompt and the tools but
+	 * **not** the world the model looks at; `payloadShapeHash` covers the real
+	 * request but **includes the world** ⇒ it differs on every seed ⇒ it cannot
+	 * answer "did these two runs ask the same question" across runs (it would
+	 * cry wolf). This one is the **structure** of the projection: stable across
+	 * seeds, changed exactly when the projection changes (SPEC §10.121).
+	 */
+	observationShapeHash: string | null;
+	/**
 	 * Token cap applied to this run (null = no cap). Part of the run's identity:
 	 * "it stopped early" is only interpretable with the cap that stopped it.
 	 */
@@ -92,6 +103,7 @@ export function projectManifest(src: Partial<RunManifest> | null | undefined): R
 		payloadHash: src?.payloadHash ?? null,
 		payloadShapeHash: src?.payloadShapeHash ?? null,
 		payloadCount: src?.payloadCount ?? null,
+		observationShapeHash: src?.observationShapeHash ?? null,
 		tokenLimit: src?.tokenLimit ?? null,
 		costLimit: src?.costLimit ?? null,
 	};
@@ -111,6 +123,7 @@ export const MANIFEST_FIELDS = [
 	"payloadHash",
 	"payloadShapeHash",
 	"payloadCount",
+	"observationShapeHash",
 	"tokenLimit",
 	"costLimit",
 ] as const satisfies readonly (keyof RunManifest)[];

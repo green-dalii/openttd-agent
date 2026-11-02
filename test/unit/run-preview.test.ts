@@ -72,6 +72,7 @@ describe("the preview and the manifest agree", () => {
 			thinkingLevel: knobs.thinkingLevel,
 			toolBudget: knobs.toolBudget,
 			scaffoldHash: preview.scaffoldHash,
+			observationShapeHash: preview.observationShapeHash,
 			tokenLimit: knobs.tokenLimit,
 			costLimit: knobs.costLimit,
 			model: SELECTION.model,

@@ -128,11 +128,22 @@ describe("buildCompareView", () => {
 
 /**
  * 2026-11-01 评估结论：观测面**不进** `scaffoldHash`（它在跑之前算不出来，
- * 且会让哈希随 seed 变化、毁掉预览），而由 `payloadShapeHash` 覆盖。
- * 缺的从来不是哈希，而是**比较**——Compare 现在把它说出来。
+ * 且会让哈希随 seed 变化、毁掉预览）。
+ *
+ * 2026-11-02 修正：跨局比较**不能**用 `payloadShapeHash` 当触发器 —— 它含世界
+ * （城镇名、产业清单），**每个 seed 都不同** ⇒ 拿它比较会把"同代码、不同世界"
+ * 误报成"不是同一个问题"（假警报比没警报更坏）。触发器改为两枚**跨 seed 稳定**
+ * 的指纹：`scaffoldHash`（提示词 + 工具）与 `observationShapeHash`（观测面的
+ * **结构**）；payload 形状只作记录。
  */
 describe("Compare: did the compared runs answer the same question?", () => {
-	function run(id: string, model: string, scaffold: string | null, shape: string | null) {
+	function run(
+		id: string,
+		model: string,
+		scaffold: string | null,
+		observation: string | null,
+		payloadShape: string | null = null,
+	) {
 		return {
 			id,
 			seed: 7,
@@ -143,18 +154,19 @@ describe("Compare: did the compared runs answer the same question?", () => {
 			manifest: {
 				backend: "native",
 				...(scaffold ? { scaffoldHash: scaffold } : {}),
-				...(shape ? { payloadShapeHash: shape } : {}),
+				...(observation ? { observationShapeHash: observation } : {}),
+				...(payloadShape ? { payloadShapeHash: payloadShape } : {}),
 			},
 		} as never;
 	}
 
-	it("reports no difference when every run shares both hashes", () => {
+	it("reports no difference when every run shares both fingerprints", () => {
 		const view = buildCompareView([
 			run("a", "m1", "aaaa1111", "bbbb2222"),
 			run("b", "m2", "aaaa1111", "bbbb2222"),
 		]);
 		expect(view.surface.differs).toBe(false);
-		expect(view.surface.payloadShapeHashes).toEqual(["bbbb2222"]);
+		expect(view.surface.observationShapeHashes).toEqual(["bbbb2222"]);
 	});
 
 	it("flags a different observation surface even when the scaffold hash matches", () => {
@@ -163,7 +175,19 @@ describe("Compare: did the compared runs answer the same question?", () => {
 			run("b", "m2", "aaaa1111", "cccc3333"),
 		]);
 		expect(view.surface.differs).toBe(true);
-		expect(view.surface.payloadShapeHashes).toEqual(["bbbb2222", "cccc3333"]);
+		expect(view.surface.observationShapeHashes).toEqual(["bbbb2222", "cccc3333"]);
+	});
+
+	it("a payload shape that differs is NOT a difference (it contains the world)", () => {
+		// Same code, different seed ⇒ the real payloads differ (different town
+		// names) ⇒ the question is still the same question.
+		const view = buildCompareView([
+			run("a", "m1", "aaaa1111", "bbbb2222", "dddd4444"),
+			run("b", "m2", "aaaa1111", "bbbb2222", "eeee5555"),
+		]);
+		expect(view.surface.differs).toBe(false);
+		// It is still reported, for the record.
+		expect(view.surface.payloadShapeHashes).toEqual(["dddd4444", "eeee5555"]);
 	});
 
 	it("ignores runs that recorded no hash (not measured is not a difference)", () => {

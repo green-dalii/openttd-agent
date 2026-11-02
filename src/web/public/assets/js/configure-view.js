@@ -158,6 +158,9 @@
           ["Cost cap", p.costLimit === null || p.costLimit === undefined ? "no cap" : `$${p.costLimit}`],
           ["Backend", p.backend || "—"],
           ["Scaffold", (p.scaffoldHash || "").slice(0, 8)],
+          // The observation surface's shape: what the model will *see*. Knowable
+          // before the run, so the preview can promise it (SPEC §10.121).
+          ["Observation", (p.observationShapeHash || "").slice(0, 8)],
         ];
         return rows;
       },
