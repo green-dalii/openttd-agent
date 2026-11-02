@@ -2308,12 +2308,15 @@ class BridgeV1 extends GSController {
                 tlist.Sort(GSList.SORT_BY_VALUE, false);   // largest population first
                 local towns = [];
                 foreach (tid, pop in tlist) {
-                    if (towns.len() >= 10) break;
                     local loc = GSTown.GetLocation(tid);
                     // 城镇**名字**（2026-09-25 真机验证：`GSTown.GetName` 存在且返回
                     // 真实名字，如 "New Badworth"）。之前载荷只有 id/pop/x/y，于是线路
                     // 端点只能显示 `#4 → #8` —— 那是给机器看的编号，给人看不出是哪两座城。
-                    // 单次 API 调用，10 次/200 tick，可以接受。
+                    //
+                    // **全图都报**（2026-11-02，Issue #13）：以前只报人口前 10，于是
+                    // 样本外的城镇对模型只剩一个编号（`#14 → #2`）—— 它连那座城叫什么
+                    // 都不知道，怎么选？地图约 26 座城，名字一次 API 调用即可拿到
+                    // （每 1000 tick 重算一次，见下）。
                     local nm = "";
                     try { nm = this.Trim("" + GSTown.GetName(tid)); } catch (e) { nm = ""; }
                     if (nm.len() > 24) nm = nm.slice(0, 24);
@@ -2350,6 +2353,13 @@ class BridgeV1 extends GSController {
                 } catch (e) { engines = []; }
                 GSAdmin.Send({
                     cmd = "state", tick = now,
+                    // **观测策略**（2026-11-02，Issue #13）：模型看到的是世界的**哪一部分**
+                    // —— 全部城镇，还是人口前 10？这不是"世界的读数"，是**观测面本身的
+                    // 事实**：两次运行的策略不同 ⇒ 它们回答的不是同一个问题（哪怕结构
+                    // 一模一样）。所以策略必须**由 GS 自己报**（它才知道自己取了多少），
+                    // 不能由外面猜。
+                    towns_policy = "all",
+                    industries_policy = "top12",
                     engines = engines,
                     date = GSDate.GetCurrentDate(),
                     towns = tlist.Count(),

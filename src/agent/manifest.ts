@@ -74,6 +74,15 @@ export interface RunManifest {
 	 */
 	observationShapeHash: string | null;
 	/**
+	 * The **observation policy** the GS reported (e.g. `towns=all;industries=top12`).
+	 *
+	 * Why it is a fact and not a detail: seeing all 26 towns and seeing the ten
+	 * biggest are **two different questions**, even though the facts have the same
+	 * shape. The GS knows how much of the world it sampled, so it says so; null =
+	 * not reported ("not measured", not "everything").
+	 */
+	observationPolicy: string | null;
+	/**
 	 * Token cap applied to this run (null = no cap). Part of the run's identity:
 	 * "it stopped early" is only interpretable with the cap that stopped it.
 	 */
@@ -104,6 +113,7 @@ export function projectManifest(src: Partial<RunManifest> | null | undefined): R
 		payloadShapeHash: src?.payloadShapeHash ?? null,
 		payloadCount: src?.payloadCount ?? null,
 		observationShapeHash: src?.observationShapeHash ?? null,
+		observationPolicy: src?.observationPolicy ?? null,
 		tokenLimit: src?.tokenLimit ?? null,
 		costLimit: src?.costLimit ?? null,
 	};
@@ -124,6 +134,7 @@ export const MANIFEST_FIELDS = [
 	"payloadShapeHash",
 	"payloadCount",
 	"observationShapeHash",
+	"observationPolicy",
 	"tokenLimit",
 	"costLimit",
 ] as const satisfies readonly (keyof RunManifest)[];

@@ -210,6 +210,7 @@
     if (!s || s.differs !== true) return null;
     const scaffold = Array.isArray(s.scaffoldHashes) ? s.scaffoldHashes : [];
     const observation = Array.isArray(s.observationShapeHashes) ? s.observationShapeHashes : [];
+    const policies = Array.isArray(s.observationPolicies) ? s.observationPolicies : [];
     const payloadShape = Array.isArray(s.payloadShapeHashes) ? s.payloadShapeHashes : [];
     const parts = [];
     if (scaffold.length) parts.push(`scaffold: ${scaffold.join(", ")}`);
@@ -220,8 +221,11 @@
         ? `observation surface: ${observation.join(", ")}`
         : "the observation surface was not recorded for these runs",
     );
-    // The advice must name **what** differs: a different scaffold and a
-    // different observation surface are different problems.
+    // Which slice of the world was exposed (all towns, or only the biggest?).
+    if (policies.length) parts.push(`observation policy: ${policies.join(", ")}`);
+    // The advice must name **what** differs: a different scaffold, a different
+    // observation surface and a different slice of the world are different
+    // problems.
     const what =
       scaffold.length > 1 && observation.length > 1
         ? "Treat the comparison as across two scaffolds and two observation surfaces."
@@ -231,6 +235,7 @@
     return {
       scaffold,
       observation,
+      policies,
       payloadShape,
       text:
         "These runs did not all answer the same question (" +

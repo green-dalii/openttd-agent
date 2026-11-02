@@ -131,6 +131,15 @@ export interface WorldSnapshot {
 	engines: { id: number; name: string; speed: number }[];
 	/** 本公司口径运量；null = 未收到（不是"零运量"）。 */
 	companyCargo: CompanyCargoFacts | null;
+	/**
+	 * **观测策略**：模型看到的是世界的哪一部分（由 GS 自报，例如
+	 * `towns=all;industries=top12`）。
+	 *
+	 * 为什么它是**事实**而不是细节：两次运行的策略不同 ⇒ 它们**回答的不是同一个
+	 * 问题**（哪怕事实的字段结构一模一样 —— 看到全部 26 座城与只看到人口前 10 是
+	 * 两个不同的问题）。null = 没报（"没测到"，不是"全部"）。缺省 = 没报。
+	 */
+	observationPolicy?: string | null;
 }
 
 /** One town as the agent sees it - enough to make a real choice. */
@@ -217,6 +226,8 @@ export class WorldState {
 	private recent: GameEvent[] = [];
 	private towns: TownInfo[] = [];
 	private townsTotal: number | null = null;
+	/** The GS's own statement of what it exposes (null = not reported). */
+	private observationPolicy: string | null = null;
 	private industries: IndustryInfo[] = [];
 	private industriesTotal: number | null = null;
 	private cargoTotals: CargoAmounts[] = [];
@@ -339,6 +350,7 @@ export class WorldState {
 			cargoTotals: [...this.cargoTotals],
 			engines: [...this.engines],
 			companyCargo: this.companyCargo ? { ...this.companyCargo } : null,
+			observationPolicy: this.observationPolicy,
 		};
 	}
 
@@ -385,6 +397,17 @@ export class WorldState {
 	 */
 	setEngines(list: { id: number; name: string; speed: number }[]): void {
 		this.engines = list;
+	}
+
+	/**
+	 * Record the **observation policy** the GS reports (what it exposes).
+	 *
+	 * Only the GS knows how much of the world it sampled, so it says so; the agent
+	 * side never guesses ("all" vs "top 10" is not derivable from the numbers).
+	 */
+	setObservationPolicy(policy: string | null | undefined): void {
+		if (policy === undefined) return;
+		this.observationPolicy = typeof policy === "string" && policy.trim() !== "" ? policy.trim() : null;
 	}
 
 	setTowns(towns: TownInfo[], total?: number | null): void {

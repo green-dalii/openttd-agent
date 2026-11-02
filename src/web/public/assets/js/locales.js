@@ -36,6 +36,7 @@ window.I18nMessages = {
 
     /* ---- History 页：观测面指纹 ---- */
     "Observation surface": "观测面结构",
+    "Observation policy": "观测策略",
     "Observation": "观测面",
     "Scaffold": "脚手架",
 
