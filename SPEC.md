@@ -1167,50 +1167,45 @@ compaction 冲突）在 `docs/HARNESS-MIGRATION.md` §3（带坐标），此处�
 
 **D1 成绩可见与诚实的增量**
 - 决策上下文带 `score` 块（`delivered`/`deliveredPerGameDay`/`elapsedGameDays`/
-  `horizonDays`/`scoredFromGameDay`/`windowOpened`）。`delivered` 取世界状态的
+  `horizonDays`/`scoredFromGameDay`/`windowOpened`）；`delivered` 取世界状态的
   `deliveredRun.total`，**与该局度量行同一个数**（真机：模型看到 0、度量记 0）。
-- 增量不再折零：`null` 读数 → 该增量 `null` + `baselineEstablished=false`
-  （真机第一次决策 `money=unknown`，第二次 `money=199214`）。历局成绩作为事实注入
-  （同 scenario/horizon、排除被停/冻结局，排除数报出）；`--no-memory` 对照臂同样关闭。
+- 增量不再折零：`null` 读数 → 该增量 `null` + `baselineEstablished=false`（真机第一次决策
+  `money=unknown`，第二次 `money=199214`）。历局成绩作为事实注入（同 scenario/horizon、排除
+  被停/冻结局，排除数报出）；`--no-memory` 对照臂同样关闭。
 
 **D2 世界只投影一次**
-- 唯一投影 `src/agent/world-facts.ts`：公司按 id、城镇按人口降序（缺失排最后、
-  同人口按 id）；决策上下文与 `observe()` 同源同序；上下文补 `loan`。
-- 不再每次决策留第二份全量状态（`game_observation` **从不进 LLM**，审计已有快照）。
+- 唯一投影 `src/agent/world-facts.ts`：公司按 id、城镇按人口降序（缺失排最后、同人口按 id）；
+  决策上下文与 `observe()` 同源同序；上下文补 `loan`。`game_observation` **从不进 LLM**。
   真机：`observe()` 580→479 字符（-17.4%），prompt 2653→2673（+0.8%，即新增 `loan`）。
 
 **D3a 相位接回动作**
-- 类型化 exec 事件只有 `note`+`job`（**没有 `raw`**，那是已退役协议），hub 曾用
-  `p.raw` 拼相位串 ⇒ 模型收到的每条相位是 `undefined`；`composePhaseText` 修复。
-- 相位事实带 `job`，并经 **GS ack**（job id 由 GS 分配）接回订下它的 `action`；
-  连接是 **run 级**（施工跨决策窗口）。真机 payload：
-  `{"phase":"stB_ok",...,"job":100,"action":"build_bus_route"}`。
+- 类型化 exec 事件只有 `note`+`job`（**没有 `raw`**，那是已退役协议），hub 曾用 `p.raw` 拼
+  相位串 ⇒ 模型收到的每条相位是 `undefined`；`composePhaseText` 修复。相位事实带 `job`，
+  并经 **GS ack**（job id 由 GS 分配）接回订下它的 `action`；连接是 **run 级**（施工跨决策
+  窗口）。真机 payload：`{"phase":"stB_ok",...,"job":100,"action":"build_bus_route"}`。
 
 **D3b run manifest + 结果分类**
-- 度量行 `manifest = {servedModel, thinkingLevel, toolBudget, scaffoldHash}`：
-  `servedModel` 取 provider 实际作答（`responseModel ?? model`）；`scaffoldHash` =
-  sha256(系统提示词 + 工具集[name/description/schema]，按顺序) 前 16 位。真机：
-  `{"servedModel":"faux-1","thinkingLevel":"off","toolBudget":12,
-  "scaffoldHash":"74f2e64d1e930df3"}`。
-- `classifyOutcome`（派生不存盘）：优先级 人为停止 > 环境事件 > 结果读数，缺失 →
-  `unknown`；封闭词表（十类）见 §10.122。
+- 度量行 `manifest = {servedModel, thinkingLevel, toolBudget, scaffoldHash}`：`servedModel` 取
+  provider 实际作答（`responseModel ?? model`）；`scaffoldHash` = sha256(系统提示词 +
+  工具集[name/description/schema]，按顺序) 前 16 位。真机：`{"servedModel":"faux-1",
+  "thinkingLevel":"off","toolBudget":12,"scaffoldHash":"74f2e64d1e930df3"}`。
+- `classifyOutcome`（派生不存盘）：优先级 人为停止 > 环境事件 > 结果读数，缺失 → `unknown`；
+  封闭词表（十类）见 §10.122。
 
 **D4 旋钮可配且记录生效值**
-- `resolveScaffoldKnobs`：`LLM_THINKING`（缺省 off）/`LLM_TOOL_BUDGET`（缺省 12），
-  **非法值抛错**；CLI `--thinking`/`--tool-budget`/`--llm-provider`。顺带修：
-  `applyLlmSettingsFile` 重建 `LlmConfig` 时漏拷 `scaffold` ⇒ CLI 旋钮被静默丢弃
-  （D63 同型）。真机：`thinking=low toolBudget=5` 进了 manifest。
+- `resolveScaffoldKnobs`：`LLM_THINKING`（缺省 off）/`LLM_TOOL_BUDGET`（缺省 12），**非法值
+  抛错**；CLI `--thinking`/`--tool-budget`/`--llm-provider`。顺带修：`applyLlmSettingsFile`
+  重建 `LlmConfig` 时漏拷 `scaffold` ⇒ CLI 旋钮被静默丢弃（D63 同型）。真机：
+  `thinking=low toolBudget=5` 进了 manifest。
 
 **D5 评测面**
-- `planMatrix`：模型 × seed × 重复，**每格独立 data dir**、世界逐字相同、
-  样本不足**跑前拒绝**（实测 4 局/模型 vs 需要 400 ⇒ 拒绝；+200% 需 4 ⇒ 放行）。
-- `buildScorecard` + `renderReportMarkdown`：四轴；分母 0 的比率是 `null`；被排除的局
-  计数并报原因；分组用 `servedModel` 并列出 `requestedModels` ⇒ **网关替换可见**
-  （看板侧的投影见 §10.121）。
-- `pairedComparison`：按 (seed, repeat) 配对，对差异做确定性 bootstrap CI；
-  一侧缺失的配对不计入；配对 < 3 → `not determinable`。
-- 真机冒烟：2 格矩阵跑通并产出 JSON+MD 报告（两局都因墙钟未达 horizon 被排除，
-  报告如实写出 `horizon not reached x2`）。
+- `planMatrix`：模型 × seed × 重复，**每格独立 data dir**、世界逐字相同、样本不足**跑前拒绝**
+  （实测 4 局/模型 vs 需要 400 ⇒ 拒绝；+200% 需 4 ⇒ 放行）。
+- `buildScorecard` + `renderReportMarkdown`：四轴；分母 0 的比率是 `null`；被排除的局计数并报
+  原因；分组用 `servedModel` 并列出 `requestedModels` ⇒ **网关替换可见**（看板侧投影见 §10.121）。
+- `pairedComparison`：按 (seed, repeat) 配对，对差异做确定性 bootstrap CI；一侧缺失的配对不
+  计入；配对 < 3 → `not determinable`。真机冒烟：2 格矩阵跑通并产出 JSON+MD 报告（两局都因
+  墙钟未达 horizon 被排除，报告如实写出 `horizon not reached x2`）。
 
 ### 10.117 一份运行配置真值 + 一个解析器（B1/S2，2026-10-25）
 
@@ -1244,11 +1239,10 @@ compaction 冲突）在 `docs/HARNESS-MIGRATION.md` §3（带坐标），此处�
   `resolveScaffoldKnobs`，花费上限走 `resolveRunLimits`——与 CLI 同源。页面字符串**原样**进服务端（`"12abc"` 不被悄悄改成 12）；空字段 = 不改，沿用进程设置。
 - 事实：**预览的字段名 = manifest 的字段名**（`PREVIEW_MANIFEST_FIELDS`，10 个）。为此 manifest 补了 `model`/`api`/`contextWindow`/`costKnown`（D79：缺的一方要补，不许把预览悄悄缩小）。**跑完才知道的事实不在预览里**：`servedModel`（provider 实际应答名）与 `payload*`。`scaffoldHash`（`74f2e64d1e930df3`）**不用开游戏就能算出**：指纹只覆盖工具的名称/描述/schema。
 - 事实：**无法执行的花费上限在启动前被拒**（无价目表的模型 + 费用上限），**预览也拒**——同一条闸（`costCapProblem`），错误码 `unpriced_with_cost_cap` → HTTP **400**（坏请求，不是 409 冲突）。**harness 后端受进程门禁**：页面只能在进程允许时选它，否则 400 + `AGENT_HARNESS=1`。
-- 真机（隔离 data dir，provider `minimax-cn`、模型 `MiniMax-M3.1-Flash`）：页面填
-  seed 4242 / gameDays 40 / prebuilt / control / thinking high / toolBudget 5 / tokenLimit 9000
-  → 点 Start → 跑完的 `meta.json` 与**页面显示的预览 10 个字段逐字段相同**；token 上限**真的
-  触发**（9051 ≥ 9000 停机）。非法旋钮（`thinkingLevel=ultra`、`toolBudget=12abc`）与 harness
-  后端均 400 + 可执行原因，且**没有游戏进程被启动**。
+- 真机（隔离 data dir，`minimax-cn` / `MiniMax-M3.1-Flash`）：页面填 seed 4242 / gameDays 40 /
+  prebuilt / control / thinking high / toolBudget 5 / tokenLimit 9000 → 点 Start → 跑完的
+  `meta.json` 与**页面显示的预览 10 个字段逐字段相同**；token 上限**真的触发**（9051 ≥ 9000 停机）。
+  非法旋钮与 harness 后端均 400 + 可执行原因，且**没有游戏进程被启动**。
 - 前端事实（AGENTS §5.2 的血泪）：Alpine 的 `x-for` **必须**在 `<template>` 上——写在普通
   元素上时循环变量不在作用域，表单**整块渲染为空**而页面看起来正常（错误只在
   `console.warn`）；且一个字段只能有**一个**控件（`x-show` 藏 select/input 会让两者同 id）。
@@ -1270,8 +1264,14 @@ compaction 冲突）在 `docs/HARNESS-MIGRATION.md` §3（带坐标），此处�
   `pairedComparison`，排除原因来自 `metricExclusion`——**页面一个数都不重算、也不下判断**。
   分组用**实际服务的模型**（`manifest.servedModel`）⇒ 网关替换**可见**；每局能下钻到
   History（`/sessions?run=<id>`）。
-- 真机（隔离 data dir，`minimax-cn` / `MiniMax-M3.1-Flash` + 本地 stub，各 2 个 seed）：两模型
-  × 两 seed 出四轴 + 配对判定（2 对 ⇒ "not determinable"），无价目表一侧写 `not measured`。
+- 真机（隔离 data dir，`minimax-cn` / `MiniMax-M3.1-Flash` + 本地 stub，各 2 个 seed）：两模型 × 两 seed 出四轴 + 配对判定（2 对 ⇒ "not determinable"），无价目表一侧写 `not measured`。
+- 事实：**比较计划是同一套预览的矩阵版**（Issue #48，`src/agent/compare-plan.ts`）：格子 = 模型 ×
+  seed；**只估"运行"**（几局、封顶、花费能不能测），**不估结果**；字段名与 manifest 同名同义
+  （`model`/`seed`/`gameDays`/`tokenLimit`/`costLimit`/`backend`/`scaffoldHash`/`costKnown`）。
+  "花费能不能测"是**逐格**的事实：只有每格都有价目表才是 `costKnown=true`，否则"没测到"。
+  一个进程只能跑一局 ⇒ 格子**顺序**跑（`PlanQueue`），一格失败被记下、后面继续；与已有运行冲突 ⇒
+  409，**一局都不启动**。真机：费用上限 + 无价目表 ⇒ 400 `unpriced_with_cost_cap` 且没有游戏进程；
+  未知模型 ⇒ `unknown_model`；页面点"Launch this plan"（逐格确认）⇒ 跑完的 manifest 与计划**逐字段相同**。
 
 ### 10.122 结局词表是**封闭**的，错误的 hint 也只有**一份**（B5，2026-10-25）
 
@@ -1282,8 +1282,8 @@ compaction 冲突）在 `docs/HARNESS-MIGRATION.md` §3（带坐标），此处�
 - 事实：失败是 `{problems: [{code, message, hint}]}`，且**每个 code 只有一个规范 hint**
   （`problemHint`）：生产方只写"发生了什么"（哪个 provider、哪个 URL）；`endpoint_401`/
   `endpoint_403`/`no_model_endpoint`/`no_credential`/`provider_unavailable` 都按 HTTP 状态判定
-  （**不对错误文案做正则**）。刷新端点的状态码说明**是谁的错**：400 = 请求没法照做、502 =
-  上游失败；`repo-hygiene` 有守卫禁止前端再用正则猜 401。
+  （**不对错误文案做正则**）；刷新端点的状态码说明**是谁的错**：400 = 请求没法照做、502 = 上游
+  失败；`repo-hygiene` 有守卫禁止前端再用正则猜 401。
 - 真机（隔离 data dir，坏 key + 7 个不同结局的局）：刷新返回 502 + 三个带 code 的 problem；Compare 与 History 画出八种结局类（真实 Chrome 0 console）。
 
 ### 10.123 一局能自证：manifest 全字段 + 分组键来自账本 + 导航按四个问题（B6，2026-10-29）

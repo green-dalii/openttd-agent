@@ -250,7 +250,92 @@
     return models.map((m) => String(m.model ?? "")).filter((m) => m !== "");
   }
 
+  /* ------------------------------------------------------------------
+   * The comparison plan (Issue #48)
+   * ------------------------------------------------------------------
+   * The page draws the plan the **server** computed: how many runs, which
+   * models and seeds, the caps, and whether the spend is measurable. It never
+   * estimates a run itself (a page-side estimate would drift from the one the
+   * server would make) and it never predicts a score (that is History's job).
+   */
+
+  /** The plan's summary rows (run count, caps, cost). */
+  function planSummary(plan) {
+    if (!plan) return [];
+    const rows = [];
+    rows.push({ label: "Runs", text: num(plan.runCount, 0), known: true });
+    rows.push({
+      label: "Game days",
+      text: plan.gameDays === null || plan.gameDays === undefined ? "no horizon" : num(plan.gameDays, 0),
+      known: plan.gameDays !== null && plan.gameDays !== undefined,
+    });
+    rows.push({
+      label: "Token cap",
+      text: plan.tokenLimit === null || plan.tokenLimit === undefined ? "no cap" : num(plan.tokenLimit, 0),
+      known: plan.tokenLimit !== null && plan.tokenLimit !== undefined,
+    });
+    rows.push({
+      label: "Cost cap",
+      text: plan.costLimit === null || plan.costLimit === undefined ? "no cap" : num(plan.costLimit, 2),
+      known: plan.costLimit !== null && plan.costLimit !== undefined,
+    });
+    // "Partly known" is not a number: the server says whether the **whole**
+    // plan's spend is measurable.
+    rows.push({
+      label: "Cost",
+      text: plan.costKnown === true ? "measurable" : NOT_MEASURED,
+      known: plan.costKnown === true,
+    });
+    rows.push({ label: "Backend", text: plan.backend ? String(plan.backend) : "—", known: !!plan.backend });
+    rows.push({ label: "Thinking level", text: plan.thinkingLevel ? String(plan.thinkingLevel) : "—", known: !!plan.thinkingLevel });
+    rows.push({ label: "Tool budget", text: num(plan.toolBudget, 0), known: typeof plan.toolBudget === "number" });
+    rows.push({ label: "Memory arm", text: plan.memoryArm ? String(plan.memoryArm) : "—", known: !!plan.memoryArm });
+    return rows;
+  }
+
+  /** The cells of the plan (one row per run the plan starts). */
+  function planCells(plan) {
+    const cells = plan && Array.isArray(plan.cells) ? plan.cells : [];
+    return cells.map((c) => ({
+      model: String(c.model ?? ""),
+      seed: Number(c.seed ?? 0),
+      costKnown: !!(c.facts && c.facts.costKnown === true),
+    }));
+  }
+
+  /** The plan's problems (the server's own wording: code + message + hint). */
+  function planProblems(payload) {
+    const problems = payload && Array.isArray(payload.problems) ? payload.problems : [];
+    return problems.map((p) => ({
+      code: String(p.code ?? ""),
+      message: String(p.message ?? ""),
+      hint: String(p.hint ?? ""),
+    }));
+  }
+
+  /** The queue's state (which cell runs, what failed). */
+  function planQueueState(state) {
+    if (!state) return { status: "idle", text: "", cells: [] };
+    const cells = Array.isArray(state.cells) ? state.cells : [];
+    return {
+      status: String(state.status ?? "idle"),
+      text: `${state.completed ?? 0}/${state.total ?? 0} cells`,
+      failed: Number(state.failed ?? 0),
+      current: state.current ? `${state.current.model} (seed ${state.current.seed})` : "",
+      cells: cells.map((c) => ({
+        model: String(c.model ?? ""),
+        seed: Number(c.seed ?? 0),
+        status: String(c.status ?? "pending"),
+        error: String(c.error ?? ""),
+      })),
+    };
+  }
+
   window.CompareView = {
+    planSummary,
+    planCells,
+    planProblems,
+    planQueueState,
     modelRows,
     exclusionRows,
     comparison,

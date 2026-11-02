@@ -15,6 +15,7 @@ import { resolveRunKnobs, type RunKnobDefaults } from "../../src/agent/run-knobs
 
 const DEFAULTS: RunKnobDefaults = {
 	seed: 4242,
+	model: null,
 	gameDays: null,
 	scenario: "freeform",
 	memoryArm: "treatment",
