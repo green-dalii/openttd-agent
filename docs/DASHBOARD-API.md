@@ -39,32 +39,32 @@
 
 ```
 src/web/public/
-  pages/                 # 一个页面一个 HTML（只放 HTML）
-    live.html            #   Run      ：实时游戏 + agent 遥测
-    compare.html         #   Compare  ：模型比较（四轴 / 配对判定）
-    providers.html       #   Configure：provider 选型 + 密钥 + 运行旋钮
-    sessions.html        #   History  ：历史局管理 / 复盘 / 记忆
+  pages/*.html           # 一个页面一个 HTML（只放 HTML）；URL 由文件名派生，见下表
   assets/css/style.css   # 全部样式（单文件，无预处理器）
   assets/js/*.js         # common.js（共享）+ 每页一个脚本
 ```
 
-**URL 路由表**（`src/web/server.ts` 的 `PAGES`，单一事实源）:
+**URL 路由由文件名派生**（`src/web/server.ts` 的 `pageRoutes()`，单一事实源 = 磁盘上的文件）:
 
 | URL | 文件 | 职责 |
 |---|---|---|
-| `GET /` | `pages/live.html` | Run：实时游戏 + agent 遥测 |
+| `GET /` | `pages/live.html` | Run：实时游戏 + agent 遥测（唯一的特例：URL 不等于文件名） |
 | `GET /compare` | `pages/compare.html` | Compare：模型比较（四轴 / 配对判定） |
-| `GET /configure` | `pages/providers.html` | Configure：provider 选型 + 密钥 + 运行旋钮 |
+| `GET /configure` | `pages/configure.html` | Configure：provider 选型 + 密钥 + 运行旋钮 |
 | `GET /sessions` | `pages/sessions.html` | History：历史局管理 / 复盘 / 记忆 |
-| `GET /llm` | *(别名 → `/configure`)*；`GET /providers` | *(302 → `/configure`)* | v0.3 的旧 URL 与旧地址：保留/重定向，页面的名字跟它回答的问题走 |
-| `GET /evolution` | *(302 → `/sessions#memory`)* | 旧的 "Evolution" 页 → History 的记忆区 |
 
-- 导航按**四个问题**（CoDesign §4）：Run / Compare / History / Configure。URL 保持**扁平**（`/configure` 而非 `/pages/providers.html`）——文件可自由挪动，链接不会断。
-- 更名/迁移页面时：内容没变就加进 `PAGE_ALIASES`（内部重写），**内容搬走了**就用
-  `PAGE_REDIRECTS`（302）——不留第二份，两份必然漂移。
-- 强制约束（单测锁定 `web-api.test.ts`）: `public/` 根目录**不得**再有散落的 html/css/js；
-  每个 `PAGES` 目标文件必须存在且返回 200；HTML 里的每个 `/xxx` 引用必须指向真实存在的文件；
-  `pages/**` 只放 `.html`、`assets/css/**` 只放 `.css`、`assets/js/**` 只放 `.js`。
+**旧地址**：`/llm`（别名 → `/configure`）、`/providers`（302 → `/configure`）、`/evolution`（302 → `/sessions#memory`）——保留/重定向，页面的名字跟它回答的问题走。
+
+**为什么路由是"派生"的而不是手写表**：手写表会和文件漂移——文件在、路由没有 ⇒ 浏览器只看到
+一句 `not found`，看起来像"这个页面根本没做"。派生之后"加一个页面" = "加一个文件"，运行中
+新增的文件也会被认到。**不是页面的 URL** 返回一张列出全部页面的 404 页，并写明"进程可能比
+磁盘旧，请重启"。
+
+- 导航按**四个问题**（CoDesign §4）：Run / Compare / History / Configure。URL 保持**扁平**（`/configure` 而非 `/pages/configure.html`）——文件可自由挪动，链接不会断。
+- 更名/迁移页面时：内容没变就加进 `PAGE_ALIASES`（内部重写），**内容搬走了**就用 `PAGE_REDIRECTS`（302）——不留第二份。
+- 强制约束（单测锁定 `web-api.test.ts` / `web-routing.test.ts`）: `public/` 根目录**不得**再有散落的
+  html/css/js；每个路由目标文件必须存在且返回 200；导航里的每个链接必须能解析；HTML 里的每个
+  `/xxx` 引用必须指向真实存在的文件或路由；`pages/**` 只放 `.html`、`assets/**` 只放对应后缀。
 - **禁止引入构建链**（无 bundler/预处理/外部 CDN，离线可用）。
 
 ---

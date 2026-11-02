@@ -6,7 +6,7 @@
  *   且后果最严重的错误（浏览器白屏）：JS 语法错误、页面引用了不存在的资源、
  *   页面脚本缺少配套的 HTML、公共符号未定义、隐私规则被破坏。
  * 事实来源: docs/DASHBOARD-UI.md §2/§3/§5（组件与页面契约）、
- *   docs/DASHBOARD-API.md §1（目录契约 + PAGES 路由表）。
+ *   docs/DASHBOARD-API.md §1（目录契约 + 页面路由）。
  * 禁止: 在此启动浏览器（真机 E2E 属于 web-api.test.ts / live 测试）。
  */
 
@@ -14,7 +14,7 @@ import { describe, expect, it } from "vitest";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { PAGES, PAGE_ALIASES, PUBLIC_DIR } from "../../src/web/server.js";
+import { PAGE_ALIASES, PUBLIC_DIR, pageRoutes } from "../../src/web/server.js";
 
 function listFiles(prefix = ""): string[] {
 	const out: string[] = [];
@@ -61,16 +61,16 @@ describe("front-end assets", () => {
 			const refs = [...html.matchAll(/(?:href|src)="\/([^"]+)"/g)].map((m) => m[1]!);
 			expect(refs.length, `${page} has no asset refs`).toBeGreaterThan(0);
 			for (const ref of refs) {
-				// In-app links point at a ROUTE, not a file: `/providers` is served by
-				// PAGES, so only asset refs must exist on disk.
-				if (Object.keys(PAGES).includes(`/${ref}`)) continue;
+				// In-app links point at a ROUTE, not a file (routes are derived from
+				// the page files), so only asset refs must exist on disk.
+				if (Object.keys(pageRoutes()).includes(`/${ref}`)) continue;
 				expect(existsSync(join(PUBLIC_DIR, ref)), `${page} -> /${ref}`).toBe(true);
 			}
 		}
 	});
 
 	it("every page route (and alias) maps to an existing HTML file", () => {
-		for (const [url, file] of Object.entries(PAGES)) {
+		for (const [url, file] of Object.entries(pageRoutes())) {
 			expect(existsSync(join(PUBLIC_DIR, file)), `${url} -> ${file}`).toBe(true);
 			expect(file.split("/")[0], url).toBe("pages");
 			const html = read(file);
@@ -79,7 +79,7 @@ describe("front-end assets", () => {
 			expect(html, file).toContain("/assets/css/style.css");
 		}
 		for (const [alias, target] of Object.entries(PAGE_ALIASES)) {
-			expect(PAGES[target], `alias ${alias} -> ${target}`).toBeDefined();
+			expect(pageRoutes()[target], `alias ${alias} -> ${target}`).toBeDefined();
 		}
 	});
 
@@ -348,7 +348,7 @@ describe("图表尺寸回读守卫", () => {
  * 本测试守住这个结构（往任何页面重新手写 h1/nav 都会红）。
  */
 describe("页头结构：单一来源", () => {
-	const pages = ["live", "compare", "providers", "sessions"];
+	const pages = ["live", "compare", "configure", "sessions"];
 	for (const page of pages) {
 		it(`pages/${page}.html 只声明 brand 占位符，不手写标题/导航`, () => {
 			const html = readFileSync(join(PUBLIC_DIR, "pages", `${page}.html`), "utf8");

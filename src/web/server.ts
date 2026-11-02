@@ -1,3 +1,4 @@
+/* eslint-disable no-console -- the 404 page is also reported to the operator's terminal */
 /**
  * WebServer — HTTP static + WebSocket relay for the live dashboard.
  *
@@ -8,7 +9,7 @@
  */
 
 import http from "node:http";
-import { promises as fs, statSync } from "node:fs";
+import { promises as fs, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer, type WebSocket } from "ws";
@@ -195,16 +196,40 @@ export interface WebServerOptions {
  *   public/assets/css/*.css    styles
  *   public/assets/js/*.js      shared + per-page scripts
  *
- * URLs stay flat (`/providers`, not `/pages/providers.html`) so links keep
- * working even if files move. Add a page by adding one row here + one file in
- * `pages/`; renamed URLs go in PAGE_ALIASES so old links keep resolving.
+ * URLs stay flat (`/configure`, not `/pages/configure.html`) so links keep
+ * working even if files move.
+ *
+ * **The routes are derived from the files, not written by hand.** A hand-written
+ * table drifts: a page exists on disk but nothing routes to it, and the browser
+ * shows a bare "not found" — which reads as "the page was never built". Deriving
+ * the URL from the file name makes "add a page" mean "add a file", and makes
+ * "the nav links to a page that does not exist" impossible to ship unnoticed.
+ * The Run page is the one exception: it is served at "/" (see HOME_PAGE).
  */
-export const PAGES: Record<string, string> = {
-	"/": "pages/live.html",
-	"/compare": "pages/compare.html",
-	"/configure": "pages/providers.html",
-	"/sessions": "pages/sessions.html",
-};
+export const HOME_PAGE = "pages/live.html";
+
+/**
+ * The routes the server serves right now: URL -> file under `public/`.
+ *
+ * Read from disk on every call, so a page file added while the server runs is
+ * picked up without a restart. `dir` is a parameter only so the tests can
+ * point it at a fixture directory.
+ */
+export function pageRoutes(dir: string = path.join(PUBLIC_DIR, "pages")): Record<string, string> {
+	const routes: Record<string, string> = { "/": HOME_PAGE };
+	let files: string[] = [];
+	try {
+		files = readdirSync(dir).filter((f) => f.endsWith(".html"));
+	} catch {
+		return routes;
+	}
+	for (const file of files) {
+		const stem = file.slice(0, -".html".length);
+		if (stem === "live") continue; // the Run page is served at "/"
+		routes[`/${stem}`] = `pages/${file}`;
+	}
+	return routes;
+}
 
 /**
  * Extra URLs that must resolve to a page above. `/llm` was the pre-v0.4 name of
@@ -427,9 +452,18 @@ export class WebServer {
 			}
 			// Legacy URLs resolve to their current page before the route lookup.
 			if (PAGE_ALIASES[p]) p = PAGE_ALIASES[p]!;
-			// Page route table first (see PAGES); then plain static files.
-			const route = PAGES[p];
-			if (route) p = `/${route}`;
+			// Page routes are derived from the files in `public/pages/` (pageRoutes).
+			const routes = pageRoutes();
+			const route = routes[p];
+			if (route) {
+				p = `/${route}`;
+			} else if (!path.extname(p)) {
+				// A URL that looks like a page but is not one. Answer with the page
+				// list instead of a bare "not found": the browser then shows which
+				// pages exist, instead of a page that looks like a broken dashboard.
+				this.sendPageNotFound(res, p, routes);
+				return;
+			}
 			// Prevent path traversal.
 			const filePath = path.normalize(path.join(PUBLIC_DIR, p));
 			if (!filePath.startsWith(PUBLIC_DIR)) {
@@ -454,6 +488,38 @@ export class WebServer {
 		} catch {
 			res.writeHead(404).end("not found");
 		}
+	}
+
+	/**
+	 * 404 for a URL that is not a page: list the pages that do exist.
+	 *
+	 * 为什么要有这一页：仪表盘最常见的坏状态是"导航点过去是 not found"，而
+	 * 一个光秃秃的 "not found" 看起来像"这个页面根本没做"。这一页把真实情况
+	 * 说清楚 —— 有哪些页面、你点的那个不在其中 —— 并且提醒：进程比磁盘上的
+	 * 文件旧时就会出现这个现象（路由表在进程内存里）。
+	 */
+	private sendPageNotFound(
+		res: http.ServerResponse,
+		requested: string,
+		routes: Record<string, string>,
+	): void {
+		const items = Object.keys(routes)
+			.sort()
+			.map((url) => `<li><a href="${url}">${url === "/" ? "Run" : url.slice(1)}</a></li>`)
+			.join("");
+		const body =
+			`<!doctype html><html lang="en"><head><meta charset="utf-8">` +
+			`<title>Page not found — openttd-agent</title>` +
+			`<style>body{font:15px/1.6 system-ui,sans-serif;margin:3rem auto;max-width:34rem;padding:0 1rem}` +
+			`a{color:#f0a500}code{background:#1c1c22;padding:.1rem .35rem;border-radius:.25rem}</style></head><body>` +
+			`<h1>No page is served at <code>${requested}</code></h1>` +
+			`<p>These pages exist:</p><ul>${items}</ul>` +
+			`<p>If you expected a page here, this dashboard process may be older than the files on disk — ` +
+			`restart it so it picks up the current routes.</p></body></html>`;
+		// The operator sees the mismatch in the terminal too: the request, and the
+		// pages this process knows about.
+		console.warn(`[web] 404 ${requested} (pages: ${Object.keys(routes).join(", ")})`);
+		res.writeHead(404, { "content-type": "text/html; charset=utf-8" }).end(body);
 	}
 
 	/**

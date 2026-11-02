@@ -24,9 +24,9 @@ import {
 	lintXForNullable,
 	topLevelElements,
 } from "./helpers/alpine-lint.js";
-import { PAGES } from "../../src/web/server.js";
+import { pageRoutes } from "../../src/web/server.js";
 
-/** 所有页面 HTML 的绝对路径(含 PAGES 路由表里没有的旧页面,一并检查)。 */
+/** 所有页面 HTML 的绝对路径(路由由文件名派生,所以这里就是全部页面)。 */
 function allPageHtml(): Array<{ name: string; html: string }> {
 	const dir = join(PAGES_DIR);
 	const out: Array<{ name: string; html: string }> = [];
@@ -47,11 +47,12 @@ describe("alpine: 页面模板结构", () => {
 		for (const p of pages) expect(p.html.length).toBeGreaterThan(200);
 	});
 
-	it("PAGES 路由表里的页面都在磁盘上", () => {
-		for (const route of Object.values(PAGES)) {
-			const rel = typeof route === "string" ? route : String(route);
-			if (!rel.endsWith(".html")) continue;
-			expect(pages.some((p) => rel.endsWith(p.name))).toBe(true);
+	it("每个页面文件都有一个由文件名派生的 URL（没有孤立页面）", () => {
+		const routes = pageRoutes();
+		for (const p of pages) {
+			const stem = p.name.replace(/\.html$/, "");
+			const url = stem === "live" ? "/" : `/${stem}`;
+			expect(routes[url], `${p.name} -> ${url}`).toBeDefined();
 		}
 	});
 
