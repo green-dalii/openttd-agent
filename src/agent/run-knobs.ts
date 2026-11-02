@@ -41,6 +41,18 @@ export type KnobValue = number | string | null | undefined;
 export interface RunKnobInput {
 	/** World seed (integer >= 1). */
 	seed?: KnobValue;
+	/**
+	 * Which model this run uses.
+	 *
+	 * Why it is a knob and not a process setting: a **comparison** runs several
+	 * models in one process (Issue #48), and each cell must name its own model.
+	 * Absent = the process's current selection (the common case).
+	 *
+	 * Only the **shape** is checked here (a non-empty name); whether the model
+	 * exists is the resolver's business (selection.ts), so the rule is not
+	 * written twice.
+	 */
+	model?: KnobValue;
 	/** Episode horizon in simulated game days (integer >= 1). */
 	gameDays?: KnobValue;
 	/** "freeform" (default) or "prebuilt" (a route exists before the window opens). */
@@ -90,6 +102,8 @@ export function knobInputFrom(raw: Record<string, unknown> | undefined): RunKnob
 export interface RunKnobs {
 	/** The world seed this run uses (the process seed when the page left it blank). */
 	seed: number;
+	/** The model this run uses (null = the process's current selection). */
+	model: string | null;
 	gameDays: number | null;
 	scenario: "freeform" | "prebuilt";
 	memoryArm: "treatment" | "control";
@@ -109,6 +123,8 @@ export interface RunKnobs {
 export interface RunKnobDefaults {
 	/** The process seed (already resolved; the page may override it). */
 	seed: number;
+	/** The process's current model (null when the page names one). */
+	model: string | null;
 	gameDays: number | null;
 	scenario: "freeform" | "prebuilt";
 	memoryArm: "treatment" | "control";
@@ -200,6 +216,22 @@ export function resolveRunKnobs(
 
 	const seed =
 		parseInt(input.seed, "seed", { min: 1, max: 2 ** 31 - 1, problems }) ?? defaults.seed;
+	// The model's **shape** only: a name, or nothing (the process's model).
+	// Existence is the resolver's call (selection.ts) — one rule, not two.
+	let model: string | null = defaults.model;
+	if (!isAbsent(input.model)) {
+		const text = String(input.model).trim();
+		if (!text || text.length > 200) {
+			problems.push(
+				bad(
+					text ? `the model name is too long (${text.length} characters)` : "the model name is empty",
+					"pick a model from the list",
+				),
+			);
+		} else {
+			model = text;
+		}
+	}
 	const gameDays =
 		parseInt(input.gameDays, "gameDays", { min: 1, max: 100_000, problems }) ?? defaults.gameDays;
 	const scenario =
@@ -267,6 +299,7 @@ export function resolveRunKnobs(
 
 	return {
 		seed,
+		model,
 		gameDays,
 		scenario,
 		memoryArm,

@@ -34,6 +34,34 @@ window.I18nMessages = {
     "Start agent plays with that model. Observe only records what the built-in AI does, with no model calls at all.":
       "Start agent 用那个模型自己打；Observe only 只记录内置 AI 做了什么，不产生任何模型调用。",
 
+    /* ---- Compare 页：比较计划（Issue #48） ----
+       注："Token cap" 是**服务端结局词表**里的类名（outcome.ts），按 B5 的
+       "服务端只有一份规范文案" 规则**不进这张表** —— 它在中文界面里保持英文，
+       与配置页的同名旋钮一致。 */
+    "Plan a comparison": "计划一次比较",
+    "the server says what it would run, before it runs it": "跑之前，服务端先说它会跑什么",
+    "Models": "模型",
+    "Seeds": "世界种子",
+    "Preview the plan": "预览计划",
+    "Launch this plan": "按计划开跑",
+    "no models yet — the plan needs at least one": "还没有模型 —— 计划至少要一个模型",
+    "pick at least one model": "至少选一个模型",
+    "add at least one seed": "至少填一个世界种子",
+    "a comparison is already running": "已经有一个比较在跑",
+    "preview the plan first": "先预览计划",
+    "Cost": "花费",
+    "measurable": "可测",
+    "no horizon": "不限视界",
+    "no cap": "不设上限",
+    "Cell": "格子",
+    "Comparison running: ": "比较进行中：",
+    "Last comparison: ": "上一次比较：",
+    " — now running ": " —— 正在跑 ",
+    " — every cell finished": " —— 每一格都跑完了",
+    " cell(s) failed": " 格失败",
+    "Each game is a full run; they run one after another.": "每一格都是一局完整的运行；它们一个接一个地跑。",
+    "Run the plan": "开始跑计划",
+
     /* ---- Compare 页 ---- */
     "same worlds, different models — every number computed by the server": "同一批世界，不同模型 —— 每个数字都由服务端算出",
     "Four axes per model": "每个模型的四个轴",

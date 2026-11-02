@@ -48,6 +48,100 @@
       </div>
     </section>
 
+    <!-- ===================== ⓪ the plan ===================== -->
+    <!-- "The comparison starts from the comparison" (Issue #48): pick the
+         models and the worlds, see what the server would run (how many runs,
+         which caps, whether the spend is measurable) and launch it from here.
+         The page **estimates nothing**: the plan is the server's answer. -->
+    <section class="panel cmp-plan" x-show="!loading && !error">
+      <div class="panel-head">
+        <h2>Plan a comparison</h2>
+        <span class="dim">the server says what it would run, before it runs it</span>
+      </div>
+
+      <div class="actions">
+        <div class="cmp-plan-models">
+          <span class="dim">Models</span>
+          <template x-for="m in planModelNames()" :key="'plan-' + m">
+            <label class="check">
+              <input type="checkbox" :value="m" x-model="planModels" />
+              <span x-text="m"></span>
+            </label>
+          </template>
+          <span class="form-msg" x-show="planModelNames().length === 0" x-text="'no models yet — the plan needs at least one'"></span>
+        </div>
+
+        <label class="field">
+          <span>Seeds</span>
+          <input type="text" x-model="planSeeds" placeholder="4242, 4243" />
+        </label>
+        <label class="field">
+          <span>Game days</span>
+          <input type="number" x-model="planGameDays" min="1" placeholder="300" />
+        </label>
+        <label class="field">
+          <span>Token cap</span>
+          <input type="number" x-model="planTokenLimit" min="1" placeholder="no cap" />
+        </label>
+        <label class="field">
+          <span>Cost cap</span>
+          <input type="number" x-model="planCostLimit" min="0" step="0.01" placeholder="no cap" />
+        </label>
+
+        <div class="actions">
+          <button type="button" class="btn sm" :disabled="planLoading" @click="previewPlan()">Preview the plan</button>
+          <button type="button" class="btn sm primary"
+                  :disabled="!planCanLaunch() || planLoading" @click="launchPlan()">Launch this plan</button>
+          <span class="form-msg" x-show="!planCanLaunch() && planModels.length > 0" x-text="planWhyNot()"></span>
+        </div>
+      </div>
+
+      <div class="cmp-warn" x-show="planProblems().length">
+        <template x-for="p in planProblems()" :key="p.code + p.message">
+          <p>
+            <span x-text="p.message"></span>
+            <span class="dim" x-show="p.hint" x-text="p.hint"></span>
+          </p>
+        </template>
+      </div>
+
+      <div class="cmp-plan-summary" x-show="plan">
+        <div class="kpis">
+          <template x-for="row in planSummary()" :key="row.label">
+            <div class="kpi">
+              <div class="kpi-k" x-text="row.label"></div>
+              <div class="kpi-v" x-text="row.text"></div>
+            </div>
+          </template>
+        </div>
+        <table class="kv">
+          <thead>
+            <tr><th>Cell</th><th>Model</th><th>Seed</th><th>Spend</th></tr>
+          </thead>
+          <tbody>
+            <template x-for="(c, i) in planCells()" :key="'cell-' + i">
+              <tr>
+                <td x-text="i + 1"></td>
+                <td x-text="c.model"></td>
+                <td x-text="c.seed"></td>
+                <td x-text="c.costKnown ? 'measurable' : 'not measured'"></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="cmp-plan-queue" x-show="planQueue().status !== 'idle'">
+        <p>
+          <span x-text="planQueue().status === 'running' ? 'Comparison running: ' : 'Last comparison: '"></span>
+          <span x-text="planQueue().text"></span>
+          <span x-show="planQueue().current" x-text="' — now running ' + planQueue().current"></span>
+          <span x-show="planQueue().failed" x-text="' — ' + planQueue().failed + ' cell(s) failed'"></span>
+          <span x-show="planQueue().status === 'done'" x-text="' — every cell finished'"></span>
+        </p>
+      </div>
+    </section>
+
     <section class="panel" x-show="!loading && !error && hasRuns()">
       <div class="panel-head">
         <h2>Four axes per model <span class="dim">Result / Efficiency / Reliability / Growth</span></h2>

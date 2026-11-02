@@ -144,6 +144,82 @@ describe("WebServer REST", () => {
 		expect(r.body.saved).toMatchObject({ source: "catalog", providerId: "deepseek" });
 	});
 
+	describe("the comparison plan (Issue #48)", () => {
+		let planned: Record<string, unknown>[] = [];
+		let launched: Record<string, unknown>[] = [];
+
+		async function startWithPlanHooks(
+			over: Partial<ConstructorParameters<typeof WebServer>[0]> = {},
+		): Promise<void> {
+			planned = [];
+			launched = [];
+			await start({
+				plan: {
+					preview: (input) => {
+						planned.push(input);
+						return { plan: { runCount: 4, cells: [] }, problems: [] };
+					},
+					launch: (input) => {
+						launched.push(input);
+						return { plan: { runCount: 4, cells: [] }, problems: [], state: { status: "running" } };
+					},
+					state: () => ({ status: "idle", total: 0, completed: 0, failed: 0, cells: [] }),
+				},
+				...over,
+			});
+		}
+
+		it("POST /api/compare/plan forwards the plan request to the agent layer", async () => {
+			await startWithPlanHooks();
+			const r = await req("POST", "/api/compare/plan", {
+				models: ["a", "b"],
+				seeds: [1, 2],
+				gameDays: 300,
+			});
+			expect(r.status).toBe(200);
+			expect(planned).toHaveLength(1);
+			// The web layer forwards the request verbatim (it owns no rules).
+			expect(planned[0]).toEqual({ models: ["a", "b"], seeds: [1, 2], gameDays: 300 });
+		});
+
+		it("GET /api/compare/plan reports the queue's state", async () => {
+			await startWithPlanHooks();
+			const r = await req("GET", "/api/compare/plan");
+			expect(r.status).toBe(200);
+			expect(r.body.status).toBe("idle");
+		});
+
+		it("POST /api/compare/launch starts the plan", async () => {
+			await startWithPlanHooks();
+			const r = await req("POST", "/api/compare/launch", { models: ["a"], seeds: [1] });
+			expect(r.status).toBe(200);
+			expect(launched).toHaveLength(1);
+			expect(launched[0]).toEqual({ models: ["a"], seeds: [1] });
+		});
+
+		it("the plan endpoints answer 404 when the feature is not wired", async () => {
+			await start();
+			expect((await req("POST", "/api/compare/plan", {})).status).toBe(404);
+			expect((await req("POST", "/api/compare/launch", {})).status).toBe(404);
+			expect((await req("GET", "/api/compare/plan")).status).toBe(404);
+		});
+
+		it("a launch that is refused answers 409 (a conflict) and starts nothing", async () => {
+			await startWithPlanHooks({
+				plan: {
+					preview: () => ({ plan: null, problems: [] }),
+					launch: () => {
+						throw new Error("a run is already running");
+					},
+					state: () => ({ status: "idle" }),
+				},
+			});
+			const r = await req("POST", "/api/compare/launch", { models: ["a"], seeds: [1] });
+			expect(r.status).toBe(409);
+			expect(String(r.body.error)).toContain("already running");
+		});
+	});
+
 	describe("the run surface (B2)", () => {
 		/** What the run hooks saw (the knobs must arrive **unvalidated**). */
 		let started: { mode: string; knobs: Record<string, unknown> | undefined }[] = [];

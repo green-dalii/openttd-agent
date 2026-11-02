@@ -43,7 +43,82 @@ interface CompareView {
 		max: number;
 		bars: { model: string; label: string; text: string; value: number | null; known: boolean; width: number }[];
 	}[];
+	planSummary(plan: unknown): { label: string; text: string; known: boolean }[];
+	planCells(plan: unknown): { model: string; seed: number; costKnown: boolean }[];
+	planProblems(payload: unknown): { code: string; message: string; hint: string }[];
+	planQueueState(state: unknown): {
+		status: string;
+		text: string;
+		failed: number;
+		current: string;
+		cells: { model: string; seed: number; status: string; error: string }[];
+	};
 }
+
+describe("the comparison plan (Issue #48)", () => {
+	it("the summary says how many runs, which caps, and whether the spend is measurable", () => {
+		const rows = load().planSummary({
+			runCount: 4,
+			gameDays: 300,
+			tokenLimit: null,
+			costLimit: null,
+			costKnown: true,
+			backend: "agent",
+			thinkingLevel: "off",
+			toolBudget: 12,
+			memoryArm: "treatment",
+		});
+		const byLabel = Object.fromEntries(rows.map((r) => [r.label, r.text]));
+		expect(byLabel["Runs"]).toBe("4");
+		expect(byLabel["Game days"]).toBe("300");
+		expect(byLabel["Token cap"]).toBe("no cap");
+		expect(byLabel["Cost cap"]).toBe("no cap");
+		expect(byLabel["Cost"]).toBe("measurable");
+	});
+
+	it("an unmeasurable spend reads 'not measured', never $0", () => {
+		const rows = load().planSummary({ runCount: 2, costKnown: false, tokenLimit: null, costLimit: null });
+		const cost = rows.find((r) => r.label === "Cost");
+		expect(cost?.text).toBe("not measured");
+		expect(cost?.known).toBe(false);
+	});
+
+	it("the cells list every run the plan starts", () => {
+		const cells = load().planCells({
+			cells: [
+				{ model: "a", seed: 1, facts: { costKnown: true } },
+				{ model: "b", seed: 2, facts: { costKnown: false } },
+			],
+		});
+		expect(cells).toEqual([
+			{ model: "a", seed: 1, costKnown: true },
+			{ model: "b", seed: 2, costKnown: false },
+		]);
+	});
+
+	it("the problems keep the server's code, message and hint", () => {
+		const problems = load().planProblems({
+			problems: [{ code: "unpriced_with_cost_cap", message: "no price table", hint: "drop the cap" }],
+		});
+		expect(problems[0]?.code).toBe("unpriced_with_cost_cap");
+		expect(problems[0]?.hint).toBe("drop the cap");
+	});
+
+	it("the queue state says which cell runs and how many failed", () => {
+		const state = load().planQueueState({
+			status: "running",
+			completed: 1,
+			total: 3,
+			failed: 1,
+			current: { model: "b", seed: 2 },
+			cells: [{ model: "a", seed: 1, status: "done", error: "" }],
+		});
+		expect(state.text).toBe("1/3 cells");
+		expect(state.failed).toBe(1);
+		expect(state.current).toBe("b (seed 2)");
+		expect(state.cells[0]?.status).toBe("done");
+	});
+});
 
 function load(): CompareView {
 	const sandbox: Record<string, unknown> = { console, JSON, Object, Number, Math, Intl };

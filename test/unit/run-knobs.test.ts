@@ -17,6 +17,7 @@ import {
 
 const DEFAULTS: RunKnobDefaults = {
 	seed: 4242,
+	model: null,
 	gameDays: null,
 	scenario: "freeform",
 	memoryArm: "treatment",
@@ -36,6 +37,7 @@ describe("resolveRunKnobs", () => {
 		const knobs = resolveRunKnobs({}, DEFAULTS, ["agent"]);
 		expect(knobs).toEqual({
 			seed: 4242,
+			model: null,
 			gameDays: null,
 			scenario: "freeform",
 			memoryArm: "treatment",
@@ -51,6 +53,7 @@ describe("resolveRunKnobs", () => {
 		const knobs = resolveRunKnobs(
 			{
 				seed: 7,
+		model: null,
 				gameDays: 180,
 				scenario: "prebuilt",
 				memoryArm: "control",

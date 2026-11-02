@@ -130,6 +130,26 @@ export interface RunHooks {
 	stop: () => Promise<void> | void;
 	pause: () => Promise<void> | void;
 	resume: () => Promise<void> | void;
+	/**
+	 * The comparison plan: what a matrix of runs would do (Issue #48).
+	 *
+	 * Absent => the endpoints answer 404 (a feature that is not wired is not
+	 * silently "nothing to do").
+	 */
+	plan?: PlanHooks;
+}
+
+/**
+ * The plan hooks (Issue #48): a comparison can be planned and launched from
+ * the Compare page.
+ */
+export interface PlanHooks {
+	/** The plan: how many runs, which models and seeds, the caps, the cost. */
+	preview: (input: Record<string, unknown>) => Promise<unknown> | unknown;
+	/** Launch the plan (one run per cell, in order). */
+	launch: (input: Record<string, unknown>) => Promise<unknown> | unknown;
+	/** The queue's state (which cell is running, what failed). */
+	state: () => unknown;
 }
 
 /**
@@ -180,6 +200,8 @@ export interface WebServerOptions {
 	catalog?: CatalogHooks;
 	/** Past sessions. Absent => 404. */
 	sessions?: SessionHooks;
+	/** The comparison plan (Issue #48). Absent => the plan endpoints 404. */
+	plan?: PlanHooks;
 	/** Cross-game memory (SPEC §6.1 view 4). Absent => /api/evolution 404s. */
 	evolution?: EvolutionHooks;
 	/** Start/stop/pause/resume the game run. Absent => 404. */
@@ -263,6 +285,7 @@ export class WebServer {
 	private wss: WebSocketServer;
 	private getSnapshot: () => unknown;
 	private runHooks?: RunHooks;
+	private planHooks?: PlanHooks;
 	private version?: string;
 	private sessionHooks?: SessionHooks;
 	private evolutionHooks?: EvolutionHooks;
@@ -280,6 +303,7 @@ export class WebServer {
 		this.getSnapshot = opts.getSnapshot ?? (() => ({}));
 		this.onFirstClient = opts.onFirstClient;
 		this.runHooks = opts.run;
+		this.planHooks = opts.plan;
 		this.version = opts.version;
 		this.sessionHooks = opts.sessions;
 		this.evolutionHooks = opts.evolution;
@@ -755,6 +779,50 @@ export class WebServer {
 					strategies: this.evolutionHooks.strategies(),
 					arms: this.evolutionHooks.arms ? this.evolutionHooks.arms() : null,
 				});
+			}
+
+			// /api/compare/plan, /api/compare/launch — the comparison plan
+			// (Issue #48). The plan is computed **server-side** (the page does
+			// not estimate a run) and the launch runs the cells one by one.
+			if (segments[1] === "compare" && segments[2] === "plan") {
+				if (!this.planHooks) return json(404, { error: "plan disabled" });
+				if (req.method === "GET") return json(200, this.planHooks.state());
+				if (req.method !== "POST") return json(405, { error: "method not allowed" });
+				const raw = await readBody(req);
+				let body: Record<string, unknown> = {};
+				try {
+					body = raw.length ? (JSON.parse(raw) as Record<string, unknown>) : {};
+				} catch {
+					return json(400, { error: "invalid JSON body" });
+				}
+				try {
+					return json(200, await this.planHooks.preview(body));
+				} catch (e) {
+					const problems = (e as { problems?: unknown }).problems;
+					const message = e instanceof Error ? e.message : String(e);
+					return json(400, { error: message, problems: Array.isArray(problems) ? problems : [] });
+				}
+			}
+			if (segments[1] === "compare" && segments[2] === "launch") {
+				if (!this.planHooks) return json(404, { error: "plan disabled" });
+				if (req.method !== "POST") return json(405, { error: "method not allowed" });
+				const raw = await readBody(req);
+				let body: Record<string, unknown> = {};
+				try {
+					body = raw.length ? (JSON.parse(raw) as Record<string, unknown>) : {};
+				} catch {
+					return json(400, { error: "invalid JSON body" });
+				}
+				try {
+					return json(200, await this.planHooks.launch(body));
+				} catch (e) {
+					const problems = (e as { problems?: unknown }).problems;
+					const message = e instanceof Error ? e.message : String(e);
+					// 400: the plan itself is illegal (nothing started).
+					// 409: something is already running (a conflict, not a bad request).
+					if (Array.isArray(problems)) return json(400, { error: message, problems });
+					return json(409, { error: message });
+				}
 			}
 
 			// GET /api/compare — the Compare page's payload (B4). Read-only: it
