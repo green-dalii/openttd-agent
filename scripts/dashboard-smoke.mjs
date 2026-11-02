@@ -487,6 +487,43 @@ for (const path of PAGE_URLS) {
   for (const n of noisy) pageProblems.push(`${path}: 控制台 ${n.level}: ${n.text.slice(0, 160)}`);
 }
 console.log("PAGES:", JSON.stringify(pageViews, null, 2));
+
+/* ======================================================================
+ * 比较计划（Issue #48）：Compare 页上的计划区必须**存在**且是**诚实的空态**
+ * ----------------------------------------------------------------------
+ * 这一页的验收不看"有没有数据"（自带的 dashboard 没有局），看的是：
+ *   ① 计划区在页面上（有它，"发起比较"才有入口）；
+ *   ② 没有模型时，它说的是**下一步**（"至少选一个模型"），不是红色报错；
+ *   ③ "Preview the plan" 按钮在（且在没有模型时是禁用的）。
+ * ====================================================================== */
+await send("Page.navigate", { url: new global.URL("/compare", URL).toString() });
+await sleep(3000);
+const planPanel = await send("Runtime.evaluate", {
+  expression: `(() => {
+    const d = window.Alpine && document.querySelector('[x-data]') ? window.Alpine.$data(document.querySelector('[x-data]')) : null;
+    const panel = document.querySelector('.cmp-plan');
+    const box = (el) => el ? Math.round(el.getBoundingClientRect().height) : 0;
+    const previewBtn = [...document.querySelectorAll('.cmp-plan button')].find(b => /Preview the plan/.test(b.textContent));
+    const notice = panel ? (panel.innerText || '') : '';
+    return {
+      panelVisible: box(panel) > 0,
+      previewButton: !!previewBtn,
+      previewDisabled: previewBtn ? previewBtn.disabled : null,
+      whyNot: d && typeof d.planWhyNot === 'function' ? d.planWhyNot() : null,
+      saysNextStep: /at least one|pick at least/i.test(notice),
+      looksLikeError: /unknown_provider|not found|error/i.test(notice),
+    };
+  })()`,
+  returnByValue: true,
+});
+const planView = planPanel.result?.value || {};
+console.log("PLAN PANEL:", JSON.stringify(planView, null, 2));
+if (!planView.panelVisible) pageProblems.push("Compare 页没有比较计划区（发起比较没有入口）");
+if (!planView.previewButton) pageProblems.push("Compare 页的计划区没有 'Preview the plan' 按钮");
+if (planView.whyNot !== "pick at least one model") {
+  pageProblems.push(`计划区的空态文案是 "${planView.whyNot}"（应说明下一步：至少选一个模型）`);
+}
+if (planView.looksLikeError) pageProblems.push("计划区的空态看起来像报错（应是指下一步，不是红灯）");
 if (pageProblems.length) {
   console.error("FAIL（页面导航）:");
   for (const p of pageProblems) console.error("  -", p);

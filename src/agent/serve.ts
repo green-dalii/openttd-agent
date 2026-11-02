@@ -35,9 +35,20 @@ import {
 	type RunKnobs,
 } from "./run-knobs.js";
 import { buildNextRunPreview, type NextRunPreview } from "./run-preview.js";
+import {
+	assembleComparePlan,
+	parseComparePlan,
+	planCells,
+	planKnobs,
+	type ComparePlan,
+	type ComparePlanInput,
+	type ComparePlanModelFacts,
+} from "./compare-plan.js";
+import { PlanQueue, type PlanQueueState } from "./plan-queue.js";
 import { harnessEnabled } from "./harness-runtime.js";
 import { assertCostCapEnforceable, costCapProblem } from "./run-budget.js";
-import type { Problem } from "./problems.js";
+import type { ResolvedSelection } from "./selection.js";
+import { ProblemError, type Problem } from "./problems.js";
 
 /**
  * "No model is selected yet" — a state, not a validation failure.
@@ -117,6 +128,8 @@ export function allowedBackends(env: Record<string, string | undefined> = proces
 export function runKnobDefaults(cfg: Config, opts: ServeOptions): RunKnobDefaults {
 	return {
 		seed: cfg.seed,
+		// The process's current model; a plan cell may name another one.
+		model: cfg.llm.model || null,
 		gameDays: opts.runOptions?.gameDays ?? null,
 		scenario: opts.runOptions?.scenario ?? "freeform",
 		memoryArm: opts.runOptions?.injectMemory === false ? "control" : "treatment",
@@ -199,11 +212,18 @@ export async function runServe(cfg: Config, opts: ServeOptions = {}): Promise<Se
 	 */
 	async function resolveKnobs(raw: RunKnobInput | undefined): Promise<RunKnobs> {
 		const knobs = resolveRunKnobs(raw ?? {}, knobDefaults(), backends());
+		// A named model must exist **before** anything starts: the plan promises
+		// "this model will run", so an unknown model is refused here (Issue #48).
+		// The rule is the resolver's (selection.ts) — the same one the runner uses.
+		if (knobs.model) {
+			const resolved = await llmApi.resolveModel(knobs.model);
+			if (!resolved.valid) throw new ProblemError(resolved.problems);
+		}
 		// A cost cap on a model without a price table can never fire, so it would
 		// be a lie about the budget. Refuse it here — before the game starts —
 		// with the same rule the runner uses (run-budget.ts).
 		if (knobs.costLimit !== null) {
-			const resolved = await llmApi.resolveCurrent();
+			const resolved = await resolveEffective(knobs);
 			if (resolved.valid) {
 				assertCostCapEnforceable(
 					{ tokens: knobs.tokenLimit, cost: knobs.costLimit },
@@ -212,6 +232,17 @@ export async function runServe(cfg: Config, opts: ServeOptions = {}): Promise<Se
 			}
 		}
 		return knobs;
+	}
+
+	/**
+	 * The selection facts of the model a run would **actually** use.
+	 *
+	 * A plan cell may name its own model (Issue #48); the facts must come from
+	 * the same resolver for that model, or the plan could promise a model the
+	 * run cannot serve.
+	 */
+	async function resolveEffective(knobs: RunKnobs): Promise<ResolvedSelection> {
+		return knobs.model ? llmApi.resolveModel(knobs.model) : llmApi.resolveCurrent();
 	}
 
 	/**
@@ -229,7 +260,7 @@ export async function runServe(cfg: Config, opts: ServeOptions = {}): Promise<Se
 	}> {
 		const parsed = previewRunKnobs(raw ?? {}, knobDefaults(), backends());
 		if (!parsed.knobs) return { preview: null, problems: parsed.problems };
-		const resolved = await llmApi.resolveCurrent();
+		const resolved = await resolveEffective(parsed.knobs);
 		if (!resolved.valid) {
 			// 空选择 = "还没配"，不是"配错了"（2026-11-01 审计 A13）：
 			// 全新 data dir 打开页面时，NEXT RUN 立刻红着报 unknown_provider，
@@ -261,6 +292,126 @@ export async function runServe(cfg: Config, opts: ServeOptions = {}): Promise<Se
 	}
 
 	/**
+	 * The comparison plan: what a matrix of runs would do (Issue #48).
+	 *
+	 * Everything is **resolved server-side**: the models are resolved by the
+	 * same resolver the runner uses (so a plan cannot promise a model the run
+	 * cannot serve), the caps are parsed by the same knob rules, and the cost
+	 * line says "measurable" only when **every** cell's model is priced.
+	 */
+	async function buildPlan(raw: ComparePlanInput): Promise<{
+		plan: ComparePlan | null;
+		problems: Problem[];
+	}> {
+		const parsed = parseComparePlan(raw);
+		const knobs = planKnobs(raw, knobDefaults(), backends());
+		const problems = [...parsed.problems, ...knobs.problems];
+		if (!knobs.knobs || parsed.models.length === 0 || parsed.seeds.length === 0) {
+			return { plan: null, problems };
+		}
+		// Resolve each model once (the catalog is shared, so this is cheap).
+		const factsByModel = new Map<string, ComparePlanModelFacts>();
+		for (const model of parsed.models) {
+			const resolved = await llmApi.resolveModel(model);
+			if (!resolved.valid) {
+				problems.push(...resolved.problems);
+				continue;
+			}
+			factsByModel.set(model, {
+				providerId: resolved.facts.providerId,
+				model: resolved.facts.model,
+				api: resolved.facts.api,
+				contextWindow: resolved.facts.contextWindow,
+				maxTokens: resolved.facts.maxTokens,
+				costKnown: resolved.facts.costKnown,
+			});
+		}
+		const plan = assembleComparePlan({
+			cells: planCells(parsed.models, parsed.seeds),
+			knobs: knobs.knobs,
+			factsByModel,
+			problems,
+		});
+		return { plan, problems };
+	}
+
+	/**
+	 * The plan preview (what the Compare page shows before launching).
+	 *
+	 * A plan with problems is still returned — the page shows what is wrong and
+	 * what to do — but it cannot be launched.
+	 */
+	async function previewPlan(raw: ComparePlanInput): Promise<{
+		plan: ComparePlan | null;
+		problems: Problem[];
+	}> {
+		return buildPlan(raw);
+	}
+
+	/**
+	 * Launch a comparison plan: one run per cell, in order.
+	 *
+	 * The refusals happen **before** anything starts:
+	 *   - the plan has problems (illegal knob, unknown model);
+	 *   - a cost cap is set while a cell's model has no price table (the cap
+	 *     could never fire — the same rule the single run uses);
+	 *   - a run or another plan is already in flight (one game port, one run).
+	 */
+	async function launchPlan(raw: ComparePlanInput): Promise<{
+		plan: ComparePlan | null;
+		problems: Problem[];
+		state: PlanQueueState;
+	}> {
+		const built = await buildPlan(raw);
+		if (!built.plan || built.problems.length > 0) {
+			return { plan: built.plan, problems: built.problems, state: planQueue.getState() };
+		}
+		const plan = built.plan;
+		// The same refusal a single run makes (run-budget.ts): a cost cap on an
+		// unpriced model is a budget that can never fire.
+		if (plan.costLimit !== null && !plan.costKnown) {
+			return {
+				plan,
+				problems: [
+					costCapProblem({ tokens: plan.tokenLimit, cost: plan.costLimit }, false) ?? {
+						code: "unpriced_with_cost_cap",
+						message: "a cost cap is set but a model in the plan has no price table",
+						hint: "drop the cost cap, or use a model with a price table",
+					},
+				],
+				state: planQueue.getState(),
+			};
+		}
+		if (supervisor.state().state !== "idle") {
+			throw new Error("a run is already running — stop it before launching a comparison");
+		}
+		if (planQueue.isBusy()) {
+			throw new Error("a comparison is already running");
+		}
+		// The knobs every cell shares (the plan already merged the process
+		// defaults, so passing null for "no cap" means exactly that).
+		const shared: RunKnobInput = {
+			gameDays: plan.gameDays,
+			scenario: plan.scenario,
+			memoryArm: plan.memoryArm,
+			thinkingLevel: plan.thinkingLevel,
+			toolBudget: plan.toolBudget,
+			tokenLimit: plan.tokenLimit,
+			costLimit: plan.costLimit,
+			backend: plan.backend,
+		};
+		planQueue.start(
+			plan.cells.map((c) => ({ model: c.model, seed: c.seed })),
+			async (cell) => {
+				// One cell = one complete run; the next cell waits for it.
+				await supervisor.start("agent", { ...shared, seed: cell.seed, model: cell.model });
+				await supervisor.waitForIdle();
+			},
+		);
+		return { plan, problems: [], state: planQueue.getState() };
+	}
+
+	/**
 	 * The knobs of one run, applied to the config and the run options.
 	 *
 	 * Why the config is **cloned** instead of mutated: `cfg` is the process's
@@ -274,6 +425,12 @@ export async function runServe(cfg: Config, opts: ServeOptions = {}): Promise<Se
 			seed: knobs.seed,
 			llm: {
 				...base.llm,
+				// Which model this run uses. A comparison cell names its own
+				// model (Issue #48); without one the process's selection stands.
+				// The rest of the model's facts (api, context window, price table)
+				// are resolved from the catalog at run time, so the model id is
+				// enough here.
+				model: knobs.model ?? base.llm.model,
 				// The scaffold knobs (thinking level, tool budget) and the spend
 				// caps travel in the config because that is where the runner
 				// reads them from (one source, no second copy).
@@ -364,6 +521,13 @@ export async function runServe(cfg: Config, opts: ServeOptions = {}): Promise<Se
 		},
 	});
 
+	// The comparison queue (Issue #48): the cells run one after another, in
+	// this process, on the same game port — so a cell waits for the previous
+	// one to finish instead of colliding with it.
+	const planQueue = new PlanQueue({
+		onChange: (state) => console.log(`[serve] plan: ${state.completed}/${state.total} cells, ${state.failed} failed`),
+	});
+
 	web = new WebServer({
 		host: "127.0.0.1",
 		port: opts.webPort ?? 0,
@@ -382,6 +546,11 @@ export async function runServe(cfg: Config, opts: ServeOptions = {}): Promise<Se
 		// One construction for the evolution hooks (the runner's attach() replaces
 		// them — see MEMORY D82).
 		evolution: evolutionHooks(cfg.dataDir),
+		plan: {
+			preview: (input) => previewPlan(input as ComparePlanInput),
+			launch: (input) => launchPlan(input as ComparePlanInput),
+			state: () => planQueue.getState(),
+		},
 		run: {
 			status: () => supervisor.state(),
 			// The raw request record is converted to the typed input **once**, at

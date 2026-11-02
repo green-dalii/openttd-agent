@@ -71,32 +71,14 @@ src/web/public/
 
 ## 2. 类型（后端 TS 与前端 JS 必须一致）
 
-### 2.1 Usage（token 计量；全部为 number）
+**权威在代码里**：`src/agent/telemetry.ts`（`UsageView` / `StepRecord` / `TelemetrySnapshot`）、
+`src/types.ts`（`GameEvent` / `SessionMeta`）。下面只写**页面依赖的口径**，不抄第二份定义。
 
-```ts
-interface UsageView {
-  input: number;
-  output: number;
-  cacheRead: number;
-  cacheWrite: number;
-  reasoning: number;      // 缺失时填 0
-  totalTokens: number;
-  costTotal: number;      // Usage.cost.total
-}
-```
-
-### 2.2 StepRecord（一步 = 一条 assistant 消息 或 一次工具执行）
-
-```ts
-interface StepRecord {
-  id: string;             // 会话内单调: "s1", "s2", ...
-  ts: number;             // epoch ms
-  turn: number;           // 1-based（agent turn）
-  kind: "message" | "tool";
-  // kind === "message": text? thinking? model? provider? stopReason? usage?
-  // kind === "tool":    tool? args? ok? summary? data? durationMs?
-}
-```
+- `UsageView`：token 计量**全部为 number**（`input`/`output`/`cacheRead`/`cacheWrite`/
+  `reasoning`/`totalTokens`/`costTotal`）；缺失的 reasoning 填 0。
+- `StepRecord`：一步 = 一条 assistant 消息 **或** 一次工具执行（`kind: "message" | "tool"`），
+  `id` 会话内单调（`"s1"`, `"s2"`, …）、`turn` 从 1 开始；message 带 text/thinking/usage，
+  tool 带 tool/args/ok/summary/durationMs。
 
 ### 2.3 TelemetrySnapshot
 
@@ -265,9 +247,8 @@ GET /api/llm/catalog/:providerId/refresh
 - `problems[]` 是**结构化**的失败原因（`{code, message, hint}`）：`message` 带上试过的 URL 与
   状态（`<url> → HTTP 401`），`hint` 是服务端给的**下一步**。失败时 `models` 保留上次已知列表
   （端点说不出话 ≠ 模型消失了）。**状态码说明是谁的错**（400 = 缺凭据，502 = 上游失败）。
-- 该端点**永不抛错**；"没有凭据所以跳过刷新"也走 `problems[]`（pi-ai 会静默跳过）。
-- 刷新结果由 pi-ai 的 `ModelsStore` 持久化到 `<dataDir>/models-cache.json`，agent 进程启动时
-  能恢复同一份覆盖层。
+- 该端点**永不抛错**；刷新结果由 pi-ai 的 `ModelsStore` 持久化到 `<dataDir>/models-cache.json`，
+  agent 进程启动时能恢复同一份覆盖层。
 
 DELETE /api/llm/credentials/:providerId
 → 200 { ok: true }
@@ -332,29 +313,14 @@ GET /api/sessions/groups?by=model|seed|backend
 
 ## 5. UI 分类与 Tag 规则（前端唯一实现）
 
-`categoryOf(kind)`：
+`categoryOf(kind)`（**唯一实现**：`assets/js/charts.js`；分类只有 date / economy / company /
+vehicle / station / town / industry / script / protocol / other 十类，每个 Tag 有稳定配色
+`TAG_COLORS[category]`）——**本文档不再抄一份映射**，抄了就会漂移。
 
-| category | kinds |
-|---|---|
-| `date` | `date` |
-| `economy` | `company_economy` `company_stats` |
-| `company` | `company_new` `company_info` `company_remove` |
-| `vehicle` | `vehicle_new` `vehicle_info` `vehicle_update` |
-| `station` | `station_new` `station_info` |
-| `town` | `town_new` `town_info` |
-| `industry` | `industry_new` `industry_info` |
-| `script` | `gamescript` |
-| `protocol` | `welcome` `protocol` `error` `rcon_end` `console` |
-| `other` | 其它 |
-
-每个 Tag 有稳定配色（前端 `TAG_COLORS[category]`）。
-
-**关键字段摘要**（`briefOf(ev)` → 一行人类可读文本，替代裸 JSON）：
-- `economy` → `£297.8k cash · income £1.2k · loan £100k`
-- `date` → `1950-03-01`
-- `company_info` → `#0 "EX work" · AI · president …`
-- `gamescript` → `cmd=build_bus_route job=100` （含 `kind:ack/state/...`）
-- 其余 → 紧凑键值对（最多 6 个字段），**不是** 140 字符截断的 JSON。
+**关键字段摘要**（`briefOf(ev)` → 一行人类可读文本，替代裸 JSON）：`economy` → `£297.8k cash ·
+income £1.2k · loan £100k`；`date` → `1950-03-01`；`company_info` → `#0 "EX work" · AI · president …`；
+`gamescript` → `cmd=build_bus_route job=100`（含 `kind:ack/state/...`）；其余 → 紧凑键值对（最多
+6 个字段），**不是** 140 字符截断的 JSON。
 
 **保留原始形态**：每条事件提供「展开」按钮显示完整 JSON（满足"保留当前原始 log 形式"）。
 
@@ -559,6 +525,27 @@ GET /api/compare?models=A,B&seed=7&backend=harness
 **只读**：端点不写文件、不发起运行，只从**已有的度量行**算出。四轴来自 `buildScorecard`，
 配对判定来自 `pairedComparison`，排除原因来自 `metricExclusion`——**页面不重算、也不下判断**
 （含 `not determinable` 这类结论）。`costPerRun` 在**无价目表**的模型上是"没测到"，不是 `$0`。
+
+### 3.8b 比较计划（v0.6.x，Issue #48）
+
+```
+POST /api/compare/plan      body { models: [A,B], seeds: [7,8], gameDays?, tokenLimit?, costLimit? }
+→ 200 { plan: { cells: [{ model, seed, facts: { providerId, model, api, contextWindow,
+                                               maxTokens, costKnown } }],
+              runCount, gameDays, tokenLimit, costLimit, thinkingLevel, toolBudget,
+              memoryArm, scenario, backend, scaffoldHash, costKnown,
+              problems: [] },
+        problems: [] }
+POST /api/compare/launch    body 同上
+→ 200 { plan, problems: [], state: { status, total, completed, failed, current, cells } }
+→ 400 { error, problems }      // 计划非法（旋钮/未知模型/无价目表却设了费用上限）
+→ 409 { error }                // 已有运行或已有比较在跑（一局都没启动）
+GET  /api/compare/plan        → 200 { status, total, completed, failed, current, cells }
+```
+
+**计划只估"运行"，不估结果**：几局、封顶、花费**能不能测**。字段名与 manifest 同名同义 ⇒
+计划与跑完的 manifest 可逐字段比。`costKnown` 只有在**每格**的模型都有价目表时才是 true，
+否则是"没测到"。格子**顺序**跑（一个进程只能跑一局）：一格失败被记下、后面的格子继续。
 
 ### 3.9 运行控制面（v0.6.x，B2）
 

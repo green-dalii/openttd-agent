@@ -18,12 +18,13 @@
   navigates to all four pages, not just the home page.
 
 ### Added
+- **A comparison can start from the comparison.** The Compare page could only look at runs that already existed: picking the models, the worlds and the caps and then *starting that plan* was impossible. The plan is now computed **server-side** (the page estimates nothing): how many runs it would start, which caps apply, whether the spend is measurable, which model each cell uses - with the same field names the manifest uses, so plan and finished run compare field by field. Launching runs the cells **one after another** (one process, one game port); a failed cell is recorded and the rest still run. The refusals happen before anything starts: a cost cap on a model without a price table, an unknown model, or a plan that collides with a running game.
+
 - **Corrected: the deliveries cannot be split into cargo and passengers.** An earlier entry here claimed they could; the OpenTTD 15.3 source says otherwise: the script API has **no cargo monitor** (`GSCargoMonitor.*` does not fail - it returns null, so a split reads as "always empty"), and the admin's counter is the **sum** over the per-cargo-type array. The score keeps the one number it can measure, the split fields report "not measured", and the API is registered in the squirrel-api guard.
 
 - **The first real benchmark matrix is done.** Two models x three seeds x 300 game days, same scaffold and horizon, every cell reaching it. The harness's verdict on the primary axis is **"not determinable"** (paired mean difference -0.270 delivered per game day, 95% CI [-1.077, 0.545] includes zero: the variance across seeds dwarfs the difference). The secondary axes do separate them, in opposite directions: **M3.1-Flash needs ~40% fewer tokens per delivered unit** (1635 vs 1033 per million tokens), **M2.5 makes ~4.5x fewer failed tool calls** (2.9% vs 13.1%). Full numbers in issue #1.
 
-- **The configuration page is now called what it does.** The page that used to live at `/providers`
-  answers "how is this run configured?", so it is now at `/configure`; the old URL redirects (and the older `/llm` alias still resolves).
+- **The configuration page is now called what it does.** The page that used to live at `/providers` answers "how is this run configured?", so it is now at `/configure`; the old URL redirects (and the older `/llm` alias still resolves).
 - **The score now says what it actually counts.** The delivery counter the harness reads is
   OpenTTD's *per-cargo-type* array summed up - and OpenTTD keeps passengers in that same array, so
   the number has always counted **cargo and passengers**, not tonnes of freight. The scorecard, the benchmark report, the History page and the model-facing system prompt all said "cargo", which was untrue - and the prompt told the model it was judged on freight alone. The wording now comes from one place on the server (`DELIVERED_MEASURE`), the page copies it, and the scaffold fingerprint moved (`3da8a64e1fbe818e` -> `74f2e64d1e930df3`) because the prompt changed.
@@ -33,8 +34,8 @@
 - **The model can finally see the cargo.** The Bridge GS reported the industries, the per-cargo totals, the road engines and the town names all along, and the agent side parsed them - but the model-visible projection dropped them, so the agent only saw `date`, the companies and `towns[{id,pop,x,y}]`. A real model noticed and built a **passenger** line because it could not see a single crate. `observe()` and every decision context now carry the cargo world, the engine catalogue and the town names; missing readings stay `null` (never 0) and a town without a name stays nameless. The observation surface changed, so the fingerprint moved with it (`7956ab6d8c86fa60` -> `3da8a64e1fbe818e`).
 - **A run can now explain itself.** The run's detail shows the **full manifest**: the same world (seed + game version), the same scaffold (scaffold / payload-shape hashes), and whether the run was capped (token / cost limit). When the provider answered with a different model than the one requested - a substituting gateway - that is flagged instead of hidden. Hashes are shown short, copied in full.
 
-- **The runs can be grouped** by model, seed or backend. The keys come from the ledger, because
-  "which model" has two sources - requested and served - and a guessing page would disagree.
+
+- **The runs can be grouped** by model, seed or backend. The keys come from the ledger, because "which model" has two sources - requested and served - and a guessing page would disagree.
 
 - **The navigation follows the four questions now**: Run / Compare / History / Configure. The "Evolution" page was renamed **Memory** and moved into History, because it manages what the agent *remembers*, not "evolution"; `/evolution` redirects to `/sessions#memory`.
 

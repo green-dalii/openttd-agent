@@ -55,6 +55,15 @@ export interface LlmApi {
 	 * the runner cannot disagree (S2).
 	 */
 	resolveCurrent: () => Promise<ResolvedSelection>;
+	/**
+	 * Resolve the facts of **one named model** of the current provider.
+	 *
+	 * Why: a comparison runs several models in one process (Issue #48), and each
+	 * cell must be resolved by the **same** resolver the runner uses — otherwise
+	 * the plan could promise a model the run cannot serve ("unknown model" at
+	 * launch time, after the user waited for the plan).
+	 */
+	resolveModel: (model: string) => Promise<ResolvedSelection>;
 }
 
 /** Credential file path for a data dir (mirrors FileCredentialStore's default). */
@@ -155,6 +164,17 @@ export function createLlmApi(deps: LlmApiDeps): LlmApi {
 	 */
 	async function resolveCurrent(): Promise<ResolvedSelection> {
 		return resolver.resolve(applyLlmSettingsFile(deps.cfg).llm);
+	}
+
+	/**
+	 * Resolve one named model of the current provider.
+	 *
+	 * Same merge as `resolveCurrent` (so a save that just happened counts),
+	 * only the model differs.
+	 */
+	async function resolveModel(model: string): Promise<ResolvedSelection> {
+		const llm = applyLlmSettingsFile(deps.cfg).llm;
+		return resolver.resolve({ ...llm, model });
 	}
 
 	/**
@@ -275,6 +295,7 @@ export function createLlmApi(deps: LlmApiDeps): LlmApi {
 	return {
 		llm: { get: currentView, save },
 		resolveCurrent,
+		resolveModel,
 		catalog: {
 			generatedAt: () => catalogGeneratedAt(),
 			providers: () => listCatalogProvidersWithStatus(deps.dataDir),

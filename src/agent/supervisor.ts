@@ -70,6 +70,8 @@ export class RunSupervisor {
 		error: null,
 	};
 	private hooks: RunHooks = {};
+	/** Waiters for "the run has finished" (the plan queue's cells). */
+	private idleWaiters: Array<() => void> = [];
 
 	constructor(opts: SupervisorOptions) {
 		this.opts = opts;
@@ -140,6 +142,18 @@ export class RunSupervisor {
 		this.set({ state: "running", pausedBy: null, pausedAt: null });
 	}
 
+	/**
+	 * Wait until no run is active (the current run has finished).
+	 *
+	 * Why: a comparison runs several cells **in one process** (Issue #48), and
+	 * only one run can be alive at a time — so the plan queue must be able to
+	 * wait for the current cell to finish before starting the next one.
+	 */
+	waitForIdle(): Promise<void> {
+		if (this.cur.state === "idle") return Promise.resolve();
+		return new Promise((resolve) => this.idleWaiters.push(resolve));
+	}
+
 	/** The run reports its session id once known (for the dashboard link). */
 	setSessionId(id: string | null): void {
 		this.set({ sessionId: id });
@@ -154,5 +168,11 @@ export class RunSupervisor {
 	private set(patch: Partial<RunStatus>): void {
 		this.cur = { ...this.cur, ...patch };
 		this.opts.onStateChange?.(this.state());
+		// A run that ended releases everyone waiting for the next cell.
+		if (this.cur.state === "idle" && this.idleWaiters.length > 0) {
+			const waiters = this.idleWaiters;
+			this.idleWaiters = [];
+			for (const w of waiters) w();
+		}
 	}
 }
