@@ -9,7 +9,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { WebSocket } from "ws";
-import { PAGES, PAGE_ALIASES, PAGE_REDIRECTS, PUBLIC_DIR, WebServer } from "../../src/web/server.js";
+import { PAGE_ALIASES, PAGE_REDIRECTS, PUBLIC_DIR, WebServer, pageRoutes } from "../../src/web/server.js";
 import { createTools } from "../../src/agent/tools/index.js";
 import { sessionHooks } from "../../src/agent/session-store.js";
 import type { AgentDeps } from "../../src/agent/types.js";
@@ -524,10 +524,10 @@ describe("WebServer REST", () => {
 		expect((await req("GET", "/api/compare")).status).toBe(404);
 	});
 
-	it("serves every page route declared in the PAGES table", async () => {
+	it("serves every page route derived from the files in public/pages", async () => {
 		await start();
 		// Guards the URL->file mapping so a page can never 404 silently.
-		for (const [path, file] of Object.entries(PAGES)) {
+		for (const [path, file] of Object.entries(pageRoutes())) {
 			const res = await new Promise<number>((res, rej) => {
 				http
 					.get(`http://127.0.0.1:${port}${path}`, (r) => {
@@ -579,9 +579,9 @@ describe("WebServer REST", () => {
 			const refs = [...html.matchAll(/(?:href|src)="\/([^"]+)"/g)].map((m) => m[1]!);
 			expect(refs.length, page).toBeGreaterThan(0);
 			for (const ref of refs) {
-				// In-app links point at a ROUTE, not a file (`/providers` is served by
-				// PAGES), so only asset refs must exist on disk.
-				if (Object.keys(PAGES).includes(`/${ref}`)) continue;
+				// In-app links point at a ROUTE, not a file (the routes are derived
+				// from the page files), so only asset refs must exist on disk.
+				if (Object.keys(pageRoutes()).includes(`/${ref}`)) continue;
 				expect(existsSync(join(PUBLIC_DIR, ref)), `${page} -> ${ref}`).toBe(true);
 			}
 		}
@@ -753,10 +753,10 @@ describe("WebServer checkpoints", () => {
 	it("resolves the legacy /llm URL to the configure page", async () => {
 		await startWithCheckpoints();
 		expect(PAGE_ALIASES["/llm"]).toBe("/configure");
-		expect(PAGES["/configure"]).toBe("pages/providers.html");
+		expect(pageRoutes()["/configure"]).toBe("pages/configure.html");
 		// 旧地址 `/providers` 不再是页面，而是重定向（页面的名字跟它回答的问题走）。
 		expect(PAGE_REDIRECTS["/providers"]).toBe("/configure");
-		expect(PAGES["/providers"]).toBeUndefined();
+		expect(pageRoutes()["/providers"]).toBeUndefined();
 		const r = await new Promise<{ status: number; body: string }>((resolve, reject) => {
 			http
 				.get({ host: "127.0.0.1", port, path: "/llm" }, (res) => {

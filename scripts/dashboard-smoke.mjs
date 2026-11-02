@@ -449,6 +449,49 @@ if (tv.available === false) {
   // 有通道时必须说明这是取样，不是全图
   if (!/not the whole map/.test(tv.sampleNote)) stabilityProblems.push("Towns 有数据但没说明「这是取样、不是全图」");
 }
+/* ======================================================================
+ * 四个页面都要能打开（2026-11 用户报"导航点'比较'/'配置'全是 not found"）
+ * ----------------------------------------------------------------------
+ * 真因不是页面没做，而是跑着的进程比磁盘旧：路由表在进程内存里，页面文件
+ * 却是新加的 ⇒ 老进程不认新 URL。**只测首页**永远发现不了这件事，所以这里
+ * 逐个导航点过去：每个 URL 必须 200、必须真的渲染出页头与四个导航链接、
+ * 并且**不是**那句光秃秃的 "not found"。
+ * ====================================================================== */
+const PAGE_URLS = ["/", "/compare", "/sessions", "/configure"];
+const pageProblems = [];
+const pageViews = [];
+for (const path of PAGE_URLS) {
+  const before = logs.length;
+  const target = new global.URL(path, URL).toString();
+  const res = await fetch(target, { redirect: "follow", signal: AbortSignal.timeout(5000) }).catch(() => null);
+  const body = res ? await res.text() : "";
+  await send("Page.navigate", { url: target });
+  await sleep(2500);
+  const view = await send("Runtime.evaluate", {
+    expression: `(() => ({
+      title: document.title,
+      nav: [...document.querySelectorAll('nav.nav a')].map((a) => a.getAttribute('href')),
+      h1: (document.querySelector('.brand h1')?.textContent || '').replace(/\\s+/g, ' ').trim(),
+      bodyStart: (document.body.innerText || '').replace(/\\s+/g, ' ').trim().slice(0, 80),
+    }))()`,
+    returnByValue: true,
+  });
+  const v = view.result?.value || {};
+  const here = logs.slice(before);
+  const noisy = here.filter((l) => l.level === "error" || l.level === "warning" || l.level === "exception");
+  pageViews.push({ path, status: res?.status ?? null, nav: v.nav, h1: v.h1, noisy: noisy.length });
+  if (!res || res.status !== 200) pageProblems.push(`${path}: HTTP ${res?.status ?? "no response"}`);
+  if (/not found/i.test(body) && body.length < 200) pageProblems.push(`${path}: 响应体是 "not found"`);
+  if (!Array.isArray(v.nav) || v.nav.length !== 4) pageProblems.push(`${path}: 导航渲染出 ${(v.nav || []).length} 个链接（应为 4）`);
+  if (!v.h1) pageProblems.push(`${path}: 没有页头（页面没渲染）`);
+  for (const n of noisy) pageProblems.push(`${path}: 控制台 ${n.level}: ${n.text.slice(0, 160)}`);
+}
+console.log("PAGES:", JSON.stringify(pageViews, null, 2));
+if (pageProblems.length) {
+  console.error("FAIL（页面导航）:");
+  for (const p of pageProblems) console.error("  -", p);
+}
+
 const bad = logs.filter((l) => l.level === "error" || l.level === "warning" || l.level === "exception");
 console.log("console entries:", logs.length, "| errors/warnings/exceptions:", bad.length);
 for (const b of bad.slice(0, 8)) console.log("  !!", b.level, b.text.slice(0, 200));
@@ -459,6 +502,7 @@ chrome.kill();
 const needsPanels = coldView.cold !== true;
 const ok =
   bad.length === 0 &&
+  pageProblems.length === 0 &&
   coldProblems.length === 0 &&
   (needsPanels ? probe.result?.value?.visible === true : true) &&
   (needsPanels ? probe.result?.value?.rowCount > 0 : true) &&
