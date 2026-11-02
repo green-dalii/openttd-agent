@@ -970,10 +970,10 @@ unfinished action (simulated 2026-09-25)`（72 字符）⇒ 真实事件流按�
 31 字符分块协议（W3）与公司名中继已**删除**（分块装配器与其测试一并删除）。
 `done` 事件带车队真值 `fleet:{owned, ids, applied}`。
 
-**真机流水线实测**（offline demo，seed 11）：`queued → work j100 → stA_ok → stB_ok
-→ road_start → road seg1 d54 → … → road_stuck:ERR_AREA_NOT_CLEAR → done`
-——具名失败与全文错误（`the index 'ShortErr' does not exist` 被 Fail() 捕获并送达）
-都进了事件流；有界失败（同 job 连续异常 50 轮 → `abandoned`，FIFO 不堵）。
+**真机流水线实测**（offline demo，seed 11）：`queued → work j100 → stA_ok → stB_ok → road_start →
+road seg1 d54 → … → road_stuck:ERR_AREA_NOT_CLEAR → done`——具名失败与全文错误（`the index
+'ShortErr' does not exist` 被 Fail() 捕获并送达）都进了事件流；有界失败（同 job 连续异常 50 轮 →
+`abandoned`，FIFO 不堵）。
 
 **新事实（勿再试）**：
 1. **`import("pathfinder.road")` 在 GS 上下文不可用**：真机报 `couldn't find library`
@@ -989,24 +989,21 @@ unfinished action (simulated 2026-09-25)`（72 字符）⇒ 真实事件流按�
    `ExecCore` 不继承 ⇒ 需要自备代理（`GSController.Sleep` 存在）。
 
 **P1-1b 补齐：GS 寻路库入库**（上面第 1 条的缺口已修；GS 库的解析事实，勿再试）：
-- GS 的库扫描树是 **`<data>/game/library/`**（OpenTTD 自建；`content_download/ai/library/`
-  只对 **AI 上下文**可见——这就是旧 AI 能 import 而 GS 不能的全部原因）。
+- GS 的库扫描树是 **`<data>/game/library/`**（OpenTTD 自建；`content_download/ai/library/` 只对 **AI 上下文**可见——这就是旧 AI 能 import 而 GS 不能的原因）。
 - **GS 虚拟机的库基类注册名是 `GSLibrary`**（四选一探针实测：`GameLibrary`/`Library`/
   `ScriptLibrary`/`AILibrary` 均报 `the index '...' does not exist`）。
-- **GS 虚拟机不注册 AI* API 名**（`the index 'AIList' does not exist`）⇒ 库内代码须按双名
-  映射改 GS 名（AITile/AIMap/AITunnel/AIBridge/AIRoad/AIVehicle/AITestMode/AIList/
-  AIBridgeList_Length → GSTile/GSMap/GSTunnel/GSBridge/GSRoad/GSVehicle/GSTestMode/GSList/
-  GSBridgeList_Length）。
-- 依赖链：`pathfinder.road`(v4) → `graph.aystar`(v6) → `queue.binary_heap`(v1)。三件套已
-  vendored 进 `src/game/squirrel/library/`（GPL v2 独立作品，保留许可全文，修改声明在各
-  `library.nut` 顶部；边界见该目录 README）。`squirrel-deploy` 部署到 `<data>/game/library/`。
-- **完整线路建成**（P1-1a 验收补齐，seed 11 真机）：`queued → work j100 → stA_ok → stB_ok
-  → road seg1..3 → road_built → dpt_ok → dpt_conn → bus_live → done`，
-  `done.fleet = {owned:1, ids:[4], applied:-1}`——车站×2 + 道路（真 Pathfinder.Road 分段寻路）
-  + 车库 + 巴士 + 发车，全部经 GS 执行核心，server.log 零 API 缺失。
-- **遗留（收尾链缺陷，登记 ROADMAP）**：offline demo 收尾时反射步骤失败（faux 队列耗尽）会让
-  `runFinalizeAndReflect` 返回 1、进程退出码 1 且**不写指标行**（`/api/metrics` 看不到该局）
-  ——数据丢失，P2 的短局多跑必须先修。
+- **GS 虚拟机不注册 AI* API 名**（`the index 'AIList' does not exist`）⇒ 库内代码须按双名映射改 GS 名
+  （AITile/AIMap/AITunnel/AIBridge/AIRoad/AIVehicle/AITestMode/AIList/AIBridgeList_Length →
+  GSTile/GSMap/GSTunnel/GSBridge/GSRoad/GSVehicle/GSTestMode/GSList/GSBridgeList_Length）。
+- 依赖链：`pathfinder.road`(v4) → `graph.aystar`(v6) → `queue.binary_heap`(v1)。三件套已 vendored 进
+  `src/game/squirrel/library/`（GPL v2 独立作品，保留许可全文；边界见该目录 README）。
+  `squirrel-deploy` 部署到 `<data>/game/library/`。
+- **完整线路建成**（P1-1a 验收补齐，seed 11 真机）：`queued → work j100 → stA_ok → stB_ok → road
+  seg1..3 → road_built → dpt_ok → dpt_conn → bus_live → done`，`done.fleet = {owned:1, ids:[4],
+  applied:-1}`——车站×2 + 道路（真 Pathfinder.Road 分段寻路）+ 车库 + 巴士 + 发车，全部经 GS 执行
+  核心，server.log 零 API 缺失。
+- **遗留（收尾链缺陷，已登记 ROADMAP）**：offline demo 收尾时反射步骤失败（faux 队列耗尽）会让
+  `runFinalizeAndReflect` 返回 1 且**不写指标行** —— 数据丢失，P2 的短局多跑必须先修。
 ### 10.109 P1-1b 尾巴 + P1-3 数据层：车队双向/退役实证（2026-10-08 真机）
 
 **双向与退役在新核心上全部落地**（D58 探针，seed 11）：
@@ -1166,46 +1163,43 @@ compaction 冲突）在 `docs/HARNESS-MIGRATION.md` §3（带坐标），此处�
 > `docs/SCAFFOLD-CONTRACT.md`——那是**契约**，本节是**实测事实**。
 
 **D1 成绩可见与诚实的增量**
-- 决策上下文带 `score` 块（`delivered`/`deliveredPerGameDay`/`elapsedGameDays`/
-  `horizonDays`/`scoredFromGameDay`/`windowOpened`）；`delivered` 取世界状态的
-  `deliveredRun.total`，**与该局度量行同一个数**（真机：模型看到 0、度量记 0）。
-- 增量不再折零：`null` 读数 → 该增量 `null` + `baselineEstablished=false`（真机第一次决策
-  `money=unknown`，第二次 `money=199214`）。历局成绩作为事实注入（同 scenario/horizon、排除
-  被停/冻结局，排除数报出）；`--no-memory` 对照臂同样关闭。
+- 决策上下文带 `score` 块（`delivered`/`deliveredPerGameDay`/`elapsedGameDays`/`horizonDays`/
+  `scoredFromGameDay`/`windowOpened`）；`delivered` 取世界状态的 `deliveredRun.total`，**与该局度量行
+  同一个数**（真机：模型看到 0、度量记 0）。增量不再折零：`null` 读数 → 该增量 `null` +
+  `baselineEstablished=false`（真机第一次决策 `money=unknown`，第二次 `money=199214`）。历局成绩作为
+  事实注入（同 scenario/horizon、排除被停/冻结局，排除数报出）；`--no-memory` 对照臂同样关闭。
 
 **D2 世界只投影一次**
-- 唯一投影 `src/agent/world-facts.ts`：公司按 id、城镇按人口降序（缺失排最后、同人口按 id）；
-  决策上下文与 `observe()` 同源同序；上下文补 `loan`。`game_observation` **从不进 LLM**。
-  真机：`observe()` 580→479 字符（-17.4%），prompt 2653→2673（+0.8%，即新增 `loan`）。
+- 唯一投影 `src/agent/world-facts.ts`：公司按 id、城镇按人口降序（缺失排最后、同人口按 id）；决策
+  上下文与 `observe()` 同源同序；上下文补 `loan`。`game_observation` **从不进 LLM**。真机：`observe()`
+  580→479 字符（-17.4%），prompt 2653→2673（+0.8%，即新增 `loan`）。
 
 **D3a 相位接回动作**
-- 类型化 exec 事件只有 `note`+`job`（**没有 `raw`**，那是已退役协议），hub 曾用 `p.raw` 拼
-  相位串 ⇒ 模型收到的每条相位是 `undefined`；`composePhaseText` 修复。相位事实带 `job`，
-  并经 **GS ack**（job id 由 GS 分配）接回订下它的 `action`；连接是 **run 级**（施工跨决策
-  窗口）。真机 payload：`{"phase":"stB_ok",...,"job":100,"action":"build_bus_route"}`。
+- 类型化 exec 事件只有 `note`+`job`（**没有 `raw`**，那是已退役协议），hub 曾用 `p.raw` 拼相位串 ⇒
+  模型收到的每条相位是 `undefined`；`composePhaseText` 修复。相位事实带 `job`，并经 **GS ack**（job id
+  由 GS 分配）接回订下它的 `action`；连接是 **run 级**（施工跨决策窗口）。真机 payload：
+  `{"phase":"stB_ok",...,"job":100,"action":"build_bus_route"}`。
 
 **D3b run manifest + 结果分类**
 - 度量行 `manifest = {servedModel, thinkingLevel, toolBudget, scaffoldHash}`：`servedModel` 取
-  provider 实际作答（`responseModel ?? model`）；`scaffoldHash` = sha256(系统提示词 +
-  工具集[name/description/schema]，按顺序) 前 16 位。真机：`{"servedModel":"faux-1",
-  "thinkingLevel":"off","toolBudget":12,"scaffoldHash":"74f2e64d1e930df3"}`。
-- `classifyOutcome`（派生不存盘）：优先级 人为停止 > 环境事件 > 结果读数，缺失 → `unknown`；
-  封闭词表（十类）见 §10.122。
+  provider 实际作答（`responseModel ?? model`）；`scaffoldHash` = sha256(系统提示词 + 工具集
+  [name/description/schema]，按顺序) 前 16 位。真机：`{"servedModel":"faux-1","thinkingLevel":"off",
+  "toolBudget":12,"scaffoldHash":"74f2e64d1e930df3"}`。`classifyOutcome`（派生不存盘）：优先级
+  人为停止 > 环境事件 > 结果读数，缺失 → `unknown`；封闭词表（十类）见 §10.122。
 
 **D4 旋钮可配且记录生效值**
-- `resolveScaffoldKnobs`：`LLM_THINKING`（缺省 off）/`LLM_TOOL_BUDGET`（缺省 12），**非法值
-  抛错**；CLI `--thinking`/`--tool-budget`/`--llm-provider`。顺带修：`applyLlmSettingsFile`
-  重建 `LlmConfig` 时漏拷 `scaffold` ⇒ CLI 旋钮被静默丢弃（D63 同型）。真机：
-  `thinking=low toolBudget=5` 进了 manifest。
+- `resolveScaffoldKnobs`：`LLM_THINKING`（缺省 off）/`LLM_TOOL_BUDGET`（缺省 12），**非法值抛错**；
+  CLI `--thinking`/`--tool-budget`/`--llm-provider`。顺带修：`applyLlmSettingsFile` 重建
+  `LlmConfig` 时漏拷 `scaffold` ⇒ CLI 旋钮被静默丢弃（D63 同型）。真机：`thinking=low
+  toolBudget=5` 进了 manifest。
 
 **D5 评测面**
-- `planMatrix`：模型 × seed × 重复，**每格独立 data dir**、世界逐字相同、样本不足**跑前拒绝**
-  （实测 4 局/模型 vs 需要 400 ⇒ 拒绝；+200% 需 4 ⇒ 放行）。
-- `buildScorecard` + `renderReportMarkdown`：四轴；分母 0 的比率是 `null`；被排除的局计数并报
-  原因；分组用 `servedModel` 并列出 `requestedModels` ⇒ **网关替换可见**（看板侧投影见 §10.121）。
-- `pairedComparison`：按 (seed, repeat) 配对，对差异做确定性 bootstrap CI；一侧缺失的配对不
-  计入；配对 < 3 → `not determinable`。真机冒烟：2 格矩阵跑通并产出 JSON+MD 报告（两局都因
-  墙钟未达 horizon 被排除，报告如实写出 `horizon not reached x2`）。
+- `planMatrix`：模型 × seed × 重复，**每格独立 data dir**、世界逐字相同、样本不足**跑前拒绝**（实测
+  4 局/模型 vs 需要 400 ⇒ 拒绝；+200% 需 4 ⇒ 放行）。`buildScorecard` + `renderReportMarkdown`：
+  四轴；分母 0 的比率是 `null`；被排除的局计数并报原因；分组用 `servedModel` 并列出
+  `requestedModels` ⇒ **网关替换可见**（看板侧投影见 §10.121）。`pairedComparison`：按 (seed, repeat)
+  配对，对差异做确定性 bootstrap CI；一侧缺失的配对不计入；配对 < 3 → `not determinable`。真机冒烟：
+  2 格矩阵跑通并产出 JSON+MD 报告（两局都因墙钟未达 horizon 被排除，报告如实写出 `horizon not reached x2`）。
 
 ### 10.117 一份运行配置真值 + 一个解析器（B1/S2，2026-10-25）
 
@@ -1265,13 +1259,19 @@ compaction 冲突）在 `docs/HARNESS-MIGRATION.md` §3（带坐标），此处�
   分组用**实际服务的模型**（`manifest.servedModel`）⇒ 网关替换**可见**；每局能下钻到
   History（`/sessions?run=<id>`）。
 - 真机（隔离 data dir，`minimax-cn` / `MiniMax-M3.1-Flash` + 本地 stub，各 2 个 seed）：两模型 × 两 seed 出四轴 + 配对判定（2 对 ⇒ "not determinable"），无价目表一侧写 `not measured`。
+- 事实：**观测面有自己的结构指纹**（2026-11-02）：`scaffoldHash` 只覆盖提示词 + 工具，**不覆盖
+  观测面**；`payloadShapeHash` 含**世界**（城镇名、产业清单）⇒ **每个 seed 都不同** ⇒ 拿它跨局
+  比较会**误报**"不是同一个问题"（假警报比没警报更坏）。于是新增 `observationShapeHash`：
+  **投影的结构**（有哪些事实、什么类型；值全抹掉、数组长度不计），由**填满所有分支的探针世界**
+  算出 ⇒ 只依赖代码、**跑前就能算**、两种后端都记录（真机 `ba1cc7959b170e8d`，且**预览与
+  manifest 逐字段相同**）。Compare 的 `differs` 现在只由 `scaffoldHash` 与 `observationShapeHash`
+  决定；payload 形状降级为记录。
 - 事实：**比较计划是同一套预览的矩阵版**（Issue #48，`src/agent/compare-plan.ts`）：格子 = 模型 ×
-  seed；**只估"运行"**（几局、封顶、花费能不能测），**不估结果**；字段名与 manifest 同名同义
-  （`model`/`seed`/`gameDays`/`tokenLimit`/`costLimit`/`backend`/`scaffoldHash`/`costKnown`）。
-  "花费能不能测"是**逐格**的事实：只有每格都有价目表才是 `costKnown=true`，否则"没测到"。
-  一个进程只能跑一局 ⇒ 格子**顺序**跑（`PlanQueue`），一格失败被记下、后面继续；与已有运行冲突 ⇒
-  409，**一局都不启动**。真机：费用上限 + 无价目表 ⇒ 400 `unpriced_with_cost_cap` 且没有游戏进程；
-  未知模型 ⇒ `unknown_model`；页面点"Launch this plan"（逐格确认）⇒ 跑完的 manifest 与计划**逐字段相同**。
+  seed；**只估"运行"**（几局、封顶、花费能不能测），**不估结果**；字段名与 manifest 同名同义。
+  "花费能不能测"是**逐格**的事实：只有每格都有价目表才是 `costKnown=true`，否则"没测到"。一个进程
+  只能跑一局 ⇒ 格子**顺序**跑（`PlanQueue`），一格失败被记下、后面继续；与已有运行冲突 ⇒ 409，
+  **一局都不启动**。真机：费用上限 + 无价目表 ⇒ 400 `unpriced_with_cost_cap` 且没有游戏进程；未知
+  模型 ⇒ `unknown_model`；页面点"Launch this plan"（逐格确认）⇒ 跑完的 manifest 与计划**逐字段相同**。
 
 ### 10.122 结局词表是**封闭**的，错误的 hint 也只有**一份**（B5，2026-10-25）
 

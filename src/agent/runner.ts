@@ -47,6 +47,7 @@ import type { Models } from "@earendil-works/pi-ai";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { DecisionAgent } from "./decision-agent.js";
 import { createTools } from "./tools/index.js";
+import { observationShapeHash } from "./world-facts.js";
 import { fauxAssistantMessage, fauxToolCall, createFauxCore } from "@earendil-works/pi-ai";
 import { buildBrain, redactKey } from "./provider.js";
 import { Telemetry } from "./telemetry.js";
@@ -1117,6 +1118,9 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 			thinkingLevel: scaffold.thinkingLevel,
 			toolBudget: scaffold.toolBudget,
 			scaffoldHash: fingerprint,
+			// The observation surface's **shape** — cross-seed stable, and it
+			// changes exactly when the projection changes (SPEC §10.121).
+			observationShapeHash: observationShapeHash(),
 			// The model the run ASKED for, and the facts of that model (its api
 			// and context window) — resolved by the same resolver the next-run
 			// preview uses, so the two agree field by field. `servedModel` (what

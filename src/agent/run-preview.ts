@@ -21,6 +21,7 @@ import { createTools } from "./tools/index.js";
 import type { AgentDeps } from "./types.js";
 import type { RunManifest } from "./manifest.js";
 import type { RunKnobs } from "./run-knobs.js";
+import { observationShapeHash } from "./world-facts.js";
 
 /**
  * The tool set's fingerprint, computed **without** a running game.
@@ -65,6 +66,7 @@ export interface NextRunPreview
 		| "costLimit"
 		| "backend"
 		| "scaffoldHash"
+		| "observationShapeHash"
 	> {
 	/** The provider that will serve the run. */
 	providerId: string;
@@ -106,6 +108,9 @@ export function buildNextRunPreview(
 		costLimit: knobs.costLimit,
 		backend: knobs.backend,
 		scaffoldHash: probeScaffoldHash(),
+		// The observation surface's shape: knowable **before** a run (it depends
+		// on the code, not on the world) ⇒ the preview can promise it (SPEC §10.121).
+		observationShapeHash: observationShapeHash(),
 	};
 }
 
@@ -125,4 +130,5 @@ export const PREVIEW_MANIFEST_FIELDS = [
 	"costLimit",
 	"backend",
 	"scaffoldHash",
+	"observationShapeHash",
 ] as const satisfies readonly (keyof RunManifest)[];
