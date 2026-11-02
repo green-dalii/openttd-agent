@@ -18,6 +18,14 @@
   navigates to all four pages, not just the home page.
 
 ### Added
+- **The model can finally see every town, and the dashboard knows which slice it saw.** The Bridge GS
+  reported the ten biggest towns only, so every other town reached the model as a bare number (`#14 ->
+  #2`) - it could not even name the place it was routing to. The GS now reports **every** town with its
+  name (real machine: all 26 towns, with names, in `observe()`). And because "all 26 towns" and "the ten
+  biggest" are **different questions** even when the facts have the same shape, the GS now **states its
+  own policy** (`towns=all;industries=top12`) and that statement lands in the manifest - so Compare can
+  say "these runs did not answer the same question" instead of quietly comparing them.
+
 - **The observation surface now has a fingerprint of its own.** Two runs could share a scaffold and
   still have seen different worlds - and nothing said so. The payload fingerprint cannot answer it
   across runs (it contains the world, so it differs on every seed - it would cry wolf), so there is
@@ -72,19 +80,13 @@
 
 - **Spend caps**: `LLM_TOKEN_LIMIT` / `LLM_COST_LIMIT` (and CLI flags) stop a run at a decision boundary; a cost cap on an unpriced model refuses to start.
 
-- **Second decision backend**: `AGENT_HARNESS=1` drives the same scaffold through
-  pi-agent-core's `AgentHarness` (replayable transcript, retry/fault visibility). Both
-  backends were verified to send byte-identical system prompts and the same tool set.
+- **Second decision backend**: `AGENT_HARNESS=1` drives the same scaffold through pi-agent-core's `AgentHarness` (replayable transcript, retry/fault visibility). Both backends were verified to send byte-identical system prompts and the same tool set.
 
 - **Scaffold knobs**: `--thinking` and `--tool-budget` (recorded as *resolved* values).
 
-- **Score visibility**: the decision context carries the project's own score, deltas keep
-  `null` instead of folding to 0, and past runs' scores are injected (the control arm
-  `--no-memory` disables the injection too).
+- **Score visibility**: the decision context carries the project's own score, deltas keep `null` instead of folding to 0, and past runs' scores are injected (the control arm `--no-memory` disables the injection too).
 
-- **Dashboard**: manifest comparison rows (backend / scaffold / payload), a "Wire" health
-  KPI, industry & cargo panel, towns panel, minimap, chart zoom/pan, run control from the
-  page, per-session archive with savegame location.
+- **Dashboard**: manifest comparison rows (backend / scaffold / payload), a "Wire" health KPI, industry & cargo panel, towns panel, minimap, chart zoom/pan, run control from the page, per-session archive with savegame location.
 
 - **`capabilities()`**: the agent can ask which actions exist before trying them.
 ### Fixed

@@ -375,6 +375,7 @@ function window2(): {
 	surfaceDiff: (payload: unknown) => {
 		scaffold: string[];
 		observation: string[];
+		policies: string[];
 		payloadShape: string[];
 		text: string;
 	} | null;

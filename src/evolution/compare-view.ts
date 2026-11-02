@@ -75,6 +75,13 @@ export interface SurfaceCheck {
 	 */
 	observationShapeHashes: string[];
 	/**
+	 * Distinct **observation policies** the GS reported (`towns=all;…`).
+	 *
+	 * A different slice of the world is a different question, even when the facts
+	 * have the same shape — so this, too, decides "differs".
+	 */
+	observationPolicies: string[];
+	/**
 	 * Distinct payload-shape hashes (the real request, numbers normalised).
 	 *
 	 * **Informational only**: the payload contains the world (town names, industry
@@ -189,6 +196,7 @@ export function buildCompareView(
 	};
 	const scaffoldHashes = distinct((m) => m.manifest?.scaffoldHash);
 	const observationShapeHashes = distinct((m) => m.manifest?.observationShapeHash);
+	const observationPolicies = distinct((m) => m.manifest?.observationPolicy);
 	const payloadShapeHashes = distinct((m) => m.manifest?.payloadShapeHash);
 
 	return {
@@ -197,12 +205,17 @@ export function buildCompareView(
 		surface: {
 			scaffoldHashes,
 			observationShapeHashes,
+			observationPolicies,
 			payloadShapeHashes,
-			// The trigger is the two **cross-seed stable** fingerprints: the
-			// scaffold (prompt + tools) and the observation surface's shape.
-			// The payload shape is listed for the record but never decides — it
-			// contains the world, so it differs on every seed.
-			differs: scaffoldHashes.length > 1 || observationShapeHashes.length > 1,
+			// The trigger is the **cross-seed stable** facts: the scaffold
+			// (prompt + tools), the observation surface's shape, and the policy
+			// (which slice of the world was exposed). The payload shape is listed
+			// for the record but never decides — it contains the world, so it
+			// differs on every seed.
+			differs:
+				scaffoldHashes.length > 1 ||
+				observationShapeHashes.length > 1 ||
+				observationPolicies.length > 1,
 		},
 		models,
 		exclusions,

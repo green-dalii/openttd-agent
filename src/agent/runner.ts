@@ -1121,6 +1121,9 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 			// The observation surface's **shape** — cross-seed stable, and it
 			// changes exactly when the projection changes (SPEC §10.121).
 			observationShapeHash: observationShapeHash(),
+			// What the GS says it exposes (towns=all;industries=top12): a run that
+			// saw a different slice of the world answered a different question.
+			observationPolicy: deps.state.snapshot().observationPolicy ?? null,
 			// The model the run ASKED for, and the facts of that model (its api
 			// and context window) — resolved by the same resolver the next-run
 			// preview uses, so the two agree field by field. `servedModel` (what

@@ -207,6 +207,7 @@ function observationProbe(): WorldSnapshot {
 		cargoTotals: [{ label: "COAL", produced: 1, transported: 1 }],
 		engines: [{ id: 1, name: "probe", speed: 1 }],
 		companyCargo: null,
+		observationPolicy: null,
 	};
 }
 
