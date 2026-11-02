@@ -77,6 +77,19 @@ export interface CargoFact {
 	transported: number | null;
 }
 
+/**
+ * 融资事实（模型可见）：还能借多少、贷款的最小单位是多少。
+ *
+ * **利息率不在这里**：引擎的脚本 API **不暴露**利息率（`_economy.interest_rate` 只在
+ * 引擎内部用）⇒ 那是"没测到"，不是"0%"，也不是猜一个数（Issue #13 / D60）。
+ */
+export interface FinancingFact {
+	/** 还能借多少（公司的贷款上限）；null = 没测到。 */
+	loanCeiling: number | null;
+	/** 贷款的最小单位（引擎的贷款间隔）；null = 没测到。 */
+	loanInterval: number | null;
+}
+
 /** 一个可选道路车型（模型可见）：车队能换成什么。 */
 export interface EngineFact {
 	id: number;
@@ -95,6 +108,8 @@ export interface WorldFacts {
 	cargoTotals: CargoFact[];
 	/** 车型目录。 */
 	engines: EngineFact[];
+	/** 融资事实（还能借多少 / 贷款的最小单位）。 */
+	financing: FinancingFact;
 	/** Index signature: the projection travels as a plain JSON object. */
 	[key: string]: unknown;
 }
@@ -163,7 +178,18 @@ export function worldFacts(snap: WorldSnapshot): WorldFacts {
 		name: typeof e.name === "string" ? e.name : "",
 		speed: toNumber(e.speed) ?? 0,
 	}));
-	return { date: gameDate(snap), companies, towns, industries, cargoTotals, engines };
+	return {
+		date: gameDate(snap),
+		companies,
+		towns,
+		industries,
+		cargoTotals,
+		engines,
+		financing: {
+			loanCeiling: typeof snap.loanCeiling === "number" ? snap.loanCeiling : null,
+			loanInterval: typeof snap.loanInterval === "number" ? snap.loanInterval : null,
+		},
+	};
 }
 
 /**
@@ -208,6 +234,8 @@ function observationProbe(): WorldSnapshot {
 		engines: [{ id: 1, name: "probe", speed: 1 }],
 		companyCargo: null,
 		observationPolicy: null,
+		loanCeiling: 100000,
+		loanInterval: 10000,
 	};
 }
 

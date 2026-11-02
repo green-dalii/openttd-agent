@@ -18,6 +18,16 @@
   navigates to all four pages, not just the home page.
 
 ### Added
+- **The model can finally see its financing, and it knows why its balance moves.** The company facts
+  already carried the loan, but not how much more could be borrowed - and the **interest rate is not
+  exposed by the engine at all**, so that one stays "not measured" rather than a guess. The Bridge GS
+  now reads the company's loan ceiling (it has to enter company mode to do it) and reports it, so the
+  projection carries `financing { loanCeiling, loanInterval }` (real machine: 300000 / 10000). The system
+  prompt also states the mechanism the model could not see: the executor raises the loan to the ceiling
+  before it starts building - which moves the **scaffold fingerprint** (`74f2e64d1e930df3` ->
+  `2f5b438b462d21a3`), so the 2026-10-31 benchmark matrix is now a *different scaffold* and Compare
+  says so.
+
 - **The model can finally see every town, and the dashboard knows which slice it saw.** The Bridge GS
   reported the ten biggest towns only, so every other town reached the model as a bare number (`#14 ->
   #2`) - it could not even name the place it was routing to. The GS now reports **every** town with its
@@ -106,16 +116,13 @@
   evidence folded behind it (outcome, manifest, token breakdown, staged summaries, event log). A page
   that used to be ~9,800px of equally-weighted tables is ~2,900px of conclusions, and the same numbers
   stop appearing twice: the header keeps run counts, the strip keeps the measured rates.
-- **A training chart that is flat at 0 is now a sentence.** A 900x300 plot with one line on the floor
-  carries no information and reads as a rendering failure; when every comparable run delivered 0 the
-  page says so instead of drawing it.
+- **A training chart that is flat at 0 is now a sentence.** A 900x300 plot with one line on the floor carries no information and reads as a rendering failure; when every comparable run delivered 0 the page says so instead of drawing it.
 - **Dropped ledger rows are disclosed on History too.** The ledger keeps the newest row per session id;
   on pre-2026-10-31 data that silently halved the sample. `/api/evolution` now returns the collisions
   and the page prints how many rows are missing and which ids, so its "N comparable runs" cannot be
   read as the whole ledger. When a colliding row belongs to a different run, the selected run's
   delivered reading says "not measured" instead of borrowing a stranger's number.
-- **Spend reads "unknown" rather than a partial sum** when any comparable run had no price table
-  (the same rule the header already applied, now applied to the conclusion).
+- **Spend reads "unknown" rather than a partial sum** when any comparable run had no price table (the same rule the header already applied, now applied to the conclusion).
 
 - **The Run header stopped lying about elapsed time and the session id.** Both displayed fields the page never wrote, so they read "-" even mid-run; they now come from the server (the telemetry snapshot, or the supervisor's run record) and the elapsed time actually ticks.
 
@@ -142,17 +149,10 @@
   produced here, and has any of it moved". Verified on a real machine: the first `observe()` of a
   fresh game now carries the cargo totals and the industries.
 
-- **The training panel had been reading an endpoint that never existed.** It asked for
-  `/api/metrics` while the ledger has always lived under `/api/evolution` - so the panel showed
-  "no metrics ledger yet" while the ledger was full of runs. A false empty state is worse than
-  no panel: it says your runs were never recorded.
+- **The training panel had been reading an endpoint that never existed.** It asked for `/api/metrics` while the ledger has always lived under `/api/evolution` - so the panel showed "no metrics ledger yet" while the ledger was full of runs. A false empty state is worse than no panel: it says your runs were never recorded.
 
-- **The manifest's "served a different model" flag was invisible.** The warning colour was scoped
-  to the list chips, so the detail table showed the substituted model in plain text.
-- **The probe mode carried its own copy of the admin client** (148 lines of protocol code next to
-  the real, tested one) - and it used the one-shot connect, the very mistake that made a probe
-  time out for weeks. It uses the real client now: the handshake is bounded and retried, and the
-  duplicated protocol code is gone.
+- **The manifest's "served a different model" flag was invisible.** The warning colour was scoped to the list chips, so the detail table showed the substituted model in plain text.
+- **The probe mode carried its own copy of the admin client** (148 lines of protocol code next to the real, tested one) - and it used the one-shot connect, the very mistake that made a probe time out for weeks. It uses the real client now: the handshake is bounded and retried, and the duplicated protocol code is gone.
 
 - **The evolution hooks had drifted into two copies.** The runner re-attaches its own hooks when
   a run starts, and only the server's copy carried the per-row exclusion reason - so the same run
