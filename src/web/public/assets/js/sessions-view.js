@@ -714,6 +714,8 @@
       copy: obs.copy,
       title: obs.copy ? `the structure of the world facts the model saw — full: ${obs.copy}` : "",
     });
+    // Which slice of the world the GS exposed (all towns, or only the biggest?).
+    push("Observation policy", m.observationPolicy || NOT_MEASURED);
     push("Payload requests", maybeNum(m.payloadCount));
     push("Token cap", m.tokenLimit === null || m.tokenLimit === undefined ? "none" : maybeNum(m.tokenLimit));
     push("Cost cap", m.costLimit === null || m.costLimit === undefined ? "none" : maybeNum(m.costLimit));

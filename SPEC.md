@@ -1237,9 +1237,6 @@ compaction 冲突）在 `docs/HARNESS-MIGRATION.md` §3（带坐标），此处�
   prebuilt / control / thinking high / toolBudget 5 / tokenLimit 9000 → 点 Start → 跑完的
   `meta.json` 与**页面显示的预览 10 个字段逐字段相同**；token 上限**真的触发**（9051 ≥ 9000 停机）。
   非法旋钮与 harness 后端均 400 + 可执行原因，且**没有游戏进程被启动**。
-- 前端事实（AGENTS §5.2 的血泪）：Alpine 的 `x-for` **必须**在 `<template>` 上——写在普通
-  元素上时循环变量不在作用域，表单**整块渲染为空**而页面看起来正常（错误只在
-  `console.warn`）；且一个字段只能有**一个**控件（`x-show` 藏 select/input 会让两者同 id）。
 
 ### 10.120 因果时间线：一次决策一行，四段证据由 `job` 连接（B3，2026-10-25）
 
@@ -1259,19 +1256,22 @@ compaction 冲突）在 `docs/HARNESS-MIGRATION.md` §3（带坐标），此处�
   分组用**实际服务的模型**（`manifest.servedModel`）⇒ 网关替换**可见**；每局能下钻到
   History（`/sessions?run=<id>`）。
 - 真机（隔离 data dir，`minimax-cn` / `MiniMax-M3.1-Flash` + 本地 stub，各 2 个 seed）：两模型 × 两 seed 出四轴 + 配对判定（2 对 ⇒ "not determinable"），无价目表一侧写 `not measured`。
-- 事实：**观测面有自己的结构指纹**（2026-11-02）：`scaffoldHash` 只覆盖提示词 + 工具，**不覆盖
-  观测面**；`payloadShapeHash` 含**世界**（城镇名、产业清单）⇒ **每个 seed 都不同** ⇒ 拿它跨局
-  比较会**误报**"不是同一个问题"（假警报比没警报更坏）。于是新增 `observationShapeHash`：
-  **投影的结构**（有哪些事实、什么类型；值全抹掉、数组长度不计），由**填满所有分支的探针世界**
-  算出 ⇒ 只依赖代码、**跑前就能算**、两种后端都记录（真机 `ba1cc7959b170e8d`，且**预览与
-  manifest 逐字段相同**）。Compare 的 `differs` 现在只由 `scaffoldHash` 与 `observationShapeHash`
-  决定；payload 形状降级为记录。
-- 事实：**比较计划是同一套预览的矩阵版**（Issue #48，`src/agent/compare-plan.ts`）：格子 = 模型 ×
-  seed；**只估"运行"**（几局、封顶、花费能不能测），**不估结果**；字段名与 manifest 同名同义。
-  "花费能不能测"是**逐格**的事实：只有每格都有价目表才是 `costKnown=true`，否则"没测到"。一个进程
-  只能跑一局 ⇒ 格子**顺序**跑（`PlanQueue`），一格失败被记下、后面继续；与已有运行冲突 ⇒ 409，
-  **一局都不启动**。真机：费用上限 + 无价目表 ⇒ 400 `unpriced_with_cost_cap` 且没有游戏进程；未知
-  模型 ⇒ `unknown_model`；页面点"Launch this plan"（逐格确认）⇒ 跑完的 manifest 与计划**逐字段相同**。
+- 事实：**观测面有自己的两枚指纹**（2026-11-02）：`scaffoldHash` 只覆盖提示词 + 工具，**不覆盖观测面**；
+  `payloadShapeHash` 含**世界**（城镇名、产业清单）⇒ **每个 seed 都不同** ⇒ 拿它跨局比较会**误报**
+  "不是同一个问题"（假警报比没警报更坏）。于是新增 ① `observationShapeHash`：**投影的结构**（有哪些
+  事实、什么类型；值全抹掉、数组长度不计），由**填满所有分支的探针世界**算出 ⇒ 只依赖代码、**跑前
+  就能算**、两种后端都记录（真机 `ba1cc7959b170e8d`，且**预览与 manifest 逐字段相同**）；②
+  `observationPolicy`：**GS 自报**它暴露了世界的哪一部分（`towns=all;industries=top12`）——"看到全部
+  26 座城"与"只看到人口前 10"是**两个不同的问题**，哪怕字段结构一模一样 ⇒ 策略也进 manifest。
+  Compare 的 `differs` 由这三者决定（结构指纹在这次改动里**不变**：字段没变，**切的那一刀变了**）。
+- 事实：**GS 现在报全图城镇**（2026-11-02，Issue #13）：以前只报人口前 10，样本外的城镇对模型只剩一个
+  编号（`#14 → #2`）。真机（seed 4242）：**26 座城全部带名字**进 `observe()`（城镇块 ~1.8 KB）。
+- 事实：**比较计划是同一套预览的矩阵版**（Issue #48，`src/agent/compare-plan.ts`）：格子 = 模型 × seed；
+  **只估"运行"**（几局、封顶、花费能不能测），**不估结果**；字段名与 manifest 同名同义。"花费能不能测"
+  是**逐格**的事实：只有每格都有价目表才是 `costKnown=true`，否则"没测到"。一个进程只能跑一局 ⇒ 格子
+  **顺序**跑（`PlanQueue`），一格失败被记下、后面继续；与已有运行冲突 ⇒ 409，**一局都不启动**。真机：费用
+  上限 + 无价目表 ⇒ 400 `unpriced_with_cost_cap` 且没有游戏进程；未知模型 ⇒ `unknown_model`；页面点
+  "Launch this plan"（逐格确认）⇒ 跑完的 manifest 与计划**逐字段相同**。
 
 ### 10.122 结局词表是**封闭**的，错误的 hint 也只有**一份**（B5，2026-10-25）
 

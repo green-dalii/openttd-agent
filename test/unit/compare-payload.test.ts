@@ -143,6 +143,7 @@ describe("Compare: did the compared runs answer the same question?", () => {
 		scaffold: string | null,
 		observation: string | null,
 		payloadShape: string | null = null,
+		policy: string | null = null,
 	) {
 		return {
 			id,
@@ -156,6 +157,7 @@ describe("Compare: did the compared runs answer the same question?", () => {
 				...(scaffold ? { scaffoldHash: scaffold } : {}),
 				...(observation ? { observationShapeHash: observation } : {}),
 				...(payloadShape ? { payloadShapeHash: payloadShape } : {}),
+				...(policy ? { observationPolicy: policy } : {}),
 			},
 		} as never;
 	}
@@ -188,6 +190,17 @@ describe("Compare: did the compared runs answer the same question?", () => {
 		expect(view.surface.differs).toBe(false);
 		// It is still reported, for the record.
 		expect(view.surface.payloadShapeHashes).toEqual(["dddd4444", "eeee5555"]);
+	});
+
+	it("flags a different observation POLICY (a different slice of the world)", () => {
+		// Same scaffold, same fact structure - but one run saw all 26 towns and
+		// the other only the ten biggest. That is a different question.
+		const view = buildCompareView([
+			run("a", "m1", "aaaa1111", "bbbb2222", null, "towns=all"),
+			run("b", "m2", "aaaa1111", "bbbb2222", null, "towns=top10"),
+		]);
+		expect(view.surface.differs).toBe(true);
+		expect(view.surface.observationPolicies).toEqual(["towns=all", "towns=top10"]);
 	});
 
 	it("ignores runs that recorded no hash (not measured is not a difference)", () => {

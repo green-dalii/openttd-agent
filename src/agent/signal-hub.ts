@@ -251,6 +251,19 @@ export function makeSignalHub(refs: SignalHubRefs): SignalHub {
 					// this the agent could not see the options it was choosing
 					// between, which is what made the M3 experiment saturated
 					// (SPEC §10.32).
+					// **观测策略**（2026-11-02）：GS 自己报它暴露了世界的哪一部分
+					// （towns=all / industries=top12）。这是**观测面的事实**：策略不同 ⇒
+					// 两次运行回答的不是同一个问题。GS 不报就是"没测到"（null），不是"全部"。
+					if (typeof p.towns_policy === "string" || typeof p.industries_policy === "string") {
+						const parts: string[] = [];
+						if (typeof p.towns_policy === "string" && p.towns_policy.trim() !== "") {
+							parts.push(`towns=${p.towns_policy.trim()}`);
+						}
+						if (typeof p.industries_policy === "string" && p.industries_policy.trim() !== "") {
+							parts.push(`industries=${p.industries_policy.trim()}`);
+						}
+						refs.world.setObservationPolicy(parts.length ? parts.join(";") : null);
+					}
 					if (Array.isArray(p.town_list)) {
 						refs.world.setTowns(
 							(p.town_list as { id?: unknown; name?: unknown; pop?: unknown; x?: unknown; y?: unknown; tc?: unknown }[]).map((t) => ({
@@ -272,7 +285,7 @@ export function makeSignalHub(refs: SignalHubRefs): SignalHub {
 										}
 									: {}),
 							})),
-							// `towns` 是 GS 报的**总数**（`town_list` 只是人口前 10 的取样）。
+							// `towns` 是 GS 报的**总数**（`town_list` 自 2026-11-02 起是**全部**城镇）。
 							typeof p.towns === "number" ? (p.towns as number) : undefined,
 						);
 					}
