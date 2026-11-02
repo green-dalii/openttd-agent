@@ -69,7 +69,18 @@ export interface ExclusionCount {
 export interface SurfaceCheck {
 	/** Distinct scaffold hashes among the compared runs (null/absent excluded). */
 	scaffoldHashes: string[];
-	/** Distinct payload-shape hashes (the question actually asked, numbers normalised). */
+	/**
+	 * Distinct **observation-shape** hashes (the structure of the world facts the
+	 * model sees). Cross-seed stable ⇒ comparable across runs (SPEC §10.121).
+	 */
+	observationShapeHashes: string[];
+	/**
+	 * Distinct payload-shape hashes (the real request, numbers normalised).
+	 *
+	 * **Informational only**: the payload contains the world (town names, industry
+	 * lists), so it differs on every seed — it must NOT decide "different
+	 * question" (that would cry wolf on every cross-seed comparison).
+	 */
 	payloadShapeHashes: string[];
 	/** True when the compared runs were not answering the same question. */
 	differs: boolean;
@@ -177,6 +188,7 @@ export function buildCompareView(
 		return [...out].sort();
 	};
 	const scaffoldHashes = distinct((m) => m.manifest?.scaffoldHash);
+	const observationShapeHashes = distinct((m) => m.manifest?.observationShapeHash);
 	const payloadShapeHashes = distinct((m) => m.manifest?.payloadShapeHash);
 
 	return {
@@ -184,8 +196,13 @@ export function buildCompareView(
 		collisions,
 		surface: {
 			scaffoldHashes,
+			observationShapeHashes,
 			payloadShapeHashes,
-			differs: scaffoldHashes.length > 1 || payloadShapeHashes.length > 1,
+			// The trigger is the two **cross-seed stable** fingerprints: the
+			// scaffold (prompt + tools) and the observation surface's shape.
+			// The payload shape is listed for the record but never decides — it
+			// contains the world, so it differs on every seed.
+			differs: scaffoldHashes.length > 1 || observationShapeHashes.length > 1,
 		},
 		models,
 		exclusions,

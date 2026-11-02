@@ -34,6 +34,11 @@ window.I18nMessages = {
     "Start agent plays with that model. Observe only records what the built-in AI does, with no model calls at all.":
       "Start agent 用那个模型自己打；Observe only 只记录内置 AI 做了什么，不产生任何模型调用。",
 
+    /* ---- History 页：观测面指纹 ---- */
+    "Observation surface": "观测面结构",
+    "Observation": "观测面",
+    "Scaffold": "脚手架",
+
     /* ---- Compare 页：比较计划（Issue #48） ----
        注："Token cap" 是**服务端结局词表**里的类名（outcome.ts），按 B5 的
        "服务端只有一份规范文案" 规则**不进这张表** —— 它在中文界面里保持英文，

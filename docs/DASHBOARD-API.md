@@ -571,8 +571,10 @@ POST /api/run/preview
 **`NextRunPreview` 的字段名 = manifest 的字段名**（同名同义）：解析后的模型事实 `model` /
 `api` / `contextWindow` / `costKnown`（不是配置文件里可能过时的值）；本局生效的旋钮
 `thinkingLevel` / `toolBudget` / `tokenLimit` / `costLimit` / `backend`；`scaffoldHash`
-（提示词 + 工具 schema 的指纹，**不用开游戏**就能算出）；仅预览有的补充事实 `providerId` /
-`maxTokens` / `seed` / `gameDays` / `scenario` / `memoryArm`。
+（提示词 + 工具 schema 的指纹，**不用开游戏**就能算出）；`observationShapeHash`（**观测面的
+结构**指纹：有哪些世界事实、什么类型；值全抹掉 —— 只依赖代码，所以也**跑前就能算**，且
+跨 seed 稳定）；仅预览有的补充事实 `providerId` / `maxTokens` / `seed` / `gameDays` /
+`scenario` / `memoryArm`。
 
 跑完才知道的字段（`servedModel` / `payloadHash` / `payloadShapeHash` / `payloadCount`）
 **不在预览里**：预览只承诺它能兑现的（D79）。**预览与启动用同一条闸**：无法执行的花费上限

@@ -380,6 +380,12 @@
           ["Backend", manifestField(ma, "backend") ?? "—", manifestField(mb, "backend") ?? "—", null],
           ["Scaffold", shortHash(manifestField(ma, "scaffoldHash")), shortHash(manifestField(mb, "scaffoldHash")), null],
           ["Payload", shortHash(manifestField(ma, "payloadHash")), shortHash(manifestField(mb, "payloadHash")), null],
+          [
+            "Observation",
+            shortHash(manifestField(ma, "observationShapeHash")),
+            shortHash(manifestField(mb, "observationShapeHash")),
+            null,
+          ],
         ];
         return rows.map(([key, a, b, d]) => ({ key, a, b, delta: d }));
       },
@@ -699,7 +705,14 @@
     const shape = hashText(m.payloadShapeHash);
     push("Payload shape", shape.text, {
       copy: shape.copy,
-      title: shape.copy ? `the same question apart from the world's numbers — full: ${shape.copy}` : "",
+      title: shape.copy ? `the real request, numbers normalised (it contains the world, so it differs per seed) — full: ${shape.copy}` : "",
+    });
+    // The observation surface's **shape**: cross-seed stable, so it is the
+    // fingerprint that can say "these two runs saw the same world facts".
+    const obs = hashText(m.observationShapeHash);
+    push("Observation surface", obs.text, {
+      copy: obs.copy,
+      title: obs.copy ? `the structure of the world facts the model saw — full: ${obs.copy}` : "",
     });
     push("Payload requests", maybeNum(m.payloadCount));
     push("Token cap", m.tokenLimit === null || m.tokenLimit === undefined ? "none" : maybeNum(m.tokenLimit));

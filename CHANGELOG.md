@@ -18,6 +18,16 @@
   navigates to all four pages, not just the home page.
 
 ### Added
+- **The observation surface now has a fingerprint of its own.** Two runs could share a scaffold and
+  still have seen different worlds - and nothing said so. The payload fingerprint cannot answer it
+  across runs (it contains the world, so it differs on every seed - it would cry wolf), so there is
+  now a third fingerprint: the **structure** of the world facts the model sees (which facts, which
+  types; values and array lengths ignored), computed from a probe world that fills every branch. It
+  depends on the code only ⇒ it can be computed **before** a run, both backends record it, and the
+  preview promises it (real machine: `ba1cc7959b170e8d`, identical in the preview and the finished
+  manifest). Compare now decides "these runs did not answer the same question" from the scaffold and
+  this fingerprint; the payload shape is reported for the record only.
+
 - **A comparison can start from the comparison.** The Compare page could only look at runs that already existed: picking the models, the worlds and the caps and then *starting that plan* was impossible. The plan is now computed **server-side** (the page estimates nothing): how many runs it would start, which caps apply, whether the spend is measurable, which model each cell uses - with the same field names the manifest uses, so plan and finished run compare field by field. Launching runs the cells **one after another** (one process, one game port); a failed cell is recorded and the rest still run. The refusals happen before anything starts: a cost cap on a model without a price table, an unknown model, or a plan that collides with a running game.
 
 - **Corrected: the deliveries cannot be split into cargo and passengers.** An earlier entry here claimed they could; the OpenTTD 15.3 source says otherwise: the script API has **no cargo monitor** (`GSCargoMonitor.*` does not fail - it returns null, so a split reads as "always empty"), and the admin's counter is the **sum** over the per-cargo-type array. The score keeps the one number it can measure, the split fields report "not measured", and the API is registered in the squirrel-api guard.
@@ -54,20 +64,13 @@
 
 - **The dashboard can start a run, and says what the next run will use.** The run knobs (seed, game days, scenario, memory arm, thinking level, tool budget, token and cost caps, backend) are settable from the Configure page, and `POST /api/run/start` carries them with the run; the rules are the ones the command line already used - the page cannot introduce a second set. A next-run preview (`POST /api/run/preview`) resolves the knobs server-side and shows the values the next run would use; its field names are the manifest's own, so "the preview equals the manifest" is a contract a test can check field by field. An illegal knob is refused with a reason and a hint, before any game process starts.
 
-- **Benchmark mode (D5)**: a matrix planner that gives every cell its own data dir and
-  refuses to run before the comparison is pre-registered, a four-axis scorecard, paired
-  bootstrap comparison, and JSON + Markdown reports (`scripts/bench.ts`).
+- **Benchmark mode (D5)**: a matrix planner that gives every cell its own data dir and refuses to run before the comparison is pre-registered, a four-axis scorecard, paired bootstrap comparison, and JSON + Markdown reports (`scripts/bench.ts`).
 
-- **Run manifest**: every run records the served model, backend, thinking level, tool
-  budget, scaffold fingerprint, real payload fingerprint, first-payload shape, game
-  version and spend caps - in `meta.json` **and** the metrics row (SPEC §10.114–§10.115).
+- **Run manifest**: every run records the served model, backend, thinking level, tool budget, scaffold fingerprint, real payload fingerprint, first-payload shape, game version and spend caps - in `meta.json` **and** the metrics row (SPEC §10.114–§10.115).
 
-- **Named outcomes**: every run ends with a reason (`delivered`, `delivered_nothing`,
-  `no_construction`, `refused`, `paused_by_agent`, `world_frozen`, `wall_clock_cap`,
-  `token_cap`, `cost_cap`, `unknown`), so a zero is never a bare number.
+- **Named outcomes**: every run ends with a reason (`delivered`, `delivered_nothing`, `no_construction`, `refused`, `paused_by_agent`, `world_frozen`, `wall_clock_cap`, `token_cap`, `cost_cap`, `unknown`), so a zero is never a bare number.
 
-- **Spend caps**: `LLM_TOKEN_LIMIT` / `LLM_COST_LIMIT` (and CLI flags) stop a run at a
-  decision boundary; a cost cap on an unpriced model refuses to start.
+- **Spend caps**: `LLM_TOKEN_LIMIT` / `LLM_COST_LIMIT` (and CLI flags) stop a run at a decision boundary; a cost cap on an unpriced model refuses to start.
 
 - **Second decision backend**: `AGENT_HARNESS=1` drives the same scaffold through
   pi-agent-core's `AgentHarness` (replayable transcript, retry/fault visibility). Both
