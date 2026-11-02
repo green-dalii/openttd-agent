@@ -97,7 +97,11 @@ describe("the preview and the manifest agree", () => {
 		// 它现在说清楚自己带哪些事实——城镇名字、货种总量、产业、车型）。
 		// 2026-10-31: 3da8a64e1fbe818e → 74f2e64d1e930df3（系统提示改成说清
 		// 「分数同时计入货物与客运」——旧的措辞让模型以为自己只被货物打分）。
-		expect(preview.scaffoldHash).toBe("74f2e64d1e930df3");
+		// 2026-11-02: 74f2e64d1e930df3 → 2f5b438b462d21a3（系统提示补上**融资机制**：
+		// 执行器开工前先把贷款提到上限——不写这句，模型看到自己的余额与贷款突然变动
+		// 却无从解释）。⇒ 2026-10-31 那轮基准矩阵（6 格，74f2e64d…）从此是**另一副
+		// 脚手架**，跨批次比较会被 Compare 明写出来。
+		expect(preview.scaffoldHash).toBe("2f5b438b462d21a3");
 	});
 
 	it("keeps the cost-known fact honest (a live-only model has no price table)", () => {

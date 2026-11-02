@@ -264,6 +264,14 @@ export function makeSignalHub(refs: SignalHubRefs): SignalHub {
 						}
 						refs.world.setObservationPolicy(parts.length ? parts.join(";") : null);
 					}
+					// **融资事实**（2026-11-02，Issue #13）：贷款上限 + 贷款的最小单位。
+					// 利息率**引擎不暴露** ⇒ 不在这里编（"没测到"就是没测到）。
+					if (p.loan_ceiling !== undefined || p.loan_interval !== undefined) {
+						refs.world.setFinancing(
+							typeof p.loan_ceiling === "number" ? p.loan_ceiling : null,
+							typeof p.loan_interval === "number" ? p.loan_interval : null,
+						);
+					}
 					if (Array.isArray(p.town_list)) {
 						refs.world.setTowns(
 							(p.town_list as { id?: unknown; name?: unknown; pop?: unknown; x?: unknown; y?: unknown; tc?: unknown }[]).map((t) => ({

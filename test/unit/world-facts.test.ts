@@ -194,6 +194,18 @@ describe("worldFacts：管道里本来就有、但模型看不见的那几类事
 	});
 });
 
+describe("worldFacts：融资事实（Issue #13）", () => {
+	it("带上还能借多少与贷款的最小单位", () => {
+		const facts = worldFacts(snap({ loanCeiling: 300000, loanInterval: 10000 }));
+		expect(facts.financing).toEqual({ loanCeiling: 300000, loanInterval: 10000 });
+	});
+
+	it("没测到就是 null（利息率引擎不暴露，绝不猜一个数）", () => {
+		const facts = worldFacts(snap());
+		expect(facts.financing).toEqual({ loanCeiling: null, loanInterval: null });
+	});
+});
+
 describe("auditState（审计侧的世界快照）", () => {
 	it("保留审计需要的显示字段（name/isAi）与事件计数，且读数与投影同源", () => {
 		const s = snap({ companies: new Map([[0, company(0)]]) as unknown as WorldSnapshot["companies"], recent: [{ kind: "x" }, { kind: "y" }] as never, totalEvents: 7 });

@@ -993,15 +993,13 @@ road seg1 d54 → … → road_stuck:ERR_AREA_NOT_CLEAR → done`——具名失
 - **GS 虚拟机的库基类注册名是 `GSLibrary`**（四选一探针实测：`GameLibrary`/`Library`/
   `ScriptLibrary`/`AILibrary` 均报 `the index '...' does not exist`）。
 - **GS 虚拟机不注册 AI* API 名**（`the index 'AIList' does not exist`）⇒ 库内代码须按双名映射改 GS 名
-  （AITile/AIMap/AITunnel/AIBridge/AIRoad/AIVehicle/AITestMode/AIList/AIBridgeList_Length →
-  GSTile/GSMap/GSTunnel/GSBridge/GSRoad/GSVehicle/GSTestMode/GSList/GSBridgeList_Length）。
+  （AI* → GS*：Tile/Map/Tunnel/Bridge/Road/Vehicle/TestMode/List/BridgeList_Length）。
 - 依赖链：`pathfinder.road`(v4) → `graph.aystar`(v6) → `queue.binary_heap`(v1)。三件套已 vendored 进
   `src/game/squirrel/library/`（GPL v2 独立作品，保留许可全文；边界见该目录 README）。
   `squirrel-deploy` 部署到 `<data>/game/library/`。
-- **完整线路建成**（P1-1a 验收补齐，seed 11 真机）：`queued → work j100 → stA_ok → stB_ok → road
-  seg1..3 → road_built → dpt_ok → dpt_conn → bus_live → done`，`done.fleet = {owned:1, ids:[4],
-  applied:-1}`——车站×2 + 道路（真 Pathfinder.Road 分段寻路）+ 车库 + 巴士 + 发车，全部经 GS 执行
-  核心，server.log 零 API 缺失。
+- **完整线路建成**（P1-1a 验收补齐，seed 11 真机）：`queued → work j100 → stA_ok → stB_ok → road seg1..3
+  → road_built → dpt_ok → dpt_conn → bus_live → done`，`done.fleet = {owned:1, ids:[4], applied:-1}`——
+  车站×2 + 道路（真 Pathfinder.Road 分段寻路）+ 车库 + 巴士 + 发车，全部经 GS 执行核心，server.log 零 API 缺失。
 - **遗留（收尾链缺陷，已登记 ROADMAP）**：offline demo 收尾时反射步骤失败（faux 队列耗尽）会让
   `runFinalizeAndReflect` 返回 1 且**不写指标行** —— 数据丢失，P2 的短局多跑必须先修。
 ### 10.109 P1-1b 尾巴 + P1-3 数据层：车队双向/退役实证（2026-10-08 真机）
@@ -1164,10 +1162,10 @@ compaction 冲突）在 `docs/HARNESS-MIGRATION.md` §3（带坐标），此处�
 
 **D1 成绩可见与诚实的增量**
 - 决策上下文带 `score` 块（`delivered`/`deliveredPerGameDay`/`elapsedGameDays`/`horizonDays`/
-  `scoredFromGameDay`/`windowOpened`）；`delivered` 取世界状态的 `deliveredRun.total`，**与该局度量行
-  同一个数**（真机：模型看到 0、度量记 0）。增量不再折零：`null` 读数 → 该增量 `null` +
-  `baselineEstablished=false`（真机第一次决策 `money=unknown`，第二次 `money=199214`）。历局成绩作为
-  事实注入（同 scenario/horizon、排除被停/冻结局，排除数报出）；`--no-memory` 对照臂同样关闭。
+  `scoredFromGameDay`/`windowOpened`）；`delivered` 取世界状态的 `deliveredRun.total`，**与该局度量行同
+  一个数**。增量不再折零：`null` 读数 → 该增量 `null` + `baselineEstablished=false`（真机第一次决策
+  `money=unknown`，第二次 `money=199214`）。历局成绩作为事实注入（同 scenario/horizon、排除被停/冻结局）；
+  `--no-memory` 对照臂同样关闭。
 
 **D2 世界只投影一次**
 - 唯一投影 `src/agent/world-facts.ts`：公司按 id、城镇按人口降序（缺失排最后、同人口按 id）；决策
@@ -1181,11 +1179,10 @@ compaction 冲突）在 `docs/HARNESS-MIGRATION.md` §3（带坐标），此处�
   `{"phase":"stB_ok",...,"job":100,"action":"build_bus_route"}`。
 
 **D3b run manifest + 结果分类**
-- 度量行 `manifest = {servedModel, thinkingLevel, toolBudget, scaffoldHash}`：`servedModel` 取
-  provider 实际作答（`responseModel ?? model`）；`scaffoldHash` = sha256(系统提示词 + 工具集
-  [name/description/schema]，按顺序) 前 16 位。真机：`{"servedModel":"faux-1","thinkingLevel":"off",
-  "toolBudget":12,"scaffoldHash":"74f2e64d1e930df3"}`。`classifyOutcome`（派生不存盘）：优先级
-  人为停止 > 环境事件 > 结果读数，缺失 → `unknown`；封闭词表（十类）见 §10.122。
+- 度量行 `manifest = {servedModel, thinkingLevel, toolBudget, scaffoldHash}`：`servedModel` 取 provider
+  实际作答（`responseModel ?? model`）；`scaffoldHash` = sha256(系统提示词 + 工具集[name/description/schema]，
+  按顺序) 前 16 位。`classifyOutcome`（派生不存盘）：优先级 人为停止 > 环境事件 > 结果读数，缺失 →
+  `unknown`；封闭词表（十类）见 §10.122。
 
 **D4 旋钮可配且记录生效值**
 - `resolveScaffoldKnobs`：`LLM_THINKING`（缺省 off）/`LLM_TOOL_BUDGET`（缺省 12），**非法值抛错**；
@@ -1195,11 +1192,9 @@ compaction 冲突）在 `docs/HARNESS-MIGRATION.md` §3（带坐标），此处�
 
 **D5 评测面**
 - `planMatrix`：模型 × seed × 重复，**每格独立 data dir**、世界逐字相同、样本不足**跑前拒绝**（实测
-  4 局/模型 vs 需要 400 ⇒ 拒绝；+200% 需 4 ⇒ 放行）。`buildScorecard` + `renderReportMarkdown`：
-  四轴；分母 0 的比率是 `null`；被排除的局计数并报原因；分组用 `servedModel` 并列出
-  `requestedModels` ⇒ **网关替换可见**（看板侧投影见 §10.121）。`pairedComparison`：按 (seed, repeat)
-  配对，对差异做确定性 bootstrap CI；一侧缺失的配对不计入；配对 < 3 → `not determinable`。真机冒烟：
-  2 格矩阵跑通并产出 JSON+MD 报告（两局都因墙钟未达 horizon 被排除，报告如实写出 `horizon not reached x2`）。
+  4 局/模型 vs 需要 400 ⇒ 拒绝）。`buildScorecard` + `renderReportMarkdown`：四轴；分母 0 的比率是 `null`；
+  被排除的局计数并报原因；分组用 `servedModel` ⇒ **网关替换可见**（看板侧投影见 §10.121）。
+  `pairedComparison`：按 (seed, repeat) 配对 + 确定性 bootstrap CI；配对 < 3 → `not determinable`。
 
 ### 10.117 一份运行配置真值 + 一个解析器（B1/S2，2026-10-25）
 
@@ -1257,13 +1252,18 @@ compaction 冲突）在 `docs/HARNESS-MIGRATION.md` §3（带坐标），此处�
   History（`/sessions?run=<id>`）。
 - 真机（隔离 data dir，`minimax-cn` / `MiniMax-M3.1-Flash` + 本地 stub，各 2 个 seed）：两模型 × 两 seed 出四轴 + 配对判定（2 对 ⇒ "not determinable"），无价目表一侧写 `not measured`。
 - 事实：**观测面有自己的两枚指纹**（2026-11-02）：`scaffoldHash` 只覆盖提示词 + 工具，**不覆盖观测面**；
-  `payloadShapeHash` 含**世界**（城镇名、产业清单）⇒ **每个 seed 都不同** ⇒ 拿它跨局比较会**误报**
-  "不是同一个问题"（假警报比没警报更坏）。于是新增 ① `observationShapeHash`：**投影的结构**（有哪些
-  事实、什么类型；值全抹掉、数组长度不计），由**填满所有分支的探针世界**算出 ⇒ 只依赖代码、**跑前
-  就能算**、两种后端都记录（真机 `ba1cc7959b170e8d`，且**预览与 manifest 逐字段相同**）；②
-  `observationPolicy`：**GS 自报**它暴露了世界的哪一部分（`towns=all;industries=top12`）——"看到全部
-  26 座城"与"只看到人口前 10"是**两个不同的问题**，哪怕字段结构一模一样 ⇒ 策略也进 manifest。
-  Compare 的 `differs` 由这三者决定（结构指纹在这次改动里**不变**：字段没变，**切的那一刀变了**）。
+  `payloadShapeHash` 含**世界**（城镇名、产业清单）⇒ **每个 seed 都不同** ⇒ 拿它跨局比较会**误报**"不是同一
+  个问题"（假警报比没警报更坏）。于是新增 ① `observationShapeHash`：**投影的结构**（有哪些事实、什么类型；
+  值全抹掉、数组长度不计），由**填满所有分支的探针世界**算出 ⇒ 只依赖代码、**跑前就能算**、两种后端都记录
+  （真机 `ba1cc7959b170e8d`，且**预览与 manifest 逐字段相同**）；② `observationPolicy`：**GS 自报**它暴露了
+  世界的哪一部分（`towns=all;industries=top12`）——"看到全部 26 座城"与"只看到人口前 10"是**两个不同的
+  问题**，哪怕字段结构一模一样 ⇒ 策略也进 manifest。Compare 的 `differs` 由这三者决定（结构指纹在城镇那次
+  改动里**不变**：字段没变，**切的那一刀变了**）。
+- 事实：**融资事实进了观测面**（2026-11-02，Issue #13）：GS 在**公司模式**里读
+  `GSCompany.GetMaxLoanAmount()`（只能在那里读：`COMPANY_SELF` 在全局脚本里无效）⇒ 投影带
+  `financing{loanCeiling, loanInterval}`（真机：上限 300000、间隔 10000）。**利息率引擎根本不暴露**
+  ⇒ **"没测到"，不猜**。系统提示另补一句**融资机制**（执行器开工前先把贷款提到上限）⇒ 脚手架指纹
+  `74f2e64d1e930df3` → **`2f5b438b462d21a3`** ⇒ 2026-10-31 那轮 6 格基准从此是**另一副脚手架**。
 - 事实：**GS 现在报全图城镇**（2026-11-02，Issue #13）：以前只报人口前 10，样本外的城镇对模型只剩一个
   编号（`#14 → #2`）。真机（seed 4242）：**26 座城全部带名字**进 `observe()`（城镇块 ~1.8 KB）。
 - 事实：**比较计划是同一套预览的矩阵版**（Issue #48，`src/agent/compare-plan.ts`）：格子 = 模型 × seed；

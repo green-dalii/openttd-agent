@@ -14,7 +14,7 @@
  */
 
 import { decodePhaseWindow } from "../game/executor-status.js";
-import type { CargoFact, EngineFact, IndustryFact } from "./world-facts.js";
+import type { CargoFact, EngineFact, FinancingFact, IndustryFact } from "./world-facts.js";
 
 /**
  * One route as the model sees it. `townA/townB` are present only when the
@@ -44,7 +44,7 @@ import type { CompanyFact, TownFact } from "./world-facts.js";
  */
 export type TownSummary = TownFact;
 export type CompanyNumbers = CompanyFact;
-export type { CargoFact, EngineFact, IndustryFact };
+export type { CargoFact, EngineFact, FinancingFact, IndustryFact };
 
 /**
  * Snapshot used as the baseline for the next delta.
@@ -125,6 +125,12 @@ export interface DecisionContextInput {
 	 * be built from. Present for the same reason as `cargo` (SPEC §10.124).
 	 */
 	engines?: EngineFact[];
+	/**
+	 * The financing facts: how much more the company could borrow and the game's
+	 * loan interval. The **interest rate is not exposed by the engine**, so it is
+	 * absent rather than guessed (Issue #13 / D60).
+	 */
+	financing?: FinancingFact;
 	/**
 	 * How much wall-clock session remains, in seconds. A FACT about the episode
 	 * boundary (like a human knowing how long the session lasts), not advice:
