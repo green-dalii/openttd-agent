@@ -18,7 +18,7 @@
  *   看不见任何货物而建了客运线 ⇒ 分数（货物吨数）读 0。事实来源见 SPEC §10.124。
  */
 
-import type { CompanyState, WorldSnapshot } from "../game/world-state.js";
+import type { CompanyState, WorldEventFact, WorldSnapshot } from "../game/world-state.js";
 import { observationShapeHash as observationShapeHashOf } from "./observation-shape.js";
 
 /** One company's comparable numbers (model-visible). */
@@ -110,6 +110,16 @@ export interface WorldFacts {
 	engines: EngineFact[];
 	/** 融资事实（还能借多少 / 贷款的最小单位）。 */
 	financing: FinancingFact;
+	/**
+	 * The game's **pushed events** (Issue #13, S7d): a vehicle was lost, the
+	 * first vehicle reached a station…
+	 *
+	 * Why they belong to the observation surface: the engine pushes them, and
+	 * before this they were dropped by the GS - so a model could not see "my bus
+	 * arrived" or "my truck was scrapped" unless it looked at the right moment.
+	 * The newest come last; the list is bounded by the world state.
+	 */
+	events: WorldEventFact[];
 	/** Index signature: the projection travels as a plain JSON object. */
 	[key: string]: unknown;
 }
@@ -189,6 +199,7 @@ export function worldFacts(snap: WorldSnapshot): WorldFacts {
 			loanCeiling: typeof snap.loanCeiling === "number" ? snap.loanCeiling : null,
 			loanInterval: typeof snap.loanInterval === "number" ? snap.loanInterval : null,
 		},
+		events: (snap.worldEvents ?? []).map((e) => ({ ...e })),
 	};
 }
 
@@ -236,6 +247,10 @@ function observationProbe(): WorldSnapshot {
 		observationPolicy: null,
 		loanCeiling: 100000,
 		loanInterval: 10000,
+		worldEvents: [
+			{ seq: 0, kind: "vehicle_lost", vehicle: 1, station: null, industry: null, town: null },
+			{ seq: 1, kind: "station_first_vehicle", vehicle: 1, station: 1, industry: null, town: null },
+		],
 	};
 }
 
