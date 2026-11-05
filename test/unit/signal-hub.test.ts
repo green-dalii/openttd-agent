@@ -33,7 +33,15 @@ const fakeSession = () => ({
 	appendAudit: vi.fn(),
 	current: () => ({ checkpoints: [{ gameDate: "1950-03-14" }, { gameDate: "1950-04-01" }] }),
 });
-const fakeLedger = () => ({ markDone: vi.fn(), record: vi.fn() });
+// 测试替身必须与生产契约一致（缺方法会让 hub 在这里抛错，而那一抛会连坐同一条
+// state 里的城镇/产业事实 —— 这条耦合本身就是证据）。
+const fakeLedger = () => ({
+	markDone: vi.fn(),
+	record: vi.fn(),
+	// 决策→结果台账（Issue #13）：车辆 → 线路的归属 + 推事件的归因。
+	recordVehicleJobs: vi.fn(),
+	noteVehicleEvent: vi.fn(),
+});
 
 describe("signal-hub —— B-3 单元契约（golden from /tmp/calA3.log）", () => {
 	it_("company_stats：fleet 变化唤醒 onNotableEvent", () => {

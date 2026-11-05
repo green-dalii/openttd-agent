@@ -33,12 +33,21 @@ export interface RouteFact {
 	waiting?: number;
 	/** Year-to-date profit of the route's vehicles (Money; negative = loss). */
 	profit?: number;
+	/**
+	 * The **world events** observed for this route's vehicles (Issue #13: the
+	 * decision→result ledger) - e.g. "the first vehicle reached the station".
+	 *
+	 * Why: without it, the memory can only recall "did I build it" and "did it
+	 * make money", never "**the world then did something to it**". Absent = no
+	 * event was observed (not "nothing happened").
+	 */
+	observed?: { kind: string; vehicle: number | null; date?: string }[];
 }
 
 /** Ledger 中间形态（route-ledger.ts 的 all() 输出）。 */
 export interface LedgerLine {
 	order: { job: number; fromTown: number; toTown: number; decision: number; orderedAt: number };
-	outcome: { completed: boolean; doneDate?: string };
+	outcome: { completed: boolean; doneDate?: string; observed?: { kind: string; vehicle: number | null; date?: string }[] };
 }
 
 /**
@@ -60,6 +69,7 @@ export function routeFactsFromLedger(
 			completed: l.outcome.completed,
 		};
 		if (l.outcome.doneDate) base.doneDate = l.outcome.doneDate;
+		if (l.outcome.observed && l.outcome.observed.length) base.observed = l.outcome.observed;
 		const st = statsByJob?.get(l.order.job);
 		if (st) {
 			base.vehicles = st.vehicles;
