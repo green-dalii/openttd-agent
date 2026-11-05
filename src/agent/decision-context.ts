@@ -15,6 +15,7 @@
 
 import { decodePhaseWindow } from "../game/executor-status.js";
 import type { CargoFact, EngineFact, FinancingFact, IndustryFact } from "./world-facts.js";
+import type { WorldEventFact } from "../game/world-state.js";
 
 /**
  * One route as the model sees it. `townA/townB` are present only when the
@@ -131,6 +132,11 @@ export interface DecisionContextInput {
 	 * absent rather than guessed (Issue #13 / D60).
 	 */
 	financing?: FinancingFact;
+	/**
+	 * The game's pushed events (Issue #13, S7d): a vehicle was lost, the first
+	 * vehicle reached a station… **Facts about what happened**, not advice.
+	 */
+	events?: WorldEventFact[];
 	/**
 	 * How much wall-clock session remains, in seconds. A FACT about the episode
 	 * boundary (like a human knowing how long the session lasts), not advice:

@@ -115,6 +115,11 @@ export async function runDecision(
 		...(facts.financing.loanCeiling !== null || facts.financing.loanInterval !== null
 			? { financing: facts.financing }
 			: {}),
+		// The game's **pushed events** (Issue #13, S7d): what happened since the
+		// world last moved (a vehicle arrived, a vehicle was lost). They ride
+		// along so "is my route working?" is visible without a tool call. The
+		// list is empty when nothing was pushed - not a fabricated "all fine".
+		...(facts.events.length > 0 ? { events: facts.events } : {}),
 		// Same lesson, new signal (N2-2b): the economics of the lines already
 		// ordered ride along too, so "is my route actually working" is visible
 		// without a tool call. A route with no reading yet is simply absent.

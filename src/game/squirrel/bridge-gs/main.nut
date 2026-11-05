@@ -2403,7 +2403,54 @@ class BridgeV1 extends GSController {
             local ev = GSEventController.GetNextEvent();
             if (ev == null) break;
             local t = ev.GetEventType();
-            if (t == GSEvent.ET_ADMIN_PORT) {
+            if (t == GSEvent.ET_VEHICLE_LOST) {
+                // 推送事件（Issue #13 S7d）：车没了。引擎推给 GameScript 的事件队列
+                // 原本被**整个丢掉**（只有 admin 端口事件被处理）⇒ 模型永远看不到
+                // "我的车被报废了"。这里把引擎的事件类型映射到**封闭词表**。
+                try {
+                    local v = GSEventVehicleLost.Convert(ev);
+                    this.ReportGameEvent({ event = "vehicle_lost", vehicle = v.GetVehicleID(),
+                                           station = null, industry = null, town = null });
+                } catch (e) {}
+            } else if (t == GSEvent.ET_STATION_FIRST_VEHICLE) {
+                try {
+                    local s = GSEventStationFirstVehicle.Convert(ev);
+                    this.ReportGameEvent({ event = "station_first_vehicle",
+                                           station = s.GetStationID(), vehicle = s.GetVehicleID(),
+                                           industry = null, town = null });
+                } catch (e) {}
+            } else if (t == GSEvent.ET_VEHICLE_WAITING_IN_DEPOT) {
+                try {
+                    local d = GSEventVehicleWaitingInDepot.Convert(ev);
+                    this.ReportGameEvent({ event = "vehicle_waiting_in_depot",
+                                           vehicle = d.GetVehicleID(), station = d.GetStationID(),
+                                           industry = null, town = null });
+                } catch (e) {}
+            } else if (t == GSEvent.ET_VEHICLE_UNPROFITABLE) {
+                try {
+                    local u = GSEventVehicleUnprofitable.Convert(ev);
+                    this.ReportGameEvent({ event = "vehicle_unprofitable", vehicle = u.GetVehicleID(),
+                                           station = null, industry = null, town = null });
+                } catch (e) {}
+            } else if (t == GSEvent.ET_INDUSTRY_OPEN) {
+                try {
+                    local io = GSEventIndustryOpen.Convert(ev);
+                    this.ReportGameEvent({ event = "industry_open", industry = io.GetIndustryID(),
+                                           vehicle = null, station = null, town = null });
+                } catch (e) {}
+            } else if (t == GSEvent.ET_INDUSTRY_CLOSE) {
+                try {
+                    local ic = GSEventIndustryClose.Convert(ev);
+                    this.ReportGameEvent({ event = "industry_close", industry = ic.GetIndustryID(),
+                                           vehicle = null, station = null, town = null });
+                } catch (e) {}
+            } else if (t == GSEvent.ET_TOWN_FOUNDED) {
+                try {
+                    local tf = GSEventTownFounded.Convert(ev);
+                    this.ReportGameEvent({ event = "town_founded", town = tf.GetTownID(),
+                                           vehicle = null, station = null, industry = null });
+                } catch (e) {}
+            } else if (t == GSEvent.ET_ADMIN_PORT) {
                 local ap = GSEventAdminPort.Convert(ev);
                 local obj = ap.GetObject();
                 this._admin_seen++;
@@ -2421,6 +2468,29 @@ class BridgeV1 extends GSController {
                                    got = (obj == null ? "null" : typeof obj) });
                 }
             }
+        }
+    }
+
+    /* 推送事件的上报出口（Issue #13 S7d）。
+     *
+     * 形状恒定（D44）：键永远在，缺的就是 null —— 页面与模型看到的形状不会因为
+     * 事件类型而变。异常不许杀死 GS（一条坏事件不该带走整条通道）。 */
+    function ReportGameEvent(ev) {
+        try {
+            // **形状恒定**（D44）：四个键永远在，缺的就是 null。
+            // `rawin` 是"这个键存在吗"——Squirrel 里**读不存在的键会抛**
+            // （`the index 'x' does not exist`），所以先问再读。
+            GSAdmin.Send({
+                kind = "game_event",
+                event = ev.event,
+                vehicle = (ev.rawin("vehicle") && ev.vehicle != null) ? ev.vehicle : null,
+                station = (ev.rawin("station") && ev.station != null) ? ev.station : null,
+                industry = (ev.rawin("industry") && ev.industry != null) ? ev.industry : null,
+                town = (ev.rawin("town") && ev.town != null) ? ev.town : null,
+            });
+        } catch (e) {
+            // 不许静默：一条推事件丢了，模型就少知道一件事（走 err 通道）。
+            try { GSAdmin.Send({ kind = "err", cmd = "game_event", reason = "" + e }); } catch (e2) {}
         }
     }
 

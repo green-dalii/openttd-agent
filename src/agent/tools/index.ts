@@ -70,7 +70,10 @@ export function observeTool(deps: AgentDeps): AgentTool<typeof ObserveSchema, Ac
 					`industries=${JSON.stringify(facts.industries)} ` +
 					`engines=${JSON.stringify(facts.engines)} ` +
 					// 融资：还能借多少、贷款的最小单位（**利息率引擎不暴露**，不编）。
-					`financing=${JSON.stringify(facts.financing)}`,
+					`financing=${JSON.stringify(facts.financing)} ` +
+					// 推送事件：车到了 / 车没了 / 产业开关（**引擎推给 GS 的事件**，
+					// 以前被整个丢掉 ⇒ 模型看不到"我的车到了"）。
+					`events=${JSON.stringify(facts.events)}`,
 				data: facts,
 			};
 			return toResult(r);

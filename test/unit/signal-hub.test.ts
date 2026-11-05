@@ -20,6 +20,8 @@ const fakeWorld = () => ({
 	setDateFromRaw: vi.fn(),
 	setCargoTotals: vi.fn(),
 	setCompanyCargo: vi.fn(),
+	// 推送事件（Issue #13 S7d）：GS 把引擎推的事件翻译成封闭词表后送进来。
+	pushWorldEvent: vi.fn(),
 	// G2: the hub now reads the clock to time construction progress.
 	snapshot: () => ({ date: { year: 1950, month: 1, day: 1 } }),
 });
@@ -330,6 +332,53 @@ describe("signal-hub —— GS 错误计数（通道健康）", () => {
 			payload: { kind: "err", cmd: "build", detail: { reason: "refused" } },
 		} as unknown as GameEvent);
 		expect(hub.getGsErrors()).toBe(2);
+	});
+});
+
+describe("推送事件（Issue #13 S7d）", () => {
+	function hub(w: unknown) {
+		return makeSignalHub({
+			world: w as never, getWeb: () => null, getSession: () => null,
+			routeLedger: fakeLedger() as never, getDecisionCount: () => 0,
+			onPhaseChange: () => {}, onNotableEvent: () => {},
+		});
+	}
+
+	it_("game_event 进世界状态（模型因此看得到「车到了 / 车没了」）", () => {
+		const w = fakeWorld();
+		hub(w).onEvent({
+			kind: "gamescript",
+			payload: {
+				kind: "game_event",
+				event: "station_first_vehicle",
+				vehicle: 5,
+				station: 2,
+				industry: null,
+				town: null,
+			},
+		} as unknown as GameEvent);
+		expect(w.pushWorldEvent).toHaveBeenCalledWith({
+			kind: "station_first_vehicle",
+			vehicle: 5,
+			station: 2,
+			industry: null,
+			town: null,
+		});
+	});
+
+	it_("缺字段保持 null（不折成 0）", () => {
+		const w = fakeWorld();
+		hub(w).onEvent({
+			kind: "gamescript",
+			payload: { kind: "game_event", event: "vehicle_lost" },
+		} as unknown as GameEvent);
+		expect(w.pushWorldEvent).toHaveBeenCalledWith({
+			kind: "vehicle_lost",
+			vehicle: null,
+			station: null,
+			industry: null,
+			town: null,
+		});
 	});
 });
 
