@@ -101,7 +101,11 @@ describe("the preview and the manifest agree", () => {
 		// 执行器开工前先把贷款提到上限——不写这句，模型看到自己的余额与贷款突然变动
 		// 却无从解释）。⇒ 2026-10-31 那轮基准矩阵（6 格，74f2e64d…）从此是**另一副
 		// 脚手架**，跨批次比较会被 Compare 明写出来。
-		expect(preview.scaffoldHash).toBe("2f5b438b462d21a3");
+		// 2026-11-02: 2f5b438b462d21a3 → a72a663cdd126090（**工具表变了**：新增 L2 查询
+		// 工具 `inspect_vehicle` / `inspect_town` —— 工具的描述与 schema 属于脚手架
+		// 指纹 ⇒ 加工具就是换脚手架）。⇒ 2026-10-31 那轮 6 格基准（74f2e64d…）与
+		// 2026-11-02 之后的所有局**互不可比**（Compare 按组分开）。
+		expect(preview.scaffoldHash).toBe("a72a663cdd126090");
 	});
 
 	it("keeps the cost-known fact honest (a live-only model has no price table)", () => {

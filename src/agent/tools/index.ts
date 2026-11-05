@@ -88,6 +88,17 @@ const BuildRouteSchema = Type.Object({
 	job: Type.Optional(Type.Number({ description: "Optional job id for tracking" })),
 });
 
+/** How long an L2 query waits for the game's answer before giving up. */
+export const INSPECT_TIMEOUT_MS = 5000;
+
+const InspectVehicleSchema = Type.Object({
+	vehicle: Type.Number({ description: "The vehicle id (from observe() / a route's vehicle list)" }),
+});
+
+const InspectTownSchema = Type.Object({
+	town: Type.Number({ description: "The town id (from observe())" }),
+});
+
 /** `build_bus_route` — ask the Bridge GS to plan+place a bus route blueprint. */
 export function buildBusRouteTool(deps: AgentDeps): AgentTool<typeof BuildRouteSchema, ActionResult> {
 	return {
@@ -605,12 +616,113 @@ export function inspectRouteTool(deps: AgentDeps): AgentTool<typeof InspectRoute
 	};
 }
 
+/**
+ * L2 查询工具（Issue #13）：**问一个具体的问题，把答案带回来**。
+ *
+ * 为什么需要：观测面是**周期采样**——它告诉模型"世界此刻长什么样"，却不告诉它
+ * "**我那辆车**现在在干什么、载了多少、赚了多少"。没有这些，模型只能猜（或者不停
+ * 地 observe 一遍又一遍）。
+ *
+ * 铁律（与动作工具一样）：
+ *   - **要么给出答案，要么明说拿不到**（超时/通道坏了 ⇒ 报"没得到回答"，绝不报"没有"）。
+ *   - **不评价**（不说"这辆车很赚"），只给事实。
+ *   - 只读：这两个工具**不改变世界**。
+ */
+export function inspectVehicleTool(deps: AgentDeps): AgentTool<typeof InspectVehicleSchema, ActionResult> {
+	return {
+		name: "inspect_vehicle",
+		label: "Inspect Vehicle",
+		description:
+			"Ask the game about ONE vehicle: its name, where it is, its type and engine, its age, its current speed, how much it is carrying and its profit this year. " +
+			"Use it when observe() shows vehicles or a route but not what a specific vehicle is doing. Read-only.",
+		executionMode: "sequential",
+		parameters: InspectVehicleSchema,
+		execute: async (_id, params) => {
+			const answer = await deps.sink.gameScriptAwait?.(
+				JSON.stringify({ cmd: "inspect_vehicle", vehicle: params.vehicle }),
+				INSPECT_TIMEOUT_MS,
+			);
+			if (answer === undefined) {
+				return toResult({
+					ok: false,
+					summary: `inspect_vehicle is not available in this run (no answer channel); vehicle ${params.vehicle} was not inspected`,
+				});
+			}
+			if (answer === null) {
+				return toResult({
+					ok: false,
+					summary: `no answer from the game within ${INSPECT_TIMEOUT_MS} ms for vehicle ${params.vehicle}; nothing was inspected`,
+				});
+			}
+			if (answer.ok !== true) {
+				return toResult({
+					ok: false,
+					summary: `the game could not inspect vehicle ${params.vehicle}: ${String(answer.reason ?? "unknown reason")}`,
+					data: answer,
+				});
+			}
+			const data = (answer.data ?? {}) as Record<string, unknown>;
+			return toResult({
+				ok: true,
+				summary: `vehicle ${params.vehicle}: ${JSON.stringify(data)}`,
+				data,
+			});
+		},
+	};
+}
+
+/** `inspect_town` — ask the game about ONE town. */
+export function inspectTownTool(deps: AgentDeps): AgentTool<typeof InspectTownSchema, ActionResult> {
+	return {
+		name: "inspect_town",
+		label: "Inspect Town",
+		description:
+			"Ask the game about ONE town: its name, population, houses, where it is and its growth rate. " +
+			"Use it when observe() shows towns but not the details of a specific one. Read-only.",
+		executionMode: "sequential",
+		parameters: InspectTownSchema,
+		execute: async (_id, params) => {
+			const answer = await deps.sink.gameScriptAwait?.(
+				JSON.stringify({ cmd: "inspect_town", town: params.town }),
+				INSPECT_TIMEOUT_MS,
+			);
+			if (answer === undefined) {
+				return toResult({
+					ok: false,
+					summary: `inspect_town is not available in this run (no answer channel); town ${params.town} was not inspected`,
+				});
+			}
+			if (answer === null) {
+				return toResult({
+					ok: false,
+					summary: `no answer from the game within ${INSPECT_TIMEOUT_MS} ms for town ${params.town}; nothing was inspected`,
+				});
+			}
+			if (answer.ok !== true) {
+				return toResult({
+					ok: false,
+					summary: `the game could not inspect town ${params.town}: ${String(answer.reason ?? "unknown reason")}`,
+					data: answer,
+				});
+			}
+			const data = (answer.data ?? {}) as Record<string, unknown>;
+			return toResult({
+				ok: true,
+				summary: `town ${params.town}: ${JSON.stringify(data)}`,
+				data,
+			});
+		},
+	};
+}
+
 export function createTools(deps: AgentDeps): AgentTool<TSchema, ActionResult>[] {
 	// Order matters for the model's attention but not for behaviour. The action
 	// list itself is derived from THIS array by `capabilitiesTool`, so the
 	// catalog cannot report a name that does not exist (AB-1).
 	const actions: AgentTool<TSchema, ActionResult>[] = [
 		observeTool(deps),
+		inspectVehicleTool(deps),
+		inspectTownTool(deps),
 		estimateRouteTool(deps),
 		inspectRouteTool(deps),
 		buildBusRouteTool(deps),
