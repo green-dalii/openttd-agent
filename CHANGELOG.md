@@ -18,6 +18,15 @@
   navigates to all four pages, not just the home page.
 
 ### Added
+- **A comparison only compares one question.** Runs that answered a **different** question - a
+  different scaffold, a different observation surface, a different slice of the world - are no longer
+  mixed into one table. The server groups the metric rows by the manifest's own fields (scaffold +
+  observation shape + observation policy), the page offers the groups, and the numbers below belong to
+  **one** group; the runs in the other groups are counted, not dropped. The default group is the one with
+  the most runs, so the 2026-10-31 benchmark matrix (6 cells, the older scaffold) is its own group and
+  keeps its numbers - the paired difference inside it is still **-0.270** (real machine: 6 old cells +
+  1 new scaffold, two groups).
+
 - **The model can finally see its financing, and it knows why its balance moves.** The company facts
   already carried the loan, but not how much more could be borrowed - and the **interest rate is not
   exposed by the engine at all**, so that one stays "not measured" rather than a guess. The Bridge GS
@@ -154,15 +163,9 @@
 - **The manifest's "served a different model" flag was invisible.** The warning colour was scoped to the list chips, so the detail table showed the substituted model in plain text.
 - **The probe mode carried its own copy of the admin client** (148 lines of protocol code next to the real, tested one) - and it used the one-shot connect, the very mistake that made a probe time out for weeks. It uses the real client now: the handshake is bounded and retried, and the duplicated protocol code is gone.
 
-- **The evolution hooks had drifted into two copies.** The runner re-attaches its own hooks when
-  a run starts, and only the server's copy carried the per-row exclusion reason - so the same run
-  could show a different exclusion depending on which path served the page. They are built in one
-  place now, and a guard keeps them there.
+- **The evolution hooks had drifted into two copies.** The runner re-attaches its own hooks when a run starts, and only the server's copy carried the per-row exclusion reason - so the same run could show a different exclusion depending on which path served the page. They are built in one place now, and a guard keeps them there.
 
-- **The timeline did not survive the start of a run.** The runner re-attaches its own session
-  hooks when a run starts, which **replaced** the server's hooks with a narrower copy - so the
-  feature worked on an idle dashboard and vanished the moment a run began. The hooks are now
-  built in one place, and a guard keeps them there.
+- **The timeline did not survive the start of a run.** The runner re-attaches its own session hooks when a run starts, which **replaced** the server's hooks with a narrower copy - so the feature worked on an idle dashboard and vanished the moment a run began. The hooks are now built in one place, and a guard keeps them there.
 
 - **A cost cap the model cannot enforce is now a bad request, not a conflict.** Setting a cost cap
   on a model without a price table could never fire, so it was refused before the game started —
@@ -175,8 +178,7 @@
   empty while the page looked fine (the errors only appear in `console.warn`). The knob fields
   also had two controls sharing one id, so `#knob-toolBudget` resolved to the hidden one.
 
-- **The preview follows the form.** It was fetched once on load, so the panel kept showing the
-  values of the previous knobs while claiming to describe the next run.
+- **The preview follows the form.** It was fetched once on load, so the panel kept showing the values of the previous knobs while claiming to describe the next run.
 
 - **One resolver for the run configuration.** The view, the save path, the startup gate and the
   runner now derive the selection from the same function, so they cannot answer differently. The
@@ -207,13 +209,11 @@
 - Runs could be **stopped and look like failures**: pause attribution, world-frozen runs
   and unfinished horizons are now named and excluded from comparisons.
 
-- **Deltas folded unread readings to zero** - the model read "no change" where nothing had
-  been measured.
+- **Deltas folded unread readings to zero** - the model read "no change" where nothing had been measured.
 
 - **Fleet counts disagreed with themselves** (route table vs company stats).
 
-- **Charts flickered and grew** (per-frame `devicePixelRatio` multiplication; width→height
-  feedback loop) - fixed and guarded by a time-series smoke check at dpr=2.
+- **Charts flickered and grew** (per-frame `devicePixelRatio` multiplication; width→height feedback loop) - fixed and guarded by a time-series smoke check at dpr=2.
 
 - **World clock came from a `Monthly` channel** and could be stale for a whole month.
 
@@ -222,19 +222,15 @@
 - `--serve` kept a stale `llm.json`, so Start after saving a provider still said
   "not configured".
 
-- **`test:live` was red on main** (it picked `events.jsonl` as the newest session) and
-  left OpenTTD running when it failed, which silently disabled 13 preflight tests.
+- **`test:live` was red on main** (it picked `events.jsonl` as the newest session) and left OpenTTD running when it failed, which silently disabled 13 preflight tests.
 ## [0.6.0] - 2026-09-11
 
 > **本轮的主要工作是"把实现拉回 SPEC"**，而不是加功能。审计真机 Session 日志发现，
 > 之前几轮返工的根因都是**没有按 SPEC §1.1/§4.2 实现决策循环**。
 
 ### Fixed（核心：Agent 其实只决策了一次）
-- **`maxTurns ?? 1` 使整局只问 LLM 一次**：模型在 1950-01-01 建一条线后再没被咨询过，
-  收入一路下滑也无人补救。真机证据：三个 Session 全是 `mode=watch` + `kind=faux` +
-  `decisions=0`（内置 CPU AI 在打），而面板看起来一切正常
-- **轮询顺序 bug**：阶段变化靠 admin poll 发现，而 poll 曾写在决策循环**之后** →
-  永远发现不到变化 → 调度器收不到 `phase_change` → 仍表现为"只决策一次"
+- **`maxTurns ?? 1` 使整局只问 LLM 一次**：模型在 1950-01-01 建一条线后再没被咨询过， 收入一路下滑也无人补救。真机证据：三个 Session 全是 `mode=watch` + `kind=faux` + `decisions=0`（内置 CPU AI 在打），而面板看起来一切正常
+- **轮询顺序 bug**：阶段变化靠 admin poll 发现，而 poll 曾写在决策循环**之后** → 永远发现不到变化 → 调度器收不到 `phase_change` → 仍表现为"只决策一次"
 - **删除框架层的策略引导**：旧 prompt 写"施工中就报告并结束回合"，等于替模型做决定。
   现在 prompt 只给事实与因果（并有测试禁止 `you should`/`recommend` 等措辞）
 - **Live 页 `renderHeader` 引用已删除的 `#g-mode`** → 页面首屏就崩（浏览器实测发现）

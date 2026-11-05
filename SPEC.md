@@ -1238,12 +1238,8 @@ compaction 冲突）在 `docs/HARNESS-MIGRATION.md` §3（带坐标），此处�
 - 事实：**一行 = 一次决策**（`src/agent/causal-timeline.ts`）：四段 = decision（触发/时刻/
   目标）→ tools → job/相位 → effect（本窗口增量）。归属**靠窗口**（上一次决策之后、下一次
   决策之前）；**连接键是 `job`**（D3a）。
-- 事实：**GS 相位必须归档**才可复盘：`signal-hub` 把每个非心跳 exec 事件写成 `gs_exec` 审计记录（此前只在实时流里，跑完的局就查不到了）。**effect = 与下一次决策快照的差**（钱/收入/车/站/交付/游戏日）；最后一个决策没有"下一个快照" ⇒ effect = `null`（**没测到**，D60）。**会话 hook 只有一处构造**
-  （`sessionHooks(dataDir)`）：runner 的 `web.attach({sessions})` 会**替换**掉 server 的 hook
-  ——两份构造曾让时间线在**run 一开始就从页面上消失**；`repo-hygiene` 有守卫。
-- 真机（隔离 data dir，`minimax-cn` / `MiniMax-M3.1-Flash`）：freeform 局里决策 2 下了 4 个
-  job，相位（queued → buildA → road）与工具、效果同在一行，由 `job` 连接。
-
+- 事实：**GS 相位必须归档**才可复盘：`signal-hub` 把每个非心跳 exec 事件写成 `gs_exec` 审计记录（此前只在实时流里，跑完的局就查不到了）。**effect = 与下一次决策快照的差**（钱/收入/车/站/交付/游戏日）；最后一个决策没有"下一个快照" ⇒ effect = `null`（**没测到**，D60）。**会话 hook 只有一处构造**（`sessionHooks(dataDir)`）：runner 的 `web.attach({sessions})` 会**替换**掉 server 的 hook ——两份构造曾让时间线在**run 一开始就从页面上消失**；`repo-hygiene` 有守卫。
+- 真机（隔离 data dir，`minimax-cn` / `MiniMax-M3.1-Flash`）：freeform 局里决策 2 下了 4 个 job，相位（queued → buildA → road）与工具、效果同在一行，由 `job` 连接。
 ### 10.121 Compare 视图是**投影**：四轴、判定与排除都不是页面算的（B4，2026-10-25）
 
 - 事实：`GET /api/compare` 是**只读**的：四轴来自 `buildScorecard`，配对判定来自
@@ -1251,19 +1247,23 @@ compaction 冲突）在 `docs/HARNESS-MIGRATION.md` §3（带坐标），此处�
   分组用**实际服务的模型**（`manifest.servedModel`）⇒ 网关替换**可见**；每局能下钻到
   History（`/sessions?run=<id>`）。
 - 真机（隔离 data dir，`minimax-cn` / `MiniMax-M3.1-Flash` + 本地 stub，各 2 个 seed）：两模型 × 两 seed 出四轴 + 配对判定（2 对 ⇒ "not determinable"），无价目表一侧写 `not measured`。
-- 事实：**观测面有自己的两枚指纹**（2026-11-02）：`scaffoldHash` 只覆盖提示词 + 工具，**不覆盖观测面**；
-  `payloadShapeHash` 含**世界**（城镇名、产业清单）⇒ **每个 seed 都不同** ⇒ 拿它跨局比较会**误报**"不是同一
-  个问题"（假警报比没警报更坏）。于是新增 ① `observationShapeHash`：**投影的结构**（有哪些事实、什么类型；
-  值全抹掉、数组长度不计），由**填满所有分支的探针世界**算出 ⇒ 只依赖代码、**跑前就能算**、两种后端都记录
-  （真机 `ba1cc7959b170e8d`，且**预览与 manifest 逐字段相同**）；② `observationPolicy`：**GS 自报**它暴露了
-  世界的哪一部分（`towns=all;industries=top12`）——"看到全部 26 座城"与"只看到人口前 10"是**两个不同的
-  问题**，哪怕字段结构一模一样 ⇒ 策略也进 manifest。Compare 的 `differs` 由这三者决定（结构指纹在城镇那次
-  改动里**不变**：字段没变，**切的那一刀变了**）。
+
+- 事实：**观测面有自己的两枚指纹**（2026-11-02）：`scaffoldHash` 只覆盖提示词 + 工具，**不覆盖观测面**；`payloadShapeHash`
+  含**世界**（城镇名、产业清单）⇒ **每个 seed 都不同** ⇒ 拿它跨局比较会**误报**"不是同一个问题"（假警报比没警报更坏）。
+  于是新增 ① `observationShapeHash`：**投影的结构**（有哪些事实、什么类型；值全抹掉、数组长度不计），由**填满所有分支的
+  探针世界**算出 ⇒ 只依赖代码、**跑前就能算**、两种后端都记录（真机 `f06107cdb4c77a59`，**预览与 manifest 逐字段相同**）；
+  ② `observationPolicy`：**GS 自报**它暴露了世界的哪一部分（`towns=all;industries=top12`）——"看到全部 26 座城"与
+  "只看到人口前 10"是**两个不同的问题**，哪怕字段结构一模一样 ⇒ 策略也进 manifest。
+- 事实：**比较只发生在"同一个问题"之内**（2026-11-02，用户决定 (b)）：Compare 按 **manifest 自己的三元组**
+  （脚手架 + 观测面结构 + 观测策略）给度量行**分组**，一次只比**一组**；别的组**披露**（`runsOutsideGroup`）、
+  不混进任何数字（默认组 = **局数最多**的那组 ⇒ 2026-10-31 那轮 6 格自成一组）。真机（6 格旧基准 + 1 格新
+  脚手架）：两组，组内配对差仍为 **-0.270**（与 2026-10-31 的读数一致）。
 - 事实：**融资事实进了观测面**（2026-11-02，Issue #13）：GS 在**公司模式**里读
   `GSCompany.GetMaxLoanAmount()`（只能在那里读：`COMPANY_SELF` 在全局脚本里无效）⇒ 投影带
   `financing{loanCeiling, loanInterval}`（真机：上限 300000、间隔 10000）。**利息率引擎根本不暴露**
   ⇒ **"没测到"，不猜**。系统提示另补一句**融资机制**（执行器开工前先把贷款提到上限）⇒ 脚手架指纹
-  `74f2e64d1e930df3` → **`2f5b438b462d21a3`** ⇒ 2026-10-31 那轮 6 格基准从此是**另一副脚手架**。
+  `74f2e64d1e930df3` → **`2f5b438b462d21a3`**；投影多了 `financing` ⇒ 观测面结构指纹
+  `ba1cc7959b170e8d` → **`f06107cdb4c77a59`** ⇒ 2026-10-31 那轮 6 格基准从此是**另一个问题**。
 - 事实：**GS 现在报全图城镇**（2026-11-02，Issue #13）：以前只报人口前 10，样本外的城镇对模型只剩一个
   编号（`#14 → #2`）。真机（seed 4242）：**26 座城全部带名字**进 `observe()`（城镇块 ~1.8 KB）。
 - 事实：**比较计划是同一套预览的矩阵版**（Issue #48，`src/agent/compare-plan.ts`）：格子 = 模型 × seed；

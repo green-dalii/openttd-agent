@@ -133,7 +133,10 @@ pgrep -fl "bench.ts|run-experiment|cli/run.ts|llm-stub|OpenTTD.app"
 ③ 因果时间线默认最近 20 条、按需加载。
 
 **上一轮的遗留（未完成，别丢）**：
-- **#13 S7 世界事实补洞**：方案在 `docs/SCAFFOLD-CONTRACT.md` §9，等回答三问（归因口径可接受？顺序 a→b→c→d？一次一 PR？）。**排在 B 系列之后**。
+- **#13 S7 世界事实补洞**：方案在 `docs/SCAFFOLD-CONTRACT.md` §9。**所有者已答复（2026-11-02）**：
+  ① **旧基准自成一组**，只做组内比较 ⇒ Compare 已按 manifest 三元组**分组**（PR #76）；② 逐线路交付
+  要**调研换引擎/换脚本语言**的可行性（待做）；③ 推送事件 / L2 查询工具 / 决策→结果台账**都要做**
+  （下一步，一次一 PR）；④ i18n 尾巴**留到最后**。已补：城镇名（PR #74）、融资事实（PR #75）。
 - **AGENT_HARNESS 翻默认**：前提已满足 2/3（live 双绿、跨 seed `payloadShapeHash` 相等）；
   还差"至少一局真实模型"。**S2 已修好 A5**（门禁与 runner 共用同一份覆盖层，见 `SPEC.md` §10.117）：
   门禁现在对 live-only 模型 `MiniMax-M3.1-Flash` 判 **ok**（provider 1592ms 应答），

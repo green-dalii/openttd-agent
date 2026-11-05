@@ -15,6 +15,7 @@
  * 禁止: 在此发明阈值、在此比较模型、在此改写口径。
  */
 
+import { createHash } from "node:crypto";
 import { metricExclusion, type GameMetric } from "./metrics.js";
 import { buildScorecard, type BenchConditions, type ModelCard } from "./scorecard.js";
 import type { LedgerCollision } from "./store.js";
@@ -93,6 +94,38 @@ export interface SurfaceCheck {
 	differs: boolean;
 }
 
+/**
+ * One group of runs that answered **the same question**.
+ *
+ * Why groups exist (2026-11-02, the owner's decision for Issue #13): two runs
+ * with a different scaffold (prompt + tools), a different observation surface or
+ * a different slice of the world are **not the same question**. The 2026-10-31
+ * benchmark matrix was produced by an older scaffold; mixing it with the newer
+ * runs would compare two different things. So the runs are **partitioned** and
+ * only one group is compared at a time - the rest are disclosed, never dropped
+ * silently.
+ *
+ * The key comes from the **manifest's own fields** (the same ones that decide
+ * `surface.differs`), so the page cannot invent a grouping of its own.
+ */
+export interface QuestionGroup {
+	/** A short stable id (the page passes it back to pick this group). */
+	id: string;
+	/** The scaffold (prompt + tools). Null = the run did not record it. */
+	scaffoldHash: string | null;
+	/** The structure of the observation surface. Null = not recorded. */
+	observationShapeHash: string | null;
+	/** Which slice of the world the GS exposed. Null = not recorded. */
+	observationPolicy: string | null;
+	/** How many runs are in this group. */
+	runs: number;
+	/** The models that served the runs in this group. */
+	models: string[];
+	/** The first and the last run of the group (ms). */
+	firstStartedAt: number;
+	lastStartedAt: number;
+}
+
 /** Everything the Compare page draws. */
 export interface ComparePayload {
 	conditions: BenchConditions;
@@ -112,6 +145,19 @@ export interface ComparePayload {
 	runs: CompareRun[];
 	/** Whether the compared runs shared a scaffold and an observation surface. */
 	surface: SurfaceCheck;
+	/**
+	 * The groups the filtered runs fall into ("did these answer the same
+	 * question?"). The page offers them; the server picks the default.
+	 */
+	groups: QuestionGroup[];
+	/** The group the numbers below come from (null when there is no run). */
+	selectedGroupId: string | null;
+	/**
+	 * How many filtered runs are in **another** group - they are not in any
+	 * number below. A silently shrinking sample is how a benchmark starts to
+	 * lie (Issue #58's rule, applied to groups).
+	 */
+	runsOutsideGroup: number;
 }
 
 /** The model that served a run (a gateway substitute must not be credited to the request). */
@@ -125,6 +171,58 @@ function perDay(m: GameMetric): number | null {
 	return m.deliveredRun / m.simulatedDays;
 }
 
+/** The three manifest fields that decide "the same question" (null = not recorded). */
+function questionKey(m: GameMetric): [string | null, string | null, string | null] {
+	const norm = (v: unknown): string | null => (typeof v === "string" && v !== "" ? v : null);
+	return [
+		norm(m.manifest?.scaffoldHash),
+		norm(m.manifest?.observationShapeHash),
+		norm(m.manifest?.observationPolicy),
+	];
+}
+
+/** A short, stable id for a group key (the page passes it back to select it). */
+function groupId(key: [string | null, string | null, string | null]): string {
+	return createHash("sha256").update(key.map((k) => k ?? "").join("|")).digest("hex").slice(0, 8);
+}
+
+/**
+ * Partition the runs into "the same question" groups.
+ *
+ * The key is the manifest's own triple (scaffold, observation shape, observed
+ * policy) - the very fields `surface.differs` uses - so the page cannot invent
+ * a grouping. Runs that never recorded a field group under null (i.e. "not
+ * recorded"), never under a guess.
+ */
+export function questionGroups(rows: GameMetric[]): QuestionGroup[] {
+	const byId = new Map<string, QuestionGroup>();
+	for (const m of rows) {
+		const key = questionKey(m);
+		const id = groupId(key);
+		const existing = byId.get(id);
+		const startedAt = Number(m.startedAt ?? 0);
+		if (!existing) {
+			byId.set(id, {
+				id,
+				scaffoldHash: key[0],
+				observationShapeHash: key[1],
+				observationPolicy: key[2],
+				runs: 1,
+				models: [servedModel(m)],
+				firstStartedAt: startedAt,
+				lastStartedAt: startedAt,
+			});
+			continue;
+		}
+		existing.runs += 1;
+		if (!existing.models.includes(servedModel(m))) existing.models.push(servedModel(m));
+		existing.models.sort();
+		if (startedAt < existing.firstStartedAt) existing.firstStartedAt = startedAt;
+		if (startedAt > existing.lastStartedAt) existing.lastStartedAt = startedAt;
+	}
+	return [...byId.values()].sort((a, b) => b.runs - a.runs || b.lastStartedAt - a.lastStartedAt);
+}
+
 /**
  * Build the Compare page's payload.
  *
@@ -134,7 +232,14 @@ function perDay(m: GameMetric): number | null {
  */
 export function buildCompareView(
 	metrics: GameMetric[],
-	opts: { models?: string[]; seed?: number; backend?: string; conditions?: BenchConditions } = {},
+	opts: {
+		models?: string[];
+		seed?: number;
+		backend?: string;
+		/** The group to compare (its id). Unknown ids fall back to the default. */
+		group?: string;
+		conditions?: BenchConditions;
+	} = {},
 	collisions: LedgerCollision[] = [],
 ): ComparePayload {
 	const rows = (Array.isArray(metrics) ? metrics : []).filter((m) => m && typeof m === "object");
@@ -146,14 +251,27 @@ export function buildCompareView(
 		return true;
 	});
 
+	// The groups: runs that answered the same question. The numbers below come
+	// from **one** group only - the other groups are disclosed, not merged in
+	// (the owner's decision for Issue #13: the old matrix is its own group).
+	const groups = questionGroups(filtered);
+	const wantedGroup = opts.group ? groups.find((g) => g.id === opts.group) : undefined;
+	const selectedGroup =
+		wantedGroup ??
+		// Default: the group with the most runs (ties = the newest one). A group
+		// of the biggest matrix is the one the user most likely means.
+		groups[0] ??
+		null;
+	const scoped = selectedGroup ? filtered.filter((m) => groupId(questionKey(m)) === selectedGroup.id) : [];
+
 	// The four axes: from the scorecard, never recomputed here. The scorecard also
 	// carries the outcome classes with the server's own names (B5), so this module
 	// has no vocabulary of its own.
-	const models = buildScorecard(filtered, opts.conditions ? { conditions: opts.conditions } : {}).models;
+	const models = buildScorecard(scoped, opts.conditions ? { conditions: opts.conditions } : {}).models;
 
 	// The exclusions: counted by the existing reason enum.
 	const counts = new Map<string, number>();
-	for (const m of filtered) {
+	for (const m of scoped) {
 		const why = metricExclusion(m);
 		if (!why) continue;
 		counts.set(why, (counts.get(why) ?? 0) + 1);
@@ -165,9 +283,9 @@ export function buildCompareView(
 	// The paired comparison: only when exactly two models are selected.
 	const selected = opts.models ?? [];
 	const comparison =
-		selected.length === 2 ? pairedComparison(filtered, selected[0]!, selected[1]!) : null;
+		selected.length === 2 ? pairedComparison(scoped, selected[0]!, selected[1]!) : null;
 
-	const runs: CompareRun[] = filtered
+	const runs: CompareRun[] = scoped
 		.map((m) => ({
 			id: String(m.id ?? ""),
 			model: servedModel(m),
@@ -188,7 +306,7 @@ export function buildCompareView(
 
 	const distinct = (pick: (m: GameMetric) => unknown): string[] => {
 		const out = new Set<string>();
-		for (const m of filtered) {
+		for (const m of scoped) {
 			const v = pick(m);
 			if (typeof v === "string" && v) out.add(v);
 		}
@@ -221,5 +339,8 @@ export function buildCompareView(
 		exclusions,
 		comparison,
 		runs,
+		groups,
+		selectedGroupId: selectedGroup?.id ?? null,
+		runsOutsideGroup: filtered.length - scoped.length,
 	};
 }

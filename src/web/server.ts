@@ -837,12 +837,17 @@ export class WebServer {
 					: undefined;
 				const seedRaw = Number(url.searchParams.get("seed"));
 				const backendRaw = url.searchParams.get("backend");
+				// The group to compare (Issue #13's decision (b)): the runs that
+				// answered the same question are grouped by the manifest's own
+				// fields; the page picks one, the server does the rest.
+				const groupRaw = url.searchParams.get("group");
 				return json(
 					200,
 					this.evolutionHooks.compare({
 						...(models && models.length ? { models } : {}),
 						...(Number.isFinite(seedRaw) && seedRaw > 0 ? { seed: seedRaw } : {}),
 						...(backendRaw ? { backend: backendRaw } : {}),
+						...(groupRaw ? { group: groupRaw } : {}),
 					}),
 				);
 			}

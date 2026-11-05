@@ -88,7 +88,7 @@ export function evolutionHooks(dataDir: string): {
 	strategies: () => unknown[];
 	arms: () => unknown;
 	setStrategyEnabled: (id: string, enabled: boolean) => boolean;
-	compare: (opts: { models?: string[]; seed?: number; backend?: string }) => unknown;
+	compare: (opts: { models?: string[]; seed?: number; backend?: string; group?: string }) => unknown;
 	groups: (by: GroupBy) => unknown;
 } {
 	return {

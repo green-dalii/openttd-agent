@@ -19,6 +19,29 @@
         error: "",
         /** The two models the user picked for the paired comparison. */
         picked: [],
+        /**
+         * The group of runs the user is looking at ("the same question").
+         * Empty = the server's default (the group with the most runs).
+         */
+        pickedGroup: "",
+
+        /* ------------------------- the question groups ---------------------- */
+
+        /** The groups the server found (runs that answered the same question). */
+        groups() {
+          return window.CompareView.questionGroups(this.payload);
+        },
+
+        /** How many runs are in another group (not in any number below). */
+        outsideGroupCount() {
+          return window.CompareView.outsideGroupCount(this.payload);
+        },
+
+        /** Show one group's runs. */
+        async selectGroup(id) {
+          this.pickedGroup = String(id || "");
+          await this.load();
+        },
 
         /* --------------------------- the plan (Issue #48) ------------------- */
         /** The models the plan will run. */
@@ -61,6 +84,7 @@
           try {
             const params = new URLSearchParams();
             if (this.picked.length === 2) params.set("models", this.picked.join(","));
+            if (this.pickedGroup) params.set("group", this.pickedGroup);
             const qs = params.toString();
             const r = await fetch(`/api/compare${qs ? "?" + qs : ""}`);
             if (!r.ok) {
