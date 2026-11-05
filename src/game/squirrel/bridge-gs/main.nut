@@ -2716,6 +2716,52 @@ class BridgeV1 extends GSController {
             GSAdmin.Send({ kind = "ack", cmd = "demo", job = job, placed = placed,
                            town = towns[0], tile = tA, company = exec,
                            company_signs = names.len(), names = names });
+        } else if (cmd == "inspect_vehicle") {
+            // L2 查询（Issue #13）：**问一个具体的问题并把答案带回去**。
+            // 与动作命令不同，这里必须回答案 —— 模型问的是"我这辆车在干什么"，
+            // 没有答案它只能猜。
+            local id = -1;
+            if (obj.rawin("vehicle")) id = obj["vehicle"];
+            local ans_id = -1;
+            if (obj.rawin("id")) ans_id = obj["id"];
+            if (!GSVehicle.IsValidVehicle(id)) {
+                GSAdmin.Send({ kind = "answer", id = ans_id, ok = false,
+                               reason = "no such vehicle", vehicle = id });
+                return;
+            }
+            local data = {
+                vehicle = id,
+                name = GSVehicle.GetName(id),
+                location = GSVehicle.GetLocation(id),
+                type = GSVehicle.GetVehicleType(id),
+                engine = GSVehicle.GetEngineType(id),
+                age_days = GSVehicle.GetAge(id),
+                speed = GSVehicle.GetCurrentSpeed(id),
+                profit_this_year = GSVehicle.GetProfitThisYear(id),
+                // 载客量（货种 0 = 客运；15.3 的脚本 API **没有**车辆当前站的读数 ⇒
+                // 不编一个"它在哪一站"，只报它**在哪块地**）。
+                cargo = GSVehicle.GetCargoLoad(id, 0),
+            };
+            GSAdmin.Send({ kind = "answer", id = ans_id, ok = true, data = data });
+        } else if (cmd == "inspect_town") {
+            local id = -1;
+            if (obj.rawin("town")) id = obj["town"];
+            local ans_id = -1;
+            if (obj.rawin("id")) ans_id = obj["id"];
+            if (!GSTown.IsValidTown(id)) {
+                GSAdmin.Send({ kind = "answer", id = ans_id, ok = false,
+                               reason = "no such town", town = id });
+                return;
+            }
+            local data = {
+                town = id,
+                name = GSTown.GetName(id),
+                population = GSTown.GetPopulation(id),
+                houses = GSTown.GetHouseCount(id),
+                location = GSTown.GetLocation(id),
+                growth_rate = GSTown.GetGrowthRate(id),
+            };
+            GSAdmin.Send({ kind = "answer", id = ans_id, ok = true, data = data });
         } else if (cmd == "probe_route_cm") {
             // AB-4a: build AND run a route with the GS alone (NEXT-4 acceptance).
             this.StartProbeRoute();

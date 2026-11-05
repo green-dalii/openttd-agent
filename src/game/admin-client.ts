@@ -266,6 +266,45 @@ export class AdminClient {
 		this.send(AdminPacketType.AdminGameScript, (w) => w.str(json));
 	}
 
+	/**
+	 * Send a game-script command and **await its answer** (Issue #13: the L2
+	 * query tools).
+	 *
+	 * Why this exists: the action tools are fire-and-forget (a route takes
+	 * minutes to build), but a **question** needs an answer inside the tool
+	 * result - otherwise the model would have to guess and ask again. The
+	 * client injects a unique `id` into the command; the GS answers with the
+	 * same id (`{kind:"answer", id, ok, data}`), and the answer is matched
+	 * here.
+	 *
+	 * A timeout resolves with **null** - the tool then says it could not
+	 * confirm the answer (observe-or-refuse), never that the answer was "no".
+	 */
+	async gameScriptAwait(json: string, timeoutMs = 5000): Promise<Record<string, unknown> | null> {
+		let payload: Record<string, unknown>;
+		try {
+			payload = JSON.parse(json) as Record<string, unknown>;
+		} catch {
+			return null;
+		}
+		const id = ++this.scriptAnswerSeq;
+		payload.id = id;
+		return new Promise<Record<string, unknown> | null>((resolve) => {
+			const timer = setTimeout(() => {
+				this.scriptWaiters.delete(id);
+				resolve(null);
+			}, timeoutMs);
+			this.scriptWaiters.set(id, { resolve, timer });
+			try {
+				this.gameScript(JSON.stringify(payload));
+			} catch {
+				clearTimeout(timer);
+				this.scriptWaiters.delete(id);
+				resolve(null);
+			}
+		});
+	}
+
 	chat(message: string): void {
 		this.send(AdminPacketType.AdminChat, (w) => w.uint32(0).uint8(0).str(message));
 	}
@@ -394,12 +433,34 @@ export class AdminClient {
 	private rconWaiters: { resolve: (m: string | null) => void; timer: NodeJS.Timeout }[] = [];
 	private rconLines: string[] = [];
 
+	/** Pending game-script answers, keyed by the id we injected. */
+	private scriptWaiters = new Map<number, { resolve: (p: Record<string, unknown> | null) => void; timer: NodeJS.Timeout }>();
+	/** The id counter for `gameScriptAwait`. */
+	private scriptAnswerSeq = 0;
+
 	private emit(ev: GameEvent | null): void {
 		try {
-			if (ev) this.callbacks.onEvent?.(ev);
+			if (ev) {
+				this.resolveScriptAnswer(ev);
+				this.callbacks.onEvent?.(ev);
+			}
 		} catch (e) {
 			this.handleError(e instanceof Error ? e : new Error(String(e)));
 		}
+	}
+
+	/** Match a GS answer (`{kind:"answer", id, …}`) to the waiting call. */
+	private resolveScriptAnswer(ev: GameEvent): void {
+		if (ev.kind !== "gamescript") return;
+		const payload = ev.payload as Record<string, unknown> | undefined;
+		if (!payload || payload.kind !== "answer") return;
+		const id = Number(payload.id);
+		if (!Number.isInteger(id)) return;
+		const waiter = this.scriptWaiters.get(id);
+		if (!waiter) return;
+		this.scriptWaiters.delete(id);
+		clearTimeout(waiter.timer);
+		waiter.resolve(payload);
 	}
 
 	private handleError(e: Error): void {

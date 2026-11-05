@@ -22,6 +22,16 @@ export interface CommandSink {
 	 * rather than claiming success (observe-or-refuse).
 	 */
 	rconAwait?(command: string, timeoutMs?: number): Promise<string | null>;
+	/**
+	 * A game-script command with its **answer** awaited (Issue #13: the L2 query
+	 * tools). Optional for the same reason as `rconAwait`: a sink that cannot
+	 * observe answers must say so, not pretend the question was answered.
+	 *
+	 * The answer is the GS's `{kind:"answer", id, ok, data}` payload; `null`
+	 * means **no answer arrived** (timeout or a broken channel) - which is
+	 * different from an answer that says "no such vehicle".
+	 */
+	gameScriptAwait?(json: string, timeoutMs?: number): Promise<Record<string, unknown> | null>;
 }
 
 /** Read-side: latest normalized world state (implemented by WorldState). */

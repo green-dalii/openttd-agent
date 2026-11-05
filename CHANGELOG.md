@@ -18,6 +18,20 @@
   navigates to all four pages, not just the home page.
 
 ### Added
+- **The model can now ask the game a question and get the answer.** The observation surface is a
+  **periodic sample**: it says what the world looks like right now, never what *its own vehicle* is
+  doing, how much it carries or what it earned. Two read-only tools close that gap: `inspect_vehicle`
+  (name, location, type, engine, age, speed, load, profit this year) and `inspect_town` (name,
+  population, houses, location, growth rate). The channel is the admin port's gameScript **with an
+  answer**: the client injects an id, the GS replies `{kind:"answer", id, ok, data}`, and the two are
+  matched by id. When there is no answer (timeout, or a run without the channel) the tool says it could
+  not ask - it never claims "no such vehicle". Real machine: `inspect_town 23` ->
+  `{name:"Plunbury", population:2519, houses:54, growth_rate:39}`, `inspect_town 999` -> "no such town".
+  The tool list changed, so the **scaffold fingerprint** moved (`2f5b438b462d21a3` ->
+  `a72a663cdd126090`) - the 2026-10-31 benchmark matrix and every run after it are not comparable
+  across that boundary (Compare groups them).
+
+### Added
 - **A decision now has a result on the world's side.** "The executor says it built the line" is not a
   result; "the first vehicle reached the station" is. The join is the **vehicle id**: the executor's route
   statistics report the line's `vehiclesIds`, the pushed events report the vehicle, and the two together
