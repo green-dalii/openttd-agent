@@ -48,6 +48,38 @@
       </div>
     </section>
 
+    <!-- ===================== the question groups ===================== -->
+    <!-- Runs that answered a **different** question (a different scaffold, a
+         different observation surface, a different slice of the world) are not
+         comparable. The server groups them; the page offers the groups and says
+         how many runs are outside the one on screen (Issue #13, decision (b)). -->
+    <section class="panel cmp-groups" x-show="!loading && !error && hasRuns()">
+      <div class="panel-head">
+        <h2>Which question</h2>
+        <span class="dim">runs that answered the same question — the numbers below are one group</span>
+      </div>
+      <div class="actions cmp-group-list">
+        <template x-for="g in groups()" :key="'grp-' + g.id">
+          <label class="check cmp-group">
+            <input type="radio" name="cmp-group" :value="g.id"
+                   :checked="g.selected" @change="selectGroup(g.id)" />
+            <span class="cmp-group-label">
+              <span class="cmp-group-count" x-text="g.runs + (g.runs === 1 ? ' run' : ' runs')"></span>
+              <span class="dim cmp-group-facts">
+                <span x-text="'scaffold ' + (g.scaffoldHash || 'not recorded')"></span>
+                <span x-text="'surface ' + (g.observationShapeHash || 'not recorded')"></span>
+                <span x-text="'policy ' + (g.observationPolicy || 'not recorded')"></span>
+              </span>
+            </span>
+          </label>
+        </template>
+      </div>
+      <p class="notice" x-show="outsideGroupCount() > 0">
+        Runs in another question group, not in any number below:
+        <span x-text="outsideGroupCount()"></span>
+      </p>
+    </section>
+
     <!-- ===================== ⓪ the plan ===================== -->
     <!-- "The comparison starts from the comparison" (Issue #48): pick the
          models and the worlds, see what the server would run (how many runs,

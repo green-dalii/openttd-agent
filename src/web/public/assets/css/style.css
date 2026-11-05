@@ -772,6 +772,14 @@ button[disabled] { opacity: .45; cursor: not-allowed; }
 .cmp-plan-queue { margin-top: 12px; font-size: 12.5px; color: var(--muted); }
 .cmp-plan-queue p { margin: 0; }
 
+/* Compare: the question groups (Issue #13's decision (b)). */
+.cmp-group-list { flex-direction: column; align-items: stretch; gap: 8px; }
+.cmp-group { align-items: flex-start; }
+.cmp-group-label { display: flex; flex-direction: column; gap: 2px; }
+.cmp-group-count { font-weight: 600; }
+.cmp-group-facts { display: flex; flex-wrap: wrap; gap: 10px; font-size: 11px; }
+.cmp-group-facts span { white-space: nowrap; }
+
 /* Compare: data loss must be visible (Issue #58). */
 .cmp-warn {
   margin: 0 0 14px;

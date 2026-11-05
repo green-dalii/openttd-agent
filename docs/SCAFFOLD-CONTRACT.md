@@ -298,7 +298,8 @@ OpenTTD 的年度分类账 + 事件时间线提供了全部原料，缺的是 ha
 **harness 后端**有值（它们来自 `before_payload` 回调）；默认后端跑出来的局这两项是
 `null`（真机账本实测：6 行全是 `null`）。**这不再影响"是否同一问句"的判断** ——
 那件事现在由 `observationShapeHash` 回答（两种后端都记录，真机实测值
-`ba1cc7959b170e8d`，且**预览与 manifest 逐字段相同**）。
+`f06107cdb4c77a59`，且**预览与 manifest 逐字段相同**；投影结构一变它就变——融资事实进观测面
+时它从 `ba1cc7959b170e8d` 挪到了新值）。
 | **I6** | 结果可归因：0 分必须带**结果分类**（S8） | manifest 必填字段 |
 
 ---
@@ -327,16 +328,19 @@ OpenTTD 的年度分类账 + 事件时间线提供了全部原料，缺的是 ha
 
 1. **一次只改一类事实**。每加一类都要能回答"上一次改动之后，模型的行为变了多少"
    ——同时改三样，任何差异都无法归因。
-2. **可比性自己会变**。观测面属于 `scaffoldHash` 的输入，所以任何一步都会让
-   **改动前后的局不可直接比较**；报告按 hash 分组，跨 hash 只能当"不同脚手架"看。
+2. **可比性自己会变**。观测面**不在** `scaffoldHash` 里（它有自己两枚指纹：
+   `observationShapeHash` = 投影的**结构**、`observationPolicy` = GS **自报**暴露了哪一片世界），
+   所以任何一步都会让**改动前后的局变成"不同的问题"**。现在的处理办法（2026-11-02，
+   所有者决定 (b)）：Compare 按 manifest 的三元组**分组**，一次只比一组，别的组披露
+   （见 `docs/DASHBOARD-API.md` §3.8）——而不是把两副脚手架的数字混在一张表里。
 
 ### 9.2 四个缺口（按"该先补哪个"排序）
 
 | # | 缺口 | 现在的事实（坐标） | 数据从哪来 | 风险 |
 |---|---|---|---|---|
-| **S7a** | 城镇**没有名字** | `world-facts.ts` 的 town 投影只有 `{id, pop, x, y}`；样本外只能看到 `#4 → #8` | GS 侧 `GSTown.GetName`（**待真机验证**；同族 `GSIndustry.GetName` 已在用，见 `bridge-gs/main.nut`） | 本地化字符串（非 ASCII）进 payload 的编码坑（`SPEC.md` 的 Squirrel 字符串教训） |
-| **S7b** | **逐线交付量**不存在 | GS `route-stats` 只有 `vehicles / profit / waiting / endsA / endsB`；公司级季度量在旁路 | 已有 `GSCargoMonitor.GetTownDeliveryAmount(0, cargo, townId, true)`（cargo 面板在用）⇒ **按目的地城镇**归因 | **归因边界**：同一城镇有两条线时无法分摊。只能报"进入城镇 X 的交付量"，不能报"你的 101 线交付了 N" |
-| **S7c** | **融资事实缺失** | 公司事实只有 `loan`（D2 加的），没有利率/上限/可借额度 | `GSCompany.GetLoanAmount/GetMaxLoanAmount/GetLoanInterval`（**待真机验证**） | 利率是"该怎么花钱"的暗示？不是——它是价格事实，与"造价 X"同类 |
+| **S7a** | 城镇**没有名字** | ✅ **已补**（PR #74）：GS 改报**全图城镇**并带名字（真机 26 座城全部有名字进 `observe()`）；GS 自报 `towns=all;industries=top12` | GS 侧 `GSTown.GetName`（真机已验证） | 本地化字符串（非 ASCII）进 payload 的编码坑（`SPEC.md` 的 Squirrel 字符串教训） |
+| **S7b** | **逐线交付量**不存在 | ⛔ **引擎限制**（PR #65 / MEMORY D89）：OpenTTD 15.3 的 **Squirrel 没有 cargo monitor**——`GSCargoMonitor.*` 调用**不报错**，只返回 `null`；C++ 的 `ScriptCargoMonitor` 属于**原生脚本 API**，我们的 Bridge GS 是 Squirrel，用不上。admin 只给**合计**。⇒ 只能报"进入城镇 X 的交付量"，**不能**报"你的 101 线交付了 N" | 需要换引擎/换脚本语言（**待调研**：见 Issue #13 评论里的选项） | 归因边界（同城镇两条线无法分摊） |
+| **S7c** | **融资事实缺失** | ✅ **已补**（PR #75）：投影带 `financing{loanCeiling, loanInterval}`（真机 300000 / 10000）。**利息率引擎不暴露** ⇒ "没测到"，不猜；且必须在**公司模式**里读（`COMPANY_SELF` 在全局脚本里解析不出来，MEMORY D93） | `GSCompany.GetMaxLoanAmount`（真机已验证）/ `GetLoanInterval`（真机已验证） | 利率是"该怎么花钱"的暗示？不是——它是价格事实，与"造价 X"同类 |
 | **S7d** | **推送族未用** | L3 只推相位与失败；车毁/首车到站/城镇成长都走不到模型 | `GSEventVehicleLost` / `GSEventTownGrowth` 等（**待真机验证**） | 噪声：推送太多会淹没增量段，必须先定"值得推"的门槛 |
 
 ### 9.3 每一步的验收

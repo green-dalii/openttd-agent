@@ -506,9 +506,13 @@ GET /api/sessions/:id/timeline?limit=20&offset=0
 ### 3.8 Compare（v0.6.x，B4）
 
 ```
-GET /api/compare?models=A,B&seed=7&backend=harness
+GET /api/compare?models=A,B&seed=7&backend=harness[&group=<groupId>]
 → 200 {
     conditions: BenchConditions,
+    groups: [{ id, scaffoldHash, observationShapeHash, observationPolicy,
+               runs, models, firstStartedAt, lastStartedAt }],   // "同一个问题"的分组
+    selectedGroupId: string | null,                             // 下面的数字属于哪一组
+    runsOutsideGroup: number,                                   // 别的组里的局（**不混进任何数字**）
     models: [{ model, requestedModels, runs, excluded, excludedReasons,
                ability, efficiency, stability: { …, outcomeDistribution:
                  [{ code, label, hint, count }] },   // 十类结局（服务端命名）
@@ -525,6 +529,12 @@ GET /api/compare?models=A,B&seed=7&backend=harness
 **只读**：端点不写文件、不发起运行，只从**已有的度量行**算出。四轴来自 `buildScorecard`，
 配对判定来自 `pairedComparison`，排除原因来自 `metricExclusion`——**页面不重算、也不下判断**
 （含 `not determinable` 这类结论）。`costPerRun` 在**无价目表**的模型上是"没测到"，不是 `$0`。
+
+**分组（Issue #13 的决定 (b)）**：分组键 = **manifest 自己的三元组**（`scaffoldHash` +
+`observationShapeHash` + `observationPolicy`）——脚手架、观测面结构、暴露的世界切片。不同 ⇒
+**不是同一个问题** ⇒ 不混在一张表里比。一次只比**一组**：`group=<id>` 点名，默认组 = **局数
+最多**的那组（2026-10-31 那轮 6 格基准因此自成一组）。别的组的局数由 `runsOutsideGroup` 披露，
+**不折成 0、也不静默丢弃**。字段没记录过的局，其键为 `null`（"not recorded"，不是猜一个值）。
 
 ### 3.8b 比较计划（v0.6.x，Issue #48）
 

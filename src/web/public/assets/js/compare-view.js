@@ -261,6 +261,39 @@
   }
 
   /** The models the page may pick from (the server's list, never invented). */
+  /**
+   * The groups of runs that answered the same question.
+   *
+   * The page only draws what the server sent: the group's id, the fingerprints
+   * that define it and how many runs it holds. "not recorded" stays visible —
+   * a run from before the fingerprints existed must not look like a run with an
+   * empty fingerprint.
+   */
+  function questionGroups(payload) {
+    const groups = payload && Array.isArray(payload.groups) ? payload.groups : [];
+    const selectedId = payload && payload.selectedGroupId ? String(payload.selectedGroupId) : "";
+    return groups.map((g) => ({
+      id: String(g.id ?? ""),
+      selected: String(g.id ?? "") === selectedId,
+      runs: Number(g.runs ?? 0),
+      models: Array.isArray(g.models) ? g.models.map((m) => String(m)) : [],
+      scaffoldHash: g.scaffoldHash ? String(g.scaffoldHash) : "",
+      observationShapeHash: g.observationShapeHash ? String(g.observationShapeHash) : "",
+      observationPolicy: g.observationPolicy ? String(g.observationPolicy) : "",
+    }));
+  }
+
+  /**
+   * The runs that are in another group and therefore in none of the numbers.
+   *
+   * A silently shrinking sample is how a benchmark starts to lie, so the count
+   * is disclosed instead of dropped.
+   */
+  function outsideGroupCount(payload) {
+    const n = payload && typeof payload.runsOutsideGroup === "number" ? payload.runsOutsideGroup : 0;
+    return n > 0 ? n : 0;
+  }
+
   function modelNames(payload) {
     const models = payload && Array.isArray(payload.models) ? payload.models : [];
     return models.map((m) => String(m.model ?? "")).filter((m) => m !== "");
@@ -357,6 +390,8 @@
     comparison,
     runRows,
     modelNames,
+    questionGroups,
+    outsideGroupCount,
     axisCharts,
     collisionRows,
     surfaceDiff,
