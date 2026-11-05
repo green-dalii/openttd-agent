@@ -428,6 +428,9 @@ describe("createTools", () => {
 		// 替 agent 选问题）
 		expect(names).toEqual([
 			"observe",
+			// Issue #13：L2 查询（问一个具体的问题，答案进工具结果）
+			"inspect_vehicle",
+			"inspect_town",
 			"estimate_route",
 			"inspect_route",
 			"build_bus_route",

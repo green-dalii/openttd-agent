@@ -48,13 +48,15 @@ function fauxAgent(deps: AgentDeps, responses: Parameters<ReturnType<typeof crea
 }
 
 describe("createAgent", () => {
-	it("installs the eleven tools and the default system prompt", () => {
+	it("installs the tools (eleven + the two L2 queries) and the default system prompt", () => {
 		const { deps } = fakeDeps();
 		const faux = createFauxCore({});
 		faux.setResponses([fauxAssistantMessage("hi")]);
 		const { agent } = createAgent({ deps, streamFn: faux.streamSimple, model: faux.getModel() });
 		expect(agent.state.tools.map((t) => t.name)).toEqual([
 			"observe",
+			"inspect_vehicle",
+			"inspect_town",
 			"estimate_route",
 			"inspect_route",
 			"build_bus_route",

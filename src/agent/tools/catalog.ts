@@ -75,6 +75,9 @@ export const ACTION_EFFECTS: Record<string, ActionEffect> = {
 	observe: "read",
 	estimate_route: "read",
 	inspect_route: "read",
+	// L2 查询（Issue #13）：**只读**——问游戏一个问题，答案进工具结果，世界不变。
+	inspect_vehicle: "read",
+	inspect_town: "read",
 	recall: "read",
 	capabilities: "read",
 	build_bus_route: "write",
