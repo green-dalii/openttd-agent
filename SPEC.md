@@ -824,47 +824,15 @@ W2 的目标是让"这局是在**世界冻住**时结束的"成为 run 记录里
 
 ### 10.103 执行器异常：完整文本进事件流（2026-09-25）
 
-**问题**：`EX exc:can't execute over an un…` + `vehicles: 0`。错误文本在**生产端**被砍
-（`catch` 里 `es.slice(0, 24)`）——上限是真的，算法是错的：于是现场那句 `…` 不是显示层截断，
-是信息在源头就没了。
-
-**三条候选通道，逐条实测排除**（隔离真机，探针已回退；勿再重试）：
-- 公司名（`AICompany.SetName`）：**31 接受；32/44/56/64/72 全部静默拒绝** ⇒ 上限 31 是硬
-  事实，一条错误永远放不下。
-- `AILog.*`：macOS dedicated `-v dedicated` 下 **0 行**（server.log 与 admin console 包都没有）
-  ⇒ 与 §10.10 一致，这条通道在 macOS 上不存在。
-- `AISign.BuildSign` → GS 的 `GSSignList()`：AI 建标牌**成功**（`ok30481`），但 GS 扫描
-  **16/16 次报告都看不到它**。
-
-⇒ **公司名是唯一已验证的执行器→harness 通道**（GS 每 ~20 script tick ≈ 1.1 s 轮询一次），
-于是错误只能**分块**走它。
-
-**协议**：`exc<seq><marker><chunk>`，写进名字 `EX <phase> j<job>`（总长 ≤ 31）。
-marker 三态：`: ` 后续还有块 / `=` 末块且完整 / `~` 末块但被生产端 5 块上限截断。
-块宽由**真实预算**算出：`31 - 3("EX ") - 3("exc") - 1(seq) - 1(marker) - (2 + 位数(job))`，
-下限 4；每块**粘滞 5 轮**（≈1.4 s > GS 的 1.1 s 轮询），否则末块会被下一轮施工相位盖掉。
-GS 侧把 `exc<seq>` 映射成 `stage = "error" + seq`：**必须**带序号，否则 `ExecEventKey`
-指纹（只比 stage/job/hb）会把第 2..N 块全部抑制。
-
-**两个协议级陷阱（worker 复核时发现，已修）**：
-1. **指纹**：连续两条**单块**错误会算出同一个 `error1|job|0`，第二条永远发不出去。
-   修法：指纹对**错误相位**附加整段相位文本（非心跳相位，否则心跳每轮变 → 事件风暴）。
-2. **作业号后缀**：`s.find(" j")` 取**首次**命中，块文本里出现 `" j"`（例如
-   `can't join …`）就会切错并顺带截断相位。修法：从后往前找，且尾部必须全是数字，
-   否则宁可不切。
-
+**仍为真的事实**：执行器抛出的异常**全文**必须进事件流（截断的错误文本比没有更坏）。
+今天的通道是**类型化 exec 事件**（GS 直接带 `error` 字段，P1-1a），**不是**早期的"公司名分块"
+协议（那套 31 字符上限 + `exc<seq><marker><chunk>` 的协议已随执行器搬进 GS 而**删除**，
+过程见 `CHANGELOG.md`）。
+**两个仍然生效的陷阱**：① **指纹**只比 stage/job/hb ⇒ 连续两条**同相位**的错误会算出同一个
+指纹，第二条被抑制（修法：错误相位附整段文本，非心跳相位否则每轮变 → 事件风暴）；② **作业号
+后缀**要从**后往前**找，且尾部必须全是数字，否则宁可整段不切（块文本里出现 `" j"` 会切错）。
 **装配在 hub，且必须喂 `p.raw`**：`decodeExecutorPhase` 自己的后缀处理会吃掉块尾空格，
-于是 `cannot join` 会变成 `cannotjoin`——一个**自信的错误文本**比没有更坏。装配器规则：
-必须从 `seq 1` 开始且逐一递增；跳号/重复则丢弃重拼（采样通道可能漏轮询，缺字就
-不拼）；非块相位不动缓冲区；30 s 以上的残块在下一次 push 时丢弃。
-
-**真机验收（重放现场那句错误）**：一次性注入 `W3REPLAY: can't execute over an
-unfinished action (simulated 2026-09-25)`（72 字符）⇒ 真实事件流按序出现 4 块
-（`exc1:`…`exc4=`）⇒ 装配器还原出**完整 72 字符**（`truncated=false, complete=true`）；
-旧代码这里只剩前 24 字符。页面渲染出
-`The executor raised an error (2 minutes ago): W3REPLAY: can't execute over an unfinished action (simulated 2026-09-25)`。
-完整文本同时进 `events.jsonl`（走的是与收包相同的归档路径），所以事后 autopsy 不需要新通道。
-
+`cannot join` 会变成 `cannotjoin`。
 ### 10.104 图表手势、区间读数与列表索引（2026-09-25 用户实测复核）
 
 用户在真实长局（自有实例，9.15M tokens / 691 决策 / 17 条线路）上指出"折线图、Token 用量等，
@@ -1241,8 +1209,7 @@ compaction 冲突）在 `docs/HARNESS-MIGRATION.md` §3（带坐标），此处�
 - 事实：**一行 = 一次决策**（`src/agent/causal-timeline.ts`）：四段 = decision（触发/时刻/
   目标）→ tools → job/相位 → effect（本窗口增量）。归属**靠窗口**（上一次决策之后、下一次
   决策之前）；**连接键是 `job`**（D3a）。
-- 事实：**GS 相位必须归档**才可复盘：`signal-hub` 把每个非心跳 exec 事件写成 `gs_exec` 审计记录（此前只在实时流里，跑完的局就查不到了）。**effect = 与下一次决策快照的差**（钱/收入/车/站/交付/游戏日）；最后一个决策没有"下一个快照" ⇒ effect = `null`（**没测到**，D60）。**会话 hook 只有一处构造**（`sessionHooks(dataDir)`）：runner 的 `web.attach({sessions})` 会**替换**掉 server 的 hook ——两份构造曾让时间线在**run 一开始就从页面上消失**；`repo-hygiene` 有守卫。
-- 真机（隔离 data dir，`minimax-cn` / `MiniMax-M3.1-Flash`）：freeform 局里决策 2 下了 4 个 job，相位（queued → buildA → road）与工具、效果同在一行，由 `job` 连接。
+- 事实：**GS 相位必须归档**才可复盘：`signal-hub` 把每个非心跳 exec 事件写成 `gs_exec` 审计记录（此前只在实时流里，跑完的局就查不到了）。**effect = 与下一次决策快照的差**（钱/收入/车/站/交付/游戏日）；最后一个决策没有"下一个快照" ⇒ effect = `null`（**没测到**，D60）。**会话 hook 只有一处构造**（`sessionHooks(dataDir)`）：runner 的 `web.attach({sessions})` 会**替换**掉 server 的 hook ——两份构造曾让时间线在**run 一开始就从页面上消失**；`repo-hygiene` 有守卫。 真机：决策 2 下了 4 个 job，相位与工具、效果同在一行，由 `job` 连接。
 ### 10.121 Compare 视图是**投影**：四轴、判定与排除都不是页面算的（B4，2026-10-25）
 
 - 事实：`GET /api/compare` 是**只读**的：四轴来自 `buildScorecard`，配对判定来自
@@ -1257,12 +1224,23 @@ compaction 冲突）在 `docs/HARNESS-MIGRATION.md` §3（带坐标），此处�
   探针世界**算出 ⇒ 只依赖代码、**跑前就能算**、两种后端都记录（真机 `f06107cdb4c77a59`，**预览与 manifest 逐字段相同**）；
   ② `observationPolicy`：**GS 自报**它暴露了世界的哪一部分（`towns=all;industries=top12`）——"看到全部 26 座城"与
   "只看到人口前 10"是**两个不同的问题**，哪怕字段结构一模一样 ⇒ 策略也进 manifest。
+- 事实：**引擎的推送事件进了观测面**（2026-11-02，Issue #13 S7d）：引擎把事件推给 GameScript
+  （`Game::NewEvent`），而我们的 GS **只处理 admin 端口事件，其余整个丢掉** ⇒ 模型看不到"我的车到站了 /
+  被报废了"。现在 GS 把引擎的事件类型映射到**封闭词表**（`vehicle_lost` / `station_first_vehicle` /
+  `vehicle_waiting_in_depot` / `vehicle_unprofitable` / `industry_open` / `industry_close` /
+  `town_founded`）⇒ 世界状态按序记住（有界 50 条）⇒ 投影带 `events` ⇒ `observe()` 与决策上下文都带着它。
+  真机（真实模型，seed 4242）：**首车到站**两次到达 harness（`station_first_vehicle`，车站 0/1、
+  车 8）⇒ 模型第一次能看见"我的车到了"。⚠ 两个 Squirrel 陷阱（MEMORY D44 的第三/四个形态）：
+  ① **类成员必须先声明**（类的表也是严格的）——不声明就赋值会抛 `the index '_x' does not exist`，
+  整个 GS 停摆；② **读不存在的键会抛** ⇒ 事件载荷必须**形状恒定**（缺的就是 null）且先
+  `rawin` 再读。
+  投影多了 `events` ⇒ 观测面结构指纹 `f06107cdb4c77a59` → **`1808f8babae13cb0`**。
 - 事实：**融资事实进了观测面**（2026-11-02，Issue #13）：GS 在**公司模式**里读
-  `GSCompany.GetMaxLoanAmount()`（只能在那里读：`COMPANY_SELF` 在全局脚本里无效）⇒ 投影带
+  `GSCompany.GetMaxLoanAmount()`（`COMPANY_SELF` 在全局脚本里无效）⇒ 投影带
   `financing{loanCeiling, loanInterval}`（真机：上限 300000、间隔 10000）。**利息率引擎根本不暴露**
   ⇒ **"没测到"，不猜**。系统提示另补一句**融资机制**（执行器开工前先把贷款提到上限）⇒ 脚手架指纹
   `74f2e64d1e930df3` → **`2f5b438b462d21a3`**；投影多了 `financing` ⇒ 观测面结构指纹
-  `ba1cc7959b170e8d` → **`f06107cdb4c77a59`** ⇒ 2026-10-31 那轮 6 格基准从此是**另一个问题**。
+  `ba1cc7959b170e8d` → `f06107cdb4c77a59` ⇒ 2026-10-31 那轮 6 格基准从此是**另一个问题**。
 - 事实：**GS 现在报全图城镇**（2026-11-02，Issue #13）：以前只报人口前 10，样本外的城镇对模型只剩一个
   编号（`#14 → #2`）。真机（seed 4242）：**26 座城全部带名字**进 `observe()`（城镇块 ~1.8 KB）。
 - 事实：**比较计划是同一套预览的矩阵版**（Issue #48，`src/agent/compare-plan.ts`）：格子 = 模型 × seed；

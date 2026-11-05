@@ -17,6 +17,21 @@
   exist** plus the hint that the process may be older than the files. The smoke check now
   navigates to all four pages, not just the home page.
 
+### Added
+- **The model can finally see what the game pushes at it.** The engine pushes events to the
+  GameScript (a vehicle was lost, the first vehicle reached a station, an industry opened) - and our
+  Bridge GS **drained them and threw them away**: only the admin-port event was handled. A model could
+  therefore never see "my bus arrived" or "my truck was scrapped" unless it happened to look at exactly
+  the right moment. The GS now maps the engine's event types onto a **closed vocabulary**
+  (`vehicle_lost`, `station_first_vehicle`, `vehicle_waiting_in_depot`, `vehicle_unprofitable`,
+  `industry_open`, `industry_close`, `town_founded`), the world state keeps them in order (bounded to
+  50), and the projection carries them - so `observe()` and every decision context show what happened.
+  Real machine (real model, seed 4242): the first vehicle reaching each station arrived twice
+  (`station_first_vehicle`, stations 0 and 1, vehicle 8). Two Squirrel traps came with it and are now
+  written down (MEMORY D95): a **class member must be declared** before it is assigned, and
+  **reading a key that does not exist throws** - so the payload shape is constant and every read asks
+  `rawin` first.
+
 ### Fixed
 - **The cargo monitor was never missing - our own accumulator was broken.** On 2026-11-01 this project
   concluded that OpenTTD 15.3's Squirrel API has no cargo monitor and that splitting the deliveries by
@@ -379,14 +394,9 @@
 ### Fixed（Providers 页保存）
 
 - **点了 Save 毫无反应**（用户报告）。根因是**禁用的按钮看起来完全可点**： 选中 Provider 但未选模型时 `saveReady()` 为假、按钮 `disabled`，而 CSS 没有给 `:disabled` 任何样式（`opacity:1; cursor:pointer`），点击不发请求、不报错、不提示。 现在：`:disabled` 有可见样式，且 `saveHint()` 按分支说明**下一步该做什么**。
-- **切到 Custom 模式会继承目录 Provider 的 id**，把
-  `{"source":"custom","providerId":"deepseek"}` 写进 `llm.json`（凭据归错主的混合记录）。
-  两个模式的选择现在分开保存。
-- **静态资源没有缓存校验**（无 `Cache-Control` / `ETag`），导致"刷新"可能继续跑旧 JS
-  —— 修好的 bug 看起来没修好。现为 `no-cache` + `ETag`（未变返回 304）。
-- **全新安装默认落在 Custom 端点**（`resolveLlmSource` 对空配置返回 `custom`），
-  于是首次打开 Providers 是一个禁用的、要求填写 baseUrl 的自定义表单。
-  空配置现返回 `catalog`——内置目录才是入口。
+- **切到 Custom 模式会继承目录 Provider 的 id**，把 `{"source":"custom","providerId":"deepseek"}` 写进 `llm.json`（凭据归错主的混合记录）。 两个模式的选择现在分开保存。
+- **静态资源没有缓存校验**（无 `Cache-Control` / `ETag`），导致"刷新"可能继续跑旧 JS —— 修好的 bug 看起来没修好。现为 `no-cache` + `ETag`（未变返回 304）。
+- **全新安装默认落在 Custom 端点**（`resolveLlmSource` 对空配置返回 `custom`）， 于是首次打开 Providers 是一个禁用的、要求填写 baseUrl 的自定义表单。 空配置现返回 `catalog`——内置目录才是入口。
 
 ### Added（测试缺口）
 
@@ -405,24 +415,12 @@
   `if (y0 != null && y1 != null)`，只给 `y0` 会被**静默忽略**（实测无变化）。
   修后逐系列像素 `{Input:4922, Output:949, Reasoning:385}`，
   纵向颜色序列自上而下 `Reasoning → Output → Input`，即正确的堆叠。
-- **`add_vehicles` 谎报成功，导致 agent 无限重试**。工具无条件返回 `ok=true`
-  （"命令写进 socket 了"），而这条命令在车队为 0 时**永远不可能生效**
-  （执行器靠克隆头车扩容，且只在 `stage=="done"` 时读请求标牌）。
-  模型因此得不到"这做不到"的反馈 —— 一个永远说谎的工具会让 agent 丧失学习能力。
-  现在工具会检查 `vehicles` 并**拒绝**，附上原因与下一步。
-  语义澄清见 `SPEC.md` §10.20。
+- **`add_vehicles` 谎报成功，导致 agent 无限重试**。工具无条件返回 `ok=true` （"命令写进 socket 了"），而这条命令在车队为 0 时**永远不可能生效** （执行器靠克隆头车扩容，且只在 `stage=="done"` 时读请求标牌）。 模型因此得不到"这做不到"的反馈 —— 一个永远说谎的工具会让 agent 丧失学习能力。 现在工具会检查 `vehicles` 并**拒绝**，附上原因与下一步。 语义澄清见 `SPEC.md` §10.20。
 
 ### Fixed（2026-09-12 审计 + 用户报告）
 
-- **KPI 不实时更新，必须手动刷新**。根因：`--watch` 会 `web.publishEvent(ev)`，
-  而**主模式 `--agent` 从不转发事件** → 页面收不到 `event` 帧，
-  公司镜像与历史永不推进，KPI 冻结在连接时的快照上。已补齐并加一致性测试。
-- **Token 图改为堆叠面积图**（用户要求）。过程中否掉了两条错路，都由**像素扫描**判定：
-  ① uPlot 的 `bands` API：`series` 必须是 `[from,to]` 元组（传数字被静默忽略），
-  且改成元组后填充**仍然不出现**；② 仅累积数据不够——后面画的大面积会盖住前面的。
-  最终方案：**倒序绘制（大者先画）+ 不透明填充到轴**，小面积覆盖其下半部分，
-  于是每条系列露出的正好是自己那一段。实测（等分三等份）：纵向连续三段
-  `Reasoning 100px → Output 100px → Input 70px`，无缝、无混色。
+- **KPI 不实时更新，必须手动刷新**。根因：`--watch` 会 `web.publishEvent(ev)`， 而**主模式 `--agent` 从不转发事件** → 页面收不到 `event` 帧， 公司镜像与历史永不推进，KPI 冻结在连接时的快照上。已补齐并加一致性测试。
+- **Token 图改为堆叠面积图**（用户要求）。过程中否掉了两条错路，都由**像素扫描**判定： ① uPlot 的 `bands` API：`series` 必须是 `[from,to]` 元组（传数字被静默忽略）， 且改成元组后填充**仍然不出现**；② 仅累积数据不够——后面画的大面积会盖住前面的。 最终方案：**倒序绘制（大者先画）+ 不透明填充到轴**，小面积覆盖其下半部分， 于是每条系列露出的正好是自己那一段。实测（等分三等份）：纵向连续三段 `Reasoning 100px → Output 100px → Input 70px`，无缝、无混色。
 - **Harness 边界收紧**（用户明确要求：不要把经验教训内化进框架）。
   `SYSTEM_PROMPT` 曾写着"Do NOT issue the same command repeatedly"、
   "Prefer one solid route"、"add vehicles when queues grow" —— 这些是**策略**，
@@ -438,13 +436,8 @@
   （边界定义：契约前提 ✅ / 世界事实与因果 ✅ / 交互协议 ✅ / 策略 ❌）。
 
 ### Fixed
-- **阶段性总结面板恒为空（dead UI）**：Live 页读 `telemetry.checkpoints`，但该字段
-  从不存在，且 checkpoint **只在 shutdown 写**。现在 `--agent` 每个 decision turn、
-  `--watch` 每约 60 事件就产生一条，新增 `checkpoint` WS 帧，且
-  `snapshot.checkpoints` 带全量 backlog（晚订阅/刷新也能看到）
-- **阶段总结数字全是 0**：agent 模式只同步了 `events`，从未把遥测写进 session totals，
-  于是"1 decisions, 1 tool calls, 0 tokens"这类假数据会长期存在 →
-  新增 `totalsFromTelemetry()` 作为唯一映射点
+- **阶段性总结面板恒为空（dead UI）**：Live 页读 `telemetry.checkpoints`，但该字段 从不存在，且 checkpoint **只在 shutdown 写**。现在 `--agent` 每个 decision turn、 `--watch` 每约 60 事件就产生一条，新增 `checkpoint` WS 帧，且 `snapshot.checkpoints` 带全量 backlog（晚订阅/刷新也能看到）
+- **阶段总结数字全是 0**：agent 模式只同步了 `events`，从未把遥测写进 session totals， 于是"1 decisions, 1 tool calls, 0 tokens"这类假数据会长期存在 → 新增 `totalsFromTelemetry()` 作为唯一映射点
 - `live.js` 使用未导出的 `U.pickColor`（现金曲线会直接崩）→ 由门禁测试捕获并修复
 - `paintSparks` 把所有迷你线画成同一条数据 → 改为按 tile 对齐
 
@@ -457,16 +450,11 @@
 - `dashboard-core.test.ts` 新增「阶段总结必须反映真实遥测」回归用例
 
 ### Fixed（浏览器实测发现，CDP 逐条验证）
-- **协议层符号错误**：`money/loan/income/companyValue` 是 **int64**（OpenTTD `Money`），
-  却按 `uint64` 读 → 亏损公司显示 `£18446744073.71B`。新增 `ByteReader.int64()`，
-  与 `SPEC.md` §10.6 一致；真机已验证显示 `-£6.0k`
-- **现金曲线刷新即清空**：历史只存在页面内存，违反"服务端是真源" → 上移到
-  `WorldState`（有界 600 点），`snapshot` 携带，前端 seed；真机验证刷新前后曲线一致
-- **空状态图表跳高**：无数据分支跳过 `fit()`，画布停留在默认 300×200 → 空状态也按
-  容器宽度设置 backing store（含回归测试）
+- **协议层符号错误**：`money/loan/income/companyValue` 是 **int64**（OpenTTD `Money`）， 却按 `uint64` 读 → 亏损公司显示 `£18446744073.71B`。新增 `ByteReader.int64()`， 与 `SPEC.md` §10.6 一致；真机已验证显示 `-£6.0k`
+- **现金曲线刷新即清空**：历史只存在页面内存，违反"服务端是真源" → 上移到 `WorldState`（有界 600 点），`snapshot` 携带，前端 seed；真机验证刷新前后曲线一致
+- **空状态图表跳高**：无数据分支跳过 `fit()`，画布停留在默认 300×200 → 空状态也按 容器宽度设置 backing store（含回归测试）
 - **迷你趋势线错位**：`paintSparks` 把同一份数据画到所有 tile → 改为按 tile 对齐
-- **组合框分组失效**：选项未按组排序导致组标题重复出现 14 次 → 加 `sort` 并按
-  「Ready now → Needs key → OAuth」排序
+- **组合框分组失效**：选项未按组排序导致组标题重复出现 14 次 → 加 `sort` 并按 「Ready now → Needs key → OAuth」排序
 - 大数字尾部粘 delta chip → chip 移入独立行
 
 ### Verified
@@ -474,10 +462,7 @@
 - 真机 `--agent`：`/`、`/providers`、`/llm`(别名)、`/sessions` 与全部静态资源均 200；
   **运行中**（status=running）meta.json 已有 checkpoint 且数字正确
   （`1 decisions, 1 tool calls, 1,790 tokens`）；关闭后写入第二条 + 成绩单；无残留监听
-- **真实浏览器（Chrome headless + CDP）**：三页 **0 个 console 异常**；
-  组合框实测「输入 deep → ↑↓ → Enter」选中 deepseek，模型目录 4 条，
-  环境变量就绪时显示「ready — no action needed」；`canvas` 真实绘制
-  （网格线/面积/折线，非空白）；截图存档于验证流程
+- **真实浏览器（Chrome headless + CDP）**：三页 **0 个 console 异常**； 组合框实测「输入 deep → ↑↓ → Enter」选中 deepseek，模型目录 4 条， 环境变量就绪时显示「ready — no action needed」；`canvas` 真实绘制 （网格线/面积/折线，非空白）；截图存档于验证流程
 
 ## [0.3.0] - 2026-09-10
 
@@ -490,9 +475,7 @@
 **多 Provider 接入（发挥 pi-ai 内置目录，不再手填）**
 - `provider-catalog.ts`: 暴露 pi-ai **39 个内置 provider / ~1900 个模型**（`providers/all` 的
   `getBuiltinProviders`/`getBuiltinModels`），含 API 形态、上下文窗口、价格、认证方式
-- **环境变量自动检测**：用「合成 env 探测」求出每个 provider **真正接受**的变量名
-  （31/39 已解析；如 huggingface→`HF_TOKEN`、google→`GEMINI_API_KEY`、moonshotai→`MOONSHOT_API_KEY`），
-  不触碰真实 process.env；剩余 8 个 OAuth/云凭证 provider 给出明确 hint
+- **环境变量自动检测**：用「合成 env 探测」求出每个 provider **真正接受**的变量名 （31/39 已解析；如 huggingface→`HF_TOKEN`、google→`GEMINI_API_KEY`、moonshotai→`MOONSHOT_API_KEY`）， 不触碰真实 process.env；剩余 8 个 OAuth/云凭证 provider 给出明确 hint
 - `file-credential-store.ts`: **文件版 `CredentialStore`**（`credentials.json`, 0600），
   密钥重启不丢（pi-ai 默认 store 仅在内存）
 - `provider.ts` 新增 `buildBrain()`：catalog 路径直接用 `builtinModels()` 选中模型
@@ -518,11 +501,8 @@
 - `scripts/llm-stub.ts` 现在按 OpenAI 规范返回 usage chunk，使 token 计量可离线验证
 
 ### Fixed
-- **密钥写入后 `hasStoredKey` 仍为 false**：dashboard 保存走 pi-ai 的异步 `modify()`，
-  同一 tick 内回读会 stale → 改用同步 `set/remove/has` 路径（新增 `llm-api.test.ts` 锁定）
-- **重构丢掉 `providers.js` 的 else 分支**导致浏览器语法错误 → 新增
-  `web-assets.test.ts`（`node --check` 全部脚本、校验 href/src 与 `window.UI` 符号）
-  作为**无构建链前端**的永久门禁
+- **密钥写入后 `hasStoredKey` 仍为 false**：dashboard 保存走 pi-ai 的异步 `modify()`， 同一 tick 内回读会 stale → 改用同步 `set/remove/has` 路径（新增 `llm-api.test.ts` 锁定）
+- **重构丢掉 `providers.js` 的 else 分支**导致浏览器语法错误 → 新增 `web-assets.test.ts`（`node --check` 全部脚本、校验 href/src 与 `window.UI` 符号） 作为**无构建链前端**的永久门禁
 
 ### Docs
 - 新增 `docs/DASHBOARD-API.md`：dashboard 前后端**冻结契约**（路由/类型/REST/WS/Tag 规则/module 契约）

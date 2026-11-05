@@ -367,6 +367,28 @@ export function makeSignalHub(refs: SignalHubRefs): SignalHub {
 				else {
 					if (p.kind === "err") gsErrors++;
 					console.log(`[agent] GS: ${JSON.stringify(p)}`);
+					// 推送事件（Issue #13 S7d）：引擎的事件原本被 GS 整个丢掉 ⇒
+					// 模型看不到"车到了 / 车没了"。这里落进世界状态 ⇒ 进观测面。
+					if (p.kind === "game_event") {
+						const kind = String(p.event ?? "");
+						// **null 不折成 0**（D60）：`Number(null) === 0` 是个陷阱。
+						const num = (v: unknown): number | null => {
+							if (v === null || v === undefined || v === "") return null;
+							const n = Number(v);
+							return Number.isFinite(n) ? n : null;
+						};
+						try {
+							refs.world.pushWorldEvent({
+								kind,
+								vehicle: num(p.vehicle),
+								station: num(p.station),
+								industry: num(p.industry),
+								town: num(p.town),
+							});
+						} catch (e) {
+							console.warn(`[agent] game event dropped: ${e instanceof Error ? e.message : String(e)}`);
+						}
+					}
 					// Executor phase events: the PRIMARY phase source (GS relay,
 					// on-change every ~20 ticks). Replaces the company-name regex
 					// decode retired in A3.

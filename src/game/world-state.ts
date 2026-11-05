@@ -95,6 +95,47 @@ export interface CompanyHistoryPoint {
 /** Cap on retained history points per company (~1h at a 5s poll). */
 const MAX_HISTORY = 600;
 
+/**
+ * One pushed event from the game (Issue #13, S7d).
+ *
+ * The vocabulary is **closed**: the GS maps the engine's event types onto these
+ * names, so the model sees a stable set of facts rather than engine internals.
+ */
+export interface WorldEventFact {
+	/** Monotonic per-session number (oldest first). */
+	seq: number;
+	/** What happened (closed vocabulary, see `WORLD_EVENT_KINDS`). */
+	kind: string;
+	/** The vehicle the event is about (null when the event is not about one). */
+	vehicle: number | null;
+	/** The station the event is about (null when not about one). */
+	station: number | null;
+	/** The industry the event is about (null when not about one). */
+	industry: number | null;
+	/** The town the event is about (null when not about one). */
+	town: number | null;
+}
+
+/**
+ * The closed vocabulary of pushed events (Issue #13, S7d).
+ *
+ * Why closed: the model reads these as **facts**, and a fact with a stable name
+ * can be counted, compared and reasoned about. An open vocabulary would leak
+ * engine internals into the observation surface.
+ */
+/** How many pushed events the observation surface keeps (newest win). */
+export const WORLD_EVENT_LIMIT = 50;
+
+export const WORLD_EVENT_KINDS = [
+	"vehicle_lost",
+	"station_first_vehicle",
+	"vehicle_waiting_in_depot",
+	"vehicle_unprofitable",
+	"industry_open",
+	"industry_close",
+	"town_founded",
+] as const;
+
 export interface WorldSnapshot {
 	date: GameDate | null;
 	/** company id -> state. */
@@ -129,6 +170,20 @@ export interface WorldSnapshot {
 	cargoTotals: CargoAmounts[];
 	/** P1-2 车型目录；空 = 未计量。 */
 	engines: { id: number; name: string; speed: number }[];
+	/**
+	 * The game's **push events** (the GS translated them): a vehicle was lost,
+	 * the first vehicle reached a station, an industry opened/closed…
+	 *
+	 * Why they exist (Issue #13, S7d): the engine pushes these, but our
+	 * observation surface only ever carried **periodic samples** ⇒ a model could
+	 * not see "my bus arrived" or "my truck was scrapped" unless it happened to
+	 * look at the right moment. The list is bounded and newest-last.
+	 *
+	 * Absent = the world state predates the pushed events (older fixtures).
+	 * Empty = **no event was pushed** (not "no event happened" — the GS only
+	 * forwards the ones it is asked for).
+	 */
+	worldEvents?: WorldEventFact[];
 	/** 本公司口径运量；null = 未收到（不是"零运量"）。 */
 	companyCargo: CompanyCargoFacts | null;
 	/**
@@ -245,8 +300,12 @@ export class WorldState {
 	private cargoTotals: CargoAmounts[] = [];
 	/** P1-2：可选车型目录（引擎 id/名字/速度）。空 = 未计量（不是没有车）。 */
 	private engines: { id: number; name: string; speed: number }[] = [];
+	/** The pushed game events (Issue #13, S7d). Bounded, oldest first. */
+	private worldEvents: WorldEventFact[] = [];
 	private companyCargo: CompanyCargoFacts | null = null;
 	private totalEvents = 0;
+	/** The monotonic number of pushed events (never reset). */
+	private worldEventSeq = 0;
 	private recentLimit: number;
 
 	constructor(opts: WorldStateOptions = {}) {
@@ -361,6 +420,7 @@ export class WorldState {
 			industriesTotal: this.industriesTotal,
 			cargoTotals: [...this.cargoTotals],
 			engines: [...this.engines],
+			worldEvents: this.worldEvents.map((e) => ({ ...e })),
 			companyCargo: this.companyCargo ? { ...this.companyCargo } : null,
 			observationPolicy: this.observationPolicy,
 			loanCeiling: this.loanCeiling,
@@ -507,6 +567,31 @@ export class WorldState {
 	}
 
 	/** 本公司口径运量。`null` = 未收到（与 `{byCargo: []}` = "收到但为零" 不同）。 */
+	/**
+	 * Record one pushed game event (Issue #13, S7d).
+	 *
+	 * The vocabulary is closed (`WORLD_EVENT_KINDS`): the GS maps the engine's
+	 * event types onto these names, so the observation surface carries stable
+	 * facts. An unknown kind is **dropped** (not stored under a made-up name) and
+	 * the count of dropped events is not hidden - the list simply does not grow.
+	 *
+	 * The list is bounded: the newest `WORLD_EVENT_LIMIT` events are kept, so a
+	 * long run cannot grow the context without bound.
+	 */
+	pushWorldEvent(event: Omit<WorldEventFact, "seq">): void {
+		if (!event || !WORLD_EVENT_KINDS.includes(event.kind as (typeof WORLD_EVENT_KINDS)[number])) return;
+		const seq = this.worldEventSeq++;
+		this.worldEvents.push({
+			seq,
+			kind: event.kind,
+			vehicle: event.vehicle ?? null,
+			station: event.station ?? null,
+			industry: event.industry ?? null,
+			town: event.town ?? null,
+		});
+		if (this.worldEvents.length > WORLD_EVENT_LIMIT) this.worldEvents = this.worldEvents.slice(-WORLD_EVENT_LIMIT);
+	}
+
 	setCompanyCargo(facts: CompanyCargoFacts | null): void {
 		if (!facts) { this.companyCargo = null; return; }
 		const byCargo = (Array.isArray(facts.byCargo) ? facts.byCargo : [])
