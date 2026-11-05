@@ -18,6 +18,15 @@
   navigates to all four pages, not just the home page.
 
 ### Added
+- **A decision now has a result on the world's side.** "The executor says it built the line" is not a
+  result; "the first vehicle reached the station" is. The join is the **vehicle id**: the executor's route
+  statistics report the line's `vehiclesIds`, the pushed events report the vehicle, and the two together
+  make "the route decision 3 ordered had its first vehicle arrive on 1950-03-01" a fact that can be
+  booked - it lands in the route ledger and, from there, in the cross-run memory. An event about a
+  vehicle we do not know is **not attributed** (attribution must not be guessed). Until now the memory
+  could only recall "did I build it" and "did it make money", never "what the world then did to it".
+
+### Added
 - **The model can finally see what the game pushes at it.** The engine pushes events to the
   GameScript (a vehicle was lost, the first vehicle reached a station, an industry opened) - and our
   Bridge GS **drained them and threw them away**: only the admin-port event was handled. A model could

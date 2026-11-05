@@ -388,6 +388,15 @@ export function makeSignalHub(refs: SignalHubRefs): SignalHub {
 						} catch (e) {
 							console.warn(`[agent] game event dropped: ${e instanceof Error ? e.message : String(e)}`);
 						}
+						// 决策→结果台账（Issue #13）：推事件挂到**它那条线**上，
+						// 于是"这个决策带来了什么"有了世界侧的证据（不只是"执行器说建好了"）。
+						try {
+							const d = refs.world.snapshot().date;
+							const dateStr = d ? `${d.year}-${String(d.month).padStart(2, "0")}-${String(d.day).padStart(2, "0")}` : undefined;
+							refs.routeLedger.noteVehicleEvent(num(p.vehicle), kind, dateStr);
+						} catch (e) {
+							console.warn(`[agent] game event not attributed: ${e instanceof Error ? e.message : String(e)}`);
+						}
 					}
 					// Executor phase events: the PRIMARY phase source (GS relay,
 					// on-change every ~20 ticks). Replaces the company-name regex
@@ -468,6 +477,16 @@ export function makeSignalHub(refs: SignalHubRefs): SignalHub {
 								const n = Number(v);
 								return Number.isFinite(n) ? n : undefined;
 							};
+							// 车辆 → 线路的归属（决策→结果台账的连接键）。
+							// **用 `fleetIds`（执行器注册表里这条线自己的车队），不用
+							// `vehiclesIds`**（那是"此刻站在两端站上的车"，共享车站时**别的线
+							// 的车也在里面** ⇒ 会把事件归到错的线上）。
+							if (Array.isArray(p.fleetIds)) {
+								refs.routeLedger.recordVehicleJobs(
+									job,
+									p.fleetIds.map((v: unknown) => Number(v)).filter((v: number) => Number.isFinite(v)),
+								);
+							}
 							routeStats.set(job, {
 								job,
 								vehicles: Number(p.vehicles) || 0,
