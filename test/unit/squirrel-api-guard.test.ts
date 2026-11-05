@@ -35,16 +35,6 @@ const KNOWN_BAD_CALLS = [
 		use: "GSStation.GetStationID(tile) + GSStation.IsValidStation(id) - the predicate lives on GSTile, not GSStation",
 	},
 	{
-		// 2026-10-31：OpenTTD 15.3 的 **脚本 API 根本没有 cargo monitor**
-		// （`src/script/api/` 里只有 `script_cargomonitor.cpp` 给新的 Script API，
-		//  Squirrel 的 GS* 包装里没有对应物；引擎侧也只有 `GetSum()` 的求和）。
-		// ⇒ 调用**不报错**，只是返回 null ⇒ 症状是「按货种的拆分一直是空的」，
-		// 很容易被误读成「还没交付」。拆分因此**不可测**（SPEC §10.65）。
-		call: "GSCargoMonitor.",
-		reason: "OpenTTD 15.3's Squirrel API has no cargo monitor — the call returns null instead of failing",
-		use: "don't try to split the company's deliveries by cargo type; the admin counter is a sum (SPEC §10.65)",
-	},
-	{
 		// AB-4a (2026-09-19)：GS 不暴露平地常量。`SLOPE_FLAT = 0` 在引擎侧稳定
 		// (`src/slope_type.h`)，代码里用字面量 0 + 注释解释；不要在这里"修正"成
 		// `GSMap.SLOPE_FLAT`——会再次抛 `the index 'SLOPE_FLAT' does not exist`。
@@ -719,13 +709,30 @@ describe("Squirrel 桥：产业/货种/公司口径上报", () => {
 		expect(src).toMatch(/_facts_tick\s*\+\s*1000\s*</);
 	});
 
-	it("按货种的拆分**不可测**：不调用 cargo monitor（API 不存在）", () => {
-		// OpenTTD 15.3 的脚本 API 没有 cargo monitor ⇒ 调用返回 null 而不是报错
-		// ⇒ 症状是「拆分一直是空的」，很容易被误读成「还没交付」。
-		// ⇒ GS 里不许再调它（KNOWN_BAD_CALLS 也会拦）。
+	it("按货种的拆分**还没接上**：GS 里暂时不调用 cargo monitor（等实现 PR）", () => {
+		// 2026-11-05 纠正（MEMORY D94 / docs/PER-LINE-DELIVERY-FEASIBILITY.md）：
+		// **API 是存在的**（`script_cargomonitor.hpp` 写着 `@api game` ⇒ Squirrel 侧也
+		// 导出；真机实测：类存在、调用成功、返回 0）。当初"拆分永远是空的"是我们自己
+		// 的累加器抛了异常（Squirrel 的表严格 ⇒ 写不存在的键会抛）。
+		// ⇒ 这条守卫现在只锁"还没实现"；实现 PR 必须同时删掉它并加上下面那条。
 		const fn = src.slice(src.indexOf("function CollectFacts("), src.indexOf("function Start("));
 		expect(fn).not.toContain("GSCargoMonitor.");
 		expect(fn).toContain("own_by_cargo = []");
+	});
+
+	it("**累加器不许用动态键的表**（Squirrel 的表是严格的：写不存在的键会抛）", () => {
+		// 这才是当初"拆分永远是空的"的真凶（D44/D94）：`table[label] = v` 抛
+		// `the index '…' does not exist` ⇒ 整个 CollectFacts 抛异常 ⇒ 事实表从不更新。
+		// 累加必须用**数组**（append）或**字面量建好键**的表。
+		for (const file of packFiles()) {
+			const code = stripComments(readFileSync(file, "utf8"));
+			// `x[expr] = value` 的形态：键不是字面量 ⇒ 运行时才决定 ⇒ 可能不存在。
+			const suspect = /(\b[A-Za-z_][A-Za-z0-9_.]*)\s*\[\s*[A-Za-z_][A-Za-z0-9_.]*\s*\]\s*=(?!=)/g;
+			const hits = [...code.matchAll(suspect)].map((m) => m[0]);
+			// 只盯**事实累加**相关的表：其它表的动态键是允许的（例如按 id 索引的缓存）。
+			const accumulation = hits.filter((h) => /total|acc|sum|count|own_/i.test(h));
+			expect(accumulation, `${file}: 累加器不许用动态键的表`).toEqual([]);
+		}
 	});
 
 	it("事实采集仍覆盖所有城镇与所有产业（产业侧的事实不受影响）", () => {

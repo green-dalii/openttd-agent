@@ -527,9 +527,17 @@ OpenTTD 有**两个动作面**，能力完全不同：
 **过程** → `CHANGELOG.md`。**仍为真的事实**：顺序检验 block #1 的 CI 含 0 → 问题在**设计/样本量**，不在臂。
 
 ### 10.65 流量指标的**测量缺陷**：`deliveredCargo` 是当季计数器（2026-09-18）
-**仍为真**（测量缺陷，最常咬人）：`ServerCompanyEconomy.deliveredCargo` 是**本季度已运出**的计数器，**每季度归零**（u16）。所以 `deliveredRun` 是**跨季积分**，`deliveredRunComplete=true` 表示整段无 gap；两臂必须同源，否则回落到 `raw` 并标 `ArmComparison.deliveredSource`。
-**它同时含客运**（2026-10-31 核对 OpenTTD 15.3 源码）：admin 发的是 `cur_economy.delivered_cargo` 这个**按货种的数组**的求和，而 OpenTTD 把客运也记进同一数组（`src/economy.cpp`：`cur_economy.delivered_cargo[cargo_type] += accepted_total`）⇒ `deliveredRun` **已经是"货物 + 客运"**，旧措辞 "cargo delivered" 是在说谎；分数轴与系统提示都改口（措辞由服务端 `DELIVERED_MEASURE` 给出）。按货种拆分另有来源（GS 的 cargo monitor），**口径不同，不可与之相加**。
-**拆不开**（2026-11-01 核对 OpenTTD 15.3 源码）：脚本 API **没有 cargo monitor**（`GSCargoMonitor.*` 调用**不报错**、只返回 null ⇒ 症状是"拆分一直是空的"，极易被误读成"还没交付"），admin 的 `deliveredCargo` 又是按货种数组的**求和** ⇒ **公司的交付无法按货种分开**。⇒ 分数轴只有**合计**（货物+客运），`cargoDelivered`/`passengersDelivered` 恒为 `null`（= 没测到，不是 0）；守卫 `squirrel-api-guard` 登记该 API 不存在，GS 不得再调它。
+**仍为真**（测量缺陷，最常咬人）：`ServerCompanyEconomy.deliveredCargo` 是**本季度已运出**的计数器，**每季度归零**（u16）⇒ `deliveredRun` 是**跨季积分**，`deliveredRunComplete=true` 表示整段无 gap；两臂必须同源，否则回落到 `raw` 并标 `ArmComparison.deliveredSource`。
+**它同时含客运**（2026-10-31 核对 OpenTTD 15.3 源码）：admin 发的是 `cur_economy.delivered_cargo`（**按货种的数组**）的**求和**，而客运也记进同一数组（`src/economy.cpp`）⇒ `deliveredRun` **已经是"货物 + 客运"**，旧措辞 "cargo delivered" 是在说谎；分数轴与系统提示都改口（措辞由服务端 `DELIVERED_MEASURE` 给出）。
+**⚠ 上一条"拆不开"是误判（2026-11-05 纠正，调研见 `docs/PER-LINE-DELIVERY-FEASIBILITY.md`）**：
+脚本 API **有** cargo monitor（`GSCargoMonitor.GetTownDeliveryAmount` / `GetIndustryDeliveryAmount`，
+`script_cargomonitor.hpp` 写着 `@api game` ⇒ Squirrel 侧也导出；真机实测：类存在、调用成功、返回 0）。
+当初"拆分永远是空的"是**我们自己的代码**：累加器用了 **Squirrel 的严格表**（往不存在的键里写会抛
+`the index 'LVST' does not exist`）⇒ `CollectFacts` 整个抛异常 ⇒ 空结果被误读成"API 返回 null"
+（MEMORY D44/D89/D93）。**真正的限制是**：① monitor 粒度只有**城镇 / 产业**（整个脚本 API 没有
+`GetCargoTotal` ⇒ **没有车站 / 线路**）；② monitor **只统计货运**，而当前脚手架**只建客运线路**。
+⇒ 分数轴仍只有**合计**，`cargoDelivered`/`passengersDelivered` 仍为 `null`（= 没测到，不是 0）；
+守卫里"该 API 不存在"那条**删除**，换成"累加器不许用动态键的表"。
 依据：`src/game/delivery-meter.ts`、`src/evolution/metrics.ts`、`src/evolution/scorecard.ts`、`src/game/squirrel/bridge-gs/main.nut`；教训 `MEMORY.md` D14。
 
 ### 10.66 GS 通道的**部分失效**：`GSStation.IsStationTile` 不存在（2026-09-18）
@@ -722,7 +730,7 @@ inst.__zoomedByUser = true;       // 让数据帧走 setData(data, false)，视�
 | 口径 | 取值 | 语义（源码依据） |
 |------|------|------------------|
 | **产业口径** | `GSIndustry.GetLastMonthTransportedPercentage(industry, cargo)` | 读的是产业**上月产量的历史**（`script_industry.cpp` 取 `produced[LAST_MONTH].transported`） ⇒ **所有公司**合计运走的比例。**不是**本公司的成绩 |
-| **公司口径** | `GSCargoMonitor.GetTownDeliveryAmount / GetIndustryDeliveryAmount / GetTownPickupAmount / GetIndustryPickupAmount(company, cargo, id, keep_monitoring)` | 返回**自上次查询以来**的量并**更新监视状态**（`cargomonitor.h`：get **and reset**） ⇒ **本公司**实际交付/取货量；**非幂等**，只能在 GS 内读一次并累计上报，页面不得直接查 |
+| **公司口径** | `GSCargoMonitor.GetTownDeliveryAmount / GetIndustryDeliveryAmount / GetTownPickupAmount / GetIndustryPickupAmount(company, cargo, id, keep_monitoring)` | 返回**自上次查询以来**的量并**更新监视状态**（`cargomonitor.h`：get **and reset**） ⇒ **本公司**实际交付/取货量；**非幂等**，只能在 GS 内读一次并累计上报，页面不得直接查。**只统计货运**（不含客运），粒度只有**城镇 / 产业** |
 
 **规则**：同一面板里"产业利用率"与"本公司运量"必须**分块并各自标注口径**；
 所有这类字段都是**上月经济月**口径（`ScriptEconomyTime`），不是实时值，必须标注。
@@ -735,18 +743,13 @@ inst.__zoomedByUser = true;       // 让数据帧走 setData(data, false)，视�
 
 | 事实 | 证据 |
 |------|------|
-| **GS 上报原始计数，比率由前端派生** | `cmd=state` 新增字段：`industries`(总数) · `industry_list`(按产量取样 top-12：`{id,cargo,name,produced,transported,stock}`) · `cargo_totals`(按货种聚合 `{label,produced,transported}`) · `own_delivered`(本公司 monitor 累计 `{label,amount}`) · `own_quarter`(游戏季度总量) · `own_monitored`(`{towns,industries}`)。真机：`industriesTotal=49..52`、`industry_list=12`、`cargo_totals=6`、`own_monitored={towns:20..23, industries:49..52}` |
+| **GS 上报原始计数，比率由前端派生** | `cmd=state` 的字段：`industries`(总数) · `industry_list`(按产量取样 top-12：`{id,cargo,name,produced,transported,stock}`) · `cargo_totals`(按货种聚合 `{label,produced,transported}`) · `own_delivered`(本公司 monitor 累计 `{label,amount}`) · `own_quarter`(游戏季度总量) · `own_monitored`(`{towns,industries}`)。真机：`industriesTotal=49..52`、`industry_list=12`、`cargo_totals=6`、`own_monitored={towns:20..23, industries:49..52}` |
 | **重活节流**：事实每 1000 tick 重算一次（心跳仍 200 tick） | `bridge-gs/main.nut` 的 `_facts_tick + 1000 < now` 门；载荷形状恒定（不用条件建键 —— D44 的规避方式） |
-| **monitor 必须 `keep_monitoring = true`** | 语义是"读取即重置"（`cargomonitor.h`）：传 `false` 会静默丢掉这段增量。守卫测试锁死两次调用 |
-| **监视覆盖全部城镇与全部产业** | GS 侧把 `GSTownList()`/`GSIndustryList()` 物化成 id 数组后逐对轮询；真机 `own_monitored` 与地图上的数量一致 ⇒ 交付量**不是**不明子集 |
-| **货种标签是定长 4 字符**（`OIL_`） | 真机面板最初显示 `OIL_`；前端归一化后为 `Oil`（`GetName` 是本地化字符串，官方明确不作玩家可见文案） |
-| **产业名截断会留尾空格** | 真机 `"Chedingworth Falls Coal "` → GS 侧 `Trim(slice(0,24))` 后为 `"Wundston Coal Mine"` |
+| **monitor 必须 `keep_monitoring = true`**，且**累加器不许用动态键的表** | 语义是"读取即重置"（`cargomonitor.h`）：传 `false` 会静默丢掉这段增量。⚠ **2026-11-05 纠正**：当初的累加器写了 `table[label] = …`（Squirrel 的表**严格** ⇒ 抛 `the index '…' does not exist`）⇒ 事实表从未更新 ⇒ 被误读成"API 不存在"（§10.65 与 `docs/PER-LINE-DELIVERY-FEASIBILITY.md`） |
+| **监视覆盖全部城镇与全部产业** | GS 侧把 `GSTownList()`/`GSIndustryList()` 物化成 id 数组后逐对轮询；真机 `own_monitored` 与地图上的数量一致 ⇒ 口径**不是**不明子集（**但累加器坏了 ⇒ 当时读到的一直是空**，见上） |
+| **货种标签是定长 4 字符**（`OIL_`） · **产业名截断会留尾空格** | 真机面板最初显示 `OIL_`（前端归一化为 `Oil`，`GetName` 是本地化字符串）；真机 `"Chedingworth Falls Coal "` → GS 侧 `Trim(slice(0,24))` ⇒ `"Wundston Coal Mine"` |
 | **库存 `—` 的含义** | `GetStockpiledCargo` 对该产业**不接受的货**返回负值 ⇒ 落成 `null` ⇒ 页面显示 `—`（不是"库存 0"） |
-| **两种口径必须分块** | 面板：`Cargo — last month`（标注 "map-wide (all companies)"）与 `Delivered by this company`（标注 "since this run started · all N towns and M industries monitored"）分开呈现；季度总量作为**交叉核对**单列 |
-| **0 与"—"不混用** | "Our deliveries" 在有通道但尚无交付时显示 **0**（真实测量），仅当没有通道时显示 `—` |
-
-**注意**：本节的读数来自 offline-demo（脚本化演示）——`own_delivered` 因此恒为 0
-（演示里没有真实交付）。真实交付量需要带 LLM 的 agent 运行，属 P2 的后续验收项。
+| **两种口径必须分块**，且 **0 与"—"不混用** | 面板把 `Cargo — last month`（map-wide）与 `Delivered by this company`（本公司）分开呈现，季度总量单列做**交叉核对**；"Our deliveries" 在有通道但尚无交付时显示 **0**（真实测量），没有通道才显示 `—` |
 
 ### 10.101 僵尸局取证（2026-09-25）：用户看到的那句告警，**不是真相的描述，而是真相的遮蔽**
 
@@ -1246,7 +1249,7 @@ compaction 冲突）在 `docs/HARNESS-MIGRATION.md` §3（带坐标），此处�
   `pairedComparison`，排除原因来自 `metricExclusion`——**页面一个数都不重算、也不下判断**。
   分组用**实际服务的模型**（`manifest.servedModel`）⇒ 网关替换**可见**；每局能下钻到
   History（`/sessions?run=<id>`）。
-- 真机（隔离 data dir，`minimax-cn` / `MiniMax-M3.1-Flash` + 本地 stub，各 2 个 seed）：两模型 × 两 seed 出四轴 + 配对判定（2 对 ⇒ "not determinable"），无价目表一侧写 `not measured`。
+- 真机（隔离 data dir，`minimax-cn` / `MiniMax-M3.1-Flash` + 本地 stub，各 2 个 seed）：两模型 × 两 seed 出四轴 + 配对判定（2 对 ⇒ "not determinable"），无价目表一侧写 `not measured`；**比较只发生在"同一个问题"之内**（2026-11-02，用户决定 (b)）：Compare 按 **manifest 自己的三元组**（脚手架 + 观测面结构 + 观测策略）给度量行**分组**，一次只比**一组**，别的组**披露**（`runsOutsideGroup`）、不混进任何数字（默认组 = **局数最多**的那组 ⇒ 2026-10-31 那轮 6 格自成一组；真机：两组，组内配对差仍为 **-0.270**）。
 
 - 事实：**观测面有自己的两枚指纹**（2026-11-02）：`scaffoldHash` 只覆盖提示词 + 工具，**不覆盖观测面**；`payloadShapeHash`
   含**世界**（城镇名、产业清单）⇒ **每个 seed 都不同** ⇒ 拿它跨局比较会**误报**"不是同一个问题"（假警报比没警报更坏）。
@@ -1254,10 +1257,6 @@ compaction 冲突）在 `docs/HARNESS-MIGRATION.md` §3（带坐标），此处�
   探针世界**算出 ⇒ 只依赖代码、**跑前就能算**、两种后端都记录（真机 `f06107cdb4c77a59`，**预览与 manifest 逐字段相同**）；
   ② `observationPolicy`：**GS 自报**它暴露了世界的哪一部分（`towns=all;industries=top12`）——"看到全部 26 座城"与
   "只看到人口前 10"是**两个不同的问题**，哪怕字段结构一模一样 ⇒ 策略也进 manifest。
-- 事实：**比较只发生在"同一个问题"之内**（2026-11-02，用户决定 (b)）：Compare 按 **manifest 自己的三元组**
-  （脚手架 + 观测面结构 + 观测策略）给度量行**分组**，一次只比**一组**；别的组**披露**（`runsOutsideGroup`）、
-  不混进任何数字（默认组 = **局数最多**的那组 ⇒ 2026-10-31 那轮 6 格自成一组）。真机（6 格旧基准 + 1 格新
-  脚手架）：两组，组内配对差仍为 **-0.270**（与 2026-10-31 的读数一致）。
 - 事实：**融资事实进了观测面**（2026-11-02，Issue #13）：GS 在**公司模式**里读
   `GSCompany.GetMaxLoanAmount()`（只能在那里读：`COMPANY_SELF` 在全局脚本里无效）⇒ 投影带
   `financing{loanCeiling, loanInterval}`（真机：上限 300000、间隔 10000）。**利息率引擎根本不暴露**

@@ -17,6 +17,22 @@
   exist** plus the hint that the process may be older than the files. The smoke check now
   navigates to all four pages, not just the home page.
 
+### Fixed
+- **The cargo monitor was never missing - our own accumulator was broken.** On 2026-11-01 this project
+  concluded that OpenTTD 15.3's Squirrel API has no cargo monitor and that splitting the deliveries by
+  cargo type is therefore unmeasurable; that conclusion was **wrong** and it is corrected here. The API
+  exists (`script_cargomonitor.hpp` carries `@api game`, so Squirrel gets it too; a real-machine probe
+  shows the class, the method and a successful call). The empty split was **our** bug: the accumulator
+  wrote into a Squirrel table with a key that did not exist yet, and Squirrel tables are strict - the
+  write threw, the facts collector died, and the empty result was read as "the API returns null". The
+  correction is in the record, not only in the code: SPEC §10.65 and §10.100, MEMORY D89/D94, the
+  scaffold contract's S7b row and the API guard (the false "this API does not exist" entry is gone, a
+  new guard forbids the dynamic-key accumulator). What stays unmeasured is what the engine really does
+  not expose: **per station / per route** (no `GetCargoTotal` in the whole script API) - and the cargo
+  monitor counts **freight only**, while today's scaffold runs **passenger routes only**. The research
+  and the three options are in `docs/PER-LINE-DELIVERY-FEASIBILITY.md`: **do not change the engine and do
+  not change the script language** - the native API has exactly the same granularity.
+
 ### Added
 - **A comparison only compares one question.** Runs that answered a **different** question - a
   different scaffold, a different observation surface, a different slice of the world - are no longer
@@ -231,8 +247,7 @@
 ### Fixed（核心：Agent 其实只决策了一次）
 - **`maxTurns ?? 1` 使整局只问 LLM 一次**：模型在 1950-01-01 建一条线后再没被咨询过， 收入一路下滑也无人补救。真机证据：三个 Session 全是 `mode=watch` + `kind=faux` + `decisions=0`（内置 CPU AI 在打），而面板看起来一切正常
 - **轮询顺序 bug**：阶段变化靠 admin poll 发现，而 poll 曾写在决策循环**之后** → 永远发现不到变化 → 调度器收不到 `phase_change` → 仍表现为"只决策一次"
-- **删除框架层的策略引导**：旧 prompt 写"施工中就报告并结束回合"，等于替模型做决定。
-  现在 prompt 只给事实与因果（并有测试禁止 `you should`/`recommend` 等措辞）
+- **删除框架层的策略引导**：旧 prompt 写"施工中就报告并结束回合"，等于替模型做决定。 现在 prompt 只给事实与因果（并有测试禁止 `you should`/`recommend` 等措辞）
 - **Live 页 `renderHeader` 引用已删除的 `#g-mode`** → 页面首屏就崩（浏览器实测发现）
 
 ### Added（决策循环，对齐 SPEC §1.1/§4.2）
@@ -241,18 +256,13 @@
 - `scheduler.ts`：**何时问**与**问什么**分离。触发 = `start`/`phase_change`/
   `wait_until`/`interval`(每月，SPEC §4.2 默认)/`event`/`manual`；同窗口多触发**合并**
 - **冻结-观察-决策-执行-解冻**（SPEC §1.1 六步）：决策前 `rcon pause`，决策后 `unpause`
-- **结构化计划**（SPEC §4.2 步骤 2）：`{goal, plan[], immediate_action, wait_until, rationale}`
-  ——接口由框架规定，**内容全由模型填**；`wait_until` 让模型决定自己何时再被问
-- **运行控制（`--serve`）**：常驻 dashboard + `RunSupervisor`，页面可
-  **开始 / 停止 / 暂停 / 恢复**；`POST /api/run/{start,stop,pause,resume}`、`GET /api/run`、
-  WS 帧 `run`。被监督的 run 复用同一个 WebServer（`attach()` 晚绑定）
-- **阶段画面**：`stage-view.ts` 用 GS ack 的真实 tile 坐标生成几何描述，
-  前端 canvas 渲染**示意图**（每个施工阶段一张，存档 `<session>/stages/NNN.json`）
+- **结构化计划**（SPEC §4.2 步骤 2）：`{goal, plan[], immediate_action, wait_until, rationale}` ——接口由框架规定，**内容全由模型填**；`wait_until` 让模型决定自己何时再被问
+- **运行控制（`--serve`）**：常驻 dashboard + `RunSupervisor`，页面可 **开始 / 停止 / 暂停 / 恢复**；`POST /api/run/{start,stop,pause,resume}`、`GET /api/run`、 WS 帧 `run`。被监督的 run 复用同一个 WebServer（`attach()` 晚绑定）
+- **阶段画面**：`stage-view.ts` 用 GS ack 的真实 tile 坐标生成几何描述， 前端 canvas 渲染**示意图**（每个施工阶段一张，存档 `<session>/stages/NNN.json`）
 - Live 页新增运行控制条、**未接线时的明确提示**（而不是让人猜为什么面板是空的）
 
 ### Docs
-- **`AGENTS.md` §5.1**：E2E 必须证明"智能真的接上了"（7 条断言），
-  并规定**每次新 Session/compact 后先读 SPEC 对齐再动手**
+- **`AGENTS.md` §5.1**：E2E 必须证明"智能真的接上了"（7 条断言）， 并规定**每次新 Session/compact 后先读 SPEC 对齐再动手**
 - `docs/AGENT-LOOP-AND-CONTROL.md`：决策循环与运行控制契约，含**§2.0 偏离记录**
 - `SPEC.md` §10.19：把本轮事实固化（含 dedicated server 无帧缓冲 → 无法截图的结论）
 
@@ -273,9 +283,7 @@
 - 拿不到图时降级为示意图（`stage-view.ts`）
 
 ### Verified（真机，本轮）
-- **真实小地图**：`screenshot minimap` → 256×256 PNG，逐阶段归档且**内容随施工变化**
-  （4114/4124/4129 字节，sha 不同）；浏览器实测 `naturalWidth=256 loaded=true`，
-  0 console 异常
+- **真实小地图**：`screenshot minimap` → 256×256 PNG，逐阶段归档且**内容随施工变化** （4114/4124/4129 字节，sha 不同）；浏览器实测 `naturalWidth=256 loaded=true`， 0 console 异常
 - 决策数由 **1 → 4+**（phase_change 驱动，随运行持续增加）；`llm.kind=real`；token 正常
 - `--serve` 全链路：idle → start agent → pause（server.log 有 pause）→ resume →
   stop（session 落 `aborted`）→ **不重启进程再起 watch**；重复 start 返回 409
@@ -289,8 +297,7 @@
 - **先决条件不满足就拒绝启动，且发生在任何副作用之前**（不 spawn 游戏、不建 session）
 - 检查项：`binary`（存在且可执行）、`dataDir`（可建可写）、`ports`（未被占用）、
   `llmConfigured`、`llmReachable`、`gsFiles`（warn）
-- **LLM 可用性做真实最小请求**：配置完整 ≠ 可用（key 可能失效、endpoint 不可达、
-  模型名下线）。用 `buildBrain()` 走**真正会被使用的那条路径**，避免"检查的和用的不是同一个"
+- **LLM 可用性做真实最小请求**：配置完整 ≠ 可用（key 可能失效、endpoint 不可达、 模型名下线）。用 `buildBrain()` 走**真正会被使用的那条路径**，避免"检查的和用的不是同一个"
 - `--offline-demo`：**唯一**允许无 LLM 运行的显式开关（UI 里标注为"非真实 LLM"）
 - `--skip-preflight`：只跳过非安全项（ports/gsFiles），二进制与 LLM 检查不可跳过
 
@@ -301,22 +308,15 @@
 
 **Session 生命周期（`session-store.ts`）**
 - `heartbeatAt` 心跳（runner 每 2s 刷新）+ 新状态 **`interrupted`**
-- **有效状态在读取时计算**（`effectiveStatus`）：`running` 且心跳超时 15s ⇒ `interrupted`；
-  读取不写盘（幂等无副作用）
-- **启动时和解**（`reconcileStaleSessions`）：新进程把上一个进程遗留的过期 `running`
-  写盘固化为 `interrupted`（附 `endedAt` 与原因），历史自愈
+- **有效状态在读取时计算**（`effectiveStatus`）：`running` 且心跳超时 15s ⇒ `interrupted`； 读取不写盘（幂等无副作用）
+- **启动时和解**（`reconcileStaleSessions`）：新进程把上一个进程遗留的过期 `running` 写盘固化为 `interrupted`（附 `endedAt` 与原因），历史自愈
 - 崩溃兜底：`uncaughtException`/`unhandledRejection` → 尽力 finalize 为 `error`；
   新增 `SIGHUP` 处理
 - 前端：`interrupted` 是**独立徽章**并带 tooltip（此前会静默落成通用 warn）
 
 ### Fixed（仪表盘数据可视化）
-- **Token 图表类型错误**：输入/输出/推理用三条折线，但输入约是输出的 20 倍，
-  实测三条线挤在 **3px** 内（输出 y≈153、推理 y≈156），200px 画布约 60% 是空白。
-  改为**堆叠柱状图**（`Charts.stackedBars`）——同时表达"每轮总量"与"构成比例"，
-  带 hover tooltip（各段数值 + 占比）
-- **柱状图基线非零**：`niceDomain()` 会在最小值下方留 4% 内边距，非负序列因此把 y 轴
-  拉到 **-200**，柱子悬空约 30px、下方一条死区。新增 `zeroBasedDomain()`，
-  柱图一律从 0 起（实测柱底 193 vs 地板 194）
+- **Token 图表类型错误**：输入/输出/推理用三条折线，但输入约是输出的 20 倍， 实测三条线挤在 **3px** 内（输出 y≈153、推理 y≈156），200px 画布约 60% 是空白。 改为**堆叠柱状图**（`Charts.stackedBars`）——同时表达"每轮总量"与"构成比例"， 带 hover tooltip（各段数值 + 占比）
+- **柱状图基线非零**：`niceDomain()` 会在最小值下方留 4% 内边距，非负序列因此把 y 轴 拉到 **-200**，柱子悬空约 30px、下方一条死区。新增 `zeroBasedDomain()`， 柱图一律从 0 起（实测柱底 193 vs 地板 194）
 - Token 面板新增：阶段汇总（peak/累计）、按轮次倒序明细表（含缓存列）
 
 ### Changed（Live 页排版）
@@ -378,10 +378,7 @@
 
 ### Fixed（Providers 页保存）
 
-- **点了 Save 毫无反应**（用户报告）。根因是**禁用的按钮看起来完全可点**：
-  选中 Provider 但未选模型时 `saveReady()` 为假、按钮 `disabled`，而 CSS 没有给
-  `:disabled` 任何样式（`opacity:1; cursor:pointer`），点击不发请求、不报错、不提示。
-  现在：`:disabled` 有可见样式，且 `saveHint()` 按分支说明**下一步该做什么**。
+- **点了 Save 毫无反应**（用户报告）。根因是**禁用的按钮看起来完全可点**： 选中 Provider 但未选模型时 `saveReady()` 为假、按钮 `disabled`，而 CSS 没有给 `:disabled` 任何样式（`opacity:1; cursor:pointer`），点击不发请求、不报错、不提示。 现在：`:disabled` 有可见样式，且 `saveHint()` 按分支说明**下一步该做什么**。
 - **切到 Custom 模式会继承目录 Provider 的 id**，把
   `{"source":"custom","providerId":"deepseek"}` 写进 `llm.json`（凭据归错主的混合记录）。
   两个模式的选择现在分开保存。
