@@ -171,13 +171,18 @@ describe("Compare: did the compared runs answer the same question?", () => {
 		expect(view.surface.observationShapeHashes).toEqual(["bbbb2222"]);
 	});
 
-	it("flags a different observation surface even when the scaffold hash matches", () => {
+	it("puts a different observation surface into another group (never compares them)", () => {
+		// 2026-11-02（用户决定 (b)）：不同观测面的局**不再被放在一起比**——它们
+		// 各自成组，页面只比选中的那一组。
 		const view = buildCompareView([
 			run("a", "m1", "aaaa1111", "bbbb2222"),
 			run("b", "m2", "aaaa1111", "cccc3333"),
 		]);
-		expect(view.surface.differs).toBe(true);
-		expect(view.surface.observationShapeHashes).toEqual(["bbbb2222", "cccc3333"]);
+		expect(view.groups).toHaveLength(2);
+		expect(view.surface.differs).toBe(false); // 选中的组内部是同一个问题
+		expect(view.surface.observationShapeHashes).toHaveLength(1);
+		// 另一组的局必须被披露，不能静默消失。
+		expect(view.runsOutsideGroup).toBe(1);
 	});
 
 	it("a payload shape that differs is NOT a difference (it contains the world)", () => {
@@ -192,15 +197,16 @@ describe("Compare: did the compared runs answer the same question?", () => {
 		expect(view.surface.payloadShapeHashes).toEqual(["dddd4444", "eeee5555"]);
 	});
 
-	it("flags a different observation POLICY (a different slice of the world)", () => {
+	it("puts a different observation POLICY into another group (a different slice of the world)", () => {
 		// Same scaffold, same fact structure - but one run saw all 26 towns and
 		// the other only the ten biggest. That is a different question.
 		const view = buildCompareView([
 			run("a", "m1", "aaaa1111", "bbbb2222", null, "towns=all"),
 			run("b", "m2", "aaaa1111", "bbbb2222", null, "towns=top10"),
 		]);
-		expect(view.surface.differs).toBe(true);
-		expect(view.surface.observationPolicies).toEqual(["towns=all", "towns=top10"]);
+		expect(view.groups).toHaveLength(2);
+		const policies = view.groups.map((g) => g.observationPolicy).sort();
+		expect(policies).toEqual(["towns=all", "towns=top10"]);
 	});
 
 	it("ignores runs that recorded no hash (not measured is not a difference)", () => {
