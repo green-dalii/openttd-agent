@@ -339,7 +339,7 @@ OpenTTD 的年度分类账 + 事件时间线提供了全部原料，缺的是 ha
 | # | 缺口 | 现在的事实（坐标） | 数据从哪来 | 风险 |
 |---|---|---|---|---|
 | **S7a** | 城镇**没有名字** | ✅ **已补**（PR #74）：GS 改报**全图城镇**并带名字（真机 26 座城全部有名字进 `observe()`）；GS 自报 `towns=all;industries=top12` | GS 侧 `GSTown.GetName`（真机已验证） | 本地化字符串（非 ASCII）进 payload 的编码坑（`SPEC.md` 的 Squirrel 字符串教训） |
-| **S7b** | **逐线交付量**不存在 | ⛔ **引擎限制**（PR #65 / MEMORY D89）：OpenTTD 15.3 的 **Squirrel 没有 cargo monitor**——`GSCargoMonitor.*` 调用**不报错**，只返回 `null`；C++ 的 `ScriptCargoMonitor` 属于**原生脚本 API**，我们的 Bridge GS 是 Squirrel，用不上。admin 只给**合计**。⇒ 只能报"进入城镇 X 的交付量"，**不能**报"你的 101 线交付了 N" | 需要换引擎/换脚本语言（**待调研**：见 Issue #13 评论里的选项） | 归因边界（同城镇两条线无法分摊） |
+| **S7b** | **逐线交付量**不存在 | ⚠ **2026-11-05 纠正**（调研：`docs/PER-LINE-DELIVERY-FEASIBILITY.md`）：Squirrel **有** cargo monitor（`GSCargoMonitor.GetTownDeliveryAmount/GetIndustryDeliveryAmount`，`@api game`）⇒ **按城镇 / 按产业**的交付量**可测**（当初"不可测"是我们自己的累加器抛异常，Squirrel 的表严格 ⇒ MEMORY D94）。**仍然不可测**的是**逐车站 / 逐线路**（整个脚本 API 没有 `GetCargoTotal`，引擎也不记）。⇒ 逐线路只能**自己推导**（路线台账 + 唯一服务规则），**不用换引擎** | GS 的 cargo monitor（城镇 / 产业粒度）+ 我们自己的路线台账（推导） | ① monitor **只统计货运**，而当前脚手架**只建客运线路** ⇒ 货运读数恒为 0（要先把货运线路做出来）；② 同城镇多条线 ⇒ 不可分摊 |
 | **S7c** | **融资事实缺失** | ✅ **已补**（PR #75）：投影带 `financing{loanCeiling, loanInterval}`（真机 300000 / 10000）。**利息率引擎不暴露** ⇒ "没测到"，不猜；且必须在**公司模式**里读（`COMPANY_SELF` 在全局脚本里解析不出来，MEMORY D93） | `GSCompany.GetMaxLoanAmount`（真机已验证）/ `GetLoanInterval`（真机已验证） | 利率是"该怎么花钱"的暗示？不是——它是价格事实，与"造价 X"同类 |
 | **S7d** | **推送族未用** | L3 只推相位与失败；车毁/首车到站/城镇成长都走不到模型 | `GSEventVehicleLost` / `GSEventTownGrowth` 等（**待真机验证**） | 噪声：推送太多会淹没增量段，必须先定"值得推"的门槛 |
 

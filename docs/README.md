@@ -11,6 +11,7 @@
 
 | 文档 | 只回答的问题 | 权威于 | **不含**（避免重复） |
 |------|--------------|--------|---------------------|
+| [`PER-LINE-DELIVERY-FEASIBILITY.md`](PER-LINE-DELIVERY-FEASIBILITY.md) | **"逐线路交付"能不能测，要不要换引擎 / 换脚本语言**（调研结论） | 引擎与脚本 API 的实际粒度、误判的证据链、逐线路的推导规则、三个方案的代价 | 脚手架契约（→ `SCAFFOLD-CONTRACT.md`）；进度（→ `ROADMAP.md`） |
 | [`SCAFFOLD-CONTRACT.md`](SCAFFOLD-CONTRACT.md) | 模型**看到什么 / 能做什么 / 动作后得到什么**；两种模式（游玩 / 基准）如何共用同一套脚手架 | 观测面、反馈面、动作面、协议、信号从哪来、两种模式的分界、待打磨清单 | 页面与 API 形状；进化层的存储格式；进度计划 |
 | [`AGENT-LOOP-AND-CONTROL.md`](AGENT-LOOP-AND-CONTROL.md) | 框架**如何驱动 LLM**（决策循环契约）与 Dashboard 运行控制 | 循环契约、触发器、快照/增量汇报、运行控制 | 脚手架对模型的承诺（→ 契约）；游戏内执行器实现（→ 执行器文档） |
 | [`EXECUTOR-ARCHITECTURE.md`](EXECUTOR-ARCHITECTURE.md) | **为什么执行器必须运行在 GS 内**（决策依据） | GS-only 的论证、AI 只保留公司外壳的原因 | 当前系统事实（→ `SPEC.md` §10.107+）；计划（→ `ROADMAP.md`） |
