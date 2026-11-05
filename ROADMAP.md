@@ -134,9 +134,7 @@ pgrep -fl "bench.ts|run-experiment|cli/run.ts|llm-stub|OpenTTD.app"
 
 **上一轮的遗留（未完成，别丢）**：
 - **#13 S7 世界事实补洞**：方案在 `docs/SCAFFOLD-CONTRACT.md` §9。**所有者已答复（2026-11-02）**：
-  ① **旧基准自成一组**，只做组内比较 ⇒ Compare 已按 manifest 三元组**分组**（PR #76）；② 逐线路交付
-  要**调研换引擎/换脚本语言**的可行性（待做）；③ 推送事件 / L2 查询工具 / 决策→结果台账**都要做**
-  （下一步，一次一 PR）；④ i18n 尾巴**留到最后**。已补：城镇名（PR #74）、融资事实（PR #75）。
+  ① 旧基准自成一组、只做组内比较 ⇒ Compare 已按 manifest 三元组**分组**（PR #76）；② 逐线路交付 ⇒ **调研结论：不用换引擎、也不用换脚本语言**（原生 API 粒度一样；真正缺的是"逐车站/逐线路"，只能自己 推导）⇒ `docs/PER-LINE-DELIVERY-FEASIBILITY.md`（PR #77）；③ 推送事件 / L2 查询工具 / 决策→结果台账 **都做完了**（PR #78 / #80 / #79）；④ i18n 尾巴**留到最后**。已补：城镇名（PR #74）、融资事实（PR #75）。 **下一步**：货运线路（脚手架**只建客运线路** ⇒ 货运口径恒为 0），然后 i18n 尾巴。
 - **AGENT_HARNESS 翻默认**：前提已满足 2/3（live 双绿、跨 seed `payloadShapeHash` 相等）；
   还差"至少一局真实模型"。**S2 已修好 A5**（门禁与 runner 共用同一份覆盖层，见 `SPEC.md` §10.117）：
   门禁现在对 live-only 模型 `MiniMax-M3.1-Flash` 判 **ok**（provider 1592ms 应答），
