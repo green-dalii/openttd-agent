@@ -208,13 +208,15 @@ scripts/       # dev 辅助 (loop-health, run-experiment, dashboard-smoke, sync/
 
 英文：commit subject+body、**Issue**（标题/正文/新评论）、**PR**（标题/正文/评审回复）、
 Release notes、Discussion 与任何对外公告。
-中文（不"顺便翻译"）：`SPEC.md` / `ROADMAP.md` / `MEMORY.md` / `CHANGELOG.md` / `AGENTS.md` /
-`docs/**` 与源码注释——它们是协作者的内部工作语言；`README.md` / `README.zh-CN.md` 的双语镜像
-是既有例外（§9）。
+中文（不"顺便翻译"）：`SPEC.md`/`ROADMAP.md`/`MEMORY.md`/`CHANGELOG.md`/`AGENTS.md`/`docs/**` 与源码注释
+——它们是协作者的内部工作语言；`README.md`/`README.zh-CN.md` 的双语镜像是既有例外（§9）。
 
 **追溯义务**：规则生效时仍 **open** 的 Issue/PR 语言不符就地改写（`gh issue edit`）；已关闭的
 作为历史保留，不批量翻译。中文只用于与项目所有者私下对话，不写进任何公开载体。
 
+**归属声明必须属实**（2026-11-07 事故）：对外载体里写"工具/模型是谁"（`🤖 Generated with …`、
+`Co-authored-by: …`）**只在确实如此时**才写。本仓库跑在 **pi** 上（不是 Claude Code），模型是会话里
+那个（当前 MiniMax-M3.1-Flash）⇒ 写别的名字就是**假陈述**，按事故处理（MEMORY E3 有处置流程）。
 > 2026-10-24：B1–B6 六个 Issue 首次用中文创建，同日全部改写为英文——本条的由来是"发现即修"，
 > 不是"以后注意"。
 
