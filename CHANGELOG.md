@@ -9,6 +9,13 @@
 
 ## [Unreleased]
 ### Fixed
+- **The decision context swallowed two facts it had already been given.** The company's financing
+  facts (how much more it could borrow) and the events the engine pushes at it (a vehicle arrived, a
+  vehicle was lost) were passed into the decision context - and then dropped on the floor: the
+  function took them as input and never put them in its output. The model could see them by asking
+  `observe()`, but the context it is handed at every decision had neither. The readings were in the
+  projection all along, so the observation fingerprint does not move; a test now pins "passed in
+  means present in the output".
 - **The navigation now reaches every page.** A page URL was a hand-written table in the server's
   memory, so a page added after the server started was unreachable: the browser got a bare "not
   found" and the page looked like it had never been built. The routes are now **derived from the
@@ -31,7 +38,6 @@
   `a72a663cdd126090`) - the 2026-10-31 benchmark matrix and every run after it are not comparable
   across that boundary (Compare groups them).
 
-### Added
 - **A decision now has a result on the world's side.** "The executor says it built the line" is not a
   result; "the first vehicle reached the station" is. The join is the **vehicle id**: the executor's route
   statistics report the line's `vehiclesIds`, the pushed events report the vehicle, and the two together
@@ -40,7 +46,6 @@
   vehicle we do not know is **not attributed** (attribution must not be guessed). Until now the memory
   could only recall "did I build it" and "did it make money", never "what the world then did to it".
 
-### Added
 - **The model can finally see what the game pushes at it.** The engine pushes events to the
   GameScript (a vehicle was lost, the first vehicle reached a station, an industry opened) - and our
   Bridge GS **drained them and threw them away**: only the admin-port event was handled. A model could
