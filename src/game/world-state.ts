@@ -166,10 +166,25 @@ export interface WorldSnapshot {
 	industries: IndustryInfo[];
 	/** 地图上的产业总数（`GSIndustryList().Count()`）；null = 未收到。 */
 	industriesTotal: number | null;
+	/**
+	 * 全部产业的**位置与名字**（GS 的 `industry_index`）。
+	 *
+	 * 货运线路要选"哪座矿 → 哪座厂" ⇒ **坐标是必需事实**，不是细节。
+	 * 缺席 = 该 GS 没报（**不是**"地图上没有产业"）。
+	 */
+	industrySites?: IndustrySite[];
+	/**
+	 * 货种目录（GS 的 `cargo_catalog`）：哪些货是货运、谁产、谁收。
+	 *
+	 * 为什么是**事实**而不是模型的功课：车站收什么货由引擎按集货区算，
+	 * 模型看不见就只能猜（真机探针：矿场旁的车站**不接受煤**，电站旁的才接受）。
+	 * 缺席 = 该 GS 没报（**不是**"没有货种"）。
+	 */
+	cargoCatalog?: CargoCatalogEntry[];
 	/** 按货种聚合的上月产量/运量（原始计数）。 */
 	cargoTotals: CargoAmounts[];
 	/** P1-2 车型目录；空 = 未计量。 */
-	engines: { id: number; name: string; speed: number }[];
+	engines: { id: number; name: string; speed: number; cargo?: string | null }[];
 	/**
 	 * The game's **push events** (the GS translated them): a vehicle was lost,
 	 * the first vehicle reached a station, an industry opened/closed…
@@ -236,6 +251,34 @@ export interface IndustryInfo {
 	stock: number | null;
 }
 
+/**
+ * 一个产业在地图上的**位置与名字**（全部产业，GS 的 `industry_index`）。
+ *
+ * 为什么单独一份：货运线路要选"哪座矿 → 哪座厂"，**没坐标就选不了**；
+ * 而产量样本（`IndustryInfo`）只覆盖前 12 个产业，且**一个坐标都没有**。
+ */
+export interface IndustrySite {
+	id: number;
+	/** 产业名；空串 = 引擎没报名字（不是 id 字符串）。 */
+	name: string;
+	x: number;
+	y: number;
+}
+
+/**
+ * 货种目录：标签 + 是不是货运 + 谁产谁收（GS 的 `cargo_catalog`）。
+ *
+ * - `freight`：`GSCargo.IsFreight`（引擎自己的口径）。
+ * - `producers` / `consumers`：产业 id 列表（`GSIndustryList_CargoProducing` /
+ *   `GSIndustryList_CargoAccepting`）——**引擎算出的事实**，不是模型该猜的。
+ */
+export interface CargoCatalogEntry {
+	label: string;
+	freight: boolean;
+	producers: number[];
+	consumers: number[];
+}
+
 /** 本公司口径的运量（`GSCargoMonitor` 累计 + 游戏季度统计）。 */
 export interface CompanyCargoFacts {
 	/** 本会话累计：按货种（monitor 口径，只覆盖**被监视的目的地**）。 */
@@ -297,9 +340,13 @@ export class WorldState {
 	private loanInterval: number | null = null;
 	private industries: IndustryInfo[] = [];
 	private industriesTotal: number | null = null;
+	/** 全部产业的位置与名字（货运线路要坐标）。 */
+	private industrySites: IndustrySite[] = [];
+	/** 货种目录：哪些货是货运、谁产、谁收。 */
+	private cargoCatalog: CargoCatalogEntry[] = [];
 	private cargoTotals: CargoAmounts[] = [];
-	/** P1-2：可选车型目录（引擎 id/名字/速度）。空 = 未计量（不是没有车）。 */
-	private engines: { id: number; name: string; speed: number }[] = [];
+	/** P1-2：可选车型目录（引擎 id/名字/速度/能拉的货）。空 = 未计量（不是没有车）。 */
+	private engines: { id: number; name: string; speed: number; cargo: string | null }[] = [];
 	/** The pushed game events (Issue #13, S7d). Bounded, oldest first. */
 	private worldEvents: WorldEventFact[] = [];
 	private companyCargo: CompanyCargoFacts | null = null;
@@ -418,6 +465,8 @@ export class WorldState {
 			townsTotal: this.townsTotal,
 			industries: [...this.industries],
 			industriesTotal: this.industriesTotal,
+			industrySites: [...this.industrySites],
+			cargoCatalog: [...this.cargoCatalog],
 			cargoTotals: [...this.cargoTotals],
 			engines: [...this.engines],
 			worldEvents: this.worldEvents.map((e) => ({ ...e })),
@@ -469,8 +518,49 @@ export class WorldState {
 	 * Sorted by population descending so the most promising candidates come first;
 	 * the ORDER is a fact about the world, not advice about what to pick.
 	 */
-	setEngines(list: { id: number; name: string; speed: number }[]): void {
-		this.engines = list;
+	setEngines(list: { id: number; name: string; speed: number; cargo?: string | null }[]): void {
+		this.engines = list.map((e) => ({
+			id: Number(e.id),
+			name: String(e.name ?? ""),
+			speed: Number(e.speed) || 0,
+			// 车型能拉什么货：null = 引擎没报（**不是**"什么都拉"）。
+			cargo: typeof e.cargo === "string" && e.cargo !== "" ? e.cargo : null,
+		}));
+	}
+
+	/**
+	 * 替换**全部产业**的位置与名字（GS 的 `industry_index`）。
+	 *
+	 * 货运线路要选"哪座矿 → 哪座厂" ⇒ 坐标是必需事实。
+	 * 顺序按 id 升序（确定）；模型看到的顺序不承载任何"建议"。
+	 */
+	setIndustrySites(list: IndustrySite[]): void {
+		this.industrySites = (Array.isArray(list) ? list : [])
+			.filter((s) => s && Number.isFinite(Number(s.id)))
+			.map((s) => ({
+				id: Number(s.id),
+				name: String(s.name ?? "").slice(0, 40),
+				x: Number(s.x) || 0,
+				y: Number(s.y) || 0,
+			}))
+			.sort((a, b) => a.id - b.id);
+	}
+
+	/**
+	 * 替换货种目录（GS 的 `cargo_catalog`）。
+	 *
+	 * `freight` 是引擎自己的口径；`producers`/`consumers` 是产业 id 列表。
+	 * 空数组 = 该货种**没有**产方/收方（不是"没测到"——目录本身是全量的）。
+	 */
+	setCargoCatalog(list: CargoCatalogEntry[]): void {
+		this.cargoCatalog = (Array.isArray(list) ? list : [])
+			.filter((c) => c && typeof c.label === "string" && c.label !== "")
+			.map((c) => ({
+				label: String(c.label),
+				freight: c.freight === true,
+				producers: (Array.isArray(c.producers) ? c.producers : []).map(Number).filter(Number.isFinite),
+				consumers: (Array.isArray(c.consumers) ? c.consumers : []).map(Number).filter(Number.isFinite),
+			}));
 	}
 
 	/**

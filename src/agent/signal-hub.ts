@@ -320,15 +320,48 @@ export function makeSignalHub(refs: SignalHubRefs): SignalHub {
 						);
 					}
 					if (Array.isArray(p.engines)) {
-						// P1-2：可选车型目录（id/名字/速度）——agent 要看得见选项才可能做选择。
+						// P1-2：可选车型目录（id/名字/速度/**能拉什么货**）——agent 要看得见选项才可能做选择。
 						refs.world.setEngines(
-							(p.engines as { id?: unknown; name?: unknown; speed?: unknown }[])
+							(p.engines as { id?: unknown; name?: unknown; speed?: unknown; cargo?: unknown }[])
 								.filter((e) => Number.isInteger(Number(e.id)))
 								.map((e) => ({
 									id: Number(e.id),
 									name: String(e.name ?? ""),
 									speed: Number(e.speed) || 0,
+									// 货运 F1：车型能拉的货（`GSEngine.GetCargoType`）。
+									// null = 引擎没报（**不是**"什么都拉"）。
+									cargo: typeof e.cargo === "string" && e.cargo !== "" ? e.cargo : null,
 								})),
+						);
+					}
+					// 货运 F1：全部产业的**位置与名字**（GS 的 `industry_index`）。
+					// 线路要选"哪座矿 → 哪座厂" ⇒ 没坐标就选不了。
+					if (Array.isArray(p.industry_index)) {
+						refs.world.setIndustrySites(
+							(p.industry_index as { id?: unknown; name?: unknown; x?: unknown; y?: unknown }[])
+								.filter((s) => Number.isFinite(Number(s.id)))
+								.map((s) => ({
+									id: Number(s.id),
+									name: String(s.name ?? ""),
+									x: Number(s.x) || 0,
+									y: Number(s.y) || 0,
+								})),
+						);
+					}
+					// 货运 F1：货种目录（哪些货是货运、谁产、谁收）——引擎算出的事实。
+					if (Array.isArray(p.cargo_catalog)) {
+						refs.world.setCargoCatalog(
+							(p.cargo_catalog as {
+								label?: unknown;
+								freight?: unknown;
+								producers?: unknown;
+								consumers?: unknown;
+							}[]).map((c) => ({
+								label: String(c.label ?? ""),
+								freight: c.freight === true,
+								producers: Array.isArray(c.producers) ? c.producers.map(Number) : [],
+								consumers: Array.isArray(c.consumers) ? c.consumers.map(Number) : [],
+							})),
 						);
 					}
 					if (Array.isArray(p.cargo_totals)) {
