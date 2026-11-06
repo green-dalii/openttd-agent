@@ -105,8 +105,19 @@ export async function runDecision(
 		// The cargo world rides along in EVERY decision context (SPEC §10.124):
 		// the score is cargo tonnes, and a model that cannot see the cargo has
 		// nothing to aim at. Same projection as observe() - one fact, one shape.
+		//
+		// 货运 F1：货种目录（谁产谁收）与产业坐标也一起走 —— 一条货运线路就是
+		// "哪座矿 → 哪座厂"，**没有坐标就选不了线路**，而"谁要煤"是引擎按
+		// 集货区算出来的事实，模型看不见就只能猜。
 		...(facts.cargoTotals.length > 0 || facts.industries.length > 0
-			? { cargo: { totals: facts.cargoTotals, industries: facts.industries } }
+			? {
+					cargo: {
+						totals: facts.cargoTotals,
+						industries: facts.industries,
+						...(facts.cargoCatalog.length > 0 ? { catalog: facts.cargoCatalog } : {}),
+						...(facts.industrySites.length > 0 ? { industrySites: facts.industrySites } : {}),
+					},
+				}
 			: {}),
 		...(facts.engines.length > 0 ? { engines: facts.engines } : {}),
 		// The financing facts ride along too (Issue #13): how much more the

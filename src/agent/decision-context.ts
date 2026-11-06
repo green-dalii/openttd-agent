@@ -14,7 +14,7 @@
  */
 
 import { decodePhaseWindow } from "../game/executor-status.js";
-import type { CargoFact, EngineFact, FinancingFact, IndustryFact } from "./world-facts.js";
+import type { CargoFact, CargoCatalogFact, EngineFact, FinancingFact, IndustryFact, IndustrySiteFact } from "./world-facts.js";
 import type { WorldEventFact } from "../game/world-state.js";
 
 /**
@@ -45,7 +45,7 @@ import type { CompanyFact, TownFact } from "./world-facts.js";
  */
 export type TownSummary = TownFact;
 export type CompanyNumbers = CompanyFact;
-export type { CargoFact, EngineFact, FinancingFact, IndustryFact };
+export type { CargoFact, CargoCatalogFact, EngineFact, FinancingFact, IndustryFact, IndustrySiteFact };
 
 /**
  * Snapshot used as the baseline for the next delta.
@@ -120,6 +120,20 @@ export interface DecisionContextInput {
 		totals: CargoFact[];
 		/** The industries the engine sampled (top by production). */
 		industries: IndustryFact[];
+		/**
+		 * 货种目录（货运 F1）：这个货是不是货运、谁产、谁收。
+		 *
+		 * 引擎算出的事实（`GSIndustryList_CargoProducing` / `_CargoAccepting`）。
+		 * 没有它，模型看得见"哪里有煤"却看不见"谁要煤" —— 而车站收什么货是
+		 * **引擎按集货区算**的，猜不得。
+		 */
+		catalog?: CargoCatalogFact[];
+		/**
+		 * 全部产业的位置与名字（货运 F1）。
+		 *
+		 * 线路要选"哪座矿 → 哪座厂" ⇒ 坐标是必需事实。
+		 */
+		industrySites?: IndustrySiteFact[];
 	};
 	/**
 	 * The road engines the game offers (id/name/speed) - the options a fleet can
@@ -299,6 +313,8 @@ export function buildDecisionContext(input: DecisionContextInput): {
 	cargo?: {
 		totals: CargoFact[];
 		industries: IndustryFact[];
+		catalog?: CargoCatalogFact[];
+		industrySites?: IndustrySiteFact[];
 	};
 	engines?: EngineFact[];
 	/**

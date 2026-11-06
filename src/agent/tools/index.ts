@@ -43,7 +43,7 @@ export function observeTool(deps: AgentDeps): AgentTool<typeof ObserveSchema, Ac
 		name: "observe",
 		label: "Observe Game State",
 		description:
-			"Read the current normalized game state: date, companies (money/loan/income/vehicles/stations), the candidate towns (id, name, population, x, y) that build_bus_route can connect, the cargo world (per-cargo produced/transported totals and the industries the engine sampled, with their cargo label and id), and the road engines a fleet can be built from (id/name/speed).",
+			"Read the current normalized game state: date, companies (money/loan/income/vehicles/stations), the candidate towns (id, name, population, x, y) that build_bus_route can connect, the cargo world (per-cargo produced/transported totals, the industries the engine sampled with their cargo label and id, the cargo catalogue - which cargo is freight, which industry produces it and which accepts it - and where every industry stands), and the road engines a fleet can be built from (id/name/speed and the cargo each engine carries).",
 		parameters: ObserveSchema,
 		execute: async () => {
 			const snap = deps.state.snapshot();
@@ -68,6 +68,11 @@ export function observeTool(deps: AgentDeps): AgentTool<typeof ObserveSchema, Ac
 					`towns=${JSON.stringify(facts.towns)} ` +
 					`cargoTotals=${JSON.stringify(facts.cargoTotals)} ` +
 					`industries=${JSON.stringify(facts.industries)} ` +
+					// 货运目录（货运 F1）：哪个货是货运、谁产、谁收 —— **引擎算出的事实**。
+					// 没有它，模型看得见"哪里有煤"却看不见"谁要煤"。
+					`cargoCatalog=${JSON.stringify(facts.cargoCatalog)} ` +
+					// 全部产业的位置与名字：一条货运线路就是"哪座矿 → 哪座厂"。
+					`industrySites=${JSON.stringify(facts.industrySites)} ` +
 					`engines=${JSON.stringify(facts.engines)} ` +
 					// 融资：还能借多少、贷款的最小单位（**利息率引擎不暴露**，不编）。
 					`financing=${JSON.stringify(facts.financing)} ` +

@@ -154,7 +154,44 @@ describe("worldFacts：管道里本来就有、但模型看不见的那几类事
 			} as unknown as Partial<WorldSnapshot>),
 		);
 		expect(f.cargoTotals).toEqual([{ label: "LVST", produced: 768, transported: 0 }]);
-		expect(f.engines).toEqual([{ id: 153, name: "Balogh Armoured Truck", speed: 48 }]);
+		// 车型带"能拉什么货"；引擎没报时是 null（**不是**"什么都拉"）。
+		expect(f.engines).toEqual([{ id: 153, name: "Balogh Armoured Truck", speed: 48, cargo: null }]);
+	});
+
+	/**
+	 * 货运 F1：模型要看得见"谁产、谁收、在哪儿"——否则它连一条货运线路都选不出来。
+	 *
+	 * 背景（真机探针）：矿场旁边的车站**不接受煤**（煤矿不收煤），电站旁边的才接受
+	 * ⇒ 只报"哪里有煤"是不够的；而且产业此前**一个坐标都没有**。
+	 */
+	it("货种目录（是不是货运 / 谁产 / 谁收）与产业坐标都进投影", () => {
+		const f = worldFacts(
+			snap({
+				cargoCatalog: [{ label: "COAL", freight: true, producers: [28], consumers: [53] }],
+				industrySites: [
+					{ id: 28, name: "Tratborough Coal Mine", x: 40, y: 169 },
+					{ id: 53, name: "Lunningville Power Station", x: 60, y: 120 },
+				],
+			} as unknown as Partial<WorldSnapshot>),
+		);
+		expect(f.cargoCatalog).toEqual([{ label: "COAL", freight: true, producers: [28], consumers: [53] }]);
+		expect(f.industrySites).toEqual([
+			{ id: 28, name: "Tratborough Coal Mine", x: 40, y: 169 },
+			{ id: 53, name: "Lunningville Power Station", x: 60, y: 120 },
+		]);
+	});
+
+	it("车型能拉的货（GSEngine.GetCargoType）也进投影；没报就是 null", () => {
+		const f = worldFacts(
+			snap({
+				engines: [
+					{ id: 8, name: "Balogh Coal Truck", speed: 40, cargo: "COAL" },
+					{ id: 9, name: "Unknown", speed: 10 },
+				],
+			} as unknown as Partial<WorldSnapshot>),
+		);
+		expect(f.engines[0]!.cargo).toBe("COAL");
+		expect(f.engines[1]!.cargo).toBeNull();
 	});
 
 	it("没有这些事实时是空数组（不是 null、不是 0），上下文里不出现空块", () => {

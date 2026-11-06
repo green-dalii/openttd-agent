@@ -67,6 +67,38 @@ export interface IndustryFact {
 	stock: number | null;
 }
 
+/**
+ * 一个产业在地图上的**位置与名字**（模型可见）。
+ *
+ * 为什么模型需要它（货运 F1）：一条货运线路就是"**哪座矿 → 哪座厂**"，
+ * 而"哪儿"是坐标。没有坐标，模型只能看见一堆 id 与产量 —— 它没法选线路。
+ */
+export interface IndustrySiteFact {
+	id: number;
+	/** 产业名；空串 = 引擎没报名字（不是 id 字符串）。 */
+	name: string;
+	x: number;
+	y: number;
+}
+
+/**
+ * 货种目录（模型可见）：这个货**是不是货运**、谁产、谁收。
+ *
+ * 为什么是事实而不是模型的功课（货运 F1）：车站收什么货由**引擎**按集货区算
+ * （真机探针：矿场旁的车站**不接受煤**，电站旁的才接受）⇒ 模型看得见"哪里有煤"，
+ * 却看不见"谁要煤"，就只能猜。
+ */
+export interface CargoCatalogFact {
+	/** 货种标签（稳定，如 "COAL"）。 */
+	label: string;
+	/** 引擎口径：这是不是货运货（`GSCargo.IsFreight`）。 */
+	freight: boolean;
+	/** 生产这个货的产业 id（`GSIndustryList_CargoProducing`）。 */
+	producers: number[];
+	/** 接受这个货的产业 id（`GSIndustryList_CargoAccepting`）。 */
+	consumers: number[];
+}
+
 /** 全图按货种聚合的读数（模型可见）：哪些货存在、运走了多少。 */
 export interface CargoFact {
 	/** 货种标签（稳定，如 "COAL"）。 */
@@ -95,6 +127,13 @@ export interface EngineFact {
 	id: number;
 	name: string;
 	speed: number;
+	/**
+	 * 这个车型能拉的**货种标签**（如 "COAL"）；null = 引擎没报。
+	 *
+	 * 为什么重要（货运 F1）："哪辆车拉煤"是引擎的属性，不是从名字里猜的
+	 * （真机探针：Balogh Coal Truck ⇒ COAL，Talbott Livestock Van ⇒ LVST）。
+	 */
+	cargo: string | null;
 }
 
 /** The world as the model sees it. */
@@ -104,6 +143,10 @@ export interface WorldFacts {
 	towns: TownFact[];
 	/** 产业取样（按产量降序）。 */
 	industries: IndustryFact[];
+	/** 全部产业的位置与名字（货运线路要坐标）。 */
+	industrySites: IndustrySiteFact[];
+	/** 货种目录：哪些货是货运、谁产、谁收。 */
+	cargoCatalog: CargoCatalogFact[];
 	/** 按货种聚合的产量/运量。 */
 	cargoTotals: CargoFact[];
 	/** 车型目录。 */
@@ -178,6 +221,20 @@ export function worldFacts(snap: WorldSnapshot): WorldFacts {
 		transported: toNumber(i.transported),
 		stock: toNumber(i.stock),
 	}));
+	// 货运 F1：全部产业的位置与名字（坐标是选线路的必需事实）。
+	const industrySites: IndustrySiteFact[] = (snap.industrySites ?? []).map((s) => ({
+		id: s.id,
+		name: typeof s.name === "string" ? s.name : "",
+		x: toNumber(s.x) ?? 0,
+		y: toNumber(s.y) ?? 0,
+	}));
+	// 货运 F1：货种目录（是不是货运 / 谁产 / 谁收）——引擎算出的事实。
+	const cargoCatalog: CargoCatalogFact[] = (snap.cargoCatalog ?? []).map((c) => ({
+		label: typeof c.label === "string" ? c.label : "",
+		freight: c.freight === true,
+		producers: (c.producers ?? []).map(Number).filter((n) => Number.isFinite(n)),
+		consumers: (c.consumers ?? []).map(Number).filter((n) => Number.isFinite(n)),
+	}));
 	const cargoTotals: CargoFact[] = (snap.cargoTotals ?? []).map((c) => ({
 		label: typeof c.label === "string" ? c.label : "",
 		produced: toNumber(c.produced),
@@ -187,12 +244,16 @@ export function worldFacts(snap: WorldSnapshot): WorldFacts {
 		id: e.id,
 		name: typeof e.name === "string" ? e.name : "",
 		speed: toNumber(e.speed) ?? 0,
+		// null = 引擎没报这个车型能拉什么货（**不是**"什么都拉"）。
+		cargo: typeof e.cargo === "string" && e.cargo !== "" ? e.cargo : null,
 	}));
 	return {
 		date: gameDate(snap),
 		companies,
 		towns,
 		industries,
+		industrySites,
+		cargoCatalog,
 		cargoTotals,
 		engines,
 		financing: {
@@ -241,8 +302,10 @@ function observationProbe(): WorldSnapshot {
 		townsTotal: 1,
 		industries: [{ id: 1, cargo: "COAL", name: "probe", produced: 1, transported: 1, stock: 1 }],
 		industriesTotal: 1,
+		industrySites: [{ id: 1, name: "probe", x: 2, y: 3 }],
+		cargoCatalog: [{ label: "COAL", freight: true, producers: [1], consumers: [2] }],
 		cargoTotals: [{ label: "COAL", produced: 1, transported: 1 }],
-		engines: [{ id: 1, name: "probe", speed: 1 }],
+		engines: [{ id: 1, name: "probe", speed: 1, cargo: "COAL" }],
 		companyCargo: null,
 		observationPolicy: null,
 		loanCeiling: 100000,

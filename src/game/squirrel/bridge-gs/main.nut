@@ -2187,14 +2187,28 @@ class BridgeV1 extends GSController {
         local all_industries = GSIndustryList();
         local industry_list = [];
         local cargo_totals = [];
+        // 货种目录（2026-11-03，货运 F1）：标签 + 是不是货运 + 谁产谁收。
+        // 为什么单独一份：`cargo_totals` 只报**有产量的**货种，而"能不能用卡车运"
+        // 是**货种本身的属性**（`GSCargo.IsFreight`）；"谁生产它 / 谁接受它"是引擎
+        // 算得出的事实（`GSIndustryList_CargoProducing` / `_CargoAccepting`）——
+        // 模型看不见它，就只能从"煤"两个字上猜哪座厂要煤（真机探针：矿场旁边的
+        // 车站**不接受煤**，电站旁边的才接受 ⇒ 光有"哪里有煤"是没法修一条货运线的）。
+        local cargo_catalog = [];
+        // 产业位置与名字（**全部**产业）：模型要选线路就得知道"在哪儿"。
+        // 以前只有产量前 12 的产业有名字，而且**一个坐标都没有**。
+        local industry_index = [];
 
         // --- 产业侧（按货种遍历）---
         for (local c = 0; c < 64; c++) {
             if (!GSCargo.IsValidCargo(c)) continue;
             local label = GSCargo.GetCargoLabel(c);
+            if (label == null) continue;
             local sum_prod = 0;
             local sum_trans = 0;
+            local producers = [];
+            local consumers = [];
             foreach (iid, _ in GSIndustryList_CargoProducing(c)) {
+                producers.append(iid);
                 local prod = GSIndustry.GetLastMonthProduction(iid, c);
                 local trans = GSIndustry.GetLastMonthTransported(iid, c);
                 // D60（2026-09-26）：缺失/负值 = 不适用，**不是 0**。这里曾折叠成 0 ——
@@ -2214,6 +2228,12 @@ class BridgeV1 extends GSController {
                 industry_list.append({ id = iid, cargo = label, name = nm,
                                        produced = prod, transported = trans, stock = stock });
             }
+            // 谁**接受**这个货（`GSIndustryList_CargoAccepting`）—— 引擎自己算的
+            // 事实，与车站的收货判定同一套规则（`industry_cmd.cpp` 的
+            // `AddAcceptedCargo_Industry` 看的是产业自己的 accepted 表）。
+            foreach (cid, _ in GSIndustryList_CargoAccepting(c)) consumers.append(cid);
+            cargo_catalog.append({ label = label, freight = GSCargo.IsFreight(c),
+                                   producers = producers, consumers = consumers });
             if (sum_prod > 0 || sum_trans > 0) {
                 cargo_totals.append({ label = label, produced = sum_prod, transported = sum_trans });
             }
@@ -2227,6 +2247,17 @@ class BridgeV1 extends GSController {
         });
         if (industry_list.len() > 12) industry_list.resize(12);
         cargo_totals.sort(function(ca, cb) { return cb.produced - ca.produced; });
+
+        // 产业位置与名字（全部）：货运线路要选"哪座矿 → 哪座厂"，没坐标就选不了。
+        foreach (iid, _ in all_industries) {
+            local loc = GSIndustry.GetLocation(iid);
+            local nm = GSIndustry.GetName(iid);
+            if (nm == null) nm = "";
+            if (nm.len() > 24) nm = nm.slice(0, 24);
+            nm = this.Trim(nm);
+            industry_index.append({ id = iid, name = nm,
+                                    x = GSMap.GetTileX(loc), y = GSMap.GetTileY(loc) });
+        }
 
         // --- 公司口径：把 id 先物化成 array（GSList 反复遍历不安全，
         //     且仓库约定 array 用单变量 foreach）---
@@ -2250,6 +2281,8 @@ class BridgeV1 extends GSController {
         return {
             industries = all_industries.Count(),
             industry_list = industry_list,
+            industry_index = industry_index,
+            cargo_catalog = cargo_catalog,
             cargo_totals = cargo_totals,
             own_delivered = own_by_cargo,
             own_quarter = quarter,
@@ -2348,7 +2381,19 @@ class BridgeV1 extends GSController {
                     el.Valuate(GSEngine.IsBuildable);
                     el.KeepValue(1);
                     foreach (eid, _ in el) {
-                        engines.append({ id = eid, name = GSEngine.GetName(eid), speed = GSEngine.GetMaxSpeed(eid) });
+                        // 车型带**它能拉什么货**（`GSEngine.GetCargoType`）："哪辆车拉煤"
+                        // 是引擎的属性，不是从名字里猜的（真机探针：Balogh Coal Truck
+                        // ⇒ COAL，Talbott Livestock Van ⇒ LVST）。
+                        local ecargo = null;
+                        try {
+                            local ct = GSEngine.GetCargoType(eid);
+                            if (ct != null && GSCargo.IsValidCargo(ct)) {
+                                local lb = GSCargo.GetCargoLabel(ct);
+                                if (lb != null) ecargo = lb;
+                            }
+                        } catch (e) { ecargo = null; }
+                        engines.append({ id = eid, name = GSEngine.GetName(eid), speed = GSEngine.GetMaxSpeed(eid),
+                                         cargo = ecargo });
                     }
                 } catch (e) { engines = []; }
                 // **贷款上限**（2026-11-02，Issue #13）：模型看得见自己的 `loan`，却看不见
@@ -2388,6 +2433,8 @@ class BridgeV1 extends GSController {
                     // harness 只在字段存在时更新世界状态。
                     industries = (f == null) ? null : f.industries,
                     industry_list = (f == null) ? [] : f.industry_list,
+                    industry_index = (f == null) ? [] : f.industry_index,
+                    cargo_catalog = (f == null) ? [] : f.cargo_catalog,
                     cargo_totals = (f == null) ? [] : f.cargo_totals,
                     own_delivered = (f == null) ? [] : f.own_delivered,
                     own_quarter = (f == null) ? null : f.own_quarter,

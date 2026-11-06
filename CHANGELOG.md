@@ -24,6 +24,15 @@
   exist** plus the hint that the process may be older than the files. The smoke check now
   navigates to all four pages, not just the home page.
 
+- **The model can finally see the freight world.** A freight line is "which mine, which plant", and the
+  model could see neither: the GS now reports a **cargo catalogue** (which cargo is freight, which
+  industries produce it, which **accept** it - the engine's own answer, not a guess), the **position and
+  name of every industry**, and the cargo each road engine carries. Real machine (seed 4242): COAL is
+  freight, produced by 6 industries and accepted by 5 - including id 53 "Lonningbury Power Statio" - and
+  the model wrote a plan to link "a producer industry to a consumer industry". The observation surface
+  changed, so both fingerprints moved (`a72a663cdd126090` -> `41d82339b2925645`, `1808f8babae13cb0` ->
+  `7390249eb5b1347c`): runs before and after are not comparable.
+
 ### Added
 - **The model can now ask the game a question and get the answer.** The observation surface is a
   **periodic sample**: it says what the world looks like right now, never what *its own vehicle* is
@@ -55,26 +64,23 @@
   `industry_open`, `industry_close`, `town_founded`), the world state keeps them in order (bounded to
   50), and the projection carries them - so `observe()` and every decision context show what happened.
   Real machine (real model, seed 4242): the first vehicle reaching each station arrived twice
-  (`station_first_vehicle`, stations 0 and 1, vehicle 8). Two Squirrel traps came with it and are now
-  written down (MEMORY D95): a **class member must be declared** before it is assigned, and
-  **reading a key that does not exist throws** - so the payload shape is constant and every read asks
-  `rawin` first.
+  (`station_first_vehicle`, stations 0 and 1, vehicle 8). Two Squirrel traps came with it (MEMORY D95):
+  a **class member must be declared** before it is assigned, and **reading a key that does not exist
+  throws** - so the payload shape is constant and every read asks `rawin` first.
 
 ### Fixed
 - **The cargo monitor was never missing - our own accumulator was broken.** On 2026-11-01 this project
   concluded that OpenTTD 15.3's Squirrel API has no cargo monitor and that splitting the deliveries by
-  cargo type is therefore unmeasurable; that conclusion was **wrong** and it is corrected here. The API
-  exists (`script_cargomonitor.hpp` carries `@api game`, so Squirrel gets it too; a real-machine probe
-  shows the class, the method and a successful call). The empty split was **our** bug: the accumulator
-  wrote into a Squirrel table with a key that did not exist yet, and Squirrel tables are strict - the
-  write threw, the facts collector died, and the empty result was read as "the API returns null". The
-  correction is in the record, not only in the code: SPEC §10.65 and §10.100, MEMORY D89/D94, the
-  scaffold contract's S7b row and the API guard (the false "this API does not exist" entry is gone, a
-  new guard forbids the dynamic-key accumulator). What stays unmeasured is what the engine really does
-  not expose: **per station / per route** (no `GetCargoTotal` in the whole script API) - and the cargo
-  monitor counts **freight only**, while today's scaffold runs **passenger routes only**. The research
-  and the three options are in `docs/PER-LINE-DELIVERY-FEASIBILITY.md`: **do not change the engine and do
-  not change the script language** - the native API has exactly the same granularity.
+  cargo type is therefore unmeasurable; that conclusion was **wrong**. The API exists
+  (`script_cargomonitor.hpp` carries `@api game`; a real-machine probe shows the class, the method and a
+  successful call). The empty split was **our** bug: the accumulator wrote into a Squirrel table with a key
+  that did not exist yet, and Squirrel tables are strict - the write threw, the facts collector died, and
+  the empty result was read as "the API returns null". The correction is in the record, not only in the
+  code: SPEC §10.65 and §10.100, MEMORY D89/D94, the scaffold contract's S7b row and the API guard. What
+  stays unmeasured is what the engine really does not expose: **per station / per route**; the cargo
+  monitor counts **freight only**, while today's scaffold runs **passenger routes only**. The research and
+  the three options: `docs/PER-LINE-DELIVERY-FEASIBILITY.md` - **do not change the engine or the script
+  language**; the native API has exactly the same granularity.
 
 ### Added
 - **A comparison only compares one question.** Runs that answered a **different** question - a
@@ -110,15 +116,11 @@
   now a third fingerprint: the **structure** of the world facts the model sees (which facts, which
   types; values and array lengths ignored), computed from a probe world that fills every branch. It
   depends on the code only ⇒ it can be computed **before** a run, both backends record it, and the
-  preview promises it (real machine: `ba1cc7959b170e8d`, identical in the preview and the finished
-  manifest). Compare now decides "these runs did not answer the same question" from the scaffold and
-  this fingerprint; the payload shape is reported for the record only.
+  preview promises it. Compare now decides "these runs did not answer the same question" from the
+  scaffold and this fingerprint; the payload shape is reported for the record only.
 
 - **A comparison can start from the comparison.** The Compare page could only look at runs that already existed: picking the models, the worlds and the caps and then *starting that plan* was impossible. The plan is now computed **server-side** (the page estimates nothing): how many runs it would start, which caps apply, whether the spend is measurable, which model each cell uses - with the same field names the manifest uses, so plan and finished run compare field by field. Launching runs the cells **one after another** (one process, one game port); a failed cell is recorded and the rest still run. The refusals happen before anything starts: a cost cap on a model without a price table, an unknown model, or a plan that collides with a running game.
 
-- **Corrected: the deliveries cannot be split into cargo and passengers.** An earlier entry here claimed they could; the OpenTTD 15.3 source says otherwise: the script API has **no cargo monitor** (`GSCargoMonitor.*` does not fail - it returns null, so a split reads as "always empty"), and the admin's counter is the **sum** over the per-cargo-type array. The score keeps the one number it can measure, the split fields report "not measured", and the API is registered in the squirrel-api guard.
-
-- **The first real benchmark matrix is done.** Two models x three seeds x 300 game days, same scaffold and horizon, every cell reaching it. The harness's verdict on the primary axis is **"not determinable"** (paired mean difference -0.270 delivered per game day, 95% CI [-1.077, 0.545] includes zero: the variance across seeds dwarfs the difference). The secondary axes do separate them, in opposite directions: **M3.1-Flash needs ~40% fewer tokens per delivered unit** (1635 vs 1033 per million tokens), **M2.5 makes ~4.5x fewer failed tool calls** (2.9% vs 13.1%). Full numbers in issue #1.
 
 - **The configuration page is now called what it does.** The page that used to live at `/providers` answers "how is this run configured?", so it is now at `/configure`; the old URL redirects (and the older `/llm` alias still resolves).
 - **The score now says what it actually counts.** The delivery counter the harness reads is
@@ -127,7 +129,6 @@
 
 - **The dashboard speaks two languages now.** A switch in the header flips the whole interface between English and Chinese, and the choice is remembered. The English text stays where it always was (the translation table is keyed by it, the gettext way), so there is no second copy to keep in sync, and a guard test fails the build when a translation no longer matches its source. Raw evidence stays raw (the JSON in the agent steps is not translated) and so does the server's own vocabulary.
 
-- **The model can finally see the cargo.** The Bridge GS reported the industries, the per-cargo totals, the road engines and the town names all along, and the agent side parsed them - but the model-visible projection dropped them, so the agent only saw `date`, the companies and `towns[{id,pop,x,y}]`. A real model noticed and built a **passenger** line because it could not see a single crate. `observe()` and every decision context now carry the cargo world, the engine catalogue and the town names; missing readings stay `null` (never 0) and a town without a name stays nameless. The observation surface changed, so the fingerprint moved with it (`7956ab6d8c86fa60` -> `3da8a64e1fbe818e`).
 - **A run can now explain itself.** The run's detail shows the **full manifest**: the same world (seed + game version), the same scaffold (scaffold / payload-shape hashes), and whether the run was capped (token / cost limit). When the provider answered with a different model than the one requested - a substituting gateway - that is flagged instead of hidden. Hashes are shown short, copied in full.
 
 
@@ -264,7 +265,6 @@
   the provider knows are marked "live · price unknown" (their limits are borrowed from a
   sibling and their price is not measured), and they are persisted so the agent process can
   run them.
-
 - Runs could be **stopped and look like failures**: pause attribution, world-frozen runs
   and unfinished horizons are now named and excluded from comparisons.
 
