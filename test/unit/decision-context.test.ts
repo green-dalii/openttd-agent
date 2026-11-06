@@ -387,6 +387,52 @@ describe("相位↔动作的连接（D3a/S4）", () => {
 	});
 });
 
+/**
+ * 事实必须**真的**进上下文（2026-11-03）。
+ *
+ * 现象：`buildDecisionContext` 接收 `financing` 与 `events`，但输出类型里没有它们、
+ * 返回对象里也没有 ⇒ 调用方（`loop.ts`）把事实传进来，然后它**消失**了。
+ * 模型在决策时看不到"还能借多少"、看不到"车到了/车没了"；只有 `observe()` 里才有。
+ *
+ * 为什么这属于"投递"而不是"测量"：读数已经在投影里（`worldFacts()`），
+ * 观测面指纹也已经把它算进去 —— 丢的是**投递**。
+ */
+describe("融资与推送事件必须进决策上下文", () => {
+	it("financing 出现在上下文里（没测到的字段仍是 null，不是 0）", () => {
+		const ctx = buildDecisionContext({
+			trigger: "interval",
+			now: { date: "1950-04-01", companies: [] },
+			since: emptyTracker(),
+			financing: { loanCeiling: 300000, loanInterval: 10000 },
+		});
+		expect(ctx.financing).toEqual({ loanCeiling: 300000, loanInterval: 10000 });
+	});
+
+	it("events 出现在上下文里（车到了/车没了）", () => {
+		const events = [
+			{ seq: 0, kind: "station_first_vehicle" as const, vehicle: 8, station: 1, industry: null, town: null },
+		];
+		const ctx = buildDecisionContext({
+			trigger: "event",
+			now: { date: "1950-04-01", companies: [] },
+			since: emptyTracker(),
+			events,
+		});
+		expect(ctx.events).toHaveLength(1);
+		expect(ctx.events![0]!.kind).toBe("station_first_vehicle");
+	});
+
+	it("没传就不出现（缺席 ≠ 空数组）", () => {
+		const ctx = buildDecisionContext({
+			trigger: "interval",
+			now: { date: "1950-04-01", companies: [] },
+			since: emptyTracker(),
+		});
+		expect(ctx.financing).toBeUndefined();
+		expect(ctx.events).toBeUndefined();
+	});
+});
+
 describe("相位↔动作连接跨窗口（D3a/S4）", () => {
 	it("动作在上一个窗口下过时，run 级映射仍能接回相位", () => {
 		// 施工跨多个决策窗口：下令在窗口 A，相位在窗口 B 到达。
