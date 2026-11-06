@@ -167,7 +167,7 @@ stub/服务别占 8899。真机实验固定用 admin 3991 / game 3993 / web 81xx
 
 ### 4. 最近的交接点（2026-10-25 收工）
 
-- `main` = **`93090cf`**（S2：四路共用一个 selection resolver）。B2 只在分支
+- `main` = **`a3598e7`**（S2：四路共用一个 selection resolver）。B2 只在分支
   `feat/b2-launch-surface`（未提交）。`pnpm run gate` = **1652 passed / 9 skipped**。
 - `LIVE_TESTS=1 vitest --run test/live`：**harness 9/9、裸 Agent 9/9**，跑完端口自动释放。
 - 开放 Issue：#13（世界事实，下一步）、#1（跟踪）。
