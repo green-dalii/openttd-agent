@@ -130,6 +130,8 @@ export interface DecisionContextInput {
 	 * The financing facts: how much more the company could borrow and the game's
 	 * loan interval. The **interest rate is not exposed by the engine**, so it is
 	 * absent rather than guessed (Issue #13 / D60).
+	 *
+	 * 2026-11-03：**这两个输入以前被静默丢掉**（见下方输出类型的注释）。
 	 */
 	financing?: FinancingFact;
 	/**
@@ -299,6 +301,26 @@ export function buildDecisionContext(input: DecisionContextInput): {
 		industries: IndustryFact[];
 	};
 	engines?: EngineFact[];
+	/**
+	 * The financing facts (Issue #13): how much more could be borrowed.
+	 *
+	 * 2026-11-03：**这个字段以前不在输出里** —— `buildDecisionContext` 接收了
+	 * `financing`，却既不在返回类型里声明、也不在返回对象里带上 ⇒ 调用方
+	 * （`loop.ts`）把它传进来，然后它就**消失**了。模型只能在 `observe()` 里
+	 * 看到融资事实，决策上下文里没有。同一类问题也命中了 `events`。
+	 *
+	 * 为什么这是"事实没送到"而不是"事实没测到"：读数**已经**在投影里
+	 * （`worldFacts().financing`），观测面指纹也已经把它算进去了 ——
+	 * 丢的是**投递**，不是测量。修它不改变指纹（指纹量的是投影的形状）。
+	 */
+	financing?: FinancingFact;
+	/**
+	 * The game's pushed events (Issue #13, S7d): a vehicle was lost, the first
+	 * vehicle reached a station… **事实**，不是建议。
+	 *
+	 * 2026-11-03：同 `financing` —— 输入被接收，输出里没有。
+	 */
+	events?: WorldEventFact[];
 	session?: {
 		/** Wall-clock seconds left; absent when no wall cap is set. */
 		secondsRemaining?: number;
@@ -379,6 +401,10 @@ export function buildDecisionContext(input: DecisionContextInput): {
 		...(input.towns ? { towns: input.towns } : {}),
 		...(input.cargo ? { cargo: input.cargo } : {}),
 		...(input.engines ? { engines: input.engines } : {}),
+		// 融资与推送事件**必须**进上下文（2026-11-03 修）：以前它们被接收后
+		// 丢掉，模型在决策时看不到自己还能借多少、也看不到"车到了/车没了"。
+		...(input.financing ? { financing: input.financing } : {}),
+		...(input.events ? { events: input.events } : {}),
 		...(input.routes && input.routes.length > 0 ? { routes: input.routes } : {}),
 		...(input.executor ? { executor: input.executor } : {}),
 		...(input.session ? { session: input.session } : {}),
