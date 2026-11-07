@@ -51,19 +51,20 @@
 | **D4** | **旋钮与成熟度**：S6 思考档位 / 工具预算 / provider 进 CLI+config；S9 脚手架指纹（D3b 已落地） | 真机：`--thinking low --tool-budget 5` 生效并进 manifest；非法值报错 | ✅（`SPEC.md` §10.114） |
 | **D5** | **评测面**：矩阵规划（每格独立目录 + 预登记闸）/ 四轴分数卡 / 配对统计 / JSON+MD 报告 | 真机 2×1×1 矩阵跑通并出报告；预登记双向自证（拒绝/放行） | ✅（`SPEC.md` §10.114） |
 | ~~D6c~~ | 全量替换自研 `session-store`/`telemetry` | **否决**：对可比性零增益、回归面覆盖 5 页 + E2E | ❌ |
-| **D6d** | 反事实 fork（同存档同决策点换模型） | 待定：等 D5 真跑一轮真实模型后再评估 | ⏸ |
+| **D6d** | 反事实 fork（同存档同决策点换模型） | 真实基准已跑过一轮 ⇒ 条件满足；仍**排在货运轴之后**（它是功能，不是结论） | ⏸ |
 | **P3** | 卫生：删 `v02-runner` 死代码（380 行）、DOM churn 降噪（12.5k/s 实测）、orphan 规则修、`AdminProbeClient` 审查 | gate 绿；DOM churn 显著下降并实测 | ⬜ |
 
 **D6 的方案（唯一权威）**：`docs/HARNESS-MIGRATION.md`（含已核实的库事实与三条不变量）。
 
 **依赖与顺序**：D1–D4 是**共用内核**（两种模式都受益），必须先于 D5；D6 与 D1–D5
-可并行但每步独立提交。S7（世界事实补洞：逐线交付/融资/样本外镇名）是 D1 的后续，
-按需单独排期（#13）。
+可并行但每步独立提交。S7（世界事实补洞）是 D1 的后续（#13）：城镇名 / 融资 / 推送事件 /
+L2 查询 / 决策→结果台账 / 逐线路调研 **已做**；**只剩货运线路**（观测 ✅ → 计量 → 动作 →
+归因，见 `docs/FREIGHT-LINE-FEASIBILITY.md` §4）。
 
-**D1 的补洞清单**（源自契约 §5：信号源盘点里"未用"的通道，Issue #13）——随 D1 一并评估，
-不做则写明理由：L2 查询工具族（`inspect_town` / `inspect_vehicle` / `finances`）、
-决策→结果账本（credit assignment 的原料）、GSEvent 推送族（首车到站/车毁/城镇成长）、
-`company_expenses` 分类账（年度收支归因）、逐线交付量。
+**D1 的补洞清单**（源自契约 §5：信号源盘点里"未用"的通道，Issue #13）——现状：L2 查询工具族
+✅（`inspect_town` / `inspect_vehicle`）、决策→结果账本 ✅、GSEvent 推送族 ✅（封闭词表七类）；
+**仍欠**：`company_expenses` 分类账（年度收支归因）、逐线交付量（引擎无此粒度 ⇒ 只能用自有
+台账推导，见 `docs/PER-LINE-DELIVERY-FEASIBILITY.md`）。
 
 **明确不做**：不在脚手架未成熟前堆评测面；不因"模型清单未定"而阻塞脚手架
 （模型走 pi-ai 目录，评测时再指定）；不用 LLM 裁判打分；不把策略写进脚手架。
@@ -75,11 +76,11 @@
 | # | 事 | 验收 | 位置 |
 |---|---|---|---|
 | 1 | **P2-1 / P2-2 实验待跑**：预建场景 + 300 日短局多跑；M4b 选择压力 + M5 学习曲线 | 每小时局数 ≥3×；斜率 CI 或「不可判定」声明 | 需所有者先定**模型与预算**（P2-3 的功效闸会拒绝样本不足的比较） |
-| 2 | 产业表整列 `Transported 0`：先测 `-1` 是否存在 | 存在则显示 `—`；不存在则该列对"只有公交公司"的地图无信息量（两种处置不同） | §6f 仍欠 |
+| 2 | 产业表的 `Transported` 列：`-1` 已实测存在（548 个负读数 = 该产业**不接受**该货）⇒ **只剩显示**：负数显示 `—`，不要显示 `-1` | 页面上不再出现 `-1` 吨 | §6f 仍欠 |
 | 3 | **数据按需全量**：agent 只读工具 `get_industries`/`get_cargo` + 页面"展开全部"；车辆明细采样 + 按需全量 | 全量与取样一致；行数与 GS 车队数一致或明确标注 "N of M"；**稳态载荷不增**（同一探针比对前后帧字节/变更数） | §6d P3/P4 |
 | 4 | **止损型 run 一律 exit 1** 的语义分档（待议） | 区分"未到终点"与"真失败"，让 CI 不被正常止损刷屏 | §6 收尾链事实 |
 | 5 | **未测旋钮**（不得声称已有效果）：`sessionId` 缓存收益、`deliberation off-vs-low` 的质量-成本权衡 | 各跑一次受控对比并报出结论 | D4（旋钮可达后） |
-| 6 | **基准矩阵已跑完一轮**（2 模型 × 3 seed × 300 游戏日，6 格全到视界，同一指纹 `74f2e64d1e930df3`；**该指纹已作废** —— 2026-11-02 观测面改了（全图城镇 + 融资事实 + 提示词补融资机制）⇒ 现为 `2f5b438b462d21a3`，旧 6 格是**另一副脚手架**）：**配对结论 = not determinable**（均值差 -0.270/游戏日，95% CI [-1.077, 0.545] 含 0，n=3）⇒ 种子间的方差（0.42–4.62/游戏日）远大于模型间的差；**次级轴能分开**：M3.1-Flash 每 1M token 交付 **1635** vs M2.5 **1033**（省约 40% 成本），但工具失败率 **13.1%** vs **2.9%**（M2.5 少错约 4.5 倍）。**下一步**：① 按货种拆分（GS 的 cargo monitor 从未装上 ⇒ 观测面变化 ⇒ 另起一组）；② 加样本——当前 CV 下要分辨 +40% 效果需要约 **65 局**（报告自己算的）；③ 或换一个更窄的问题 | 主轴能被判定（CI 不含 0），或明确写下「在 n=3 下不可判定」并给出所需样本量 | SPEC §10.65 / MEMORY D87 / Issue #1 |
+| 6 | **基准矩阵**：旧一轮（2 模型 × 3 seed × 300 游戏日，指纹 `74f2e64d1e930df3`）主轴 **not determinable**（均值差 -0.270/游戏日，95% CI [-1.077, 0.545] 含 0，n=3）⇒ 种子间方差（0.42–4.62/游戏日）远大于模型间差。**次级轴看起来能分开**：每 1M token 交付 **1635** vs **1033**、工具失败率 **13.1%** vs **2.9%** —— 但 `pairedComparison` **只算主轴**，次级轴没有配对 CI ⇒ **先补次级轴的配对统计**（0 token，用旧 6 格估方差/效应量），再定「给哪条轴加样本、要几局」（主轴按当前 CV 需 ≈**65 局**）。⚠ 旧 6 格属**旧脚手架组**，只能用来估方差；结论必须在**当前脚手架**（`41d82339b2925645`）上重跑。货运轴（F2–F4）是换窄问题的候选 | 选定轴的配对 CI 不含 0，或写明 n 与「不可判定」 | SPEC §10.65 / MEMORY D87 / Issue #1 |
 | 7 | **D3(b) UnoCSS CLI 是否放行**（唯一可能划算的形态） | 所有者决定；不放行则保持现状 | `docs/FRONTEND.md` §6.6 |
 | 8 | 预提交孤儿符号误报刷屏（25 个/次）淹没真孤儿 —— **2026-10-30 已查清：卡在工具上**（pi-shazam 的项目配置只认 `verify.maxFiles`，没有 ignore 规则；分析器只数**调用**，前端 `window.*` 导出在模板里被调用 ⇒ 假孤儿）。它**不拦提交**（咨询性），故只剩噪声；已记 MEMORY D85 防止误删 | 要么工具支持 ignore，要么接受噪声 | P3（等工具） |
 | 9 | **界面 i18n 收尾**：运行时与切换器已落地（`assets/js/i18n.js` + `locales.js`，EN/中文，源文本作键，守卫测住漂移）；**待补**：服务端词汇按 id 本地化（结局十类、问题码）、带插值的动态句子（`{0}`）、页面上剩余的文案 | 四页任一语言下**没有半句没翻**；原文证据与服务端文案保持原样 | `docs/DASHBOARD-AUDIT-2026-10-31.md` §3 P2 |
@@ -93,13 +94,13 @@ game `3993`、web `8198`）；**不跑宽泛 pkill**；实验期间不跑 gate�
 ## 已知的环境事实
 
 - 凭证/remote/清理/门禁等易变事实**不在本文件**：见 `MEMORY.md` §0 与
-  `docs/STARTUP-AND-LIFECYCLE.md`（本文件曾复制过一份，重复即漂移——2026-10-23 删除）。
+  `docs/STARTUP-AND-LIFECYCLE.md`（本文件曾复制一份，重复即漂移——2026-11-08 删除）。
 - 本地测试 serve（8187）默认数据目录 `/tmp/openttd-agent-data`；其中的 demo 局是**旧代码**
   跑的贪心线路，不代表当前能力（新证据一律用隔离目录的局）。
 
 ---
 
-## 🔴 COMPACT 后从这里接续（2026-10-25）
+## 🔴 COMPACT 后从这里接续（2026-11-08）
 
 > 给"compact 后的我自己"的恢复手册。**按顺序做，不必重新推导**。
 
@@ -109,74 +110,42 @@ game `3993`、web `8198`）；**不跑宽泛 pkill**；实验期间不跑 gate�
 pgrep -fl "bench.ts|run-experiment|cli/run.ts|llm-stub|OpenTTD.app"
 ```
 
-无输出 = 没有实验（2026-10-24 收工时如此）。**不要**用宽泛 `pkill -f openttd`。
+无输出 = 没有实验。**不要**用宽泛 `pkill -f openttd`；收尾用
+`lsof -nP -iTCP:<port>` 确认端口为空。
 
 ### 2. 下一步做什么？
 
-**B1–B6（#33·#34·#35·#36·#37·#38）全部合并**（§10.119–§10.123；Dashboard 的四问 IA 落地完毕）。
-**下一步：#13 S7 世界事实（等 owner 答复）→ 真实模型局 → 真实基准 → D6d → P3 卫生**。
+| 顺序 | 内容 | 验收 | 权威位置 |
+|---|---|---|---|
+| **1** | **货运 F2 计量**：接 `GSCargoMonitor`（**单轴**=产业轴；增量累计；漏读报 gap） | 客运脚手架下货运读数**仍为 0**（诚实）且 monitor 非空 | `docs/FREIGHT-LINE-FEASIBILITY.md` §4 |
+| **2** | **货运 F3 动作**：`build_freight_route`（复用执行器 `LayPath`/车库/车队） | 真机**真的交付**、monitor 非 0、公司 `deliveredCargo` 增长 | 同上 |
+| **3** | **货运 F4 归因**：货运线路进台账（连接键 `fleetIds`）+ Compare/History 货运轴 | History 能说"这条决策运了多少货" | 同上 |
+| **4** | **基准决策**：先补**次级轴**配对 CI（0 token）→ 定"给哪条轴加样本、要几局" → 在**当前脚手架**上重跑矩阵 | 选定轴的配对 CI 不含 0，或写明 n 与「不可判定」 | 本文件「待办」#6 |
 
-| 步 | 内容（权威文档） | 关键验收 |
-|---|---|---|
-| **B2** 🔵 | 发起面：`POST /api/run/start` 接受并**校验**运行旋钮（seed/游戏日/场景/记忆臂/thinking/tool budget/token·cost 上限/后端）；Configure 表单 + **next-runn 预览**（字段与 manifest 同名） | 从页面用非默认旋钮起一局，`meta.manifest` 与预览**逐字段相同** |（#34）
-| **B3** | Run 页三段化 + **因果时间线**（decision → tools → job/阶段 → 效果，默认最近 20 条） | 一次决策的四段证据同屏、由 `job` 连接 |（#35）
-| **B4** | **Compare 页**：复用 `buildScorecard` + `pairedComparison`；排除按原因计数；样本不足写"不可判定" | 2 模型 × 2 seed 出四轴 + CI/不可判定 |（#36）
-| **B5** | 结果词表**全 10 类** + 结构化错误 `{code,message,hint}`（删掉前端正则猜语义） | 10 类成因都能在 UI 出现；401/404/无凭据各有 code |（#37）
-| **B6** | History 补 manifest 全字段 + 按模型/seed/后端分组；Evolution 并入 History 的 "Memory" 分区 | 任一局可自查"同世界/同脚手架/是否被闸" |（#38）
+**已完成、不要重做**：阶段 D 的 D0–D5；B1–B6（Dashboard 四页：Run / Compare / History /
+Configure）；#13 S7 除货运线外全部（城镇名 / 融资事实 / 推送事件 / L2 查询 / 决策→结果台账 /
+逐线路调研）；PR #81（决策上下文的投递修复）、PR #82（货运 F1 观测面）。
+当前指纹：scaffold `41d82339b2925645`、观测面 `7390249eb5b1347c`（变了就会分组，Compare 按组比）。
 
-**跟踪**：总 Issue **#32**（B1–B6 清单），每步各自一个 Issue（下面就标注）；PR 内 `Closes #N`。
-**语言**：对外载体（Issue/PR/评审回复）**一律英文**（`AGENTS.md` §8.1）；仓库文档仍是中文。
+**三条不得违反的不变量**：① harness 默认关（`AGENT_HARNESS=0`）；② harness compaction 必须关；
+③ 完成 = `AGENTS.md` §5.1 八条真机断言全绿（单测绿不算）。
 
-**已批准的三条决定**（细节见两份 CoDesign 的 §7）：
-① 导航按四问重排（Run / Compare / History / Configure）；
-② 基准可从看板发起，但必须有"预计局数 / 预计花费（无价目表写 unknown）/ 逐格确认"；
-③ 因果时间线默认最近 20 条、按需加载。
+### 3. 环境事实（易变）
 
-**上一轮的遗留（未完成，别丢）**：
-- **#13 S7 世界事实补洞**：方案在 `docs/SCAFFOLD-CONTRACT.md` §9。**所有者已答复（2026-11-02）**：
-  ① 旧基准自成一组、只做组内比较 ⇒ Compare 已按 manifest 三元组**分组**（PR #76）；② 逐线路交付 ⇒ **调研结论：不用换引擎、也不用换脚本语言**（原生 API 粒度一样；真正缺的是"逐车站/逐线路"，只能自己 推导）⇒ `docs/PER-LINE-DELIVERY-FEASIBILITY.md`（PR #77）；③ 推送事件 / L2 查询工具 / 决策→结果台账 **都做完了**（PR #78 / #80 / #79）；④ i18n 尾巴**留到最后**。已补：城镇名（PR #74）、融资事实（PR #75）。 **下一步**：**货运线路**（脚手架**只建客运线路** ⇒ 货运口径恒为 0）⇒ 调研已完成
-  （`docs/FREIGHT-LINE-FEASIBILITY.md`）：API 够用、**不换引擎不换语言**；但车站"收什么货"由引擎按集货区
-  自动算（**产方与收方须落在同一车站的集货区**），且观测面**缺"产业收什么货"** ⇒ 四步：**F1 观测 ✅**（2026-11-07：货种目录 + 产业坐标 + 车型能拉什么货 ⇒ 真机模型自己写出"producer industry → consumer industry"；指纹 `41d82339b2925645` / `7390249eb5b1347c`）→ **F2 计量**（接 cargo monitor，增量、单轴）→ **F3 动作**（`build_freight_route`）→ **F4 归因**；之后 i18n。
-- **AGENT_HARNESS 翻默认**：前提已满足 2/3（live 双绿、跨 seed `payloadShapeHash` 相等）；
-  还差"至少一局真实模型"。**S2 已修好 A5**（门禁与 runner 共用同一份覆盖层，见 `SPEC.md` §10.117）：
-  门禁现在对 live-only 模型 `MiniMax-M3.1-Flash` 判 **ok**（provider 1592ms 应答），
-  所以"真实模型一局"不再被门禁挡住。
-- **真实基准一轮**（需所有者定模型与预算）→ D6d fork 再评估 → P3 卫生。
+**不在本文件**：端口、二进制路径、门禁命令、清理禁则 ⇒ 见 `MEMORY.md` §0 与
+`docs/STARTUP-AND-LIFECYCLE.md`。两条最容易踩的：`dashboard:smoke` 默认占 **8899**
+（临时服务别占它）；真机实验用隔离目录 `/tmp/pXX` + admin 3991 / game 3993。
 
-**端口占用（踩过两次）**：`dashboard:smoke` 默认在 **8899** 上自起 dashboard；临时
-stub/服务别占 8899。真机实验固定用 admin 3991 / game 3993 / web 81xx–82xx。
+### 4. 最近的交接点（2026-11-08）
 
-**三条不得违反的不变量**：harness 默认关（`AGENT_HARNESS=0`）；harness compaction 必须关；
-完成=§5.1 八条真机断言全绿（单测绿不算）。
-
-### 3. 环境事实（易变，只写这里）
-
-- 门禁：`pnpm run gate`（typecheck + **eslint --max-warnings 0** + vendor 校验 + 单测）。
-  **只看它自己的退出码**：`pnpm run gate > .scratch/gate.log 2>&1; echo "gate=$?"`（MEMORY D68）。
-- 看板回归：`pnpm run dashboard:smoke`（真实 Chrome + 全部控制台级别）。
-- OpenTTD 二进制：`$HOME/Library/Application Support/Steam/steamapps/common/OpenTTD/OpenTTD.app/Contents/MacOS/openttd`。
-- 真机隔离模板：`OPENTTD_DATA_DIR=/tmp/pXX`、admin `3991`、game `3993`、`--web-port 8198`。
-- 无 CI workflow：本地 gate + PR 人工审核即门禁；**每阶段走分支 + PR**（用户 2026-10-23 要求）。
-- 一次性脚本一律放 `.scratch/` 并**用完删除**。
-- **当前 dashboard（2026-10-24 收工）**：`pnpm exec tsx src/cli/run.ts --serve --web-port 8187`
-  在后台跑，数据目录 `/tmp/openttd-agent-data`；模型选择 = `minimax-cn / MiniMax-M3.1-Flash`
-  （实时刷新到的模型，`llm.json` 里已写入）。**它现在会被门禁判死**（A5：`probeLlmReal` 缺
-  `modelsStore`）——这正是 B1/B2 要修的，修完才用它跑"至少一局真实模型"。
-- `models-cache.json` 里已有 `minimax-cn` 的 6 个实时模型覆盖层（`checkedAt` 2026-10-25）；
-  目录快照本身是 **2026-09-04** 的（`SPEC.md` §10.116）。
-
-### 4. 最近的交接点（2026-10-25 收工）
-
-- `main` = **`a3598e7`**（S2：四路共用一个 selection resolver）。B2 只在分支
-  `feat/b2-launch-surface`（未提交）。`pnpm run gate` = **1652 passed / 9 skipped**。
-- `LIVE_TESTS=1 vitest --run test/live`：**harness 9/9、裸 Agent 9/9**，跑完端口自动释放。
-- 开放 Issue：#13（世界事实，下一步）、#1（跟踪）。
-- **文档已收敛（2026-10-24）**：MEMORY 2081→664、CHANGELOG 1846→495、SPEC 1297→1243；
-  旧的完整叙述进 `docs/archive/`（冻结）；预算与"减法义务"写进 `AGENTS.md` §9.1b，
-  由 `repo-hygiene` 守卫（`pnpm run gate` 会拦超额）。
-- 已完成阶段的实测数字：`SPEC.md` §10.114（D1–D5）+ §10.115（D6）+ §10.116（模型目录）。
-- **Dashboard 现状**：Live 2030 行模板 / 20 区块 / 14 KPI；无 Compare 页、无 bench 端点、
-  无旋钮入口（诊断与目标结构见 `docs/DASHBOARD-CODESIGN.md`）。
+- `main` = 最新合并的 PR（`git log --oneline -3`）。**不要再在本文引用 commit SHA**——
+  一次历史重写就会让它悬空。
+- 门禁：`pnpm run gate` = 117 files / 1919 tests；带真机的 `pnpm run test:live` = 119 files /
+  1928 tests。
+- 开放 Issue：#1（跟踪）、#13（世界事实）。
+- Dashboard 四页已就位：`/`(Run) `/compare` `/history` `/configure`（`/providers` 302）。
+- 每阶段**分支 + PR**（英文 commit、正文 `Closes #N` / `Part of #N`、squash 合并）；
+  一次性脚本放 `.scratch/`，用完删除。
 
 ---
 
