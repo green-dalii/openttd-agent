@@ -120,6 +120,26 @@ describe("world state: 产业与货种（GS 上报的原始计数）", () => {
 		expect(w.snapshot().industriesTotal).toBeNull();
 	});
 
+	it("「不适用」的计数保持 null：库存 -1 → null（不是「库存 0 吨」）", () => {
+		// GS 把负读数编码成 JSON null（`main.nut`：`if (stock < 0) stock = null`），
+		// 而 `Number(null)` 是 0 ⇒ 不问就把「这座产业不接受这种货」说成「它没存货」。
+		const w = new WorldState();
+		w.setIndustries([{ id: 5, cargo: "COAL", name: "Coal Mine", produced: 900, transported: 600, stock: null }]);
+		expect(w.snapshot().industries[0]!.stock).toBeNull();
+	});
+
+	it("产量不明的条目直接丢掉（null 也算「拿不到」，不是 0）", () => {
+		const w = new WorldState();
+		w.setIndustries([{ id: 5, cargo: "COAL", name: "?", produced: null, transported: null, stock: null } as never]);
+		expect(w.snapshot().industries).toEqual([]);
+	});
+
+	it("货种合计：未上报的产量保持 null（不折成 0）", () => {
+		const w = new WorldState();
+		w.setCargoTotals([{ label: "COAL", produced: null, transported: null }]);
+		expect(w.snapshot().cargoTotals[0]).toEqual({ label: "COAL", produced: null, transported: null });
+	});
+
 	it("公司口径运量：本会话累计 + 季度总量 + 被监视的目的地数", () => {
 		const w = new WorldState();
 		w.setCompanyCargo({

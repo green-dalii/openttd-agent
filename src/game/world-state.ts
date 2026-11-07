@@ -316,6 +316,9 @@ const DEFAULT_RECENT_LIMIT = 500;
 
 /** 计数缺失语义（D60）：缺失/负值 → null；`0` 只能是量出来的 0。 */
 function countOr(v: unknown): number | null {
+	// `null` 是 GS 的「不适用」编码（负读数 → null）⇒ **不能**折成 0：
+	// `Number(null)` 恰好是 0，于是「这个产业不接受这种货」会变成「库存 0 吨」。
+	if (v === null || v === undefined || v === "") return null;
 	const n = Number(v);
 	return Number.isFinite(n) && n >= 0 ? n : null;
 }
@@ -630,19 +633,23 @@ export class WorldState {
 		// （`Number(null) === 0` 会把"未知"变成"零个产业"—— 2026-09-25 同类 bug 第二次。）
 		if (total !== undefined) this.industriesTotal = total === null || !Number.isFinite(Number(total)) ? null : Number(total);
 		this.industries = (Array.isArray(list) ? list : [])
-			.filter((i) => i && Number.isFinite(Number(i.id)) && Number.isFinite(Number(i.produced)))
+			// 「拿不到有限产量的条目直接丢掉」——`null` 也算拿不到（`Number(null)` 是 0，
+			// 不问就等于把"不知道"当成"不产东西"，那正是本方法要避免的谎）。
+			.filter((i) => i && Number.isFinite(Number(i.id)) && numOrNull(i.produced) !== null)
 			.map((i) => ({
 				id: Number(i.id),
 				cargo: String(i.cargo ?? ""),
 				name: String(i.name ?? "").slice(0, 40),
-				produced: Number(i.produced) || 0,
+				// 过滤后 produced 一定是数（`?? 0` 只是收窄类型，不是折零）。
+				produced: numOrNull(i.produced) ?? 0,
 				// `transported` 保持 null = **未上报**（2026-09-25）：`Number(x) || 0`
 				// 会把"没有这个读数"变成"运了 0 吨"——两者在页面上都显示成 0，
 				// 于是"这座产业没参与运输"被说成了"运输量为零"。
 				transported: numOrNull(i.transported),
 				stock: numOrNull(i.stock),
 			}))
-			.sort((a, b) => b.produced - a.produced);
+			// null 排最后，不用 0 冒充最小产量。
+			.sort((a, b) => (b.produced ?? -1) - (a.produced ?? -1));
 	}
 
 	setCargoTotals(list: CargoAmounts[]): void {
@@ -650,10 +657,10 @@ export class WorldState {
 			.filter((c) => c && typeof c.label === "string" && c.label !== "")
 			.map((c) => ({
 				label: String(c.label),
-				produced: numOrNull(c.produced) ?? 0,
+				produced: numOrNull(c.produced),
 				transported: numOrNull(c.transported),
 			}))
-			.sort((a, b) => b.produced - a.produced);
+			.sort((a, b) => (b.produced ?? -1) - (a.produced ?? -1));
 	}
 
 	/** 本公司口径运量。`null` = 未收到（与 `{byCargo: []}` = "收到但为零" 不同）。 */

@@ -134,6 +134,10 @@ const BOOT_EVENT_CAP = 256;
  * `null ≠ 0` 是本仓库红线；`0` 只能是量出来的 0。
  */
 function rawCount(v: unknown): number | null {
+	// `null` 是 GS 自己的「不适用」编码（`main.nut`：负读数 → null），**不能**折成 0
+	// —— `Number(null)` 恰好是 0，于是「这个产业不产这种货」会变成「运了 0 吨」
+	//（D60/D76）。缺席（undefined）与空串同理。
+	if (v === null || v === undefined || v === "") return null;
 	const n = Number(v);
 	return Number.isFinite(n) && n >= 0 ? n : null;
 }
