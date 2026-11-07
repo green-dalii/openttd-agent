@@ -433,6 +433,26 @@ describe("GS state：产业/货种/公司口径（P1+P2）", () => {
 		expect(w.setCargoTotals).toHaveBeenCalledWith([{ label: "COAL", produced: 900, transported: null }]);
 	});
 
+	it_("显式 null 仍是 null（GS 发的就是 JSON null：'不适用'，不是 0 吨）", () => {
+		// GS 把「该产业不产这种货」编码成 `null`（`main.nut` 里 `if (prod < 0) prod = null`），
+		// 不是省略字段 ⇒ 上面两条守卫（-1 / 缺席）都测不到它。
+		// `Number(null)` 是 0 ⇒ 不问就折成「运了 0 吨」，页面与模型都拿到一句谎话（D76）。
+		const w = fakeWorld();
+		hub(w).onEvent({
+			kind: "gamescript",
+			payload: {
+				cmd: "state", date: 1, industries: 1,
+				industry_list: [{ id: 5, cargo: "COAL", name: "Coal Mine", produced: null, transported: null, stock: null }],
+				cargo_totals: [{ label: "COAL", produced: null, transported: null }],
+			},
+		} as unknown as GameEvent);
+		expect(w.setIndustries).toHaveBeenCalledWith(
+			[{ id: 5, cargo: "COAL", name: "Coal Mine", produced: null, transported: null, stock: null }],
+			1,
+		);
+		expect(w.setCargoTotals).toHaveBeenCalledWith([{ label: "COAL", produced: null, transported: null }]);
+	});
+
 	it_("transported/produced 缺席 → null（缺席 ≠ 0）", () => {
 		const w = fakeWorld();
 		hub(w).onEvent({

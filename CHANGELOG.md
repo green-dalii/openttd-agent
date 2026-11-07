@@ -9,20 +9,27 @@
 
 ## [Unreleased]
 ### Fixed
+- **"Not applicable" was reported as zero.** The game script encodes a reading it does not have as JSON
+  `null` (a negative engine reading - the industry does not produce or does not accept that
+  cargo - becomes `null`, so the payload shape never changes). Two readers on our side went through
+  `Number(value)`, and `Number(null)` is `0`, so "this industry does not accept this cargo" turned
+  into "stockpile: 0 tonnes" - for the hundreds of industries that do not accept their own cargo.
+  The page already knew how to print "not applicable"; it never received it. Every raw counter now
+  asks "missing?" before "non-negative?", and the guards cover the case the game script actually
+  sends: an explicit `null` (the old guards only covered `-1` and an absent field). The observation
+  fingerprint does not move - only the values are honest now.
 - **The decision context swallowed two facts it had already been given.** The company's financing
-  facts (how much more it could borrow) and the events the engine pushes at it (a vehicle arrived, a
-  vehicle was lost) were passed into the decision context - and then dropped on the floor: the
-  function took them as input and never put them in its output. The model could see them by asking
-  `observe()`, but the context it is handed at every decision had neither. The readings were in the
-  projection all along, so the observation fingerprint does not move; a test now pins "passed in
-  means present in the output".
+  facts (how much more it could borrow) and the events the engine pushes at it were passed into the
+  decision context - and then dropped on the floor: the function took them as input and never put
+  them in its output. The model could see them by asking `observe()`, but the context it is handed at
+  every decision had neither. The readings were in the projection all along, so the observation
+  fingerprint does not move; a test now pins "passed in means present in the output".
 - **The navigation now reaches every page.** A page URL was a hand-written table in the server's
   memory, so a page added after the server started was unreachable: the browser got a bare "not
   found" and the page looked like it had never been built. The routes are now **derived from the
   files** in `public/pages/` (`pages/<name>.html` is served at `/<name>`), a file added while the
   server runs is picked up, and a URL that is not a page answers with **the list of pages that
-  exist** plus the hint that the process may be older than the files. The smoke check now
-  navigates to all four pages, not just the home page.
+  exist** plus the hint that the process may be older than the files. The smoke check now visits all four pages.
 
 - **The model can finally see the freight world.** A freight line is "which mine, which plant", and the
   model could see neither: the GS now reports a **cargo catalogue** (which cargo is freight, which
@@ -40,12 +47,10 @@
   (name, location, type, engine, age, speed, load, profit this year) and `inspect_town` (name,
   population, houses, location, growth rate). The channel is the admin port's gameScript **with an
   answer**: the client injects an id, the GS replies `{kind:"answer", id, ok, data}`, and the two are
-  matched by id. When there is no answer (timeout, or a run without the channel) the tool says it could
-  not ask - it never claims "no such vehicle". Real machine: `inspect_town 23` ->
-  `{name:"Plunbury", population:2519, houses:54, growth_rate:39}`, `inspect_town 999` -> "no such town".
-  The tool list changed, so the **scaffold fingerprint** moved (`2f5b438b462d21a3` ->
-  `a72a663cdd126090`) - the 2026-10-31 benchmark matrix and every run after it are not comparable
-  across that boundary (Compare groups them).
+  matched by id; when there is no answer (timeout, or a run without the channel) the tool says it could
+  not ask - it never claims "no such vehicle". Real machine: `inspect_town 23` -> "Plunbury",
+  `inspect_town 999` -> "no such town". The tool list changed, so the **scaffold fingerprint** moved
+  (`2f5b438b462d21a3` -> `a72a663cdd126090`) - runs across that boundary are not comparable.
 
 - **A decision now has a result on the world's side.** "The executor says it built the line" is not a
   result; "the first vehicle reached the station" is. The join is the **vehicle id**: the executor's route
@@ -66,7 +71,7 @@
   Real machine (real model, seed 4242): the first vehicle reaching each station arrived twice
   (`station_first_vehicle`, stations 0 and 1, vehicle 8). Two Squirrel traps came with it (MEMORY D95):
   a **class member must be declared** before it is assigned, and **reading a key that does not exist
-  throws** - so the payload shape is constant and every read asks `rawin` first.
+  throws**.
 
 ### Fixed
 - **The cargo monitor was never missing - our own accumulator was broken.** On 2026-11-01 this project
@@ -75,12 +80,10 @@
   (`script_cargomonitor.hpp` carries `@api game`; a real-machine probe shows the class, the method and a
   successful call). The empty split was **our** bug: the accumulator wrote into a Squirrel table with a key
   that did not exist yet, and Squirrel tables are strict - the write threw, the facts collector died, and
-  the empty result was read as "the API returns null". The correction is in the record, not only in the
-  code: SPEC §10.65 and §10.100, MEMORY D89/D94, the scaffold contract's S7b row and the API guard. What
-  stays unmeasured is what the engine really does not expose: **per station / per route**; the cargo
-  monitor counts **freight only**, while today's scaffold runs **passenger routes only**. The research and
-  the three options: `docs/PER-LINE-DELIVERY-FEASIBILITY.md` - **do not change the engine or the script
-  language**; the native API has exactly the same granularity.
+  the empty result was read as "the API returns null". What stays unmeasured is what the engine really
+  does not expose: **per station / per route**; the cargo monitor counts **freight only**, while today's
+  scaffold runs **passenger routes only**. The research and the three options:
+  `docs/PER-LINE-DELIVERY-FEASIBILITY.md` - **do not change the engine or the script language**.
 
 ### Added
 - **A comparison only compares one question.** Runs that answered a **different** question - a
@@ -88,9 +91,7 @@
   mixed into one table. The server groups the metric rows by the manifest's own fields (scaffold +
   observation shape + observation policy), the page offers the groups, and the numbers below belong to
   **one** group; the runs in the other groups are counted, not dropped. The default group is the one with
-  the most runs, so the 2026-10-31 benchmark matrix (6 cells, the older scaffold) is its own group and
-  keeps its numbers - the paired difference inside it is still **-0.270** (real machine: 6 old cells +
-  1 new scaffold, two groups).
+  the most runs, so the 2026-10-31 benchmark matrix (older scaffold) keeps its own numbers.
 
 - **The model can finally see its financing, and it knows why its balance moves.** The company facts
   already carried the loan, but not how much more could be borrowed - and the **interest rate is not
@@ -99,8 +100,7 @@
   projection carries `financing { loanCeiling, loanInterval }` (real machine: 300000 / 10000). The system
   prompt also states the mechanism the model could not see: the executor raises the loan to the ceiling
   before it starts building - which moves the **scaffold fingerprint** (`74f2e64d1e930df3` ->
-  `2f5b438b462d21a3`), so the 2026-10-31 benchmark matrix is now a *different scaffold* and Compare
-  says so.
+  `2f5b438b462d21a3`), so runs across that boundary are a *different scaffold*.
 
 - **The model can finally see every town, and the dashboard knows which slice it saw.** The Bridge GS
   reported the ten biggest towns only, so every other town reached the model as a bare number (`#14 ->
@@ -116,8 +116,8 @@
   now a third fingerprint: the **structure** of the world facts the model sees (which facts, which
   types; values and array lengths ignored), computed from a probe world that fills every branch. It
   depends on the code only ⇒ it can be computed **before** a run, both backends record it, and the
-  preview promises it. Compare now decides "these runs did not answer the same question" from the
-  scaffold and this fingerprint; the payload shape is reported for the record only.
+  preview promises it. Compare decides "these runs did not answer the same question" from the scaffold
+  and this fingerprint; the payload shape is reported for the record only.
 
 - **A comparison can start from the comparison.** The Compare page could only look at runs that already existed: picking the models, the worlds and the caps and then *starting that plan* was impossible. The plan is now computed **server-side** (the page estimates nothing): how many runs it would start, which caps apply, whether the spend is measurable, which model each cell uses - with the same field names the manifest uses, so plan and finished run compare field by field. Launching runs the cells **one after another** (one process, one game port); a failed cell is recorded and the rest still run. The refusals happen before anything starts: a cost cap on a model without a price table, an unknown model, or a plan that collides with a running game.
 
