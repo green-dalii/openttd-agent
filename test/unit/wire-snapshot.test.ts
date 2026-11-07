@@ -170,7 +170,7 @@ describe("wire snapshot: 产业/货种/公司口径", () => {
 		const w = new WorldState();
 		w.setIndustries([{ id: 1, cargo: "COAL", name: "Mine", produced: 10, transported: 4, stock: 2 }], 12);
 		w.setCargoTotals([{ label: "COAL", produced: 10, transported: 4 }]);
-		w.setCompanyCargo({ byCargo: [{ label: "COAL", amount: 3 }], quarterDelivered: 7, monitored: { towns: 1, industries: 1 } });
+		w.setCompanyCargo({ byCargo: [{ label: "COAL", amount: 3 }], quarterDelivered: 7, monitored: { cargoes: 1, destinations: 1 }, gaps: { dropped: 0 } });
 		return w;
 	}
 

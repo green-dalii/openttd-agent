@@ -17,7 +17,7 @@
   The page already knew how to print "not applicable"; it never received it. Every raw counter now
   asks "missing?" before "non-negative?", and the guards cover the case the game script actually
   sends: an explicit `null` (the old guards only covered `-1` and an absent field). The observation
-  fingerprint does not move - only the values are honest now.
+  fingerprint does not move.
 - **The decision context swallowed two facts it had already been given.** The company's financing
   facts (how much more it could borrow) and the events the engine pushes at it were passed into the
   decision context - and then dropped on the floor: the function took them as input and never put
@@ -36,53 +36,56 @@
   industries produce it, which **accept** it - the engine's own answer, not a guess), the **position and
   name of every industry**, and the cargo each road engine carries. Real machine (seed 4242): COAL is
   freight, produced by 6 industries and accepted by 5 - including id 53 "Lonningbury Power Statio" - and
-  the model wrote a plan to link "a producer industry to a consumer industry". The observation surface
-  changed, so both fingerprints moved (`a72a663cdd126090` -> `41d82339b2925645`, `1808f8babae13cb0` ->
-  `7390249eb5b1347c`): runs before and after are not comparable.
+  the model wrote a plan to link "a producer industry to a consumer industry". Both fingerprints moved
+  (`a72a663cdd126090` -> `41d82339b2925645`, `1808f8babae13cb0` -> `7390249eb5b1347c`): runs across that
+  boundary are not comparable.
 
 ### Added
+- **Freight deliveries are measured now.** The game script reports what *this company* delivered, per
+  cargo, with the engine's own cargo monitor. Three decisions are baked in: one axis only (the town axis
+  and the industry axis would count the same delivery twice), the running total is accumulated on our
+  side (the monitor hands out the delta since the last read and resets), and every gap is reported - a
+  destination that disappears before its amount was read makes the total a **lower bound**. One trap cost
+  a round of empty readings: the Bridge GS is a **server script** with no company of its own, so
+  `COMPANY_SELF` resolves to nothing and the monitor returns -1 without throwing; the executor's company
+  id is used instead, and the reads before that company exists are skipped rather than counted as gaps.
+  Real machine (seed 4242, passenger routes only): nine cargoes monitored at 38 destinations, all reading
+  0 - honest, because no freight was carried; the observation fingerprint moved (`7390249eb5b1347c` ->
+  `9aab3d22e9e95961`), so runs across that boundary are not comparable.
 - **The model can now ask the game a question and get the answer.** The observation surface is a
   **periodic sample**: it says what the world looks like right now, never what *its own vehicle* is
   doing, how much it carries or what it earned. Two read-only tools close that gap: `inspect_vehicle`
   (name, location, type, engine, age, speed, load, profit this year) and `inspect_town` (name,
   population, houses, location, growth rate). The channel is the admin port's gameScript **with an
   answer**: the client injects an id, the GS replies `{kind:"answer", id, ok, data}`, and the two are
-  matched by id; when there is no answer (timeout, or a run without the channel) the tool says it could
-  not ask - it never claims "no such vehicle". Real machine: `inspect_town 23` -> "Plunbury",
-  `inspect_town 999` -> "no such town". The tool list changed, so the **scaffold fingerprint** moved
-  (`2f5b438b462d21a3` -> `a72a663cdd126090`) - runs across that boundary are not comparable.
+  matched by id; when there is no answer the tool says it could not ask - it never claims "no such
+  vehicle". The tool list changed, so the **scaffold fingerprint** moved (`2f5b438b462d21a3` ->
+  `a72a663cdd126090`) - runs across that boundary are not comparable.
 
 - **A decision now has a result on the world's side.** "The executor says it built the line" is not a
   result; "the first vehicle reached the station" is. The join is the **vehicle id**: the executor's route
   statistics report the line's `vehiclesIds`, the pushed events report the vehicle, and the two together
   make "the route decision 3 ordered had its first vehicle arrive on 1950-03-01" a fact that can be
   booked - it lands in the route ledger and, from there, in the cross-run memory. An event about a
-  vehicle we do not know is **not attributed** (attribution must not be guessed). Until now the memory
-  could only recall "did I build it" and "did it make money", never "what the world then did to it".
+  vehicle we do not know is **not attributed** (attribution must not be guessed).
 
 - **The model can finally see what the game pushes at it.** The engine pushes events to the
   GameScript (a vehicle was lost, the first vehicle reached a station, an industry opened) - and our
-  Bridge GS **drained them and threw them away**: only the admin-port event was handled. A model could
-  therefore never see "my bus arrived" or "my truck was scrapped" unless it happened to look at exactly
-  the right moment. The GS now maps the engine's event types onto a **closed vocabulary**
-  (`vehicle_lost`, `station_first_vehicle`, `vehicle_waiting_in_depot`, `vehicle_unprofitable`,
-  `industry_open`, `industry_close`, `town_founded`), the world state keeps them in order (bounded to
-  50), and the projection carries them - so `observe()` and every decision context show what happened.
-  Real machine (real model, seed 4242): the first vehicle reaching each station arrived twice
-  (`station_first_vehicle`, stations 0 and 1, vehicle 8). Two Squirrel traps came with it (MEMORY D95):
-  a **class member must be declared** before it is assigned, and **reading a key that does not exist
-  throws**.
+  Bridge GS **drained them and threw them away**: only the admin-port event was handled, so a model
+  could never see "my bus arrived" unless it happened to look at exactly the right moment. The GS now
+  maps the engine's event types onto a **closed vocabulary** (the seven kinds are listed in SPEC
+  §10.78), the world state keeps them in order (bounded to 50), and the projection carries them - so
+  `observe()` and every decision context show what happened. Real machine (real model, seed 4242): the
+  first vehicle reaching each station arrived twice. Two Squirrel traps came with it (MEMORY D95): a
+  **class member must be declared** before it is assigned, and **reading a missing key throws**.
 
 ### Fixed
 - **The cargo monitor was never missing - our own accumulator was broken.** On 2026-11-01 this project
-  concluded that OpenTTD 15.3's Squirrel API has no cargo monitor and that splitting the deliveries by
-  cargo type is therefore unmeasurable; that conclusion was **wrong**. The API exists
-  (`script_cargomonitor.hpp` carries `@api game`; a real-machine probe shows the class, the method and a
-  successful call). The empty split was **our** bug: the accumulator wrote into a Squirrel table with a key
-  that did not exist yet, and Squirrel tables are strict - the write threw, the facts collector died, and
-  the empty result was read as "the API returns null". What stays unmeasured is what the engine really
-  does not expose: **per station / per route**; the cargo monitor counts **freight only**, while today's
-  scaffold runs **passenger routes only**. The research and the three options:
+  concluded that OpenTTD 15.3's Squirrel API has no cargo monitor; that conclusion was **wrong**. The API
+  exists (`script_cargomonitor.hpp` carries `@api game`); the empty split was **our** bug: the accumulator
+  wrote into a Squirrel table with a key that did not exist yet, Squirrel tables are strict - the write
+  threw, the facts collector died, and the empty result was read as "the API returns null". What the
+  engine really does not expose stays unmeasured: **per station / per route**. The research:
   `docs/PER-LINE-DELIVERY-FEASIBILITY.md` - **do not change the engine or the script language**.
 
 ### Added
@@ -90,8 +93,7 @@
   different scaffold, a different observation surface, a different slice of the world - are no longer
   mixed into one table. The server groups the metric rows by the manifest's own fields (scaffold +
   observation shape + observation policy), the page offers the groups, and the numbers below belong to
-  **one** group; the runs in the other groups are counted, not dropped. The default group is the one with
-  the most runs, so the 2026-10-31 benchmark matrix (older scaffold) keeps its own numbers.
+  **one** group; the runs in the other groups are counted, not dropped.
 
 - **The model can finally see its financing, and it knows why its balance moves.** The company facts
   already carried the loan, but not how much more could be borrowed - and the **interest rate is not
@@ -116,8 +118,7 @@
   now a third fingerprint: the **structure** of the world facts the model sees (which facts, which
   types; values and array lengths ignored), computed from a probe world that fills every branch. It
   depends on the code only ⇒ it can be computed **before** a run, both backends record it, and the
-  preview promises it. Compare decides "these runs did not answer the same question" from the scaffold
-  and this fingerprint; the payload shape is reported for the record only.
+  preview promises it.
 
 - **A comparison can start from the comparison.** The Compare page could only look at runs that already existed: picking the models, the worlds and the caps and then *starting that plan* was impossible. The plan is now computed **server-side** (the page estimates nothing): how many runs it would start, which caps apply, whether the spend is measurable, which model each cell uses - with the same field names the manifest uses, so plan and finished run compare field by field. Launching runs the cells **one after another** (one process, one game port); a failed cell is recorded and the rest still run. The refusals happen before anything starts: a cost cap on a model without a price table, an unknown model, or a plan that collides with a running game.
 
@@ -125,7 +126,9 @@
 - **The configuration page is now called what it does.** The page that used to live at `/providers` answers "how is this run configured?", so it is now at `/configure`; the old URL redirects (and the older `/llm` alias still resolves).
 - **The score now says what it actually counts.** The delivery counter the harness reads is
   OpenTTD's *per-cargo-type* array summed up - and OpenTTD keeps passengers in that same array, so
-  the number has always counted **cargo and passengers**, not tonnes of freight. The scorecard, the benchmark report, the History page and the model-facing system prompt all said "cargo", which was untrue - and the prompt told the model it was judged on freight alone. The wording now comes from one place on the server (`DELIVERED_MEASURE`), the page copies it, and the scaffold fingerprint moved (`3da8a64e1fbe818e` -> `74f2e64d1e930df3`) because the prompt changed.
+  the number has always counted **cargo and passengers**, not tonnes of freight. The scorecard, the
+  benchmark report, the History page and the model-facing system prompt all said "cargo", which was
+  untrue. The wording now comes from one place on the server (`DELIVERED_MEASURE`), and the page copies it.
 
 - **The dashboard speaks two languages now.** A switch in the header flips the whole interface between English and Chinese, and the choice is remembered. The English text stays where it always was (the translation table is keyed by it, the gettext way), so there is no second copy to keep in sync, and a guard test fails the build when a translation no longer matches its source. Raw evidence stays raw (the JSON in the agent steps is not translated) and so does the server's own vocabulary.
 
@@ -256,15 +259,12 @@
   after a restart.
 
 - **The model list never refreshed.** The list on the Providers page came from the
-  **bundled pi-ai snapshot** (generated 2026-09-04), and pi-ai's `refresh()` skips static
-  providers, so a model released later could neither be listed **nor chosen**. The page now
-  has "Refresh from provider", which asks the provider's own `/models` endpoint through
-  pi-ai's dynamic-catalog machinery, shows where the list came from (and which entries are
-  newer than the build), and reports failures with the exact URLs and statuses — including
-  "no credential, so the refresh was skipped", which pi-ai does silently. Models that only
-  the provider knows are marked "live · price unknown" (their limits are borrowed from a
-  sibling and their price is not measured), and they are persisted so the agent process can
-  run them.
+  **bundled pi-ai snapshot** (generated 2026-09-04), and pi-ai's `refresh()` skips static providers, so
+  a model released later could neither be listed **nor chosen**. The page now has "Refresh from
+  provider", which asks the provider's own `/models` endpoint, shows where the list came from, and
+  reports failures with the exact URLs and statuses — including "no credential, so the refresh was
+  skipped", which pi-ai does silently. Models that only the provider knows are marked "live · price
+  unknown", and they are persisted so the agent process can run them.
 - Runs could be **stopped and look like failures**: pause attribution, world-frozen runs
   and unfinished horizons are now named and excluded from comparisons.
 

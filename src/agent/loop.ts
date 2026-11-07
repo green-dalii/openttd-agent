@@ -120,6 +120,9 @@ export async function runDecision(
 				}
 			: {}),
 		...(facts.engines.length > 0 ? { engines: facts.engines } : {}),
+		// 货运 F2：本公司口径的货运交付（单轴累计）也一起走 —— 分数是
+		// "货物 + 客运"的合计，模型要看货运那一半才知道自己运的是货还是人。
+		...(facts.companyCargo ? { companyCargo: facts.companyCargo } : {}),
 		// The financing facts ride along too (Issue #13): how much more the
 		// company could borrow. The interest rate is **not** here — the engine
 		// does not expose it, and a made-up rate would be a lie (D60).

@@ -1323,7 +1323,7 @@
         return "no industry report yet — the GS publishes its sample every few hundred ticks";
       },
 
-      /** 公司口径：本公司实际交付（monitor 累计，只覆盖被监视的目的地）。 */
+      /** 公司口径：**货运**交付到产业（monitor 单轴累计，货运 F2）。 */
       ownCargoRows() {
         const c = this.companyCargo;
         if (!c || !Array.isArray(c.byCargo)) return [];
@@ -1335,15 +1335,25 @@
         }));
       },
 
-      /** 本公司口径的说明：**必须**写出"这是子集"（被监视的目的地数量）。 */
+      /**
+       * 本公司口径的说明：**必须**写出口径与监视范围（货运 F2）。
+       *
+       * 口径 = **货运交付到产业**（单轴；城镇轴与产业轴会把同一笔交付记两次）。
+       * 缺口（丢掉的增量）必须说出来——累计值是**下界**，不说就成了精确值。
+       */
       ownCargoNote() {
         if (this.companyCargoAvailable !== true) return "";
         const c = this.companyCargo || {};
         const m = c.monitored;
-        if (!m) return "delivered by this company since this run started — destination coverage unknown";
-        // 覆盖**全部**城镇与产业（GS 侧就是全量监视）——所以说"all"而不是"subset"；
-        // 万一将来改成抽样，这里必须跟着改（措辞与事实要一致）。
-        return `delivered by this company since this run started · all ${U.fmtInt(m.towns)} towns and ${U.fmtInt(m.industries)} industries monitored`;
+        if (!m) return "freight delivered by this company since this run started — monitored coverage unknown";
+        const base = `freight delivered by this company since this run started · ${U.fmtInt(m.cargoes)} cargoes monitored at ${U.fmtInt(m.destinations)} industry destinations`;
+        const g = c.gaps;
+        if (!g) return base;
+        // 只有**真的丢了增量**（目的地在读之前没了）才说"下界"；读失败但没丢的，
+        // 不许让这句话出现（那会把"读不到"说成"少了"）。
+        const lost = Number(g.dropped) || 0;
+        if (lost <= 0) return base;
+        return `${base} · ${U.fmtInt(lost)} destination(s) dropped before their amount was read — the total is a lower bound`;
       },
 
       /** 本公司交付合计（monitor 口径，会话累计）；未收到时 —（不是 0）。 */

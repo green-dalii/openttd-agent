@@ -156,7 +156,7 @@ interface LiveModel {
 	industriesTotal: unknown;
 	cargoTotals: { label?: unknown; produced?: unknown; transported?: unknown }[];
 	industryAvailable: boolean;
-	companyCargo: { byCargo?: { label?: string; amount?: number }[]; quarterDelivered?: number | null; monitored?: { towns: number; industries: number } | null } | null;
+	companyCargo: { byCargo?: { label?: string; amount?: number }[]; quarterDelivered?: number | null; monitored?: { cargoes: number; destinations: number } | null; gaps?: { dropped: number; error?: string } | null } | null;
 	companyCargoAvailable: boolean;
 	cargoName(label: unknown): string;
 	cargoSharePct(produced: unknown, transported: unknown): number | null;
@@ -1441,15 +1441,46 @@ describe("live-view: cargo & industry", () => {
 		expect(model.industrySampleNote()).toMatch(/not the whole map|sampled/i);
 	});
 
-	it("公司口径：分开呈现，并写明被监视的目的地数（不说成全部交付）", () => {
+	it("公司口径：分开呈现，并写明**货运单轴**与被监视的范围（货运 F2）", () => {
 		const { model } = load();
 		model.companyCargoAvailable = true;
-		model.companyCargo = { byCargo: [{ label: "PASS", amount: 120 }], quarterDelivered: 5000, monitored: { towns: 10, industries: 0 } };
+		model.companyCargo = {
+			byCargo: [{ label: "COAL", amount: 120 }],
+			quarterDelivered: 5000,
+			monitored: { cargoes: 3, destinations: 17 },
+			gaps: { dropped: 0 },
+		};
 		expect(model.ownCargoRows()[0]!.amount).toBe("120");
-		expect(model.ownCargoNote()).toMatch(/this company/i);
-		expect(model.ownCargoNote()).toMatch(/10 towns|monitored/i);
+		// 口径必须写出来：是**货运交付到产业**，不是"全部交付"。
+		expect(model.ownCargoNote()).toMatch(/freight/i);
+		expect(model.ownCargoNote()).toMatch(/3 cargoes monitored at 17 industry destinations/);
 		// 测试桩的 fmtInt 不做千分位（生产实现会），所以这里断言数值本身
 		expect(model.ownQuarterText()).toContain("5000");
+	});
+
+	it("真的丢了增量时必须说「累计是下界」（丢掉的增量不能装作没有）", () => {
+		const { model } = load();
+		model.companyCargoAvailable = true;
+		model.companyCargo = {
+			byCargo: [{ label: "COAL", amount: 120 }],
+			quarterDelivered: null,
+			monitored: { cargoes: 1, destinations: 4 },
+			gaps: { dropped: 2 },
+		};
+		expect(model.ownCargoNote()).toMatch(/lower bound/i);
+		expect(model.ownCargoNote()).toMatch(/2 destination\(s\) dropped/);
+	});
+
+	it("没有缺口时不许出现「下界」（读失败但没丢东西，不该说少了）", () => {
+		const { model } = load();
+		model.companyCargoAvailable = true;
+		model.companyCargo = {
+			byCargo: [{ label: "COAL", amount: 120 }],
+			quarterDelivered: null,
+			monitored: { cargoes: 1, destinations: 4 },
+			gaps: { dropped: 0 },
+		};
+		expect(model.ownCargoNote()).not.toMatch(/lower bound/i);
 	});
 
 	it("货种标签归一化：GS 的定长标签（OIL_）→ 友好名（Oil）", () => {
@@ -1464,10 +1495,10 @@ describe("live-view: cargo & industry", () => {
 	it("本公司交付合计：有数据时求和，未收到时 —（不是 0）", () => {
 		const { model } = load();
 		model.companyCargoAvailable = true;
-		model.companyCargo = { byCargo: [{ label: "PASS", amount: 120 }, { label: "COAL", amount: 30 }], quarterDelivered: 900, monitored: { towns: 3, industries: 1 } };
+		model.companyCargo = { byCargo: [{ label: "PASS", amount: 120 }, { label: "COAL", amount: 30 }], quarterDelivered: 900, monitored: { cargoes: 3, destinations: 1 } };
 		expect(model.ownDeliveredTotal()).toBe("150");
 		// 有通道但还没交付：0 是真实测量值（不是"未知"）
-		model.companyCargo = { byCargo: [], quarterDelivered: 0, monitored: { towns: 1, industries: 1 } };
+		model.companyCargo = { byCargo: [], quarterDelivered: 0, monitored: { cargoes: 1, destinations: 1 } };
 		expect(model.ownDeliveredTotal()).toBe("0");
 		model.companyCargoAvailable = false;
 		expect(model.ownDeliveredTotal()).toBe("—");

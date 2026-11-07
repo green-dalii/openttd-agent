@@ -76,6 +76,9 @@ export function observeTool(deps: AgentDeps): AgentTool<typeof ObserveSchema, Ac
 					`engines=${JSON.stringify(facts.engines)} ` +
 					// 融资：还能借多少、贷款的最小单位（**利息率引擎不暴露**，不编）。
 					`financing=${JSON.stringify(facts.financing)} ` +
+					// 货运 F2：本公司口径的货运交付（单轴累计 + 缺口）——
+					// 模型要看自己到底运了多少**货**（分数是"货物 + 客运"的合计）。
+					`companyCargo=${JSON.stringify(facts.companyCargo)} ` +
 					// 推送事件：车到了 / 车没了 / 产业开关（**引擎推给 GS 的事件**，
 					// 以前被整个丢掉 ⇒ 模型看不到"我的车到了"）。
 					`events=${JSON.stringify(facts.events)}`,

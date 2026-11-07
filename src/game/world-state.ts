@@ -281,12 +281,26 @@ export interface CargoCatalogEntry {
 
 /** 本公司口径的运量（`GSCargoMonitor` 累计 + 游戏季度统计）。 */
 export interface CompanyCargoFacts {
-	/** 本会话累计：按货种（monitor 口径，只覆盖**被监视的目的地**）。 */
+	/**
+	 * 本会话累计：按货种。
+	 *
+	 * 口径 = **货运交付到产业**的单轴累计（`GSCargoMonitor` 的产业轴）。
+	 * 为什么单轴：城镇轴与产业轴会把**同一笔交付**记两次
+	 * （`docs/FREIGHT-LINE-FEASIBILITY.md` §1.4）。
+	 * 为什么累计：monitor 是"读一次清零"的增量口径，累计由 harness 做。
+	 */
 	byCargo: { label: string; amount: number }[];
 	/** 游戏口径：本季度交付总量（所有货种，精确值），用作交叉核对。 */
 	quarterDelivered: number | null;
-	/** 被监视的目的地数量（缺了它就没法诚实地说"这是子集"）。 */
-	monitored: { towns: number; industries: number } | null;
+	/** 被监视的规模：货种数与目的地（货种×产业）数——数字本身就是口径的一部分。 */
+	monitored: { cargoes: number; destinations: number } | null;
+	/**
+	 * 计量缺口：累计值是**下界**。
+	 *
+	 * - `dropped`：监视中的目的地消失前，它未结算的增量拿不回来了（数量未知）。
+	 * - `failed`：读失败（-1，参数越界）；**不丢增量**（引擎那边还留着），但读数缺一个。
+	 */
+	gaps: { dropped: number; error?: string } | null;
 }
 
 export interface TownInfo {
@@ -698,8 +712,17 @@ export class WorldState {
 		this.companyCargo = {
 			byCargo,
 			quarterDelivered: Number.isFinite(Number(facts.quarterDelivered)) ? Number(facts.quarterDelivered) : null,
-			monitored: facts.monitored && Number.isFinite(Number(facts.monitored.towns))
-				? { towns: Number(facts.monitored.towns), industries: Number(facts.monitored.industries) || 0 }
+			monitored: facts.monitored && Number.isFinite(Number(facts.monitored.cargoes))
+				? { cargoes: Number(facts.monitored.cargoes), destinations: Number(facts.monitored.destinations) || 0 }
+				: null,
+			gaps: facts.gaps && Number.isFinite(Number(facts.gaps.dropped))
+				? {
+						dropped: Number(facts.gaps.dropped),
+						// 读失败时的错误全文（空串 = 没有错误）；失败不许静默（D95）。
+						...(typeof facts.gaps.error === "string" && facts.gaps.error !== ""
+							? { error: facts.gaps.error }
+							: {}),
+					}
 				: null,
 		};
 	}

@@ -14,7 +14,7 @@
  */
 
 import { decodePhaseWindow } from "../game/executor-status.js";
-import type { CargoFact, CargoCatalogFact, EngineFact, FinancingFact, IndustryFact, IndustrySiteFact } from "./world-facts.js";
+import type { CargoFact, CargoCatalogFact, CompanyCargoFact, EngineFact, FinancingFact, IndustryFact, IndustrySiteFact } from "./world-facts.js";
 import type { WorldEventFact } from "../game/world-state.js";
 
 /**
@@ -140,6 +140,13 @@ export interface DecisionContextInput {
 	 * be built from. Present for the same reason as `cargo` (SPEC §10.124).
 	 */
 	engines?: EngineFact[];
+	/**
+	 * 本公司口径的货运交付（货运 F2）：**货运交付到产业**的单轴会话累计。
+	 *
+	 * 为什么模型要看见它：分数是"货物 + 客运"的合计，这个读数是**货运那一半**
+	 * —— 没有它，模型看不出自己运的是货还是人。
+	 */
+	companyCargo?: CompanyCargoFact;
 	/**
 	 * The financing facts: how much more the company could borrow and the game's
 	 * loan interval. The **interest rate is not exposed by the engine**, so it is
@@ -318,6 +325,12 @@ export function buildDecisionContext(input: DecisionContextInput): {
 	};
 	engines?: EngineFact[];
 	/**
+	 * 本公司口径的货运交付（货运 F2）：单轴会话累计 + 计量缺口。
+	 *
+	 * 缺席 = 这局没有这个通道（watch 模式没有 GS）；**不是** 0。
+	 */
+	companyCargo?: CompanyCargoFact;
+	/**
 	 * The financing facts (Issue #13): how much more could be borrowed.
 	 *
 	 * 2026-11-03：**这个字段以前不在输出里** —— `buildDecisionContext` 接收了
@@ -417,6 +430,8 @@ export function buildDecisionContext(input: DecisionContextInput): {
 		...(input.towns ? { towns: input.towns } : {}),
 		...(input.cargo ? { cargo: input.cargo } : {}),
 		...(input.engines ? { engines: input.engines } : {}),
+		// 本公司口径的货运交付（货运 F2）：缺席 = 没有这个通道，不是 0。
+		...(input.companyCargo ? { companyCargo: input.companyCargo } : {}),
 		// 融资与推送事件**必须**进上下文（2026-11-03 修）：以前它们被接收后
 		// 丢掉，模型在决策时看不到自己还能借多少、也看不到"车到了/车没了"。
 		...(input.financing ? { financing: input.financing } : {}),

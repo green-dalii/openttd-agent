@@ -377,9 +377,10 @@ export function makeSignalHub(refs: SignalHubRefs): SignalHub {
 							})),
 						);
 					}
-					// 公司口径（P2）：本会话累计（monitor）+ 游戏季度总量。
+					// 公司口径（货运 F2）：本会话累计（monitor 的**单轴**：货运交付到产业）
+					// + 游戏季度总量 + 计量缺口。
 					// 缺字段时**不调用** setter：老 GS 与新 harness 混跑时不能清空已知事实。
-					if (Array.isArray(p.own_delivered) || typeof p.own_quarter === "number" || p.own_monitored !== undefined) {
+					if (Array.isArray(p.own_delivered) || typeof p.own_quarter === "number" || p.own_monitored !== undefined || p.own_gaps !== undefined) {
 						refs.world.setCompanyCargo({
 							byCargo: Array.isArray(p.own_delivered)
 								? (p.own_delivered as { label?: unknown; amount?: unknown }[]).map((c) => ({
@@ -389,9 +390,23 @@ export function makeSignalHub(refs: SignalHubRefs): SignalHub {
 								: [],
 							quarterDelivered: typeof p.own_quarter === "number" ? (p.own_quarter as number) : null,
 							monitored: (() => {
-								const m = p.own_monitored as { towns?: unknown; industries?: unknown } | undefined;
+								const m = p.own_monitored as { cargoes?: unknown; destinations?: unknown } | undefined;
 								if (!m || typeof m !== "object") return null;
-								return { towns: Number(m.towns) || 0, industries: Number(m.industries) || 0 };
+								// 旧 GS 报的是「地图上有几座城/几个产业」，那不是监视范围 ⇒ 缺新字段
+								// 就当**没有口径**，不能报 0（那等于说"一个目的地都没监视"）。
+								const cargoes = Number(m.cargoes);
+								if (!Number.isFinite(cargoes)) return null;
+								const destinations = Number(m.destinations);
+								return { cargoes, destinations: Number.isFinite(destinations) ? destinations : 0 };
+							})(),
+							gaps: (() => {
+								const g = p.own_gaps as { dropped?: unknown; error?: unknown } | undefined;
+								if (!g || typeof g !== "object") return null;
+								const dropped = Number(g.dropped);
+								if (!Number.isFinite(dropped)) return null;
+								// 读失败时的错误全文（D95：失败不许静默）；没有错误就**不出现**这个键。
+								const error = typeof g.error === "string" && g.error !== "" ? g.error : "";
+								return { dropped, ...(error ? { error } : {}) };
 							})(),
 						});
 					}

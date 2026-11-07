@@ -421,6 +421,11 @@ const cargo = await send("Runtime.evaluate", {
       note: d ? d.industryNote() : null,
       cargoRows: d ? d.cargoRows().length : 0,
       ownTotal: d ? d.ownDeliveredTotal() : null,
+      ownNote: d ? d.ownCargoNote() : null,
+      ownHead: (() => {
+        const h = [...document.querySelectorAll('.panel h2')].find(x => /delivered by this company/i.test(x.textContent || ''));
+        return h ? h.textContent.replace(/\\s+/g, ' ').trim() : null;
+      })(),
       quarter: d ? d.ownQuarterText() : null,
       text: sec ? sec.textContent.replace(/\\s+/g, ' ').trim().slice(0, 200) : null,
     };
@@ -435,6 +440,19 @@ if (cv.industryAvailable === false) {
   if (cv.cargoRows !== 0) stabilityProblems.push(`无通道时 cargoRows=${cv.cargoRows}（必须为 0）`);
   if (cv.ownTotal !== "—") stabilityProblems.push(`无通道时「Our deliveries」显示 ${cv.ownTotal}（必须是 —）`);
   if (cv.quarter !== "—") stabilityProblems.push(`无通道时「Delivered this quarter」显示 ${cv.quarter}（必须是 —）`);
+}
+if (cv.companyCargoAvailable === true) {
+	// 有数据时，本公司交付面板的**口径**必须与事实一致（货运 F2）：
+	// 它量的是「货运交付到产业」（单轴），不是"全部交付"，也不是"乘客"。
+	if (!/freight/i.test(cv.ownNote || "")) {
+		stabilityProblems.push("本公司交付面板的说明没有写明「货运」口径（它量的是货运交付到产业）");
+	}
+	if (!/monitored at/i.test(cv.ownNote || "")) {
+		stabilityProblems.push("本公司交付面板的说明没有写明监视范围（货种数 / 目的地数）");
+	}
+	if (!/freight/i.test(cv.ownHead || "")) {
+		stabilityProblems.push(`本公司交付面板的标题不是货运口径：${cv.ownHead || "(没有标题)"}`);
+	}
 }
 if (cv.text && /all companies/i.test(cv.text) === false && cv.cargoRows > 0) {
   stabilityProblems.push("Cargo 表没有写明「所有公司」口径");
