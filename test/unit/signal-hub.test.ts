@@ -478,21 +478,39 @@ describe("GS state：产业/货种/公司口径（P1+P2）", () => {
 		);
 	});
 
-	it_("own_delivered/own_quarter/own_monitored 写入公司口径（缺失时为 null，不编 0）", () => {
+	it_("own_delivered/own_quarter/own_monitored/own_gaps 写入公司口径（缺失时为 null，不编 0）", () => {
 		const w = fakeWorld();
 		hub(w).onEvent({
 			kind: "gamescript",
 			payload: {
 				cmd: "state", date: 1,
-				own_delivered: [{ label: "PASS", amount: 120 }],
+				own_delivered: [{ label: "COAL", amount: 120 }],
 				own_quarter: 5000,
-				own_monitored: { towns: 10, industries: 0 },
+				own_monitored: { cargoes: 3, destinations: 17 },
+				own_gaps: { dropped: 1 },
 			},
 		} as unknown as GameEvent);
 		expect(w.setCompanyCargo).toHaveBeenCalledWith({
-			byCargo: [{ label: "PASS", amount: 120 }],
+			byCargo: [{ label: "COAL", amount: 120 }],
 			quarterDelivered: 5000,
-			monitored: { towns: 10, industries: 0 },
+			monitored: { cargoes: 3, destinations: 17 },
+			gaps: { dropped: 1 },
+		});
+	});
+
+	it_("老 GS 的 own_monitored（towns/industries）不被当成新口径（缺字段就是缺）", () => {
+		// 旧 GS 报的是"地图上有几座城/几个产业"（那不是监视范围，是地图规模）；
+		// 新口径是"监视了几个货种 / 几个目的地"。混着读会把地图规模说成监视范围。
+		const w = fakeWorld();
+		hub(w).onEvent({
+			kind: "gamescript",
+			payload: { cmd: "state", date: 1, own_monitored: { towns: 10, industries: 37 } },
+		} as unknown as GameEvent);
+		expect(w.setCompanyCargo).toHaveBeenCalledWith({
+			byCargo: [],
+			quarterDelivered: null,
+			monitored: null,
+			gaps: null,
 		});
 	});
 

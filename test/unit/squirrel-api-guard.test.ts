@@ -709,15 +709,43 @@ describe("Squirrel 桥：产业/货种/公司口径上报", () => {
 		expect(src).toMatch(/_facts_tick\s*\+\s*1000\s*</);
 	});
 
-	it("按货种的拆分**还没接上**：GS 里暂时不调用 cargo monitor（等实现 PR）", () => {
-		// 2026-11-05 纠正（MEMORY D94 / docs/PER-LINE-DELIVERY-FEASIBILITY.md）：
-		// **API 是存在的**（`script_cargomonitor.hpp` 写着 `@api game` ⇒ Squirrel 侧也
-		// 导出；真机实测：类存在、调用成功、返回 0）。当初"拆分永远是空的"是我们自己
-		// 的累加器抛了异常（Squirrel 的表严格 ⇒ 写不存在的键会抛）。
-		// ⇒ 这条守卫现在只锁"还没实现"；实现 PR 必须同时删掉它并加上下面那条。
+	it("货运计量已接上：cargo monitor 只走**产业交付**单轴（货运 F2）", () => {
+		// 2026-11-05 纠正（MEMORY D94）：API **是存在的**（`script_cargomonitor.hpp`
+		// 写着 `@api game`）；当初"拆分永远是空的"是我们自己的累加器抛了异常。
+		// 2026-11-08（货运 F2）：接上了，形状与口径由这条守卫锁住。
+		//
+		// **单轴**：城镇轴与产业轴会把**同一笔交付**记两次
+		// （docs/FREIGHT-LINE-FEASIBILITY.md §1.4）⇒ 只准有产业轴。
 		const fn = src.slice(src.indexOf("function CollectFacts("), src.indexOf("function Start("));
-		expect(fn).not.toContain("GSCargoMonitor.");
-		expect(fn).toContain("own_by_cargo = []");
+		expect(fn).toContain("GSCargoMonitor.GetIndustryDeliveryAmount");
+		expect(fn).not.toContain("GSCargoMonitor.GetTownDeliveryAmount");
+		expect(fn).not.toContain("GSCargoMonitor.GetIndustryPickupAmount");
+		expect(fn).not.toContain("GSCargoMonitor.GetTownPickupAmount");
+	});
+
+	it("monitor 是'读一次清零'的增量口径 ⇒ 必须累计，而且要报缺口", () => {
+		// `script_cargomonitor.hpp`：每次读返回"上次读之后的增量"并把累计清零。
+		// 不累计 ⇒ 每次读到的都是 0（等于没测）；漏掉的目的地 ⇒ 增量丢了，
+		// 累计值是**下界** ⇒ 缺口必须跟着数字一起报。
+		const fn = src.slice(src.indexOf("function CollectFacts("), src.indexOf("function Start("));
+		expect(fn).toContain("own_gaps");
+		expect(fn).toContain("_own_lost");
+		// keep_monitoring = true：读完还要继续监视（false 会永久停掉这个组合）。
+		expect(fn).toMatch(/GetIndustryDeliveryAmount\([\s\S]{0,200}?true\)/);
+	});
+
+	it("缺口不静默：读失败要计数并留错误全文（MEMORY D95：catch 不许无声无息）", () => {
+		const fn = src.slice(src.indexOf("function CollectFacts("), src.indexOf("function Start("));
+		expect(fn).toContain("_own_lost++");
+		expect(fn).toContain("_own_err");
+	});
+
+	it("公司还没建出来时**不算缺口**（没有增量可丢，算了就是谎称「下界」）", () => {
+		// 真机实测：executor 开工前的那一轮读全是 -1（公司不存在），但那时
+		// monitor 里根本没有增量 ⇒ 什么都没丢 ⇒ 不能报成缺口。
+		const fn = src.slice(src.indexOf("function CollectFacts("), src.indexOf("function Start("));
+		expect(fn).toContain("ResolveCompanyID");
+		expect(fn).toMatch(/if \(comp != GSCompany\.COMPANY_INVALID\)/);
 	});
 
 	it("**累加器不许用动态键的表**（Squirrel 的表是严格的：写不存在的键会抛）", () => {
@@ -737,8 +765,11 @@ describe("Squirrel 桥：产业/货种/公司口径上报", () => {
 
 	it("事实采集仍覆盖所有城镇与所有产业（产业侧的事实不受影响）", () => {
 		const fn = src.slice(src.indexOf("function CollectFacts("), src.indexOf("function Start("));
-		expect(fn).toContain("GSTownList()");
 		expect(fn).toContain("GSIndustryList()");
+		// 城镇在**状态载荷**里全量枚举（CollectFacts 只做产业/货种/公司口径的重活）；
+		// 守的是"全量枚举"，不是"在哪个函数里枚举"。
+		expect(src).toContain("local tlist = GSTownList();");
+		expect(src).not.toMatch(/towns\.resize\(/);
 	});
 
 	it("货种用 GetCargoLabel（本地化 GetName 不能作为玩家可见字符串）", () => {

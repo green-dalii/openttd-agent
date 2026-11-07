@@ -137,6 +137,18 @@ export interface EngineFact {
 }
 
 /** The world as the model sees it. */
+/** 公司口径的货运交付（见 `WorldFacts.companyCargo`）。 */
+export interface CompanyCargoFact {
+	/** 每个被监视货种的会话累计（0 也是真实测量值：监视了，没收到交付）。 */
+	byCargo: { label: string; amount: number }[];
+	/** 游戏口径的季度交付总量（交叉核对用）。 */
+	quarterDelivered: number | null;
+	/** 被监视的规模：货种数 / 目的地数。 */
+	monitored: { cargoes: number; destinations: number } | null;
+	/** 计量缺口：累计值是**下界**（dropped = 丢掉的增量数；error = 最后一次失败的全文）。 */
+	gaps: { dropped: number; error?: string } | null;
+}
+
 export interface WorldFacts {
 	date: string | null;
 	companies: CompanyFact[];
@@ -151,6 +163,16 @@ export interface WorldFacts {
 	cargoTotals: CargoFact[];
 	/** 车型目录。 */
 	engines: EngineFact[];
+	/**
+	 * 本公司口径的货运交付（货运 F2）。
+	 *
+	 * 口径 = **货运交付到产业**的单轴会话累计（`GSCargoMonitor` 的产业轴）。
+	 * 为什么模型要看见它：这是"我到底运了多少货"的**结果**事实，与分数同源；
+	 * 没有它，模型只能看到总分（货物 + 客运），分不出是货运还是客运。
+	 *
+	 * null = 这局没有这个通道（watch 模式没有 GS）；**不是** 0。
+	 */
+	companyCargo: CompanyCargoFact | null;
 	/** 融资事实（还能借多少 / 贷款的最小单位）。 */
 	financing: FinancingFact;
 	/**
@@ -247,6 +269,30 @@ export function worldFacts(snap: WorldSnapshot): WorldFacts {
 		// null = 引擎没报这个车型能拉什么货（**不是**"什么都拉"）。
 		cargo: typeof e.cargo === "string" && e.cargo !== "" ? e.cargo : null,
 	}));
+	// 货运 F2：本公司口径的货运交付（单轴累计 + 缺口）。
+	const companyCargo: CompanyCargoFact | null = snap.companyCargo
+		? {
+				byCargo: (snap.companyCargo.byCargo ?? []).map((c) => ({
+					label: typeof c.label === "string" ? c.label : "",
+					amount: toNumber(c.amount) ?? 0,
+				})),
+				quarterDelivered: toNumber(snap.companyCargo.quarterDelivered),
+				monitored: snap.companyCargo.monitored
+					? {
+							cargoes: toNumber(snap.companyCargo.monitored.cargoes) ?? 0,
+							destinations: toNumber(snap.companyCargo.monitored.destinations) ?? 0,
+						}
+					: null,
+				gaps: snap.companyCargo.gaps
+					? {
+							dropped: toNumber(snap.companyCargo.gaps.dropped) ?? 0,
+							...(typeof snap.companyCargo.gaps.error === "string" && snap.companyCargo.gaps.error !== ""
+								? { error: snap.companyCargo.gaps.error }
+								: {}),
+						}
+					: null,
+			}
+		: null;
 	return {
 		date: gameDate(snap),
 		companies,
@@ -256,6 +302,7 @@ export function worldFacts(snap: WorldSnapshot): WorldFacts {
 		cargoCatalog,
 		cargoTotals,
 		engines,
+		companyCargo,
 		financing: {
 			loanCeiling: typeof snap.loanCeiling === "number" ? snap.loanCeiling : null,
 			loanInterval: typeof snap.loanInterval === "number" ? snap.loanInterval : null,
@@ -306,7 +353,12 @@ function observationProbe(): WorldSnapshot {
 		cargoCatalog: [{ label: "COAL", freight: true, producers: [1], consumers: [2] }],
 		cargoTotals: [{ label: "COAL", produced: 1, transported: 1 }],
 		engines: [{ id: 1, name: "probe", speed: 1, cargo: "COAL" }],
-		companyCargo: null,
+		companyCargo: {
+			byCargo: [{ label: "COAL", amount: 3 }],
+			quarterDelivered: 5,
+			monitored: { cargoes: 1, destinations: 2 },
+			gaps: { dropped: 0 },
+		},
 		observationPolicy: null,
 		loanCeiling: 100000,
 		loanInterval: 10000,

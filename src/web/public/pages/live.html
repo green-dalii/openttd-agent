@@ -432,7 +432,7 @@
          P1+P2（2026-09-25）。三种口径**必须分块**（SPEC §10.99）：
          ① 产业侧上月产量/运量 —— 口径 = 所有公司（`GSIndustry.*`）
          ② 产业样本（按产量取样，写明 largest N of M）
-         ③ 本公司交付 —— 口径 = `GSCargoMonitor` 累计（覆盖全部城镇/产业）
+         ③ 本公司交付 —— 口径 = `GSCargoMonitor` 的**货运交付到产业**（单轴累计，货运 F2）
          比率由 view model 派生（生产=0 → "—"，不是 0%）。没有 GS 通道时显示"读不到"。 -->
     <div class="group"><h2>Cargo &amp; industry</h2><div class="rule"></div>
       <span class="dim">what the map produces and transports — and what this company delivered</span></div>
@@ -486,7 +486,7 @@
       </div>
       <div class="panel">
         <div class="panel-head">
-          <h2>Delivered by this company</h2>
+          <h2>Freight delivered by this company</h2>
           <span class="dim" x-text="ownCargoNote()"></span>
         </div>
         <table>
@@ -497,7 +497,7 @@
             </template>
           </tbody>
         </table>
-        <p class="empty" x-show="!ownCargoRows().length">Nothing delivered yet in this run (monitor returns 0 until the first drop-off).</p>
+        <p class="empty" x-show="!ownCargoRows().length">No freight delivered yet in this run (the monitor reads 0 until the first drop-off).</p>
       </div>
     </section>
     <section class="panel" x-show="!industryNote()">

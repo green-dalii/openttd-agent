@@ -1523,6 +1523,27 @@ class BridgeV1 extends GSController {
     //（D44：未建的键会让整个 GS 静默不加载），所以载荷永远是同一个字面量形状。
     _facts = null;
     _facts_tick = 0;
+    // 货运计量（F2，2026-11-08）：`GSCargoMonitor` 是**读一次清零**的增量口径
+    // （`script_cargomonitor.hpp`：每次读返回"上次读之后的增量"并把累计清零），
+    // 所以累计**必须由我们做**，否则每次读到的都是 0 ⇒ 等于没测。
+    // 三个状态都用**数组**（Squirrel 的表不能动态建键，D44）：
+    //   _own_totals = [{label, amount}]：每个被监视货种的会话累计；
+    //   _own_pairs  = [{cargo, industry, label}]：当前在监视的目的地；
+    //   _own_lost：计量缺口（丢掉的增量数，见 CollectFacts 的说明）；
+    //   _own_err：最后一次读失败的错误全文（失败不许静默，D95）。
+    _own_totals = null;
+    _own_pairs = null;
+    _own_lost = 0;
+    _own_err = "";
+    // 施工方（executor）的公司 id。
+    //
+    // 为什么不能用 `GSCompany.COMPANY_SELF`：Bridge GS 是**服务器脚本**
+    // （`[game_scripts]`），它**自己没有公司**；公司是 executor AI 建的，
+    // executor 通过命令把公司 id 告诉它。于是 COMPANY_SELF 解析成无效公司 ⇒
+    // cargo monitor 直接返回 -1（真机实测：38 个目的地全部 failed）。
+    // 默认 0：沙盒里 executor 建的**第一家公司**（与 `GetQuarterlyCargoDelivered(0, 0)`
+    // 同一个假设），命令到达后以命令里的为准。
+    _exec_company = 0;
     _core = null;   // ExecCore（P1-1a：施工状态机，标牌邮箱已废）
 
 
@@ -2194,6 +2215,10 @@ class BridgeV1 extends GSController {
         // 模型看不见它，就只能从"煤"两个字上猜哪座厂要煤（真机探针：矿场旁边的
         // 车站**不接受煤**，电站旁边的才接受 ⇒ 光有"哪里有煤"是没法修一条货运线的）。
         local cargo_catalog = [];
+        // 货运计量（F2）的监视集合：货运货种 × 收方产业。在货种循环里顺手收集
+        // （货种的数字下标只有那里有；目录里只留标签与名字，那是模型看得懂的部分）。
+        local monitor_pairs = [];
+        local monitor_cargoes = 0;
         // 产业位置与名字（**全部**产业）：模型要选线路就得知道"在哪儿"。
         // 以前只有产量前 12 的产业有名字，而且**一个坐标都没有**。
         local industry_index = [];
@@ -2232,8 +2257,16 @@ class BridgeV1 extends GSController {
             // 事实，与车站的收货判定同一套规则（`industry_cmd.cpp` 的
             // `AddAcceptedCargo_Industry` 看的是产业自己的 accepted 表）。
             foreach (cid, _ in GSIndustryList_CargoAccepting(c)) consumers.append(cid);
-            cargo_catalog.append({ label = label, freight = GSCargo.IsFreight(c),
+            local is_freight = GSCargo.IsFreight(c);
+            cargo_catalog.append({ label = label, freight = is_freight,
                                    producers = producers, consumers = consumers });
+            // 货运交付发生在**收方**产业 ⇒ 监视收方（不是产方）。
+            if (is_freight) {
+                monitor_cargoes++;
+                foreach (cid in consumers) {
+                    monitor_pairs.append({ cargo = c, industry = cid, label = label });
+                }
+            }
             if (sum_prod > 0 || sum_trans > 0) {
                 cargo_totals.append({ label = label, produced = sum_prod, transported = sum_trans });
             }
@@ -2259,20 +2292,89 @@ class BridgeV1 extends GSController {
                                     x = GSMap.GetTileX(loc), y = GSMap.GetTileY(loc) });
         }
 
-        // --- 公司口径：把 id 先物化成 array（GSList 反复遍历不安全，
-        //     且仓库约定 array 用单变量 foreach）---
-        local town_ids = [];
-        foreach (tid, _ in GSTownList()) town_ids.append(tid);
-        local ind_ids = [];
-        foreach (iid, _ in all_industries) ind_ids.append(iid);
-
-        // 按货种拆分**不可测**（2026-11-01 核对 OpenTTD 15.3 源码）：
-        // 脚本 API **没有 cargo monitor**（`GSCargoMonitor.*` 调用**不报错**，
-        // 只是返回 null ⇒ 症状是「拆分一直是空的」，很容易被误读成「还没交付」）；
-        // admin 的 `deliveredCargo` 又是按货种数组的**求和** ⇒ 公司的交付
-        // **无法按货种分开**（SPEC §10.65）。
-        // 字段保留（载荷形状恒定，D44），值恒为空数组 —— 空数组 = 「没测到」，不是 0。
+        // --- 公司口径（货运 F2）：`GSCargoMonitor` 的**单轴**累计 ---
+        //
+        // 三个决定，都写在 `docs/FREIGHT-LINE-FEASIBILITY.md` 里：
+        // ① **单轴**：城镇轴与产业轴会把**同一笔交付**记两次 ⇒ 只取**产业交付**
+        //    （交付发生在卸货站，计入该站集货区里的收方产业）。
+        // ② **累计**：monitor 每次读会清零，所以读到的增量要**自己加起来**。
+        // ③ **只监视货运**：乘客不进产业轴（乘客送到城镇），所以产业轴天生是货运口径。
+        //
+        // 旧注释（2026-11-01）说"脚本 API 没有 cargo monitor"——**那是错的**：
+        // API 存在（`script_cargomonitor.hpp` 带 `@api game`），当初空的原因是
+        // 我们自己的累加器往 Squirrel 的严格表里写动态键，抛异常把整个
+        // CollectFacts 打断了（MEMORY D94 / D95）。
         local own_by_cargo = [];
+        local own_monitored = { cargoes = 0, destinations = 0 };
+        local own_gaps = { dropped = this._own_lost, error = this._own_err };
+
+        // 监视集合 = 每个**货运**货种 × 它的**收方**产业（在上面的货种循环里
+        // 顺手收集：那里才有货种的数字下标）。收方才是交付发生的地方 ⇒ 监视收方。
+        local pairs = monitor_pairs;
+        local cargo_count = monitor_cargoes;
+
+        // 上次的监视集合里有、这次没有的目的地 ⇒ 它未结算的增量**拿不回来了**
+        // （产业没了 ⇒ monitor 读不出来）⇒ 记成缺口，累计值是**下界**。
+        if (this._own_pairs != null) {
+            foreach (old in this._own_pairs) {
+                local still = false;
+                foreach (p in pairs) {
+                    if (p.cargo == old.cargo && p.industry == old.industry) { still = true; break; }
+                }
+                if (!still) this._own_lost++;
+            }
+        }
+
+        // 累计：每个被监视的货种先建一条 0 的记录（0 是**真实测量值**：监视了，
+        // 没收到交付），读到的增量再加上去。
+        local totals = this._own_totals;
+        if (totals == null) totals = [];
+        foreach (cinfo in cargo_catalog) {
+            if (!cinfo.freight) continue;
+            local seen = false;
+            foreach (t in totals) {
+                if (t.label == cinfo.label) { seen = true; break; }
+            }
+            if (!seen) totals.append({ label = cinfo.label, amount = 0 });
+        }
+
+        // 公司还没建出来（executor 还没开工）⇒ **监视无从谈起**：monitor 是按
+        // (公司, 货种, 产业) 三元组记的，公司不存在就没有增量 ⇒ 这既不是失败，
+        // 也没有丢东西 ⇒ 不许计数（真机实测：早于公司存在的那一轮读全是 -1，
+        // 把它算成"缺口"会让页面说"累计是下界"，而其实什么都没丢）。
+        local comp = GSCompany.ResolveCompanyID(this._exec_company);
+        if (comp != GSCompany.COMPANY_INVALID) {
+            foreach (p in pairs) {
+                local amt = -1;
+                try {
+                    amt = GSCargoMonitor.GetIndustryDeliveryAmount(
+                        this._exec_company, p.cargo, p.industry, true);
+                } catch (e) {
+                    // 不静默（D95）：记住错误全文，随缺口一起报出去。
+                    amt = -1;
+                    this._own_err = "" + e;
+                }
+                if (amt == null || amt < 0) {
+                    // -1 = 这个目的地读不出来了（产业没了）⇒ 它未结算的增量**拿不回来**
+                    // ⇒ 累计值是**下界**（这才是真正的缺口）。
+                    this._own_lost++;
+                    if (this._own_err == "") {
+                        this._own_err = "GetIndustryDeliveryAmount returned -1 (destination out of bounds)";
+                    }
+                    continue;
+                }
+                if (amt == 0) continue;
+                foreach (t in totals) {
+                    if (t.label == p.label) { t.amount = t.amount + amt; break; }
+                }
+            }
+        }
+
+        this._own_totals = totals;
+        this._own_pairs = pairs;
+        foreach (t in totals) own_by_cargo.append({ label = t.label, amount = t.amount });
+        own_monitored = { cargoes = cargo_count, destinations = pairs.len() };
+        own_gaps = { dropped = this._own_lost, error = this._own_err };
 
         // 游戏口径的季度总量（全货种，精确）—— 用来和上面的 monitor 累计交叉核对。
         local quarter = null;
@@ -2286,7 +2388,8 @@ class BridgeV1 extends GSController {
             cargo_totals = cargo_totals,
             own_delivered = own_by_cargo,
             own_quarter = quarter,
-            own_monitored = { towns = town_ids.len(), industries = ind_ids.len() },
+            own_monitored = own_monitored,
+            own_gaps = own_gaps,
         };
     }
 
@@ -2439,6 +2542,7 @@ class BridgeV1 extends GSController {
                     own_delivered = (f == null) ? [] : f.own_delivered,
                     own_quarter = (f == null) ? null : f.own_quarter,
                     own_monitored = (f == null) ? null : f.own_monitored,
+                    own_gaps = (f == null) ? null : f.own_gaps,
                 });
             }
             this.Sleep(20);
@@ -2733,6 +2837,11 @@ class BridgeV1 extends GSController {
 
     function Dispatch(obj) {
         local cmd = obj["cmd"];
+        // executor 的公司 id（货运计量要用：GS 是服务器脚本，没有自己的公司）。
+        if (obj.rawin("company")) {
+            local c = obj["company"];
+            if (c != null && c >= 0) this._exec_company = c;
+        }
         if (cmd == "ping") {
             GSAdmin.Send({ kind = "pong", cmd = "ping", ok = true });
         } else if (cmd == "demo") {
