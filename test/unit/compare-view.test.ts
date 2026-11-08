@@ -34,6 +34,19 @@ interface CompareView {
 	}[];
 	exclusionRows(payload: unknown): { reason: string; count: number }[];
 	comparison(payload: unknown): { verdict: string; message: string; pairs: number; known: boolean } | null;
+	comparisonRows(payload: unknown): {
+		axis: string;
+		what: string;
+		verdict: string;
+		message: string;
+		pairs: number;
+		known: boolean;
+		meanDiff: number | null;
+		ci: [number, number] | null;
+		betterModel: string | null;
+		betterWhen: "higher" | "lower" | null;
+		better: string;
+	}[];
 	runRows(payload: unknown): { id: string; model: string; seed: number; link: string }[];
 	modelNames(payload: unknown): string[];
 	collisionRows(payload: unknown): { id: string; dropped: number }[];
@@ -387,3 +400,127 @@ function window2(): {
 	vm.runInContext(SRC, sandbox);
 	return (sandbox.window as { CompareView: never })["CompareView"] as never;
 }
+
+describe("CompareView：配对判定按轴（Issue #87）", () => {
+	it("每个轴一行：轴、指标、单位、判定、n、区间", () => {
+		const v = load();
+		const rows = v.comparisonRows({
+			comparisons: [
+				{
+					metricId: "ability.deliveredPerGameDay",
+					axisLabel: "Result",
+					label: "cargo + passengers delivered",
+					unit: "per game day",
+					modelA: "a",
+					modelB: "b",
+					pairs: [{ seed: 1, repeat: 1, a: 1, b: 2, diff: -1 }],
+					meanDiff: -0.5,
+					diffCi95: [-1.2, 0.3],
+					verdict: "not determinable",
+					message: "the interval includes 0",
+					betterWhen: "higher",
+					betterModel: null,
+				},
+				{
+					metricId: "stability.toolFailureRate",
+					axisLabel: "Reliability",
+					label: "tool calls that failed",
+					unit: "share of tool calls",
+					modelA: "a",
+					modelB: "b",
+					pairs: [],
+					meanDiff: null,
+					diffCi95: null,
+					verdict: "not determinable",
+					message: "no usable pair",
+					betterWhen: "lower",
+					betterModel: null,
+				},
+			],
+		});
+		expect(rows).toHaveLength(2);
+		expect(rows[0]!.axis).toBe("Result");
+		expect(rows[0]!.what).toContain("per game day");
+		expect(rows[0]!.pairs).toBe(1);
+		expect(rows[0]!.known).toBe(false);
+		expect(rows[0]!.ci).toEqual([-1.2, 0.3]);
+		expect(rows[1]!.pairs).toBe(0);
+		expect(rows[1]!.meanDiff).toBeNull();
+	});
+
+	it("「谁更好」是服务端的答案：页面只透传，不自己判断方向", () => {
+		const v = load();
+		const rows = v.comparisonRows({
+			comparisons: [
+				{
+					metricId: "efficiency.secondsPerRun",
+					axisLabel: "Efficiency",
+					label: "wall clock",
+					unit: "seconds per run",
+					modelA: "a",
+					modelB: "b",
+					pairs: [{ seed: 1, repeat: 1, a: 1, b: 2, diff: -1 }],
+					meanDiff: -1,
+					diffCi95: [-2, -0.1],
+					verdict: "b_higher",
+					message: "excludes 0",
+					betterWhen: "lower",
+					betterModel: "a",
+				},
+				{
+					metricId: "ability.stations",
+					axisLabel: "Result",
+					label: "stations",
+					unit: "at the end of the run",
+					modelA: "a",
+					modelB: "b",
+					pairs: [{ seed: 1, repeat: 1, a: 5, b: 2, diff: 3 }],
+					meanDiff: 3,
+					diffCi95: [1, 5],
+					verdict: "a_higher",
+					message: "excludes 0",
+					betterWhen: null,
+					betterModel: null,
+				},
+			],
+		});
+		// B 的数字更大，但「更少墙钟」才好 ⇒ 服务端说是 a。
+		expect(rows[0]!.verdict).toBe("b_higher");
+		expect(rows[0]!.betterModel).toBe("a");
+		expect(rows[0]!.betterWhen).toBe("lower");
+		expect(rows[0]!.better).toBe("a (lower is better)");
+		// 不带好坏方向的指标：没有「谁更好」。
+		expect(rows[1]!.verdict).toBe("a_higher");
+		expect(rows[1]!.betterModel).toBeNull();
+		expect(rows[1]!.betterWhen).toBeNull();
+		expect(rows[1]!.better).toBe("no quality");
+	});
+
+	it("指标有好坏方向但判定不出来时，说「不可判定」（服务端的话）", () => {
+		const v = load();
+		const rows = v.comparisonRows({
+			comparisons: [
+				{
+					metricId: "ability.deliveredPerGameDay",
+					axisLabel: "Result",
+					label: "cargo + passengers delivered",
+					unit: "per game day",
+					pairs: [],
+					meanDiff: null,
+					diffCi95: null,
+					verdict: "not determinable",
+					message: "the interval includes 0",
+					betterWhen: "higher",
+					betterModel: null,
+				},
+			],
+		});
+		expect(rows[0]!.better).toBe("not determinable");
+	});
+
+	it("没有逐轴判定时是空数组（不是猜一条出来）", () => {
+		const v = load();
+		expect(v.comparisonRows({})).toEqual([]);
+		expect(v.comparisonRows(null)).toEqual([]);
+	});
+});

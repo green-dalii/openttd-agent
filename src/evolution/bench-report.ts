@@ -9,6 +9,7 @@
  */
 
 import type { ModelCard, Scorecard } from "./scorecard.js";
+import type { PairedComparison } from "./bench-stats.js";
 
 /** Format a number or say plainly that it was not measured. */
 function num(v: number | null, digits = 2): string {
@@ -20,7 +21,11 @@ function pct(v: number | null): string {
 }
 
 /** Render the scorecard as Markdown. Never empty: an empty card says so. */
-export function renderReportMarkdown(card: Scorecard, generatedAt = new Date()): string {
+export function renderReportMarkdown(
+	card: Scorecard,
+	generatedAt = new Date(),
+	comparisons: PairedComparison[] = [],
+): string {
 	const c = card.conditions;
 	const lines: string[] = [];
 	lines.push("# Benchmark report");
@@ -80,6 +85,55 @@ export function renderReportMarkdown(card: Scorecard, generatedAt = new Date()):
 		lines.push(`- **${m.model}**: ${m.growth.verdict} - ${m.growth.message}`);
 	}
 	lines.push("");
+
+	// ---- paired comparison (per axis) ----
+	//
+	// Every axis that can be compared pair by pair gets a row: what is compared,
+	// in what unit, the verdict and n. The reader has to be able to see WHICH
+	// question was answered - "the numbers differ" without the axis is not a
+	// result (Issue #87).
+	lines.push("## Paired comparison");
+	lines.push("");
+	if (comparisons.length === 0) {
+		lines.push("No paired comparison in this report (it needs two models on the same seeds).");
+		lines.push("");
+	} else {
+		const pairs = new Map<string, PairedComparison[]>();
+		for (const c of comparisons) {
+			const key = `${c.modelA} vs ${c.modelB}`;
+			const list = pairs.get(key);
+			if (list) list.push(c);
+			else pairs.set(key, [c]);
+		}
+		for (const [key, list] of pairs) {
+			lines.push(`### ${key}`);
+			lines.push("");
+			lines.push("Design: paired (same seed, same repeat).");
+			lines.push("");
+			lines.push("| axis | what is compared | better | verdict | pairs | mean difference | 95% CI |");
+			lines.push("|---|---|---|---|---|---|---|");
+			for (const c of list) {
+				const ci = c.diffCi95 ? `[${c.diffCi95[0].toFixed(2)}, ${c.diffCi95[1].toFixed(2)}]` : "not measured";
+				const better =
+					c.betterModel === null
+						? c.betterWhen === null
+							? "no quality"
+							: "not determinable"
+						: `${c.betterModel} (${c.betterWhen} is better)`;
+				lines.push(
+					`| ${c.axisLabel} | ${c.label} (${c.unit}) | ${better} | ${c.verdict} | n=${c.pairs.length} | ` +
+						`${c.meanDiff === null ? "not measured" : c.meanDiff.toFixed(3)} | ${ci} |`,
+				);
+			}
+			lines.push("");
+		}
+		lines.push(
+			"\"not determinable\" means the interval cannot decide (too few pairs, or it contains 0) - " +
+				"it is not a statement that the two models are equal. \"no quality\" marks a metric that " +
+				"carries no better/worse (more stations is not automatically better).",
+		);
+		lines.push("");
+	}
 
 	// ---- exclusions ----
 	const excluded = card.models.filter((m) => m.excluded > 0);

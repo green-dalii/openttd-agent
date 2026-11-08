@@ -23,7 +23,7 @@ import { join } from "node:path";
 import { planMatrix, type BenchWorld } from "../src/evolution/bench-plan.js";
 import { buildScorecard, type BenchConditions } from "../src/evolution/scorecard.js";
 import { renderReportMarkdown } from "../src/evolution/bench-report.js";
-import { pairedComparison } from "../src/evolution/bench-stats.js";
+import { pairedComparisons } from "../src/evolution/bench-stats.js";
 import { readMetrics } from "../src/evolution/store.js";
 import type { GameMetric } from "../src/evolution/metrics.js";
 
@@ -188,12 +188,24 @@ const all: GameMetric[] = plan.cells.flatMap((c) => {
 	}
 });
 const card = buildScorecard(all, { conditions });
+// The paired verdicts, per axis (Issue #87): one comparison per metric that
+// can be compared pair by pair, so the report answers every axis instead of
+// only the main one.
+const pairComparisons: Record<string, ReturnType<typeof pairedComparisons>> = {};
+const allComparisons: ReturnType<typeof pairedComparisons> = [];
+for (let i = 0; i < args.models.length; i++) {
+	for (let j = i + 1; j < args.models.length; j++) {
+		const list = pairedComparisons(all, args.models[i]!, args.models[j]!);
+		pairComparisons[`${args.models[i]} vs ${args.models[j]}`] = list;
+		allComparisons.push(...list);
+	}
+}
 const stamp = new Date().toISOString().replace(/[:.]/g, "-");
 mkdirSync(args.root, { recursive: true });
 const jsonPath = join(args.root, `bench-${stamp}.json`);
-writeFileSync(jsonPath, `${JSON.stringify({ plan, conditions, scorecard: card }, null, 2)}\n`, "utf8");
+writeFileSync(jsonPath, `${JSON.stringify({ plan, conditions, scorecard: card, comparisons: pairComparisons }, null, 2)}\n`, "utf8");
 const mdPath = join(args.root, `bench-${stamp}.md`);
-writeFileSync(mdPath, renderReportMarkdown(card), "utf8");
+writeFileSync(mdPath, renderReportMarkdown(card, new Date(), allComparisons), "utf8");
 
 console.log("");
 console.log(`runs: ${plan.cells.length - failed} ok, ${failed} failed`);
@@ -203,11 +215,14 @@ console.log(`        ${mdPath}`);
 // Pairwise, paired-by-seed comparisons (only meaningful with >= 2 models).
 if (args.models.length >= 2) {
 	console.log("");
-	console.log("paired comparisons (same seed, same repeat):");
+	console.log("paired comparisons (same seed, same repeat), per axis:");
 	for (let i = 0; i < args.models.length; i++) {
 		for (let j = i + 1; j < args.models.length; j++) {
-			const cmp = pairedComparison(all, args.models[i]!, args.models[j]!);
-			console.log(`  ${args.models[i]} vs ${args.models[j]}: ${cmp.verdict} - ${cmp.message}`);
+			const pair = `${args.models[i]} vs ${args.models[j]}`;
+			for (const cmp of pairedComparisons(all, args.models[i]!, args.models[j]!)) {
+				console.log(`  [${cmp.axisLabel}] ${cmp.label} (${cmp.unit}): ${cmp.verdict} - ${cmp.message}`);
+			}
+			console.log(`  (${pair})`);
 		}
 	}
 }

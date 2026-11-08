@@ -19,7 +19,7 @@ import { createHash } from "node:crypto";
 import { metricExclusion, type GameMetric } from "./metrics.js";
 import { buildScorecard, type BenchConditions, type ModelCard } from "./scorecard.js";
 import type { LedgerCollision } from "./store.js";
-import { pairedComparison, type PairedComparison } from "./bench-stats.js";
+import { pairedComparison, pairedComparisons, type PairedComparison } from "./bench-stats.js";
 
 /** One run, as the Compare page lists it (the drill-down to History). */
 export interface CompareRun {
@@ -141,6 +141,16 @@ export interface ComparePayload {
 	exclusions: ExclusionCount[];
 	/** The paired comparison of the two selected models (null if not two). */
 	comparison: PairedComparison | null;
+	/**
+	 * The paired comparison **per axis** (Issue #87).
+	 *
+	 * Why: the old payload carried one verdict - the main axis - so the other
+	 * axes had no interval at all ("the efficiency axis looks separable" was
+	 * never a verdict). The page shows the main one as the headline and the
+	 * rest as rows; **every verdict here is the server's**, the page never
+	 * recomputes a statistic.
+	 */
+	comparisons: PairedComparison[];
 	/** The runs themselves (the drill-down list). */
 	runs: CompareRun[];
 	/** Whether the compared runs shared a scaffold and an observation surface. */
@@ -284,6 +294,9 @@ export function buildCompareView(
 	const selected = opts.models ?? [];
 	const comparison =
 		selected.length === 2 ? pairedComparison(scoped, selected[0]!, selected[1]!) : null;
+	// The same, per axis: every metric that can be compared pair by pair.
+	const comparisons =
+		selected.length === 2 ? pairedComparisons(scoped, selected[0]!, selected[1]!) : [];
 
 	const runs: CompareRun[] = scoped
 		.map((m) => ({
@@ -338,6 +351,7 @@ export function buildCompareView(
 		models,
 		exclusions,
 		comparison,
+		comparisons,
 		runs,
 		groups,
 		selectedGroupId: selectedGroup?.id ?? null,
