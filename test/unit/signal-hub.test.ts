@@ -211,6 +211,7 @@ describe("signal-hub —— B-3 单元契约（golden from /tmp/calA3.log）", (
 		};
 		hub.onEvent({ kind: "gamescript", payload: ack } as unknown as GameEvent);
 		expect(ledger.record).toHaveBeenCalledWith({
+			kind: "passenger",
 			job: 101, fromTown: 9, toTown: 12, decision: 7, orderedAt: expect.any(Number),
 			// D3a/S4: the GS assigns the job id, so the ack is the only place
 			// that knows which command this job is.

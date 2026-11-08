@@ -27,7 +27,7 @@ describe("决策→结果台账（连接键的来源）", () => {
 describe("决策→结果台账", () => {
 	function ledger(): RouteLedger {
 		const l = new RouteLedger();
-		l.record({ job: 100, fromTown: 1, toTown: 2, decision: 3, orderedAt: 1000, command: "build_bus_route" });
+		l.record({ kind: "passenger", job: 100, fromTown: 1, toTown: 2, decision: 3, orderedAt: 1000, command: "build_bus_route" });
 		return l;
 	}
 

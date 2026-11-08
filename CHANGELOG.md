@@ -46,17 +46,23 @@
   "a producer industry to a consumer industry".
 
 ### Added
-- **A freight line now says how much it delivered.** The engine does not record which vehicle
-  delivered what where, so a per-line delivery figure has always been a *derived* number - and
-  until now there was nothing to derive it from: the game script reported the cargo totals but
-  dropped the destination, and the route table did not say which industries a line served. The
-  script now also reports the delivery **per (cargo, receiving industry)** and the **two industry
-  ids of every freight line**, and the harness attributes each delivery to the one line that
-  serves that cargo at that industry. When several of our lines share it, the delivery is **not
-  split** - it is reported as unattributable with the reason; when no line of ours serves it the
-  amount is reported separately rather than dropped, so the attributed total never silently looks
-  like the company total. Real machine (seed 4242, a coal line 28 -> 53): 160 tonnes attributed
-  to that line, nothing unattributed.
+- **A freight line now says how much it delivered, and it enters the decision ledger in its own
+  shape.** The engine does not record which vehicle delivered what where, so a per-line delivery
+  figure has always been a *derived* number - and there was nothing to derive it from: the game
+  script reported the cargo totals but dropped the destination, and the route table did not say
+  which industries a line served. The script now also reports the delivery **per (cargo,
+  receiving industry)** and the **two industry ids of every freight line**, and the harness
+  attributes each delivery to the one line that serves that cargo at that industry. When several
+  of our lines share it the delivery is **not split** - it is reported as unattributable with the
+  reason; when no line of ours serves it the amount is reported separately rather than dropped,
+  so the attributed total never silently looks like the company total. The ledger had one shape
+  ("two towns"), so a freight line could only enter it as `null/null` - and those sentences are
+  injected into the model's context: `route towns null->null was ordered at decision 2`. Passenger
+  and freight routes are now **two explicit record kinds**, the de-duplication key includes the
+  kind and the two ends, and the injected sentence says what the line really is, including how
+  much it delivered and that the figure is derived. Real machine (seed 4242, a coal line 28 ->
+  53): 160 tonnes attributed to that line, the fact reads `kind: freight, industries 28 -> 53,
+  COAL, delivered 80`, and no fact has a null end any more.
 - **The paired comparison now answers on every axis.** It used to compute exactly one metric - cargo +
   passengers delivered per game day - so the efficiency axis (delivered per 1M tokens) and the stability
   axis (share of tool calls that failed) had **no paired interval at all**. That is how "the efficiency
@@ -413,15 +419,12 @@
 
 ### Changed (Dashboard UX 重构 — 从「极客日志面板」到可用控制台)
 **Provider/Model 选择改为**「**可搜索组合框**」**（原来两个并排滚动列表，"在列表里找列表"）
-- 39 provider × ~1900 model 不是"列表内容"而是"单选控件"：用户通常已知道要用哪个，
-  第一交互应是**搜索**
+- 39 provider × ~1900 model 不是"列表内容"而是"单选控件"：用户通常已知道要用哪个，第一交互应是**搜索**
 - 键盘完整：`↑`/`↓`/`Home`/`End`/`Enter`/`Esc`；ARIA `combobox`/`listbox`/`aria-activedescendant`
-- **按「Ready now / Needs a key / Cloud-OAuth」分组**，直接回答"我现在能用哪个"
-- Providers 页从 `/llm` 迁到 `/providers`；旧 URL 经 `PAGE_ALIASES` 内部重写，不再 404
+- **按「Ready now / Needs a key / Cloud-OAuth」分组**；Providers 页从 `/llm` 迁到 `/providers`（旧 URL 经 `PAGE_ALIASES` 内部重写，不再 404）
 
 **Live 页按信息紧迫性重排，信息密度显著提升**
-- 首屏 **KPI 条**：Cash / Income / Company value / Loan / Fleet / Tokens
-  —— 大数字 + **环比 delta** + **迷你趋势线**
+- 首屏 **KPI 条**：Cash / Income / Company value / Loan / Fleet / Tokens —— 大数字 + **环比 delta** + **迷你趋势线**
 - Agent 区：token 构成、**失败率**、按 turn 图可切 **Tokens / Cost**、工具延迟表、
   步骤流**可过滤**（全部/LLM/工具/失败）、思考流独立面板
 - 事件流：类别 chips **带计数**、**搜索**（跨 kind/类别/摘要/payload）、
@@ -459,10 +462,7 @@
 
 ### Added（测试缺口）
 
-- `test/unit/providers-save.test.ts`：**保存链路**的真实组件测试——"点 Save 发了什么请求"、
-  "发不出去时用户是否被告知"。此前后端（`web-api.test.ts`）与纯逻辑
-  （`saveReady()` / `saveBody()`）都被测过，**缺的正是两者之间那一段**：
-  断言一个谓词 ≠ 断言一次体验。
+- `test/unit/providers-save.test.ts`：**保存链路**的真实组件测试——"点 Save 发了什么请求"、"发不出去时用户是否被告知"。此前后端与纯逻辑都被测过，**缺的正是两者之间那一段**：断言一个谓词 ≠ 断言一次体验。
 
 ### Fixed（用户 e2e 发现的两个问题）
 
@@ -479,7 +479,7 @@
 ### Fixed（2026-09-12 审计 + 用户报告）
 
 - **KPI 不实时更新，必须手动刷新**。根因：`--watch` 会 `web.publishEvent(ev)`， 而**主模式 `--agent` 从不转发事件** → 页面收不到 `event` 帧， 公司镜像与历史永不推进，KPI 冻结在连接时的快照上。已补齐并加一致性测试。
-- **Token 图改为堆叠面积图**（用户要求）。过程中否掉了两条错路，都由**像素扫描**判定： ① uPlot 的 `bands` API：`series` 必须是 `[from,to]` 元组（传数字被静默忽略）， 且改成元组后填充**仍然不出现**；② 仅累积数据不够——后面画的大面积会盖住前面的。 最终方案：**倒序绘制（大者先画）+ 不透明填充到轴**，小面积覆盖其下半部分， 于是每条系列露出的正好是自己那一段。实测（等分三等份）：纵向连续三段 `Reasoning 100px → Output 100px → Input 70px`，无缝、无混色。
+- **Token 图改为堆叠面积图**（用户要求）。过程中否掉了两条错路，都由**像素扫描**判定： ① uPlot 的 `bands` API：`series` 必须是 `[from,to]` 元组（传数字被静默忽略）， 且改成元组后填充**仍然不出现**；② 仅累积数据不够——后面画的大面积会盖住前面的。 最终方案：**倒序绘制（大者先画）+ 不透明填充到轴**。实测（等分三等份）：纵向连续三段 `Reasoning 100px → Output 100px → Input 70px`，无缝、无混色。
 - **Harness 边界收紧**（用户明确要求：不要把经验教训内化进框架）。
   `SYSTEM_PROMPT` 曾写着"Do NOT issue the same command repeatedly"、
   "Prefer one solid route"、"add vehicles when queues grow" —— 这些是**策略**，
@@ -619,7 +619,7 @@
 - **长驻观测循环** (`src/game/runner.ts`): spawn → start_ai → AdminClient → WorldState → WebServer 广播 + 周期 poll；SIGINT 优雅关闭
 - **AI 可用性探测** (`src/game/ai-registry.ts`)、**BigInt-safe 序列化** (`src/util/json.ts`)
 - **Web 服务器 + 仪表盘** (`src/web/server.ts` + `public/*`): HTTP 静态 + WS 扇出；原生 HTML+Canvas，无构建链
-- **CLI `--watch`**: 起服 + start_ai + 长驻采集 + 仪表盘；`--ai`/`--web-port` 参数；**测试** `test/live/observation.test.ts`（@live 真机集成）；`ws` 是唯一的运行时依赖
+- **CLI `--watch`**: 起服 + start_ai + 长驻采集 + 仪表盘；**测试** `test/live/observation.test.ts`（@live）；`ws` 是唯一的运行时依赖
 
 ### Fixed
 - `decodeErrorText` 修正: ServerError 是单 NUL 字符串而非 cstr 对；economy payload 的 BigInt 在 JSON 序列化崩溃（probe 无公司从未触达）—— 现在全链路 BigInt-safe
@@ -634,8 +634,8 @@
 - **包管理器切换到 pnpm**: 移除 `node_modules`/`package-lock.json`；改用 `pnpm-lock.yaml`；脚本从 `npm run *` 改为 `pnpm *`；移除未使用的 `zod` 依赖；声明 `pnpm.onlyBuiltDependencies`（esbuild）允许构建脚本。（注：pnpm 传递 CLI 参数不需要 `--`）
 
 ### Added (MVP — 脚手架 + Admin Port 最小闭环)
-- **工程脚手架**: TypeScript strict + ESM + vitest + eslint flat config；`pnpm run gate`（typecheck+lint+test 一键门禁）；**开发规范** `AGENTS.md`；`ROADMAP.md`
-- **Admin Port 协议层** (`src/game/admin-protocol.ts`): 完整 packet 类型枚举（对齐 `tcp_admin.h`）+ 帧编解码（u16 LE 含自身长度前缀）+ 增量流式拆帧
+- **工程脚手架**: TypeScript strict + ESM + vitest + eslint flat config；`pnpm run gate`；**开发规范** `AGENTS.md`；`ROADMAP.md`
+- **Admin Port 协议层** (`src/game/admin-protocol.ts`): packet 类型枚举（对齐 `tcp_admin.h`）+ 帧编解码（u16 LE 含自身长度前缀）+ 增量流式拆帧
 - **Payload 解析** (`src/game/payload-parsers.ts`, `src/game/observer.ts`): OpenTTD 日历算法（锚点 712223=1950-01-01 已真机校准）+ CompanyEconomy/Info/Stats/Chat/Console/GameScript/Date 规范化
 - **蓝图通道** (`src/game/blueprint.ts`): 高层动作 → GS 蓝图 JSON（job 0..999 / path ≤200 校验）
 - **进程管理** (`src/game/process-manager.ts`): 隔离 data dir；generate-then-patch 配置；spawn/stop/日志尾/端口探活

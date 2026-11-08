@@ -107,7 +107,7 @@ describe("C-1 接线：局终落盘路线事实", () => {
 	it("有下单的局：账本 → route-facts.jsonl（确定性，不经 LLM）", async () => {
 		const dir = mkdtempSync(join(tmpdir(), "rf-"));
 		const ledger = new RouteLedger();
-		ledger.record({ job: 100, fromTown: 9, toTown: 12, decision: 2, orderedAt: 1 });
+		ledger.record({ kind: "passenger", job: 100, fromTown: 9, toTown: 12, decision: 2, orderedAt: 1 });
 		ledger.markDone(100, "1950-03-14");
 		await runFinalize(dir, ledger, 2);
 		const path = join(dir, "evolution", "route-facts.jsonl");
@@ -130,7 +130,7 @@ describe("C-1 接线：局终落盘路线事实", () => {
 	it("有下单但全未完成的局：仍然反思（可行性教训有效），事实如实落盘", async () => {
 		const dir = mkdtempSync(join(tmpdir(), "rf-"));
 		const ledger = new RouteLedger();
-		ledger.record({ job: 101, fromTown: 9, toTown: 17, decision: 3, orderedAt: 2 });
+		ledger.record({ kind: "passenger", job: 101, fromTown: 9, toTown: 17, decision: 3, orderedAt: 2 });
 		reflectCalls.n = 0;
 		await runFinalize(dir, ledger, 3);
 		expect(reflectCalls.n).toBeGreaterThan(0); // 下单过 → 有可反思的内容
@@ -144,7 +144,7 @@ describe("C-1 接线：决策上下文注入事实行", () => {
 		const dir = mkdtempSync(join(tmpdir(), "rf-"));
 		expect(makeRouteFactsProvider(dir)()).toEqual([]); // 空库不造占位符
 		const ledger = new RouteLedger();
-		ledger.record({ job: 100, fromTown: 9, toTown: 12, decision: 2, orderedAt: 1 });
+		ledger.record({ kind: "passenger", job: 100, fromTown: 9, toTown: 12, decision: 2, orderedAt: 1 });
 		ledger.markDone(100, "1950-03-14");
 		// 直接通过 routeFactsFromLedger 落盘（模拟上一局 finalize 做过的事）
 		saveRouteFacts(dir, routeFactsFromLedger(ledger.all()));
@@ -170,7 +170,7 @@ describe("M1 接线：反思证据落审计", () => {
 	it("有下单的局：audit.jsonl 里出现 reflection 记录（含工具调用与回复预览）", async () => {
 		const dir = mkdtempSync(join(tmpdir(), "m1-audit-"));
 		const ledger = new RouteLedger();
-		ledger.record({ job: 101, fromTown: 9, toTown: 17, decision: 1, orderedAt: 1 });
+		ledger.record({ kind: "passenger", job: 101, fromTown: 9, toTown: 17, decision: 1, orderedAt: 1 });
 		const session = fakeSession();
 		const seen: Record<string, unknown>[] = [];
 		(session as never as { appendAudit: (r: Record<string, unknown>) => void }).appendAudit = (r) =>
@@ -188,7 +188,7 @@ describe("R1 接线：工具预算拒绝要进遥测（不许静默降级）", (
 		const dir = mkdtempSync(join(tmpdir(), "r1-budget-"));
 		const ledger = new RouteLedger();
 		// 有下单是产出记录的前提（C-2：躺平局不产出记录）
-		ledger.record({ job: 101, fromTown: 9, toTown: 17, decision: 1, orderedAt: 1 });
+		ledger.record({ kind: "passenger", job: 101, fromTown: 9, toTown: 17, decision: 1, orderedAt: 1 });
 		const session = fakeSession();
 		const seen: Array<{ outcome?: { toolBudgetBlocks?: number; gsErrors?: number } }> = [];
 		(session as never as { finalize: (a: never) => void }).finalize = ((a: never) => {
@@ -274,7 +274,7 @@ describe("D6b: the payload fingerprint must survive finalize", () => {
 		// the same shape one layer up; this test is the guard that stops a third.
 		const dir = mkdtempSync(join(tmpdir(), "d6b-payload-"));
 		const ledger = new RouteLedger();
-		ledger.record({ job: 101, fromTown: 9, toTown: 17, decision: 1, orderedAt: 1 });
+		ledger.record({ kind: "passenger", job: 101, fromTown: 9, toTown: 17, decision: 1, orderedAt: 1 });
 		const session = fakeSession();
 		const seen: Array<{ manifest?: Record<string, unknown> }> = [];
 		(session as never as { finalize: (a: never) => void }).finalize = ((a: never) => {
@@ -297,7 +297,7 @@ describe("D6b: the payload fingerprint must survive finalize", () => {
 	it("records null (not 0) when the path cannot measure a payload", async () => {
 		const dir = mkdtempSync(join(tmpdir(), "d6b-payload-null-"));
 		const ledger = new RouteLedger();
-		ledger.record({ job: 101, fromTown: 9, toTown: 17, decision: 1, orderedAt: 1 });
+		ledger.record({ kind: "passenger", job: 101, fromTown: 9, toTown: 17, decision: 1, orderedAt: 1 });
 		const session = fakeSession();
 		const seen: Array<{ manifest?: Record<string, unknown> }> = [];
 		(session as never as { finalize: (a: never) => void }).finalize = ((a: never) => {
