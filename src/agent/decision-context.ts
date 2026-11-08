@@ -14,7 +14,7 @@
  */
 
 import { decodePhaseWindow } from "../game/executor-status.js";
-import type { CargoFact, CargoCatalogFact, CompanyCargoFact, EngineFact, FinancingFact, IndustryFact, IndustrySiteFact } from "./world-facts.js";
+import type { CargoFact, CargoCatalogFact, CompanyCargoFact, EngineFact, FinancingFact, FreightLinkFact, IndustryFact, IndustrySiteFact } from "./world-facts.js";
 import type { WorldEventFact } from "../game/world-state.js";
 
 /**
@@ -45,7 +45,7 @@ import type { CompanyFact, TownFact } from "./world-facts.js";
  */
 export type TownSummary = TownFact;
 export type CompanyNumbers = CompanyFact;
-export type { CargoFact, CargoCatalogFact, EngineFact, FinancingFact, IndustryFact, IndustrySiteFact };
+export type { CargoFact, CargoCatalogFact, EngineFact, FinancingFact, FreightLinkFact, IndustryFact, IndustrySiteFact };
 
 /**
  * Snapshot used as the baseline for the next delta.
@@ -134,6 +134,14 @@ export interface DecisionContextInput {
 		 * 线路要选"哪座矿 → 哪座厂" ⇒ 坐标是必需事实。
 		 */
 		industrySites?: IndustrySiteFact[];
+		/**
+		 * 货运**可运链路**（货运 F3）：哪些产方真的装得上货。
+		 *
+		 * 车站收什么货是**引擎按集货区**算的（真机探针：矿场旁的车站**不收煤**）
+		 * ⇒ 没有这条事实，模型看得见"哪里有煤"却看不见"哪里能装煤"，
+		 * 只会反复提出根本装不上货的线路。
+		 */
+		links?: FreightLinkFact[];
 	};
 	/**
 	 * The road engines the game offers (id/name/speed) - the options a fleet can
@@ -322,6 +330,8 @@ export function buildDecisionContext(input: DecisionContextInput): {
 		industries: IndustryFact[];
 		catalog?: CargoCatalogFact[];
 		industrySites?: IndustrySiteFact[];
+		/** 货运可运链路（货运 F3）：能装货的产方。 */
+		links?: FreightLinkFact[];
 	};
 	engines?: EngineFact[];
 	/**

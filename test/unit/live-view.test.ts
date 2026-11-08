@@ -68,6 +68,11 @@ interface RouteRow {
 	profitHint?: string;
 	endpoints: string;
 	endpointsHint?: string;
+	/** F3：这条线运的货（GS 自报）；"—" = 未计量。 */
+	cargo: string;
+	cargoHint?: string;
+	/** F3：这条线是不是货运线（cargo 既不是 PASS 也不是缺省）。 */
+	freight: boolean;
 	key: string;
 }
 
@@ -1254,6 +1259,26 @@ describe("routeRows / routesSorted / routesNote（仪表盘线路面板）", () 
 		const r = v.routeRows().find((x) => x._job === 999)!;
 		expect(r.endpoints).toBe("—");
 		expect(r.endpointsHint).toMatch(/endpoints unknown/);
+	});
+
+	// 货运 F3：线路表要能说清**这条线运的货**（客运线 = PASS，货运线 = COAL…）。
+	it("routeRows：cargoCarried → 显示货种；缺席 → '—'（未计量，不是空）", () => {
+		const v = makeView();
+		v.routes = [
+			{ job: 100, vehicles: 6, waiting: 12, profitYtd: 3650, incomePerDay: 18.25, townA: 4, townB: 20, cargoCarried: "PASS" },
+			{ job: 101, vehicles: 2, waiting: 30, profitYtd: 900, incomePerDay: 4.5, cargoCarried: "COAL" },
+			{ job: 102, vehicles: 1, waiting: 0, profitYtd: 0, incomePerDay: null },
+		];
+		v.routesAvailable = true;
+		const rows = v.routeRows();
+		expect(rows.find((r) => r._job === 101)!.cargo).toBe("COAL");
+		expect(rows.find((r) => r._job === 101)!.freight).toBe(true);
+		expect(rows.find((r) => r._job === 100)!.cargo).toBe("PASS");
+		expect(rows.find((r) => r._job === 100)!.freight).toBe(false);
+		// GS 没报 ⇒ "—" + 一句说明（不许显示成空字符串，那会被读成"不运货"）。
+		const unknown = rows.find((r) => r._job === 102)!;
+		expect(unknown.cargo).toBe("—");
+		expect(unknown.cargoHint).toMatch(/did not report/);
 	});
 
 	it("routesSorted：**`null` 永远排最后**（升序也排最后，不是最小值）", () => {

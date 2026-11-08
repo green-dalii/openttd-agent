@@ -35,6 +35,9 @@ export const MIN_STRATEGY_PROFIT_PER_DAY = 5000 / 300;
  */
 export const STRATEGY_ACTIONS = [
 	"build_bus_route",
+	// 货运线路（货运 F3）：模型"证明"的货运模式也必须能落在这张词表里，
+	// 否则它的货运行为没有身份、也就永远晋升不了。
+	"build_freight_route",
 	"set_route_vehicles",
 	"set_route_cargo",
 	"set_route_engine",

@@ -142,11 +142,29 @@ function rawCount(v: unknown): number | null {
 	return Number.isFinite(n) && n >= 0 ? n : null;
 }
 
+/**
+ * 会**拒绝模型命令**的 GS 命令：它们的拒绝必须让模型看见。
+ *
+ * 只收"模型发得出去、可能被拒"的命令；GS 内部的异常（route-stats 之类）
+ * 不进这个集合 —— 那是 harness 自己的问题，不该占用模型的注意力。
+ */
+const COMMAND_REFUSALS = new Set([
+	"build_bus_route",
+	"build_freight_route",
+	"set_route_cargo",
+	"set_route_engine",
+	"set_route_vehicles",
+	"add_vehicles",
+	"retire_route",
+]);
+
 export function makeSignalHub(refs: SignalHubRefs): SignalHub {
 	const bootEvents: GameEvent[] = [];
 	let gsStates = 0;
 	/** GS error replies (channel health, SPEC §10.66). */
 	let gsErrors = 0;
+	/** 上一次报给模型的命令拒绝（去重：同一个拒绝不重复吵模型）。 */
+	let lastRefusal = "";
 	let executorStage = "";
 	let executorPhase = "";
 	/** Raw OpenTTD date from the GS state channel (fine-grained episode clock). */
@@ -368,6 +386,16 @@ export function makeSignalHub(refs: SignalHubRefs): SignalHub {
 							})),
 						);
 					}
+					// 货运 F3：**能装货的产方**（GS 的 `freight_links`）。
+					// 车站收什么货是引擎按集货区算的 ⇒ "这里有煤"不等于"这里能装煤"。
+					// 没有这条事实，模型会反复提出根本装不上货的线路。
+					if (Array.isArray(p.freight_links)) {
+						refs.world.setFreightLinks(
+							(p.freight_links as { cargo?: unknown; producer?: unknown }[])
+								.filter((l) => typeof l.cargo === "string" && l.cargo !== "" && Number.isFinite(Number(l.producer)))
+								.map((l) => ({ cargo: String(l.cargo), producer: Number(l.producer) })),
+						);
+					}
 					if (Array.isArray(p.cargo_totals)) {
 						refs.world.setCargoTotals(
 							(p.cargo_totals as { label?: unknown; produced?: unknown; transported?: unknown }[]).map((c) => ({
@@ -419,6 +447,22 @@ export function makeSignalHub(refs: SignalHubRefs): SignalHub {
 				else {
 					if (p.kind === "err") gsErrors++;
 					console.log(`[agent] GS: ${JSON.stringify(p)}`);
+					// **命令被拒绝 ⇒ 模型必须看见原因**（货运 F3）。
+					//
+					// 以前 GS 的 `err` 只进计数器与日志 ⇒ 模型以为命令发出去了，
+					// 于是反复发同一个根本建不成的命令（D20 那一族：静默失败让模型
+					// 学错因果）。货运的拒绝理由尤其多（货种不对 / 产方不产 /
+					// 收方不收 / 附近没有能装货的车站）⇒ 不给理由，模型只能乱试。
+					//
+					// 只报**命令类**的拒绝：route-stats 之类的内部异常不该吵模型。
+					if (p.kind === "err" && typeof p.cmd === "string" && COMMAND_REFUSALS.has(p.cmd)) {
+						const reason = typeof p.reason === "string" ? p.reason : "no reason given";
+						const line = `the game refused ${p.cmd}: ${reason}`;
+						if (line !== lastRefusal) {
+							lastRefusal = line;
+							refs.onNotableEvent(line);
+						}
+					}
 					// 推送事件（Issue #13 S7d）：引擎的事件原本被 GS 整个丢掉 ⇒
 					// 模型看不到"车到了 / 车没了"。这里落进世界状态 ⇒ 进观测面。
 					if (p.kind === "game_event") {
@@ -561,6 +605,9 @@ export function makeSignalHub(refs: SignalHubRefs): SignalHub {
 								...(numOrUndef(p.fleetApplied) !== undefined ? { fleetApplied: numOrUndef(p.fleetApplied) } : {}),
 								// P1-2 生效值：改装货物（标签）/车型（引擎 id）。缺失 = 未改装/未计量。
 								...(typeof p.cargoApplied === "string" ? { cargoApplied: p.cargoApplied } : {}),
+							// **这条线运的货**（F3 的看板要用）：客运线 = PASS，
+							// 货运线 = COAL/GOOD/…（GS 自报；缺席 = 未计量）。
+							...(typeof p.cargoCarried === "string" ? { cargoCarried: p.cargoCarried } : {}),
 								...(numOrUndef(p.engineApplied) !== undefined ? { engineApplied: numOrUndef(p.engineApplied) } : {}),
 								...(numOrUndef(p.endsA) !== undefined ? { endsA: numOrUndef(p.endsA) } : {}),
 								...(numOrUndef(p.endsB) !== undefined ? { endsB: numOrUndef(p.endsB) } : {}),
@@ -571,8 +618,15 @@ export function makeSignalHub(refs: SignalHubRefs): SignalHub {
 					}
 					// Remember the coordinates the executor acknowledged, so each
 					// stage snapshot can draw the actual built route.
-					if (p.kind === "ack" && p.cmd === "build_bus_route") {
+					//
+					// 货运 ack（F3）也要进地图：看板画的是**最后一条线路**，货运线
+					// 同样是"一条线"（两端是货车站，不是客运站）。
+					if (p.kind === "ack" && (p.cmd === "build_bus_route" || p.cmd === "build_freight_route")) {
 						lastRoute = p;
+					}
+					// 台账只登记**客运**线路：它的形状是"两端城镇"，而货运线的两端
+					// 是**产业** ⇒ 塞进城镇字段就是编造（货运线进台账是 F4 的活）。
+					if (p.kind === "ack" && p.cmd === "build_bus_route") {
 						refs.routeLedger.record({
 							job: Number(p.job),
 							fromTown: Number(p.townA),

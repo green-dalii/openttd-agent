@@ -378,11 +378,11 @@
         <span class="kpi-more">details ▸</span>
       </div>
       <div class="kpi">
-        <div class="kpi-k">Waiting passengers</div>
+        <div class="kpi-k">Waiting at line ends</div>
         <div class="kpi-v" x-text="$fmt.int(routesSummary().waiting)"></div>
         <div class="kpi-hint" x-text="routesSummary().waitingDeduplicated
             ? routesSummary().stops + ' distinct stops'
-            : 'at both ends of every line (not de-duplicated)'"></div>
+            : 'at both ends of every line (not de-duplicated) — passengers on bus lines, tonnes on freight lines'"></div>
       </div>
       <div class="kpi">
         <div class="kpi-k">Type</div>
@@ -414,6 +414,7 @@
               <tr :class="r.idle ? 'route-idle' : ''">
                 <td x-text="'#' + r.job"></td>
                 <td x-text="r.endpoints" :title="r.endpointsHint || ''"></td>
+                <td x-text="r.cargo" :title="r.cargoHint || ''"></td>
                 <td class="num" x-text="r.vehicles"></td>
                 <td class="num" x-text="r.waiting"></td>
                 <td class="num" :class="r.incomeHint ? 'dim' : ''" :title="r.incomeHint || 'income per game day (year to date ÷ days)'"
@@ -938,7 +939,7 @@
                x-text="'Routes are not readable in this run — the route readout comes from the Bridge GS, which only runs in agent mode (this run is ' + ((run && run.state) || 'idle') + ').'"></p>
             <table class="routes" x-show="routesAvailable">
               <thead>
-                <tr><th>Route</th><th>Endpoints</th><th class="num">Veh</th><th class="num">Waiting</th>
+                <tr><th>Route</th><th>Endpoints</th><th>Cargo</th><th class="num">Veh</th><th class="num">Waiting</th>
                   <th class="num">Income / day</th><th class="num">Profit YTD</th></tr>
               </thead>
               <tbody>
@@ -946,6 +947,7 @@
                   <tr :class="r.idle ? 'route-idle' : ''">
                     <td x-text="'#' + r.job"></td>
                     <td x-text="r.endpoints"></td>
+                    <td x-text="r.cargo"></td>
                     <td class="num" x-text="r.vehicles"></td>
                     <td class="num" x-text="r.waiting"></td>
                     <td class="num" x-text="r.income"></td>

@@ -116,14 +116,14 @@ pgrep -fl "bench.ts|run-experiment|cli/run.ts|llm-stub|OpenTTD.app"
 
 | 顺序 | 内容 | 验收 | 权威位置 |
 |---|---|---|---|
-| **1** | **货运 F3 动作**：`build_freight_route`（复用执行器 `LayPath`/车库/车队） | 真机**真的交付**、monitor 非 0、公司 `deliveredCargo` 增长 | `docs/FREIGHT-LINE-FEASIBILITY.md` §4 |
-| **2** | **货运 F4 归因**：货运线路进台账（连接键 `fleetIds`）+ Compare/History 货运轴 | History 能说"这条决策运了多少货" | 同上 |
-| **3** | **基准决策**：先补**次级轴**配对 CI（0 token）→ 定"给哪条轴加样本、要几局" → 在**当前脚手架**上重跑矩阵 | 选定轴的配对 CI 不含 0，或写明 n 与「不可判定」 | 本文件「待办」#5 |
+| **1** | **货运 F4 归因**（F3 已完成 ✅）：货运线路进台账（连接键 `fleetIds`）+ Compare/History 货运轴 | History 能说"这条决策运了多少货" | `docs/FREIGHT-LINE-FEASIBILITY.md` §4 |
+| **2** | **基准决策**：先补**次级轴**配对 CI（0 token）→ 定"给哪条轴加样本、要几局" → 在**当前脚手架**上重跑矩阵 | 选定轴的配对 CI 不含 0，或写明 n 与「不可判定」 | 本文件「待办」#5 |
 
 **已完成、不要重做**：阶段 D 的 D0–D5；B1–B6（Dashboard 四页：Run / Compare / History /
 Configure）；#13 S7 除货运线路外全部（城镇名 / 融资事实 / 推送事件 / L2 查询 / 决策→结果台账 /
-逐线路调研）；货运 **F1 观测 ✅ / F2 计量 ✅**（cargo monitor 单轴、累计、报缺口）。
-当前指纹：scaffold `41d82339b2925645`、观测面 **`9aab3d22e9e95961`**（变了就会分组，Compare 按组比）。
+逐线路调研）；货运 **F1 观测 ✅ / F2 计量 ✅ / F3 动作 ✅**（真机：真实模型自己下了 5 条
+货运线，交付 **120 吨煤**；engine 事实纠正见 `SPEC.md` §10.126）。
+当前指纹：scaffold **`3b19310088baff6e`**、观测面 **`103aabed827a8def`**（变了就会分组，Compare 按组比）。
 
 **三条不得违反的不变量**：① harness 默认关（`AGENT_HARNESS=0`）；② harness compaction 必须关；
 ③ 完成 = `AGENTS.md` §5.1 八条真机断言全绿（单测绿不算）。

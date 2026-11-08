@@ -81,6 +81,8 @@ export const ACTION_EFFECTS: Record<string, ActionEffect> = {
 	recall: "read",
 	capabilities: "read",
 	build_bus_route: "write",
+	// 货运线路（货运 F3）：模型决定运什么货、运去哪；脚手架负责怎么落地。
+	build_freight_route: "write",
 	set_route_vehicles: "write",
 	set_route_cargo: "write",
 	set_route_engine: "write",

@@ -76,9 +76,12 @@ class ExecCore {
     }
 
     /* ---- 入口（BridgeV1.Dispatch 直调；标牌邮箱已废） ---- */
-    function Enqueue(company, job, siteA, fA, siteB, fB, fleet) {
+    /* `cargo` >= 0 = 货运线路（带货种与两个**锚点产业**：`indA` 装货侧产方、
+     * `indB` 卸货侧收方）。客运线路 cargo = -1，锚点为空 ⇒ 行为与从前一致。 */
+    function Enqueue(company, job, siteA, fA, siteB, fB, fleet, cargo = -1, indA = -1, indB = -1) {
         this._queue.append({ company = company, job = job, siteA = siteA, fA = fA,
-                             siteB = siteB, fB = fB, fleet = (fleet == null ? -1 : fleet) });
+                             siteB = siteB, fB = fB, fleet = (fleet == null ? -1 : fleet),
+                             cargo = (cargo == null ? -1 : cargo), indA = indA, indB = indB });
         this._gs.ReportExec({ kind = "exec", job = job, stage = "queued" });
     }
     function FleetRequest(job, want) {
@@ -160,6 +163,12 @@ class ExecCore {
             this._slotD = { label = "D", bp = null, tried = 0 };
             this._pf = null; this._pfFrom = -1; this._pfTo = -1;
             this._reportDone = false; this._vehicle = -1; this._paxCargo = -1;
+            // 货运线路的状态（货运 F3）：货种 + 两个锚点产业瓦片。
+            // 客运线路 cargo = -1 ⇒ `_freight` 为 false ⇒ 走的还是从前那条路。
+            this._cargo = (next.cargo == null ? -1 : next.cargo);
+            this._freight = (this._cargo >= 0);
+            this._indA = (next.indA == null ? -1 : next.indA);
+            this._indB = (next.indB == null ? -1 : next.indB);
             this._radius = -1; this._fleetApplied = next.fleet;
             this._fleetOwned = []; this._fleetWaitAnnounced = "";
             this._routeCargo = -1; this._routeEngine = -1;
@@ -200,6 +209,7 @@ class ExecCore {
                 stA = (this._slotA.bp == null ? -1 : this._slotA.bp[0]),
                 stB = (this._slotB.bp == null ? -1 : this._slotB.bp[0]),
                 cargo = this._routeCargo, engine = this._routeEngine,
+                lineCargo = (this._freight ? this._cargo : this._gs.PaxCargoId()),
             };
             this._job = -1;   // 下一轮取队列里的下一个（字段整套复位）
         }
@@ -232,6 +242,10 @@ class ExecCore {
     _slotD = { label = "D", bp = null, tried = 0 };
     _vehicle = -1;
     _paxCargo = -1;
+    _cargo = -1;      // 当前 job 的货种 id（货运线路 >= 0；客运 = -1）
+    _freight = false; // 当前 job 是不是货运线路
+    _indA = -1;       // 装货锚点（产方产业瓦片）
+    _indB = -1;       // 卸货锚点（收方产业瓦片）
     _radius = -1;
     _fleetApplied = -1;  // last applied fleet size from a V sign
     _routeCargo = -1;    // 这条线**改装**到的货物 id（set_route_cargo 生效值）
@@ -335,6 +349,10 @@ class ExecCore {
      * Arena's TryBuildStation also enforced MIN_PROD and aborted the pair —
      * here we keep it soft (fall back) so the skeleton still completes. */
     function TryBuildStation(slot) {
+        // 货运线路（货运 F3）：站址**必须**按引擎规则选（装货站要收货、卸货站要
+        // 罩住收方），所以不能沿用客运那套"按人流量重选"的扫描 —— 重选会把
+        // 收货判定弄丢（矿场旁的站**不收煤**）。这里走引擎规则的站址扫描。
+        if (this._freight) { this.TryBuildFreightStation(slot); return; }
         if (slot.bp == null) {
             // GS-only：站点由 Enqueue 预填（标牌邮箱已废）。
             this.Ph("st" + slot.label + "_noslot");
@@ -367,6 +385,45 @@ class ExecCore {
         slot.tried++;
         if (alt != null) slot.bp = alt;
         else this.Ph("st" + slot.label + "_retry");
+    }
+
+    /* 货运站：按**引擎规则**选站址并建站（门前格接路，与客运同款）。
+     *
+     * 为什么不用客运的扫描：客运按"人流量"重选站址，而货运的站址必须满足
+     * **收货 >= 8**（`GSTile.GetCargoAcceptance`）—— 引擎按集货区算accepts，
+     * 矿场旁的站不收煤 ⇒ 重选会把唯一能装货的站址换掉。
+     *
+     * 选不到就换下一个候选（`slot.tried` 递增 ⇒ 扫到下一个可用站址），
+     * 试完仍不行 ⇒ 明确报放弃（不假装建成）。
+     */
+    function TryBuildFreightStation(slot) {
+        local anchor = (slot.label == "A") ? this._indA : this._indB;
+        // A = 装货侧（产方）：**不要求收货**（产业按 rating 交货，见 FreightSite 注释）。
+        // B = 卸货侧（收方）：**必须收货 >= 8**，否则车卸不下来（货被退回，不算交付）。
+        local needAcc = (slot.label == "B");
+        if (anchor < 0 || !GSMap.IsValidTile(anchor)) {
+            this.Ph("st" + slot.label + "_noslot");
+            this._stage = "done";
+            return;
+        }
+        if (slot.bp != null) {
+            if (this.TryPlaceStop(slot.bp[0], slot.bp[1], true)) {
+                this.Ph("st" + slot.label + "_ok");
+                if (slot.label == "A") { this._stage = "buildB"; }
+                else { this._stage = "road"; }
+                return;
+            }
+            slot.bp = null;   // 这个站址建不成 ⇒ 换下一个候选
+        }
+        local site = this._gs.FreightSite(anchor, this._cargo, needAcc, slot.tried);
+        if (site != null) slot.bp = site;
+        slot.tried++;
+        if (slot.tried > 6) {
+            this.Ph("st" + slot.label + "_giveup");
+            this._stage = "done";
+            return;
+        }
+        this.Ph("st" + slot.label + "_scan");
     }
 
     /* Next pax-ranked candidate for a station anchored at `anchor`. Returns
@@ -845,6 +902,8 @@ class ExecCore {
      * A -> B -> A, and start it. Mirrors arena PhaseBus (engine pick by
      * CC_PASSENGERS + ROADTYPE_ROAD, best speed). */
     function PhaseBus() {
+        // 货运线路（货运 F3）：买**货车**并改装到该货种。
+        if (this._freight) { this.PhaseTruck(); return; }
         local cl = GSCargoList();
         cl.Valuate(GSCargo.HasCargoClass, GSCargo.CC_PASSENGERS);
         cl.KeepValue(1);
@@ -854,7 +913,7 @@ class ExecCore {
             return;
         }
         local cargo = cl.Begin();
-        local engine = this.PickBusEngine(cargo);
+        local engine = this.PickRoadEngine(cargo);
         if (engine < 0) {
             this.Ph("bus_noeng");
             this._stage = "done";
@@ -900,8 +959,60 @@ class ExecCore {
         this._stage = "done";
     }
 
-    /* Pick the fastest buildable passenger road vehicle available. */
-    function PickBusEngine(cargo) {
+    /* 货运车（货运 F3）：在车库买一辆**能拉这个货**的公路车，改装，给
+     * A → B → A 的订单，启动。
+     *
+     * 与客运的差别只有三处，其余同款（同样的建站/铺路/车库/订单/启动流程）：
+     *   ① 车型按 `CanRefitCargo(engine, cargo)` 选（不是按客运货）；
+     *   ② 装的车是**这个货**（不是乘客）；
+     *   ③ 车队 2 辆而不是 3 辆：货车一车载重比客车大得多（真机：Balogh
+     *      Coal Truck 载 20 吨），三辆会闲置（要加车随时可以 `set_route_vehicles`）。
+     *
+     * 订单用 `OF_NON_STOP_INTERMEDIATE` 与客运同款：公路车在站上**自动装卸**
+     * （引擎按车站的待运货堆与车辆的载重处理），不需要显式的装卸订单。
+     */
+    function PhaseTruck() {
+        local cargo = this._cargo;
+        local engine = this.PickRoadEngine(cargo);
+        if (engine < 0) {
+            this.Ph("trk_noeng");
+            this._stage = "done";
+            return;
+        }
+        local depotTile = this._slotD.bp[0];
+        local v = GSVehicle.BuildVehicle(depotTile, engine);
+        if (!GSVehicle.IsValidVehicle(v)) {
+            local es = GSError.GetLastErrorString();
+            if (es == null) es = "" + GSError.GetLastError();
+            if (es.len() > 14) es = es.slice(0, 14);
+            this.Ph("trk_buy_e" + es);
+            this._stage = "done";
+            return;
+        }
+        this._fleetOwned.append(v);
+        this.RegisterRoute(this._job);
+        this._vehicle = v;
+        GSVehicle.RefitVehicle(v, cargo);
+        local stA = this._slotA.bp[0];
+        local stB = this._slotB.bp[0];
+        GSOrder.AppendOrder(v, stA, GSOrder.OF_NON_STOP_INTERMEDIATE);
+        GSOrder.AppendOrder(v, stB, GSOrder.OF_NON_STOP_INTERMEDIATE);
+        if (!GSVehicle.StartStopVehicle(v)) this.Ph("trk_start_e");
+        for (local i = 1; i < 2; i++) {
+            local cv = GSVehicle.CloneVehicle(this._slotD.bp[0], v, true);
+            if (!GSVehicle.IsValidVehicle(cv)) break;
+            GSVehicle.StartStopVehicle(cv);
+            this._fleetOwned.append(cv);
+        }
+        this.RegisterRoute(this._job);
+        this.Ph("trk_live");
+        this._stage = "done";
+    }
+
+    /* Pick the fastest buildable road vehicle that can carry `cargo`.
+     * Passenger routes use it with the passenger cargo, freight routes with the
+     * freight cargo — the filter (`CanRefitCargo`) is what makes it cargo-aware. */
+    function PickRoadEngine(cargo) {
         local el = GSEngineList(GSVehicle.VT_ROAD);
         el.Valuate(GSEngine.IsBuildable);          el.KeepValue(1);
         el.Valuate(GSEngine.GetRoadType);          el.KeepValue(GSRoad.ROADTYPE_ROAD);
@@ -935,13 +1046,17 @@ class ExecCore {
 
     /* One BuildRoadStation attempt on cleared land. Reports via SetPhase on
      * failure so we can see the engine error code from the admin port. */
-    function TryPlaceStop(tile, front) {
+    function TryPlaceStop(tile, front, freight = false) {
         GSTile.DemolishTile(tile);
         GSTile.DemolishTile(front);
         GSRoad.SetCurrentRoadType(GSRoad.ROADTYPE_ROAD); // precondition (pre-15 defaults vary)
-        local ok = GSRoad.BuildRoadStation(tile, front,
-                                           GSRoad.ROADVEHTYPE_BUS,
-                                           GSStation.STATION_NEW);
+        // 站型由**车型**决定（`script_road.cpp` 的 `_BuildRoadStationInternal`）：
+        // `ROADVEHTYPE_TRUCK` ⇒ 货车停靠站（truck stop）。引擎规则：**货车只能停
+        // 货车站，客车只能停公交站**（`station.cpp` 的 `GetPrimaryRoadStop`），
+        // 而且**客车站不收货、货车站不收客**（`station_cmd.cpp` 的
+        // `CanMoveGoodsToStation`）⇒ 货运必须是货车站。
+        local vtype = freight ? GSRoad.ROADVEHTYPE_TRUCK : GSRoad.ROADVEHTYPE_BUS;
+        local ok = GSRoad.BuildRoadStation(tile, front, vtype, GSStation.STATION_NEW);
         if (ok) {
             // Best-effort immediate connection; report-only on failure. The
             // real fix for sloped pairs is keeping the GS-chosen front
@@ -1230,6 +1345,10 @@ class ExecCore {
             depot = (this._slotD.bp == null ? -1 : this._slotD.bp[0]),
             retired = (prev != null && prev.retired == true),
             applied = this._fleetApplied,
+            // 这条线**天生运的货**（货运 F3）：货运线路建起来就改装到该货种；
+            // 客运线路运乘客（货种 id 0 = PASS）。与 `cargo`（set_route_cargo
+            // 的**改装生效值**）是两件事：前者是这条线的性质，后者是后来的指令。
+            lineCargo = (this._freight ? this._cargo : this._gs.PaxCargoId()),
         };
     }
 
@@ -1238,6 +1357,17 @@ class ExecCore {
         if (job == this._job) return this._fleetApplied;
         if (this._routes.rawin(job)) return this._routes.rawget(job).rawin("applied") ? this._routes[job].applied : null;
         return null;
+    }
+
+    /* 该线路**运的货**（货运 F3）：-1 = 不知道（不是"不运货"）。
+     * BridgeV1 的 route-stats 从这里取（它自己的 `_routes` 只记端点瓦片）。 */
+    function RouteLineCargo(job) {
+        if (job == this._job) return (this._freight ? this._cargo : this._gs.PaxCargoId());
+        if (this._routes.rawin(job)) {
+            local c = this._routes[job].rawin("lineCargo") ? this._routes[job].lineCargo : -1;
+            return (c == null ? -1 : c);
+        }
+        return -1;
     }
 
     /* 该线路的车队（当前线路用活字段，旧线路用登记表）。 */
@@ -1504,6 +1634,9 @@ class BridgeV1 extends GSController {
     _last_cmd = "";
     _sign_count = 0;
     _route_seq = 0;
+    _freight_seq = 0;   // 货运 job 的独立计数（**不能**与客运 job 撞号：
+                        // job 是台账/线路统计的主键，撞号会把两条线并成一条）
+    _lastJob = -1;      // 最近一条线路的 job（客运或货运）——缩编/退役的缺省目标
     // Fingerprint of the last exec event we emitted. On-change emission
     // retires the heartbeat concept: "no event = no change". All semantics
     // mirror src/game/executor-status.ts decodeExecutorPhase (REFACTOR Phase A).
@@ -1682,11 +1815,19 @@ class BridgeV1 extends GSController {
                 // 逐站上报等待量（而不是只报两端之和）：harness 要按**站点去重**求和，
                 // 共享车站的等待量被重复计入是同一个双重计数错误（2026-09-25 真机：
                 // 1 951 人 vs 公司实际在等的人数）。
+                // 等待量按**这条线运的货**读：货运线路等的是煤/粮，不是乘客。
+                // `lineCargo` 是这条线的性质（建起来就定的货种）；客运线路没有它 ⇒ 用乘客货。
+                local lineCargo = -1;
+                if (this._core != null) lineCargo = this._core.RouteLineCargo(job_str.tointeger());
+                if (lineCargo == null || lineCargo < 0) {
+                    lineCargo = rec.rawin("lineCargo") ? rec.lineCargo : -1;
+                }
+                local waitCargo = (lineCargo != null && lineCargo >= 0) ? lineCargo : pax;
                 local waitA = -1;
                 local waitB = -1;
-                if (pax >= 0) {
-                    if (GSStation.IsValidStation(sa)) { waitA = GSStation.GetCargoWaiting(sa, pax); waiting += waitA; }
-                    if (GSStation.IsValidStation(sb)) { waitB = GSStation.GetCargoWaiting(sb, pax); waiting += waitB; }
+                if (waitCargo >= 0) {
+                    if (GSStation.IsValidStation(sa)) { waitA = GSStation.GetCargoWaiting(sa, waitCargo); waiting += waitA; }
+                    if (GSStation.IsValidStation(sb)) { waitB = GSStation.GetCargoWaiting(sb, waitCargo); waiting += waitB; }
                 }
                 // 车队真值（执行器注册表，引擎 id）：与 vehiclesIds（站点归属）是
                 // 两个事实。无核心/未登记 → 不带字段（未计量 ≠ 空车队，D60）。
@@ -1711,6 +1852,11 @@ class BridgeV1 extends GSController {
                 };
                 if (fleetIds != null) payload.rawset("fleetIds", fleetIds);
                 if (fleetApplied != null) payload.rawset("fleetApplied", fleetApplied);
+                // **这条线运的货**（F3 的看板要用）：客运线 = PASS，货运线 = 煤/粮/…
+                // 与 `cargoApplied`（后来的改装指令的生效值）是两个事实。
+                if (lineCargo != null && lineCargo >= 0) {
+                    payload.rawset("cargoCarried", GSCargo.GetCargoLabel(lineCargo));
+                }
                 // P1-3：登记车辆中此刻**停在库里**的 id（IsStoppedInDepot 已验证）。
                 // 有了它 harness 才能分解「在途/在库」；缺失保持字段缺席。
                 if (fleetIds != null) {
@@ -1727,6 +1873,10 @@ class BridgeV1 extends GSController {
                     if (tgt.known) {
                         if (tgt.cargo != null && tgt.cargo >= 0) {
                             payload.rawset("cargoApplied", GSCargo.GetCargoLabel(tgt.cargo));
+                        } else if (lineCargo != null && lineCargo >= 0) {
+                            // 货运线路：车**建起来时**就改装到该货种了（没有
+                            // set_route_cargo 指令），所以生效值就是它天生的货。
+                            payload.rawset("cargoApplied", GSCargo.GetCargoLabel(lineCargo));
                         }
                         if (tgt.engine != null && tgt.engine >= 0) {
                             payload.rawset("engineApplied", tgt.engine);
@@ -2281,6 +2431,12 @@ class BridgeV1 extends GSController {
         if (industry_list.len() > 12) industry_list.resize(12);
         cargo_totals.sort(function(ca, cb) { return cb.produced - ca.produced; });
 
+        // 货运可运链路（货运 F3）：**能装货的产方**。
+        // 车站收什么货是引擎按集货区算的 ⇒ "这里有煤"不等于"这里能装煤"
+        // （真机探针：矿场旁的站不收煤）。模型看不见这件事就会反复提出
+        // 根本装不上货的线路 ⇒ 这条事实是引擎算出来的，必须进观测面。
+        local freight_links = this.FreightLinks();
+
         // 产业位置与名字（全部）：货运线路要选"哪座矿 → 哪座厂"，没坐标就选不了。
         foreach (iid, _ in all_industries) {
             local loc = GSIndustry.GetLocation(iid);
@@ -2386,6 +2542,8 @@ class BridgeV1 extends GSController {
             industry_index = industry_index,
             cargo_catalog = cargo_catalog,
             cargo_totals = cargo_totals,
+            // 货运可运链路（货运 F3）：哪些产方真的装得上货。
+            freight_links = freight_links,
             own_delivered = own_by_cargo,
             own_quarter = quarter,
             own_monitored = own_monitored,
@@ -2539,6 +2697,7 @@ class BridgeV1 extends GSController {
                     industry_index = (f == null) ? [] : f.industry_index,
                     cargo_catalog = (f == null) ? [] : f.cargo_catalog,
                     cargo_totals = (f == null) ? [] : f.cargo_totals,
+                    freight_links = (f == null) ? [] : f.freight_links,
                     own_delivered = (f == null) ? [] : f.own_delivered,
                     own_quarter = (f == null) ? null : f.own_quarter,
                     own_monitored = (f == null) ? null : f.own_monitored,
@@ -2931,6 +3090,8 @@ class BridgeV1 extends GSController {
             this.ProbeCompanyMode();
         } else if (cmd == "build_bus_route") {
             this.BuildBusRoute(obj);
+        } else if (cmd == "build_freight_route") {
+            this.BuildFreightRoute(obj);
         } else if (cmd == "set_route_cargo") {
             if (this._core == null) {
                 GSAdmin.Send({ kind = "err", cmd = "set_route_cargo", reason = "executor core not ready" });
@@ -2992,6 +3153,7 @@ class BridgeV1 extends GSController {
         // Job id: explicit or auto-increment (demo used 7; keep new ids clear).
         local job = obj.rawin("job") ? obj["job"] : (100 + this._route_seq);
         this._route_seq++;
+        this._lastJob = job;
         // Towns: explicit ids win, else auto-pick a viable pair.
         local townA = obj.rawin("townA") ? obj["townA"] : -1;
         local townB = obj.rawin("townB") ? obj["townB"] : -1;
@@ -3039,6 +3201,209 @@ class BridgeV1 extends GSController {
                        tileA = tA, frontA = fA, tileB = tB, frontB = fB,
                        depot = (siteD == null ? -1 : siteD[0]),
                        company = exec, queued = 1 });
+    }
+
+    /* ===================================================================
+     * 货运（F3）：站址解析、可运链路、建线。
+     *
+     * 分工（`docs/FREIGHT-LINE-FEASIBILITY.md` §3.2）：**模型决定运什么货、运去哪**；
+     * 脚手架负责**怎么落地**（找站址 ⇒ 铺路 ⇒ 建车库 ⇒ 买车改装 ⇒ 挂路线）。
+     * 站址规则是**引擎规则**，不是策略：
+     *   - 车站收什么货由引擎按**集货区**算（`station_cmd.cpp` 的
+     *     `GetAcceptanceAroundStation`）⇒ 矿场旁的车站**不收煤**（真机探针）；
+     *   - 产业把货交给**集货区覆盖到它**的车站（`industry_cmd.cpp` 的
+     *     `MoveGoodsToStation`）；
+     *   - 交付发生在**卸货站**，且计入该站集货区里的收方产业（`economy.cpp` 的
+     *     `DeliverGoodsToIndustry`）。
+     * ⇒ 装货站必须**同时罩住产方与收方**，卸货站必须罩住收方。
+     * =================================================================== */
+
+    /* 货车停靠站的集货半径（`CA_UNMODIFIED = 4`；开了 modified_catchment 才是 3）。 */
+    function FreightRadius() {
+        local r = GSStation.GetCoverageRadius(GSStation.STATION_TRUCK_STOP);
+        if (r <= 0) r = 4;
+        return r;
+    }
+
+    /* 站址扫描：返回第 `idx` 个可用站址 `[tile, front]`，没有就 null。
+     *
+     * 规则（引擎口径，**两边的条件不同**）：
+     *   - 站址可建、不在水上，且有一个可建的**门前格**（路要接在它旁边）；
+     *   - **装货站**（needAcceptance = false）：只要**罩住产方**就行。
+     *     为什么收货不是装货的前提：产业把货交给车站看的是**车站的 rating**
+     *     （`station_cmd.cpp` 的 `CanMoveGoodsToStation` ⇒ `rating == 0` 才拒收），
+     *     而新车站的 rating 是 175（`INITIAL_STATION_RATING`）⇒ **车站收不收这个货
+     *     不影响产业交货**。真机 2026-11-08 证伪了旧结论："矿场旁的站不收煤 ⇒
+     *     煤运不走" —— 不成立：货会到站上等着，车装走即可。
+     *   - **卸货站**（needAcceptance = true）：必须**收货 >= 8**
+     *     （`GSTile.GetCargoAcceptance` 与引擎同一套算法）—— 车在**不收货**的站
+     *     是卸不下来的（`economy.cpp` 的 `LoadCargo`/`UnloadCargo`："The station does
+     *     not accept our goods anymore" ⇒ 货被退回而不是交付）。收方产业自己就收货
+     *     ⇒ 罩住收方即可（实测 8/16/24/96）。
+     *
+     * 扫描半径 = 集货半径 ⇒ 站址**一定**罩住锚点产业（集货区是方形扩张，
+     * `station.cpp` 的 `GetCatchment`），所以"产方/收方在不在集货区"不用猜。
+     */
+    function FreightSite(anchor, cargo, needAcceptance, idx) {
+        if (anchor == null || !GSMap.IsValidTile(anchor)) return null;
+        local r = this.FreightRadius();
+        local cx = GSMap.GetTileX(anchor);
+        local cy = GSMap.GetTileY(anchor);
+        local dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+        local found = 0;
+        for (local ring = 0; ring <= r; ring++) {
+            for (local dx = -ring; dx <= ring; dx++) {
+                for (local dy = -ring; dy <= ring; dy++) {
+                    if (ring > 0 && dx != -ring && dx != ring && dy != -ring && dy != ring) continue;
+                    local x = cx + dx; local y = cy + dy;
+                    if (x < 0 || y < 0) continue;
+                    if (x >= GSMap.GetMapSizeX() || y >= GSMap.GetMapSizeY()) continue;
+                    local tile = GSMap.GetTileIndex(x, y);
+                    if (GSTile.IsWaterTile(tile)) continue;
+                    if (!GSTile.IsBuildable(tile)) continue;
+                    if (needAcceptance) {
+                        local acc = GSTile.GetCargoAcceptance(tile, cargo, 1, 1, r);
+                        if (acc == null || acc < 8) continue;
+                    }
+                    local front = -1;
+                    foreach (d in dirs) {
+                        local fx = x + d[0]; local fy = y + d[1];
+                        if (fx < 0 || fy < 0) continue;
+                        if (fx >= GSMap.GetMapSizeX() || fy >= GSMap.GetMapSizeY()) continue;
+                        local ft = GSMap.GetTileIndex(fx, fy);
+                        if (GSTile.IsWaterTile(ft)) continue;
+                        if (!GSTile.IsBuildable(ft)) continue;
+                        front = ft;
+                        break;
+                    }
+                    if (front < 0) continue;
+                    if (found == idx) return [tile, front];
+                    found++;
+                }
+            }
+        }
+        return null;
+    }
+
+    /* 货运**可运链路**：哪些产方真的能装货（货运 F3）。
+     *
+     * 为什么模型需要它：车站收什么货是**引擎按集货区算**的，模型看不见这件事，
+     * 就会反复提出根本装不上货的线路（真机探针：矿场旁的站不收煤 ⇒ "把煤从矿场
+     * 运走"这条线在那张图上根本不存在）。这条事实是**引擎算出来的**，不是策略。
+     *
+     * 形状：{cargo = 货种标签, producer = 产方产业 id}。
+     * 收方不在这里：收方由模型从 `cargoCatalog.consumers` 里选（引擎保证"卸货站
+     * 罩住收方"就能交付），把可达性写成"只有这几个收方"会是**假限制**。
+     */
+    function FreightLinks() {
+        local links = [];
+        for (local c = 0; c < 64; c++) {
+            if (!GSCargo.IsValidCargo(c)) continue;
+            if (!GSCargo.IsFreight(c)) continue;
+            local label = GSCargo.GetCargoLabel(c);
+            if (label == null) continue;
+            foreach (iid, _ in GSIndustryList_CargoProducing(c)) {
+                local loc = GSIndustry.GetLocation(iid);
+                if (loc == null || !GSMap.IsValidTile(loc)) continue;
+                // 装货站址必须存在：产方附近要有**可建的地**（收货不是装货的前提，
+                // 见 FreightSite 的注释：产业按车站 rating 交货）。
+                if (this.FreightSite(loc, c, false, 0) == null) continue;
+                links.append({ cargo = label, producer = iid });
+            }
+        }
+        return links;
+    }
+
+    /* 货运建线（货运 F3）：模型给"货 + 产方 + 收方"，脚手架落地。
+     *
+     * 校验全是**引擎事实**（不是策略）：货种是货运、产方产这个货、收方收这个货、
+     * 装货站址存在、卸货站址存在。任何一条不满足 ⇒ 明确拒绝并说清原因
+     * （不静默、不假装成功）。
+     */
+    function BuildFreightRoute(obj) {
+        if (!obj.rawin("company")) {
+            GSAdmin.Send({ kind = "err", cmd = "build_freight_route", reason = "no company" });
+            return;
+        }
+        local exec = obj["company"];
+        local cargo = -1;
+        // ResolveCargo 住在 ExecCore 里（它管"选货"那条命令），这里走同一个实现，
+        // 不抄第二份（抄一份就会漂）。
+        if (obj.rawin("cargo")) cargo = this._core.ResolveCargo(obj["cargo"]);
+        if (cargo < 0) {
+            GSAdmin.Send({ kind = "err", cmd = "build_freight_route", reason = "unknown cargo" });
+            return;
+        }
+        if (!GSCargo.IsFreight(cargo)) {
+            GSAdmin.Send({ kind = "err", cmd = "build_freight_route", reason = "cargo is not freight" });
+            return;
+        }
+        local producer = -1;
+        local consumer = -1;
+        if (obj.rawin("from_industry")) producer = obj["from_industry"];
+        if (obj.rawin("to_industry")) consumer = obj["to_industry"];
+        if (!GSIndustry.IsValidIndustry(producer)) {
+            GSAdmin.Send({ kind = "err", cmd = "build_freight_route", reason = "unknown producer industry" });
+            return;
+        }
+        if (!GSIndustry.IsValidIndustry(consumer)) {
+            GSAdmin.Send({ kind = "err", cmd = "build_freight_route", reason = "unknown consumer industry" });
+            return;
+        }
+        // 产/收关系用引擎自己的清单（与货种目录同源），不用猜。
+        local produces = false;
+        foreach (iid, _ in GSIndustryList_CargoProducing(cargo)) {
+            if (iid == producer) { produces = true; break; }
+        }
+        if (!produces) {
+            GSAdmin.Send({ kind = "err", cmd = "build_freight_route",
+                           reason = "industry " + producer + " does not produce " + GSCargo.GetCargoLabel(cargo) });
+            return;
+        }
+        local accepts = false;
+        foreach (cid, _ in GSIndustryList_CargoAccepting(cargo)) {
+            if (cid == consumer) { accepts = true; break; }
+        }
+        if (!accepts) {
+            GSAdmin.Send({ kind = "err", cmd = "build_freight_route",
+                           reason = "industry " + consumer + " does not accept " + GSCargo.GetCargoLabel(cargo) });
+            return;
+        }
+        local indA = GSIndustry.GetLocation(producer);
+        local indB = GSIndustry.GetLocation(consumer);
+        // 装货站址：只要**罩住产方**且有可建的地（产业按 rating 交货 ⇒ 不要求收货）。
+        local siteA = this.FreightSite(indA, cargo, false, 0);
+        if (siteA == null) {
+            GSAdmin.Send({ kind = "err", cmd = "build_freight_route",
+                           reason = "no loading site: no buildable ground near industry " + producer });
+            return;
+        }
+        // 卸货站址：罩住收方**且收货 >= 8**（否则车卸不下来 ⇒ 不算交付）。
+        local siteB = this.FreightSite(indB, cargo, true, 0);
+        if (siteB == null) {
+            GSAdmin.Send({ kind = "err", cmd = "build_freight_route",
+                           reason = "no unloading site that accepts " + GSCargo.GetCargoLabel(cargo) +
+                                    " near industry " + consumer });
+            return;
+        }
+        local job = obj.rawin("job") ? obj["job"] : (1000 + this._freight_seq);
+        this._freight_seq++;
+        local job_str = "" + job;
+        this._lastJob = job;
+        // 站址由 ExecCore 按引擎规则扫（同一套 `FreightSite`）：GS 这里只做
+        // **可行性预检**，建站时再扫一次是为了换一个建得成的站址。
+        this._core.Enqueue(exec, job, -1, -1, -1, -1, -1, cargo, indA, indB);
+        // 登记端点瓦片：**没有它，这条线就不会出现在 route-stats 里**（看板的线路表
+        // 与决策上下文的线路事实都读那个事件）⇒ 货运线会"建成了却看不见"。
+        if (this._routes == null) this._routes = {};
+        local frec = {};
+        frec.rawset("tA", siteA[0]);
+        frec.rawset("tB", siteB[0]);
+        this._routes.rawset(job_str, frec);
+        GSAdmin.Send({ kind = "ack", cmd = "build_freight_route", job = job,
+                       cargo = GSCargo.GetCargoLabel(cargo),
+                       producer = producer, consumer = consumer,
+                       tileA = siteA[0], tileB = siteB[0], company = exec, queued = 1 });
     }
 
     /* Find a depot site between station tiles `ta` and `tb`: scans around
@@ -3107,7 +3472,13 @@ class BridgeV1 extends GSController {
             return;
         }
         local exec = obj["company"];
-        local job = obj.rawin("job") ? obj["job"] : (100 + this._route_seq - 1);
+        // 缺省目标 = **最近一条线路**（客运或货运）：旧代码写死客运计数，
+        // 于是建完货运线再缩编会去缩编一条客运线（甚至不存在）。
+        local job = obj.rawin("job") ? obj["job"] : this._lastJob;
+        if (job == null || job < 0) {
+            GSAdmin.Send({ kind = "err", cmd = "retire_route", reason = "no route to retire" });
+            return;
+        }
         // P1-1a：退役请求直入 ExecCore（X: 标牌已废）。
         this._core.RetireRequest(job);
         GSAdmin.Send({ kind = "ack", cmd = "retire_route", job = job, company = exec,
@@ -3125,7 +3496,12 @@ class BridgeV1 extends GSController {
         local count = obj.rawin("count") ? obj["count"] : 1;
         if (count < 1) count = 1;
         if (count > 20) count = 20;
-        local job = obj.rawin("job") ? obj["job"] : (100 + this._route_seq - 1);
+        // 缺省目标 = 最近一条线路（客运或货运），见 RetireRoute 的注释。
+        local job = obj.rawin("job") ? obj["job"] : this._lastJob;
+        if (job == null || job < 0) {
+            GSAdmin.Send({ kind = "err", cmd = "add_vehicles", reason = "no route to scale" });
+            return;
+        }
         // P1-1a：车队请求直入 ExecCore（V: 标牌已废）。
         this._core.FleetRequest(job, count);
         GSAdmin.Send({ kind = "ack", cmd = "add_vehicles", job = job,

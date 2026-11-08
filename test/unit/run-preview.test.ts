@@ -105,10 +105,12 @@ describe("the preview and the manifest agree", () => {
 		// 工具 `inspect_vehicle` / `inspect_town` —— 工具的描述与 schema 属于脚手架
 		// 指纹 ⇒ 加工具就是换脚手架）。⇒ 2026-10-31 那轮 6 格基准（74f2e64d…）与
 		// 2026-11-02 之后的所有局**互不可比**（Compare 按组分开）。
+		// 2026-11-08: 41d82339b2925645 → 3b19310088baff6e（货运 F3：工具表多了
+		// `build_freight_route`，脚手架指纹覆盖工具表）。
 		// 2026-11-03: a72a663cdd126090 → 41d82339b2925645（货运 F1：observe 的描述
 		// 说清楚它还带**货种目录**与**产业坐标**——描述属于脚手架指纹 ⇒ 改描述就是
 		// 换脚手架）。⇒ 货运 F1 之后的所有局与之前的所有局**互不可比**。
-		expect(preview.scaffoldHash).toBe("41d82339b2925645");
+		expect(preview.scaffoldHash).toBe("3b19310088baff6e");
 	});
 
 	it("keeps the cost-known fact honest (a live-only model has no price table)", () => {

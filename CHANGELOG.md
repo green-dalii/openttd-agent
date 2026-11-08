@@ -33,25 +33,25 @@
 
 - **The model can finally see the freight world.** A freight line is "which mine, which plant", and the
   model could see neither: the GS now reports a **cargo catalogue** (which cargo is freight, which
-  industries produce it, which **accept** it - the engine's own answer, not a guess), the **position and
-  name of every industry**, and the cargo each road engine carries. Real machine (seed 4242): COAL is
-  freight, produced by 6 industries and accepted by 5 - including id 53 "Lonningbury Power Statio" - and
-  the model wrote a plan to link "a producer industry to a consumer industry". Both fingerprints moved
-  (`a72a663cdd126090` -> `41d82339b2925645`, `1808f8babae13cb0` -> `7390249eb5b1347c`): runs across that
-  boundary are not comparable.
+  industries produce it, which **accept** it - the engine's own answer), the **position and name of every
+  industry**, and the cargo each road engine carries. Real machine (seed 4242): the model planned to link
+  "a producer industry to a consumer industry".
 
 ### Added
-- **Freight deliveries are measured now.** The game script reports what *this company* delivered, per
-  cargo, with the engine's own cargo monitor. Three decisions are baked in: one axis only (the town axis
-  and the industry axis would count the same delivery twice), the running total is accumulated on our
-  side (the monitor hands out the delta since the last read and resets), and every gap is reported - a
-  destination that disappears before its amount was read makes the total a **lower bound**. One trap cost
-  a round of empty readings: the Bridge GS is a **server script** with no company of its own, so
-  `COMPANY_SELF` resolves to nothing and the monitor returns -1 without throwing; the executor's company
-  id is used instead, and the reads before that company exists are skipped rather than counted as gaps.
-  Real machine (seed 4242, passenger routes only): nine cargoes monitored at 38 destinations, all reading
-  0 - honest, because no freight was carried; the observation fingerprint moved (`7390249eb5b1347c` ->
-  `9aab3d22e9e95961`), so runs across that boundary are not comparable.
+- **Freight deliveries are measured now, and a freight line can be built.** The game script reports what
+  *this company* delivered, per cargo, with the engine's own cargo monitor (one axis, accumulated on our
+  side because the monitor hands out the delta and resets, every gap reported - a total with a gap is a
+  **lower bound**), and the model can now order a **freight line**: `build_freight_route(cargo,
+  from_industry, to_industry)` - the model picks the cargo and the two industries, the scaffold finds the
+  station sites by the engine's own rules, lays the road, builds the depot, buys and refits the truck and
+  starts it. Real machine (seed 4242): coal mine 28 -> power station 53, **5 tonnes delivered**.
+  Two engine rules are baked in, and the first one corrected an earlier conclusion: a station **not
+  accepting** a cargo does not stop the industry from handing it over (that is the station's *rating*),
+  but a vehicle **cannot unload** at a station that does not accept the cargo - so the loading site only
+  has to cover the producer, while the unloading site must accept the cargo. A refused command now reaches
+  the model (it used to only reach the log, so the model would repeat the same impossible order), and the
+  route table shows what each line carries. Fingerprints moved (`41d82339b2925645` ->
+  `3b19310088baff6e`, `9aab3d22e9e95961` -> `103aabed827a8def`): runs across that boundary are not comparable.
 - **The model can now ask the game a question and get the answer.** The observation surface is a
   **periodic sample**: it says what the world looks like right now, never what *its own vehicle* is
   doing, how much it carries or what it earned. Two read-only tools close that gap: `inspect_vehicle`
