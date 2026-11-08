@@ -313,6 +313,15 @@ export interface CompanyCargoFacts {
 	 * 为什么累计：monitor 是"读一次清零"的增量口径，累计由 harness 做。
 	 */
 	byCargo: { label: string; amount: number }[];
+	/**
+	 * 货运 F4（A3）：逐 **(货种, 产业)** 的会话累计。
+	 *
+	 * 为什么与 `byCargo` 并存而不是替掉它：`byCargo` 是**公司口径**的总量（模型
+	 * 看这个）；逐产业的那一层是**归因的原料**（“这批煤送到了哪个产业”）⇒
+	 * harness 要靠它把交付归到线路（唯一服务该产业的线）。
+	 * 空数组 = 没有逐产业读数（**不是**“每条都是 0”）。
+	 */
+	byIndustry: { label: string; industry: number; amount: number }[];
 	/** 游戏口径：本季度交付总量（所有货种，精确值），用作交叉核对。 */
 	quarterDelivered: number | null;
 	/** 被监视的规模：货种数与目的地（货种×产业）数——数字本身就是口径的一部分。 */
@@ -748,8 +757,20 @@ export class WorldState {
 			.filter((c) => c && typeof c.label === "string")
 			.map((c) => ({ label: String(c.label), amount: Number(c.amount) || 0 }))
 			.sort((a, b) => b.amount - a.amount);
+		// 逐 (货种, 产业)：**只收真的读数**（amount > 0）——GS 报 0 的行是
+		// “监视了但没交付”，不是事实；产业 id 必须是整数（0 是真的产业 id）。
+		const byIndustry = (Array.isArray(facts.byIndustry) ? facts.byIndustry : [])
+			.filter((r) => r && typeof r.label === "string" && Number.isInteger(Number(r.industry)))
+			.map((r) => ({
+				label: String(r.label),
+				industry: Number(r.industry),
+				amount: Number(r.amount) || 0,
+			}))
+			.filter((r) => r.amount > 0)
+			.sort((a, b) => b.amount - a.amount);
 		this.companyCargo = {
 			byCargo,
+			byIndustry,
 			quarterDelivered: Number.isFinite(Number(facts.quarterDelivered)) ? Number(facts.quarterDelivered) : null,
 			monitored: facts.monitored && Number.isFinite(Number(facts.monitored.cargoes))
 				? { cargoes: Number(facts.monitored.cargoes), destinations: Number(facts.monitored.destinations) || 0 }

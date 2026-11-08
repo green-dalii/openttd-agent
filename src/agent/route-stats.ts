@@ -51,6 +51,15 @@ export interface RouteStats {
 	 * 缺席 = GS 没报（未计量），不是"零"。
 	 */
 	cargoCarried?: string;
+	/**
+	 * 货运 F4（A3）：货运线的**两端产业 id**（产方 / 收方）。
+	 *
+	 * 为什么需要：GS 的 cargo monitor 只知道"本公司往某个产业送了���少"，
+	 * **它不知道是哪条线送的** ⇒ 归因需要知道"哪条线服务哪个产业"。
+	 * 客运线没有这两个字段（它的两端是城镇）⇒ 缺席 = 不适用，不是 0。
+	 */
+	fromIndustry?: number;
+	toIndustry?: number;
 	/** P1-2：这条线的**车型**（引擎 id）；缺席 = 未换车/未计量。 */
 	engineApplied?: number;
 	/** P1-3：这条线登记车辆中**此刻停在库里**的 id（IsStoppedInDepot，引擎读数）；缺席 = 未计量。 */
@@ -155,6 +164,10 @@ export function joinRoutesWithLedger(
 				// 去重/透传字段必须**跟着走**（2026-09-25 的教训）：这里逐字段
 				// 重建对象，漏一个字段它就静默消失（25 辆车报成 129 的同族 bug）。
 				...(r.cargoCarried !== undefined ? { cargoCarried: r.cargoCarried } : {}),
+				// 货运 F4（A3）：两端产业 id 必须**跟着走**（同一个坑：逐字段重建
+				// 对象时漏一个字段，它就静默消失 ⇒ 归因就退化成"猜"）。
+				...(r.fromIndustry !== undefined ? { fromIndustry: r.fromIndustry } : {}),
+				...(r.toIndustry !== undefined ? { toIndustry: r.toIndustry } : {}),
 			};
 			if (pair) {
 				out.townA = pair.fromTown;
@@ -189,6 +202,9 @@ export interface RouteWireFact {
 	townB?: number;
 	/** 这条线运的货（标签）；缺席 = GS 没报（未计量，不是"没有货"）。 */
 	cargoCarried?: string;
+	/** 货运 F4（A3）：两端产业 id（产方 / 收方）；缺席 = 客运线（不适用）。 */
+	fromIndustry?: number;
+	toIndustry?: number;
 }
 
 /**
@@ -219,6 +235,8 @@ export function routeWireFacts(stats: RouteStats[], ledger: LedgerPair[]): Route
 		if (r.waitB !== undefined) f.waitB = r.waitB;
 		if (r.vehiclesIds !== undefined) f.vehiclesIds = r.vehiclesIds;
 		if (r.cargoCarried !== undefined) f.cargoCarried = r.cargoCarried;
+		if (r.fromIndustry !== undefined) f.fromIndustry = r.fromIndustry;
+		if (r.toIndustry !== undefined) f.toIndustry = r.toIndustry;
 		return f;
 	});
 }

@@ -381,6 +381,7 @@ function observationProbe(): WorldSnapshot {
 		engines: [{ id: 1, name: "probe", speed: 1, cargo: "COAL" }],
 		companyCargo: {
 			byCargo: [{ label: "COAL", amount: 3 }],
+			byIndustry: [{ label: "COAL", industry: 2, amount: 3 }],
 			quarterDelivered: 5,
 			monitored: { cargoes: 1, destinations: 2 },
 			gaps: { dropped: 0 },

@@ -144,12 +144,15 @@ describe("world state: 产业与货种（GS 上报的原始计数）", () => {
 		const w = new WorldState();
 		w.setCompanyCargo({
 			byCargo: [{ label: "COAL", amount: 120 }],
+			byIndustry: [{ label: "COAL", industry: 53, amount: 120 }],
 			quarterDelivered: 5000,
 			monitored: { cargoes: 3, destinations: 17 },
 			gaps: { dropped: 1 },
 		});
 		const c = w.snapshot().companyCargo;
 		expect(c?.byCargo[0]).toEqual({ label: "COAL", amount: 120 });
+		// 逐 (货种, 产业)：归因的原料（“这批煤送到了哪个产业”）。
+		expect(c?.byIndustry[0]).toEqual({ label: "COAL", industry: 53, amount: 120 });
 		expect(c?.quarterDelivered).toBe(5000);
 		expect(c?.monitored).toEqual({ cargoes: 3, destinations: 17 });
 		// 缺口必须留着：累计值是**下界**，这个事实要跟着数字走。
@@ -158,8 +161,23 @@ describe("world state: 产业与货种（GS 上报的原始计数）", () => {
 
 	it("没收到缺口信息时是 null（不是 0 —— 那等于说「一次没漏」）", () => {
 		const w = new WorldState();
-		w.setCompanyCargo({ byCargo: [], quarterDelivered: null, monitored: null, gaps: null });
+		w.setCompanyCargo({ byCargo: [], byIndustry: [], quarterDelivered: null, monitored: null, gaps: null });
 		expect(w.snapshot().companyCargo?.gaps).toBeNull();
+	});
+
+	it("逐 (货种, 产业) 的 0 增量不占一行（那是「监视了但没交付」，不是事实）", () => {
+		const w = new WorldState();
+		w.setCompanyCargo({
+			byCargo: [{ label: "COAL", amount: 0 }],
+			byIndustry: [
+				{ label: "COAL", industry: 53, amount: 0 },
+				{ label: "COAL", industry: 28, amount: 5 },
+			],
+			quarterDelivered: null,
+			monitored: null,
+			gaps: null,
+		});
+		expect(w.snapshot().companyCargo?.byIndustry).toEqual([{ label: "COAL", industry: 28, amount: 5 }]);
 	});
 
 	it("没收到公司口径数据时是 null（不是 0 —— 那等于说「一辆货都没送」）", () => {
