@@ -44,12 +44,10 @@ OpenTTD 是**连续时钟仿真**（tick 驱动），LLM 是**慢思考离散推
    晚到的动作仍会按序落地（§10.39.1）
 6. 动作异步执行；结果事件（含 rcon 回执，§10.59）回流；需要再决策时回到 1
 
-> **历史**：原设计确实是"决策前 `pause`、决策后 `unpause`"（冻结-观察-决策-执行-解冻）。
-> 2026-09-12 因"暂停不可恢复"废除；**2026-09-17 实测推翻该归因**（§10.59：双向有效，
-> 真因是 `pause_on_join=true` 且无客户端），于是冻结以**可选、已验证**的形式回归：
-> `--freeze`（§10.60）。但它在本任务里**要付吞吐**——暂停期间施工也停，
-> 而施工墙钟是本任务瓶颈（§10.61 实测 frozen delivered 0/5 vs unfrozen 2/5）。
-> 因此**默认不冻结**；要重测决策质量必须**按游戏时间对齐**。
+> **历史**（结论与教训见 `MEMORY.md`，此处只留现状）：原设计是"决策前 `pause`"，
+> 2026-09-12 废除、2026-09-17 实测翻案（§10.59/§10.60）⇒ 冻结回到**可选**的
+> `--freeze`，但它要付吞吐（§10.61：frozen delivered 0/5 vs unfrozen 2/5）⇒
+> **默认不冻结**；重测决策质量必须**按游戏时间对齐**。
 
 ### 1.2 动作面矛盾（本次调研最重要的发现）
 OpenTTD 有**两个动作面**，能力完全不同：
@@ -61,10 +59,9 @@ OpenTTD 有**两个动作面**，能力完全不同：
 
 **关键结论**: RCON **无法**铺铁轨/建站/买车/设订单。真正「玩」必须有一个**游戏内伴生 AI**（executor）充当 LLM 的「手」；LLM 是「脑」，通过管理端口下发**高层动作指令**，由 executor 用完整 AI API 落地。
 
-**三方独立先例验证此模式**:
-- `jplattel/openttd-llm`: 外部 Python 写 `commands.nut`（**该项目的文件名，本仓库没有此文件**）到 AI 包目录 → Squirrel AI 读 → 执行 → AILog 回传
-- `walter-grace/agent-openttd-arena` (15.x): Admin↔GS 双向 JSON + **GS 用 GSSign 放蓝图标牌 → executor AI 轮询 AISignList 消费**
-- `OpenTTDLab`: 受控 Squirrel AI + admin port（重实验可复现）
+**三方独立先例**（调研记录见 `MEMORY.md`）：`jplattel/openttd-llm`（外部进程写
+`commands.nut` ⇒ Squirrel AI 执行）、`walter-grace/agent-openttd-arena`（Admin↔GS 双向
+JSON + GSSign 标牌邮箱）、`OpenTTDLab`（受控 Squirrel AI + admin port）⇒ 模式成立。
 
 ---
 
@@ -215,14 +212,10 @@ OpenTTD 有**两个动作面**，能力完全不同：
 
 ### 5.1 局生命周期
 ```
-新局 (seed, config)
-  → 加载 policy (system prompt + lessons 注入 + 候选策略)
+新局 (seed, config) → 加载 policy (system prompt + lessons 注入 + 候选策略)
   → 玩到终止条件 (年份/破产/价值阈值/时间预算)
-  → 结算: 记 metrics (终值/利润曲线/覆盖率/效率/LLM决策质量)
-  → 反思 (LLM 复盘: 成败归因)
-  → 蒸馏:
-       lessons:  泛化教训 (做对/做错 + 可复用规则)
-       strategy: 把「表现好的动作序列模式」模板化入库
+  → 结算: 记 metrics (终值/利润曲线/覆盖率/效率/LLM决策质量) → 反思 (LLM 复盘: 成败归因)
+  → 蒸馏: lessons (泛化教训) + strategy (表现好的动作序列模式模板化入库)
   → 下一局 (或同 seed 对比 baseline)
 ```
 
@@ -232,10 +225,9 @@ OpenTTD 有**两个动作面**，能力完全不同：
 3. **Metrics 追踪**: 每局结构化指标 JSONL；进化引擎可跑「同 seed 对照实验」（有无 lessons/不同策略），产出对比图。
 
 ### 5.3 收敛防抖
-- 每 lessons 限量、去重、带来源/时间戳
+- 每 lessons 限量、去重、带来源/时间戳；反思 prompt 显式禁止臆测因果（只接受游戏事实佐证）
 - 策略入库需通过「价值>阈值 且 已验证局≥2」
-- 反思 prompt 显式禁止臆测因果（只接受游戏事实佐证）
-- v0.1 进化引擎**只读建议**，规则由人类在 UI 确认后才全局生效（guardrail）
+- 进化引擎**只读建议**，规则由人类在 UI 确认后才全局生效（guardrail）
 
 ---
 
@@ -243,12 +235,9 @@ OpenTTD 有**两个动作面**，能力完全不同：
 
 ### 6.1 页面/数据
 - **WS 事件流**（从 Runner 镜像）: Agent events + GameEvents + EvolutionEvents
-- 视图:
-  1. **总览**: 当前局/年份/现金曲线/公司价值/贷款/目标达成度进度条
-  2. **时间线**: 动作事件 (build/add/pause…) 时间轴 + 结果成功/失败
-  3. **LLM 推理**: 每 turn 的 thinking/plan/rationale 流式显示
-  4. **进化**: 跨局指标折线对比 + lessons/策略库浏览 + 手动开关进化注入
-  5. **审计**: 原始事件日志 (可筛选), 保存/回放
+- **视图按四个问题组织**：Run（这一局在干什么）/ Compare（谁更强）/ History（这一局能自证）/
+  Configure（跑什么）⇒ 具体页面与接口见 `docs/DASHBOARD-API.md` 与 `docs/DASHBOARD-UI.md`
+  （本文件不复制那份清单）。
 - 状态: Runner 持权威状态，Web 无状态只渲染；断线重连拉全量快照
 
 ### 6.2 技术
@@ -276,7 +265,7 @@ OpenTTD 有**两个动作面**，能力完全不同：
 | D8 | 多 Agent? **否（v0.1）**，但 company_id 与 runner 隔离使未来可加 |
 | D9 | 一局长局 vs 短局重复? **两者都要**：CLI 支持 `--episode-length`（默认玩到 2030 或破产/价值停滞），进化靠多短局，演示靠长局 |
 | D10 | Replay/录像? **是**：每局存事件 JSONL + 关键 savegame 快照；Web 可回放时间线（重放不做像素级，是结构化事件重放） |
-| D11 | **Admin 认证(v0.1)**：隔离 data-dir 内 `allow_insecure_admin_login = true` + **随机强密码** + 仅绑定 127.0.0.1。不实现 secure-auth 握手（首版降复杂度；安全边界=本机回环）|
+| D11 | **Admin 认证(v0.1)**：隔离 data-dir 内 `allow_insecure_admin_login = true` + **随机强密码** + 仅绑定 127.0.0.1；不实现 secure-auth 握手（安全边界=本机回环）|
 
 ---
 
@@ -287,10 +276,9 @@ OpenTTD 有**两个动作面**，能力完全不同：
 3. **超时/重试**: 所有 admin RCON/GS 命令带超时；LLM 流式错误走 pi retry
 4. **状态权威单一**: Runner 内存权威，避免双写竞态；事件带单调 seq
 5. **审计**: 动作/结果/LLM 决策全落 JSONL（结构化，可 grep/回放）
-6. **配置**: 单 zod schema；路径/端口/seed/模型/预算全可配；不动用户全局配置目录（用独立 `-c` 与独立 data dir 副本）
-7. **测试**: unit (codec/蓝图/蒸馏/解析) → integration (真 spawn openttd→join→poll→rcon→save/load) → e2e smoke（最短可玩局）
-8. **类型**: strict TS；shared event 类型是单一事实源
-9. **无屎山护栏**: 每模块明确职责+禁止项(§3.2)；ADR 记录决策；复杂逻辑函数式纯函数化；LLM 交互全部走显式 schema
+6. **配置/测试/类型/模块边界** 的准则见 `AGENTS.md` §2 与 §4–§5（本文件不复制条文）：
+   单 zod schema、隔离 data dir、unit→integration→e2e 三层、strict TS、共享类型单一事实源、
+   每模块写明职责与禁止项。
 
 ---
 
@@ -325,7 +313,7 @@ OpenTTD 有**两个动作面**，能力完全不同：
 | **A 通信与协议事实** | 10.2 观察信号 · 10.4 命令下发链路 · 10.13 OpenTTD Squirrel… · 10.24 第二条 admin 连接不能给 … · 10.25 GS 可对公司施工并扣公司钱 · 10.66 GS 通道的部分失效：`GSSt… · 10.99 数据的唯一来源边界：admin … · 10.106 事实通道补全与 admin 握手… | 9 |
 | **B 执行器与施工** | 10.3 GS-only 施工候选 · 10.10 v0.2 spike: 自定义 … · 10.11 v0.2 spike: Brid… · 10.12 v0.2 实现: 标牌邮箱可见性… · 10.14 v0.2 实现: Executo… · 10.15 v0.2.1: 分段贪心铺路解除… · 10.23 执行器阶段的解码契约 · 10.26 决策循环的 freeze/tha… · 10.27 执行器"假死"的真正根因：路径搜… · 10.28 控制台 `pause` 是单向的… · 10.29 执行器跑通完整公交线 · 10.39 NEXT-4 最小切片：执行器队… · 10.39.1 修正：FIFO + done 集… · 10.40 FIFO 队列真机验证通过 · 10.45 Phase A2：GS 侧类型化… · 10.46 Phase A3：harness… · 10.90 决定性事实：Bridge GS … · 10.92 AB-4a：GS 自建 + 自运… · 10.103 执行器异常：完整文本进事件流 · 10.107 P1-1a：执行器搬进 GS · 10.109 P1-1b 尾巴 + P1-3 … · 10.110 P1-2：动作面扩——选货 / … · 10.111 P1-3 收尾：FLEET 归因… | 24 |
 | **C 决策循环与运行时** | 10.16 v0.2.1 实现: Pi Ag… · 10.18 v0.5.0 实现: 启动门禁 … · 10.19 v0.6.0 实现: 决策循环对… · 10.20 `add_vehicles` 的… · 10.21 两个 runner 的事件转发契… · 10.30 `seconds` 从未限制运行… · 10.35 心跳被当成「变化」—— 决策循环… · 10.35.1 修复的实测结果与尚未解决的问题 · 10.36 新闻门：phase 按阶段门控，… · 10.37 新闻门之后的第一次校准跑 · 10.38 校准跑 #2：session h… · 10.47 Phase B-3：signal… · 10.48 Phase B-4a：决策循环纯… · 10.49 Phase B-4b：决策循环体… · 10.50 Phase C：结构化记忆 + … · 10.60 已验证的冻结：重新引入暂停，但这… · 10.61 冻结 vs 不冻结：机制成立，但… · 10.68 测量单元本身不可比：墙钟预算 →… · 10.69 G1 落地：局以模拟时间结束 · 10.74 与 pi-agent-core … · 10.75 R1 实施结果：执行顺序 / 工… · 10.83 G6 实测：单次请求峰值 5–7… · 10.93 `--serve` 的 Star… · 10.101 僵尸局取证：用户看到的那句告警，… · 10.102 世界时钟：一个事实、一个写者、一… | 26 | · 10.115 决策运行时双后端（harness/裸 Agent，请求逐字相同） · 10.116 模型目录是快照，实时列表要另取 |
-| **D 观测面与测量** | 10.1 动作面 · 10.53 NEXT-2 N2-1：线路经济… · 10.55 NEXT-2 N2-4：主指标换… · 10.59 工具必须能观测自己的效果：rco… · 10.65 流量指标的测量缺陷：`deliv… · 10.67 校准 #2：仪器缺陷不是方差来源… · 10.71 G2 落地：把"决定结局的那个过… · 10.72 S0 oracle 梯度：杠杆存… · 10.73 S1/G4 落地：预建场景 · 10.98 城镇与存档：两条"数据一直在、只… · 10.100 P1+P2 实测：产业/货种/公… · 10.105 车队数必须跨线路去重：同屏两个"… · 10.114 D1a：模型看得见自己这局的分 · 10.126 货运：计量（F2）与动作（F3）… | 15 |
+| **D 观测面与测量** | 10.1 动作面 · 10.53 NEXT-2 N2-1：线路经济… · 10.55 NEXT-2 N2-4：主指标换… · 10.59 工具必须能观测自己的效果：rco… · 10.65 流量指标的测量缺陷：`deliv… · 10.67 校准 #2：仪器缺陷不是方差来源… · 10.71 G2 落地：把"决定结局的那个过… · 10.72 S0 oracle 梯度：杠杆存… · 10.73 S1/G4 落地：预建场景 · 10.98 城镇与存档：两条"数据一直在、只… · 10.100 P1+P2 实测：产业/货种/公… · 10.105 车队数必须跨线路去重：同屏两个"… · 10.114 D1a：模型看得见自己这局的分 · 10.126 货运：计量（F2）、动作（F3）与归因的地基… | 15 |
 | **E 记忆与进化** | 10.22 RL Harness 范围 · 10.31 M3 对照实验结果 · 10.34 M3 第二次 A/B：把决策权交… · 10.41 决策→结果账本接入反思 · 10.42 M3 A/B 第三次重跑：手眼账… · 10.43 为什么记忆无收益：全链路审计 · 10.76 R2 实施结果：经验 = 带实测… · 10.77 R2b 实施结果：反思改走 Ag… · 10.78 M1：反思产出率变成可诊断、可重… · 10.79 M2：把计分规则作为事实写进提示… · 10.80 M3 能力盘点：环境到底允许 a… · 10.82 第一性原理复检：能力面、空缺与协… · 10.84 M3-1b：车队杠杆真正的两处缺… · 10.85 第一性原理复审：离"自主 + 自… · 10.86 M3-2a：每线路登记表 + 退… · 10.87 M3-2b：披露粘滞——让事件相… · 10.88 M3-2c：车队请求对已登记的旧… · 10.89 M4a：`recall` 按需检… · 10.91 AB-1：`capabiliti… | 19 |
 | **F 实验方法与统计** | 10.32 第一性原理：M3 测不出差异，是… · 10.33 把决策权交还 agent：城镇对… · 10.52 每局存档+ M3 第五/六次重跑 · 10.56 N2-5 首轮 A/B 判废：臂… · 10.57 N2-5 有效轮次与两个结论 · 10.58 N2-5 oracle 探测：任… · 10.62 NEXT-2 收尾：首个干净判据… · 10.63 校准轮：窗口是方差的主因，实验设… · 10.64 顺序检验 block #1：CI… · 10.70 G3 落地：车队请求的静默无效变… · 10.81 M3-1 真机结果：车队杠杆被阶… · 10.112 P2-3：统计预登记 · 10.113 P2-1/P2-2 代码侧：实验… | 14 |
 | **G 产品面与前端** · 10.123 一局能自证：manifest 全字段 + 分组键来自账本… | 10.17 v0.3.0 实现: Dashb… · 10.94 Live 页面运行期的滚动失控与… · 10.95 图表渲染路径：三个真因与"图表健… · 10.96 长跑实测 · 10.97 uPlot 1.6.32 的交互… · 10.104 图表手势、区间读数与列表索引 · 10.117 一份运行配置真值 · 10.118 一份运行配置解析器 | 6 · 10.119 页面起一局：旋钮、预览与“预览即承诺”… · 10.120 因果时间线：一次决策一行，四段证据由 job 连接… · 10.121 Compare 视图是投影：四轴/判定/排除都不是页面算的… · 10.122 结局词表封闭，错误的 hint 只有一份… · 10.124 模型看不见的事实：投影是最后一道闸… |
@@ -526,14 +514,12 @@ OpenTTD 有**两个动作面**，能力完全不同：
 ### 10.65 流量指标的**测量缺陷**：`deliveredCargo` 是当季计数器（2026-09-18）
 **仍为真**（测量缺陷，最常咬人）：`ServerCompanyEconomy.deliveredCargo` 是**本季度已运出**的计数器，**每季度归零**（u16）⇒ `deliveredRun` 是**跨季积分**，`deliveredRunComplete=true` 表示整段无 gap；两臂必须同源，否则回落到 `raw` 并标 `ArmComparison.deliveredSource`。
 **它同时含客运**（2026-10-31 核对 OpenTTD 15.3 源码）：admin 发的是 `cur_economy.delivered_cargo`（**按货种的数组**）的**求和**，而客运也记进同一数组（`src/economy.cpp`）⇒ `deliveredRun` **已经是"货物 + 客运"**，旧措辞 "cargo delivered" 是在说谎；分数轴与系统提示都改口（措辞由服务端 `DELIVERED_MEASURE` 给出）。
-**⚠ 上一条"拆不开"是误判（2026-11-05 纠正，调研见 `docs/PER-LINE-DELIVERY-FEASIBILITY.md`）**：
+**⚠ 上一条"拆不开"是误判（2026-11-05 纠正，调研见 `docs/PER-LINE-DELIVERY-FEASIBILITY.md`；根因与教训见 `MEMORY.md` D89/D93/D94）**：
 脚本 API **有** cargo monitor（`GSCargoMonitor.GetTownDeliveryAmount` / `GetIndustryDeliveryAmount`，
 `script_cargomonitor.hpp` 写着 `@api game` ⇒ Squirrel 侧也导出；真机实测：类存在、调用成功、返回 0）。
-当初"拆分永远是空的"是**我们自己的代码**：累加器用了 **Squirrel 的严格表**（往不存在的键里写会抛
-`the index 'LVST' does not exist`）⇒ `CollectFacts` 整个抛异常 ⇒ 空结果被误读成"API 返回 null"
-（MEMORY D44/D89/D93）。**真正的限制是**：① monitor 粒度只有**城镇 / 产业**（整个脚本 API 没有
-`GetCargoTotal` ⇒ **没有车站 / 线路**）；② monitor **只统计货运**，而当前脚手架**只建客运线路**。
-⇒ 分数轴仍只有**合计**，`cargoDelivered`/`passengersDelivered` 仍为 `null`（= 没测到，不是 0）；
+当初"拆分永远是空的"是**我们自己的代码**（严格表写入抛异常 ⇒ 整个 `CollectFacts` 中断）。
+**真正的限制是**：① monitor 粒度只有**城镇 / 产业**（整个脚本 API 没有 `GetCargoTotal` ⇒
+**没有车站 / 线路**）；② monitor **只统计货运**（客运不在它的口径里）。
 守卫里"该 API 不存在"那条**删除**，换成"累加器不许用动态键的表"。
 依据：`src/game/delivery-meter.ts`、`src/evolution/metrics.ts`、`src/evolution/scorecard.ts`、`src/game/squirrel/bridge-gs/main.nut`；教训 `MEMORY.md` D14。
 
@@ -1288,7 +1274,7 @@ compaction 冲突）在 `docs/HARNESS-MIGRATION.md` §3（带坐标），此处�
 - 事实：**「不适用」曾被说成「零」**（2026-11-08）：OpenTTD 15.3 用 **-1** 表示"这条读数不存在"（`GetLastMonthProduction` / `GetLastMonthTransported`：该产业**不产**这种货；`GetStockpiledCargo`：该产业**不接受**这种货 —— 矿场不接受自己产的煤），GS 把负读数编码成 **JSON null**（形状恒定、值是"不适用"），而 harness 的两个读取器（`signal-hub` 的 `rawCount`、`world-state` 的 `countOr`）都走 `Number(v)` —— `Number(null) === 0` ⇒ "不接受这种货"变成"库存 0 吨"，模型与页面都只差这一步（前端本来就会把 null 打成"—"）。**真机前后对照**（seed 4242，采样 12 个产业）：修前世界状态里 **12/12** 是 `stock: 0`，修后 **12/12** 是 `stock: null`（`transported: 0` 保持原样——那是**真的零**，不是"不适用"）。守卫只测了 -1 与**缺席**，没测 GS 真正发的**显式 null** ⇒ 这条从 2026-09-25 的 D60 修复里活了下来。修法：原始计数先问"缺失？"再问"非负？"，产量拿不到的产业行直接丢弃（`setIndustries` 原本的规则）。**观测面结构指纹没动**（`7390249eb5b1347c`）——改的是取值不是结构 ⇒ 基准分组不变；但此前各局记录的这些计数里"不适用"被记成了 0（主轴"货物 + 客运交付"不受影响：它读 admin 的 `deliveredCargo`）。
 - 事实：**货运世界进了观测面**（2026-11-07，货运 F1）：模型此前看得见"哪里有煤"（产量数字），却**选不出线路** —— 缺的是**关系**（谁产、谁收）与**坐标**。GS 现在报三样：① **货种目录**（`GSCargo.IsFreight` + `GSIndustryList_CargoProducing` / `_CargoAccepting` ⇒ **引擎自己算的**"谁要煤"）；② **全部产业的名字与坐标**（`GSIndustry.GetLocation`）；③ **车型能拉的货**（`GSEngine.GetCargoType`）。真机（seed 4242）：COAL 是货运、6 个产业产、5 个产业收（含 id 53 "Lonningbury Power Statio"），"Balogh Coal Truck" ⇒ `COAL`；真实模型的计划里写着"linking a **producer industry to a consumer industry**"（此前它只谈城镇）。**车站收什么货由引擎按集货区算**（矿场旁的车站**不接受煤**）⇒ 这类事实不能靠模型猜。观测面变了 ⇒ 脚手架指纹 `a72a663cdd126090` → **`41d82339b2925645`**（observe 描述改了）、观测面结构指纹 `1808f8babae13cb0` → **`7390249eb5b1347c`** ⇒ 此前所有局与此后所有局**互不可比**。
 
-### 10.126 货运：计量（F2）与动作（F3）（2026-11-08）
+### 10.126 货运：计量（F2）、动作（F3）与归因的地基（F4 前置调研）（2026-11-08）
 
 - 事实：`GSCargoMonitor` 是**读一次清零的增量**（`script_cargomonitor.hpp`：每次读返回"上次读之后的增量"并把累计清零）⇒ 累计**必须由 harness 做**；城镇轴与产业轴会把**同一笔交付**记两次 ⇒ 只取**产业交付**。
 - 事实：**Bridge GS 是服务器脚本**（`[game_scripts]`），**它没有自己的公司** ⇒ `GSCompany.COMPANY_SELF` 解析成无效公司，`GetIndustryDeliveryAmount` **返回 -1（不是抛异常）** ⇒ 真机 38 个目的地全部 failed、读数一个都没有。修法：用 **executor 的公司 id**（命令里带来的，默认 0）——失败**不丢增量**，但读数缺一个 ⇒ 记进缺口。
@@ -1297,3 +1283,9 @@ compaction 冲突）在 `docs/HARNESS-MIGRATION.md` §3（带坐标），此处�
 - 事实（**纠正 §10.124 的推论**）：**"车站收不收货"不等于"产业交不交货"**（2026-11-08）。产业把货交给车站看的是**车站的 rating**（`station_cmd.cpp` 的 `CanMoveGoodsToStation`：`rating == 0` 才拒收），新车站的 rating 是 **175**（`INITIAL_STATION_RATING`）⇒ **车站不收这个货，产业照样把货送到站上等着**。旧结论"矿场旁的站不收煤 ⇒ 煤运不走"**不成立**。但**卸货**侧相反：车在**不收货**的站是卸不下来的（`economy.cpp` 的 `LoadCargo`/`UnloadCargo`："The station does not accept our goods anymore" ⇒ 货被退回而不是交付）⇒ **装货侧只要罩住产方，卸货侧必须收货 >= 8**。真机（seed 4242）：煤矿 28 → 电站 53，货车站 → 路 → 车库 → 货车（`Balogh Coal Truck`），**交付 5 吨煤**（cargo monitor 的产业轴非零）。
 - 事实：**集货半径是 3，不是 4**（2026-11-08）：15.3 默认**开着** modified_catchment ⇒ `GSStation.GetCoverageRadius(STATION_TRUCK_STOP)` = **3**（`CA_TRUCK`；`CA_UNMODIFIED` 才是 4）。⇒ "产方与收方必须在同一座车站的集货区里"这个约束**比想象的更紧**（真机实测：seed 4242 上最近的"产方→收方"是 15 格 ⇒ 没有任何一对产业能用一座车站同时罩住 ⇒ **产业→产业的货运线在小地图上不存在**；可行的是"产方 → 电站/工厂"这种**长距离**线路，货车把煤从矿场拉到电站）。
 - 事实：货运动作面（货运 F3）：`build_freight_route(cargo, from_industry, to_industry)` —— **模型决定运什么货、运去哪**；脚手架负责**怎么落地**（按引擎规则选站址 ⇒ 铺路 ⇒ 车库 ⇒ 买车改装 ⇒ 挂路线，**复用**客运那套 `LayPath`）。GS 侧装货站/卸货站的规则**不同**（见上一条）；任何一条不满足 ⇒ **具名拒绝**并说清原因（不静默），且**拒绝会进模型的决策上下文**（此前 GS 的 `err` 只进计数器与日志 ⇒ 模型只会重复同一个建不成的命令）。脚手架指纹 `41d82339b2925645` → **`3b19310088baff6e`**（工具表变了）；观测面结构指纹 `9aab3d22e9e95961` → **`103aabed827a8def`**（投影多了"可装货的产方"）。
+
+- 事实：GS 的 cargo monitor 累计**只按货种上报**（`own_delivered` = `[{label, amount}]`）⇒ **逐 (货种, 产业) 的增量被丢掉**。而 GS 本来就**逐对去读**（`GetIndustryDeliveryAmount` 循环）⇒ 补报只是把已经读到的数多带一层 ⇒ **逐线路归因缺的不是算法，是这个读数**（`docs/PER-LINE-DELIVERY-FEASIBILITY.md` §4.2 的归因规则：某城镇/产业**只被我们一条线**服务 ⇒ 归它；被多条线服务 ⇒ **不可分摊**，记 `null` + 说明）。
+- 事实：**路线台账的形状是"两端城镇"** ⇒ **货运线装不进去**。真机（真实模型货运局）留下的 `route-facts.jsonl` 里，5 条货运线成了 `from:null,to:null` ⇒ 注入模型的句子变成 `route towns null->null was ordered at decision 2`（**垃圾进上下文**）。F3 起货运 ack **不进台账**（只进 `lastRoute` 给地图）⇒ 决策→结果台账里**没有货运**。⇒ 台账的记录形状必须能装"产业对 + 货种"，否则要么丢、要么编。
+- 事实：**货运拆分的服务端那一半已经算好了**：`buildScorecard` 已经产出 `ability.cargoDelivered` / `passengersDelivered`（F2 的 monitor 累计喂进 `deliveredByCargo`），但**页面上没有任何地方画它**（全仓库只有 scorecard 与单测提到这两个字段）⇒ 货运轴缺的只是**接线**，口径（`DELIVERED_MEASURE` / `SPLIT_MEASURE`）也是现成的。
+- 事实：**配对统计只算主轴**：`pairedComparison` 的唯一指标是"每游戏日交付"⇒ 次级轴（每 1M token 交付、工具失败率）**没有配对 CI**。而 2026-10-31 那轮 6 格的**度量行已不在磁盘上**（`/tmp/pB*` 只剩空目录，全盘无 `metrics.jsonl`）⇒ **聚合数推不出配对 CI**（配对需要**逐对的差值**）⇒ 次级轴只能靠"把配对统计**泛化到任意轴** + 让下一轮矩阵**自带**所有轴的配对判定"。
+- 依据：`src/game/squirrel/bridge-gs/main.nut`（`own_delivered`）、`src/agent/route-ledger.ts`、`src/agent/route-facts.ts`、`src/evolution/scorecard.ts`、`src/evolution/bench-stats.ts`；教训 `MEMORY.md` D97/D98。
