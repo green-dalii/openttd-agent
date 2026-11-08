@@ -31,6 +31,8 @@ interface CompareView {
 		stability: { label: string; text: string; known: boolean }[];
 		growth: { label: string; text: string; known: boolean };
 		outcomes: { code: string; label: string; hint: string; count: number }[];
+		splitMeasure: string;
+		splitKnown: boolean;
 	}[];
 	exclusionRows(payload: unknown): { reason: string; count: number }[];
 	comparison(payload: unknown): { verdict: string; message: string; pairs: number; known: boolean } | null;
@@ -151,7 +153,10 @@ const PAYLOAD = {
 			runs: 4,
 			excluded: 1,
 			excludedReasons: ["stopped (paused)"],
-			ability: { runs: 4, measure: "cargo + passengers delivered", mean: 12.5, median: 12, stations: 3, vehicles: 6 },
+			ability: {
+				cargoDelivered: 120,
+				passengersDelivered: 0,
+				splitMeasure: "delivered to monitored towns/industries, by cargo type", runs: 4, measure: "cargo + passengers delivered", mean: 12.5, median: 12, stations: 3, vehicles: 6 },
 			efficiency: {
 				measure: "cargo + passengers delivered",
 				deliveredPerMillionTokens: 42,
@@ -202,6 +207,36 @@ const PAYLOAD = {
 };
 
 describe("CompareView", () => {
+	it("货运 F4（A6）：能力轴画出**货物/客运拆分**（服务端的数字与口径）", () => {
+		const v = load();
+		const rows = v.modelRows(PAYLOAD);
+		const labels = rows[0]!.ability.map((a) => a.label);
+		expect(labels).toContain("Cargo delivered");
+		expect(labels).toContain("Passengers delivered");
+		const cargo = rows[0]!.ability.find((a) => a.label === "Cargo delivered")!;
+		expect(cargo.text).toBe("120");
+		// 拆分的口径由服务端给（页面不写第二份措词）。
+		expect(rows[0]!.splitMeasure).toBe("delivered to monitored towns/industries, by cargo type");
+		expect(rows[0]!.splitKnown).toBe(true);
+	});
+
+	it("拆分没测到 ⇒ 不是 0（页面不把缺失当 0）", () => {
+		const v = load();
+		const payload = {
+			models: [
+				{
+					model: "m",
+					ability: { mean: 1, cargoDelivered: null, passengersDelivered: null, splitMeasure: "x" },
+				},
+			],
+		};
+		const rows = v.modelRows(payload);
+		const cargo = rows[0]!.ability.find((a) => a.label === "Cargo delivered")!;
+		expect(cargo.text).toBe("not measured");
+		expect(cargo.known).toBe(false);
+		expect(rows[0]!.splitKnown).toBe(false);
+	});
+
 	it("draws one row per model with the four axes", () => {
 		const v = load();
 		const rows = v.modelRows(PAYLOAD);

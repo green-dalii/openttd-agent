@@ -535,7 +535,18 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 			...(toWireSnapshot(_world, {
 				// 线路事实：GS 读数（车辆/等待/利润）× 账本（两端城镇）。
 				// 仪表盘此前**完全没有**线路信息——数据一直存在，只是没被发出去。
-				routes: routeWireFacts(hub.getRouteStats(), routeLedger.all()),
+				routes: routeWireFacts(
+					hub.getRouteStats(),
+					routeLedger.all(),
+					// 货运 F4（A5）：逐线路的**推导**交付量 ⇒ 页面能说
+					// “这条线运了多少”（或“归不出来，为什么”）。
+					new Map(
+						hub.getFreightAttribution().routes.map((r) => [
+							r.job,
+							{ amount: r.amount, reason: r.reason },
+						]),
+					),
+				),
 				routesAvailable: true,
 				// P1-3：FLEET 分解（在途/在库/差额具名）——服务端算，页面只渲染。
 				// 恒等式 owned + unattributed === companyTotal（route-stats.ts）。

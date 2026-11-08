@@ -307,6 +307,11 @@ table.kv td { padding: 4px 6px 4px 0; vertical-align: top; border-bottom: 1px so
 table.kv td:first-child { color: var(--muted); width: 36%; }
 table.kv tr:last-child td { border-bottom: 0; }
 table.kv td.num, table.kv th.num { text-align: right; font-variant-numeric: tabular-nums; }
+/* The route table has more columns than the key/value tables (货运 F4 / A6 added
+   "Delivered"): the headers need room, or they run into each other and the
+   reader cannot tell which number belongs to which column. */
+table.routes th { white-space: nowrap; padding-right: 14px; }
+table.routes td { padding-right: 14px; }
 .scroll-y { max-height: 260px; overflow-y: auto; }
 .scroll-y.tall { max-height: 460px; }
 .pos { color: var(--pos); }

@@ -208,6 +208,21 @@ export interface RouteWireFact {
 	/** 货运 F4（A3）：两端产业 id（产方 / 收方）；缺席 = 客运线（不适用）。 */
 	fromIndustry?: number;
 	toIndustry?: number;
+	/**
+	 * 货运 F4（A5）：这条线是**客运**还是**货运**。
+	 *
+	 * 缺席 = 台账里没有这一条（老数据）⇒ 页面按“不知道”处理，不猜。
+	 */
+	kind?: "passenger" | "freight";
+	/**
+	 * 货运 F4（A5）：这条线运了多少（**推导值**）。
+	 *
+	 * `null` = **归不出来**（多条线共用那个 (货种, 产业)）⇒ 附 `deliveredReason`。
+	 * 缺席 = 没有归因读数（**不是** 0）。
+	 */
+	delivered?: number | null;
+	/** 为什么归不出来（`delivered === null` 时有）。 */
+	deliveredReason?: string;
 }
 
 /**
@@ -216,7 +231,11 @@ export interface RouteWireFact {
  * 为什么放在 TS 侧（而不是让页面自己算）：① 算术要能单测；② `null` 与 `0` 的区别
  * 是**事实的区别**（"不可测"≠"不赚钱"），前端不该有机会重新发明这个判断。
  */
-export function routeWireFacts(stats: RouteStats[], ledger: LedgerPair[]): RouteWireFact[] {
+export function routeWireFacts(
+	stats: RouteStats[],
+	ledger: LedgerPair[],
+	deliveredByJob?: Map<number, { amount: number | null; reason: string | null }>,
+): RouteWireFact[] {
 	return joinRoutesWithLedger(stats, ledger).map((r) => {
 		const f: RouteWireFact = {
 			job: r.job,
@@ -240,6 +259,20 @@ export function routeWireFacts(stats: RouteStats[], ledger: LedgerPair[]): Route
 		if (r.cargoCarried !== undefined) f.cargoCarried = r.cargoCarried;
 		if (r.fromIndustry !== undefined) f.fromIndustry = r.fromIndustry;
 		if (r.toIndustry !== undefined) f.toIndustry = r.toIndustry;
+		// 货运 F4（A5）：这条线是客运还是货运 + 它运了多少（推导值）。
+		const order = ledger.find((l) => l.order.job === r.job)?.order;
+		if (order?.kind === "freight") {
+			f.kind = "freight";
+			f.fromIndustry = order.fromIndustry;
+			f.toIndustry = order.toIndustry;
+		} else if (order?.kind === "passenger") {
+			f.kind = "passenger";
+		}
+		const d = deliveredByJob?.get(r.job);
+		if (d) {
+			f.delivered = d.amount;
+			if (d.reason) f.deliveredReason = d.reason;
+		}
 		return f;
 	});
 }

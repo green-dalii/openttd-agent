@@ -255,6 +255,9 @@
                   <template x-for="a in row.ability" :key="a.label">
                     <div class="cmp-ax"><span class="dim" x-text="a.label"></span><span x-text="a.text"></span></div>
                   </template>
+                  <!-- 货运 F4（A6）：货物/客运拆分的**口径**（服务端的话）。
+                       没拆到时不说这句（否则读起来像“拆了但是 0”）。 -->
+                  <div class="dim cmp-sub" x-show="row.splitKnown && row.splitMeasure" x-text="row.splitMeasure"></div>
                 </td>
                 <td>
                   <template x-for="a in row.efficiency" :key="a.label">
