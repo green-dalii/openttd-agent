@@ -73,6 +73,9 @@ export function observeTool(deps: AgentDeps): AgentTool<typeof ObserveSchema, Ac
 					`cargoCatalog=${JSON.stringify(facts.cargoCatalog)} ` +
 					// 全部产业的位置与名字：一条货运线路就是"哪座矿 → 哪座厂"。
 					`industrySites=${JSON.stringify(facts.industrySites)} ` +
+					// 货运 F3：**能装货的产方**（引擎按集货区算出来的收货能力）。
+					// 没有它，模型看得见"哪里有煤"却不知道"哪里能装煤"。
+					`freightLinks=${JSON.stringify(facts.freightLinks)} ` +
 					`engines=${JSON.stringify(facts.engines)} ` +
 					// 融资：还能借多少、贷款的最小单位（**利息率引擎不暴露**，不编）。
 					`financing=${JSON.stringify(facts.financing)} ` +
@@ -135,6 +138,79 @@ export function buildBusRouteTool(deps: AgentDeps): AgentTool<typeof BuildRouteS
 			const r: ActionResult = {
 				ok: true,
 				summary: `sent build_bus_route (company=${company}${params.from_town !== undefined ? `, from=${params.from_town}` : ""}${params.to_town !== undefined ? `, to=${params.to_town}` : ""}); construction runs asynchronously — poll observe() for progress`,
+				data: cmd,
+			};
+			return toResult(r);
+		},
+	};
+}
+
+const BuildFreightRouteSchema = Type.Object({
+	cargo: Type.String({
+		description:
+			"Cargo label to move, e.g. \"COAL\" (from observe()'s cargoCatalog / freightLinks). " +
+			"Only freight cargoes can be moved by truck.",
+	}),
+	from_industry: Type.Number({
+		description:
+			"Producer industry id - the mine / farm / well the goods come from. " +
+			"Must be one of the producers listed for this cargo.",
+	}),
+	to_industry: Type.Number({
+		description:
+			"Consumer industry id - the plant / power station the goods are delivered to. " +
+			"Must be one of the consumers listed for this cargo.",
+	}),
+	company: Type.Optional(Type.Number({ description: "Executor company id (default 0)" })),
+	job: Type.Optional(Type.Number({ description: "Optional job id for tracking" })),
+});
+
+/**
+ * `build_freight_route` — order a freight line (truck stop → road → depot → truck).
+ *
+ * The split of labour (docs/FREIGHT-LINE-FEASIBILITY.md §3.2): the model decides
+ * **what to move and where to**; the scaffold decides **how** (it finds the
+ * station sites by the engine's own rules, lays the road, builds the depot and
+ * buys/refits/starts the truck).
+ *
+ * The tool description states the contract only. It does not tell the model
+ * which cargo or route to pick - that choice is the agent's (RL harness scope
+ * audit, J1-J4).
+ */
+export function buildFreightRouteTool(deps: AgentDeps): AgentTool<typeof BuildFreightRouteSchema, ActionResult> {
+	return {
+		name: "build_freight_route",
+		label: "Build Freight Route",
+		description:
+			"Order a freight line: move `cargo` from the producer industry `from_industry` to the " +
+			"consumer industry `to_industry`. The engine computes which station sites can actually load " +
+			"that cargo (a station only accepts a cargo when an accepting industry is in its catchment), " +
+			"so a producer that cannot be loaded will be refused with a reason. " +
+			"Commands are QUEUED: lines are built in submission order, each to completion (loading stop, " +
+			"unloading stop, road, depot, truck) before the next starts. " +
+			"Returns as soon as the command is delivered - construction is asynchronous in-game, so " +
+			"observe() afterwards to see what actually happened.",
+		// 变更型工具必须串行：同一条助手消息里的两条命令并发发出，台账的顺序
+		// 就不再等于游戏实际应用的顺序（ADR §10.74）。
+		executionMode: "sequential",
+		parameters: BuildFreightRouteSchema,
+		execute: async (_id, params) => {
+			const company = params.company ?? DEFAULT_COMPANY;
+			const cmd: Record<string, unknown> = {
+				cmd: "build_freight_route",
+				company,
+				cargo: params.cargo,
+				from_industry: params.from_industry,
+				to_industry: params.to_industry,
+			};
+			if (params.job !== undefined) cmd.job = params.job;
+			deps.sink.gameScript(JSON.stringify(cmd));
+			const r: ActionResult = {
+				ok: true,
+				summary:
+					`sent build_freight_route (company=${company}, cargo=${params.cargo}, ` +
+					`from_industry=${params.from_industry}, to_industry=${params.to_industry}); ` +
+					`construction runs asynchronously — poll observe() for progress`,
 				data: cmd,
 			};
 			return toResult(r);
@@ -734,6 +810,7 @@ export function createTools(deps: AgentDeps): AgentTool<TSchema, ActionResult>[]
 		estimateRouteTool(deps),
 		inspectRouteTool(deps),
 		buildBusRouteTool(deps),
+		buildFreightRouteTool(deps),
 		setRouteVehiclesTool(deps),
 		setRouteCargoTool(deps),
 		setRouteEngineTool(deps),

@@ -89,6 +89,9 @@
   const ROUTE_COLUMNS = [
     { id: "job", label: "Route", align: "left" },
     { id: "endpoints", label: "Endpoints", align: "left" },
+    // F3：**这条线运的货**（GS 自报）。客运线 = PASS，货运线 = COAL/GOOD/…
+    // 缺席 = GS 没报 ⇒ 显示 "—"，不是"空"。
+    { id: "cargo", label: "Cargo", align: "left" },
     { id: "vehicles", label: "Veh", align: "num" },
     { id: "waiting", label: "Waiting", align: "num" },
     { id: "income", label: "Income / day", align: "num" },
@@ -706,9 +709,16 @@
           const perDayRaw = r.incomePerDay === undefined || r.incomePerDay === null ? NaN : Number(r.incomePerDay);
           const perDayKnown = Number.isFinite(perDayRaw);
           const hasPair = Number.isFinite(Number(r.townA)) && Number.isFinite(Number(r.townB));
+          // 这条线运的货（GS 自报）：缺席 = 未计量 ⇒ "—"，**不是**""。
+          const cargoRaw = r.cargoCarried === undefined || r.cargoCarried === null ? "" : String(r.cargoCarried);
           return {
             key: String(job),
             job,
+            cargo: cargoRaw !== "" ? cargoRaw : "—",
+            cargoHint: cargoRaw !== "" ? undefined : "the GS did not report what this line carries",
+            // 货运线的两端是**产业**，客运线的是城镇 ⇒ 两者的"等待"含义不同
+            // （乘客 vs 吨）。列名保持中性，含义由这一行自己说。
+            freight: cargoRaw !== "" && cargoRaw !== "PASS",
             // 端点显示**城镇名**（2026-09-25）：`#4 → #8` 看不出是哪两座城，
             // 而"为什么选了这两座"正是复盘第一个要回答的问题。没有名字时回退 `#4`。
             endpoints: hasPair ? `${this.townName(r.townA)} → ${this.townName(r.townB)}` : "—",

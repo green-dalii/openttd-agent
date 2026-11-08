@@ -60,6 +60,8 @@ describe("createAgent", () => {
 			"estimate_route",
 			"inspect_route",
 			"build_bus_route",
+			// 货运线路（货运 F3）：与客运线路同级的动作面。
+			"build_freight_route",
 			"set_route_vehicles",
 			"set_route_cargo",
 			"set_route_engine",

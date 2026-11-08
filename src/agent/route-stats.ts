@@ -43,6 +43,14 @@ export interface RouteStats {
 	fleetApplied?: number;
 	/** P1-2：这条线**改装到的货物**（标签，如 "MAIL"）；缺席 = 未改装/未计量（D60）。 */
 	cargoApplied?: string;
+	/**
+	 * 这条线**天生运的货**（标签：客运线 = "PASS"，货运线 = "COAL"/"GOOD"/…）。
+	 *
+	 * 与 `cargoApplied`（后来的改装指令的生效值）是**两个事实**：前者是这条线的
+	 * 性质（建起来就定了），后者是后来那条 `set_route_cargo` 的结果。
+	 * 缺席 = GS 没报（未计量），不是"零"。
+	 */
+	cargoCarried?: string;
 	/** P1-2：这条线的**车型**（引擎 id）；缺席 = 未换车/未计量。 */
 	engineApplied?: number;
 	/** P1-3：这条线登记车辆中**此刻停在库里**的 id（IsStoppedInDepot，引擎读数）；缺席 = 未计量。 */
@@ -144,6 +152,9 @@ export function joinRoutesWithLedger(
 				...(r.endsB !== undefined ? { endsB: r.endsB } : {}),
 				...(r.waitA !== undefined ? { waitA: r.waitA } : {}),
 				...(r.waitB !== undefined ? { waitB: r.waitB } : {}),
+				// 去重/透传字段必须**跟着走**（2026-09-25 的教训）：这里逐字段
+				// 重建对象，漏一个字段它就静默消失（25 辆车报成 129 的同族 bug）。
+				...(r.cargoCarried !== undefined ? { cargoCarried: r.cargoCarried } : {}),
 			};
 			if (pair) {
 				out.townA = pair.fromTown;
@@ -176,6 +187,8 @@ export interface RouteWireFact {
 	incomePerDay: number | null;
 	townA?: number;
 	townB?: number;
+	/** 这条线运的货（标签）；缺席 = GS 没报（未计量，不是"没有货"）。 */
+	cargoCarried?: string;
 }
 
 /**
@@ -205,6 +218,7 @@ export function routeWireFacts(stats: RouteStats[], ledger: LedgerPair[]): Route
 		if (r.waitA !== undefined) f.waitA = r.waitA;
 		if (r.waitB !== undefined) f.waitB = r.waitB;
 		if (r.vehiclesIds !== undefined) f.vehiclesIds = r.vehiclesIds;
+		if (r.cargoCarried !== undefined) f.cargoCarried = r.cargoCarried;
 		return f;
 	});
 }

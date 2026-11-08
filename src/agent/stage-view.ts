@@ -49,6 +49,8 @@ export interface StageRouteInput {
 	townB?: unknown;
 	popA?: unknown;
 	popB?: unknown;
+	/** 货运线路的货种（标签）；客运线路没有 ⇒ 缺席（不是"零"）。 */
+	cargo?: unknown;
 }
 
 export interface StageViewInput {
@@ -215,11 +217,18 @@ export function buildStageView(input: StageViewInput): StageView {
 		const a = normalise(r.tileA, input.mapSize);
 		const b = normalise(r.tileB, input.mapSize);
 		if (a && b) {
-			routes.push({
-				from: a,
-				to: b,
-				label: `${num(r.townA) ?? "?"} ↔ ${num(r.townB) ?? "?"}`,
-			});
+			// 端点的标签：**客运线**是两端城镇；**货运线**的两端是产业（台账里没有
+			// 它们 ⇒ 不能编一对城镇出来）⇒ 标出货种，让地图上的线仍然可读。
+			const townA = num(r.townA);
+			const townB = num(r.townB);
+			const cargo = typeof r.cargo === "string" ? r.cargo : null;
+			const label =
+				townA !== null && townB !== null
+					? `${townA} ↔ ${townB}`
+					: cargo
+						? `${cargo}`
+						: "?";
+			routes.push({ from: a, to: b, label });
 		}
 	}
 

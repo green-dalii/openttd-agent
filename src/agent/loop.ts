@@ -116,6 +116,9 @@ export async function runDecision(
 						industries: facts.industries,
 						...(facts.cargoCatalog.length > 0 ? { catalog: facts.cargoCatalog } : {}),
 						...(facts.industrySites.length > 0 ? { industrySites: facts.industrySites } : {}),
+						// 货运 F3：**能装货的产方**。车站收什么货是引擎按集货区算的，
+						// 模型看不见"哪里能装煤"就只会提出装不上货的线路。
+						...(facts.freightLinks.length > 0 ? { links: facts.freightLinks } : {}),
 					},
 				}
 			: {}),

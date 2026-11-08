@@ -99,6 +99,20 @@ export interface CargoCatalogFact {
 	consumers: number[];
 }
 
+/**
+ * 一条货运**可运链路**（模型可见，货运 F3）：这个货能从这个产方装走。
+ *
+ * 为什么是事实而不是模型的功课：车站收什么货由**引擎**按集货区算
+ * （真机探针：矿场旁的车站**不接受煤**）⇒ 模型看不见"这里能装煤"，
+ * 就只能反复提出装不上货的线路。
+ */
+export interface FreightLinkFact {
+	/** 货种标签（稳定，如 "COAL"）。 */
+	cargo: string;
+	/** 产方产业 id（能装货的那一侧）。 */
+	producer: number;
+}
+
 /** 全图按货种聚合的读数（模型可见）：哪些货存在、运走了多少。 */
 export interface CargoFact {
 	/** 货种标签（稳定，如 "COAL"）。 */
@@ -159,6 +173,12 @@ export interface WorldFacts {
 	industrySites: IndustrySiteFact[];
 	/** 货种目录：哪些货是货运、谁产、谁收。 */
 	cargoCatalog: CargoCatalogFact[];
+	/**
+	 * 货运可运链路（货运 F3）：哪些产方真的装得上货。
+	 *
+	 * 空数组 = 引擎算出来**一个都没有**（真的装不上货）；缺席 = 没测到。
+	 */
+	freightLinks: FreightLinkFact[];
 	/** 按货种聚合的产量/运量。 */
 	cargoTotals: CargoFact[];
 	/** 车型目录。 */
@@ -257,6 +277,10 @@ export function worldFacts(snap: WorldSnapshot): WorldFacts {
 		producers: (c.producers ?? []).map(Number).filter((n) => Number.isFinite(n)),
 		consumers: (c.consumers ?? []).map(Number).filter((n) => Number.isFinite(n)),
 	}));
+	const freightLinks: FreightLinkFact[] = (snap.freightLinks ?? []).map((l) => ({
+		cargo: typeof l.cargo === "string" ? l.cargo : "",
+		producer: toNumber(l.producer) ?? -1,
+	}));
 	const cargoTotals: CargoFact[] = (snap.cargoTotals ?? []).map((c) => ({
 		label: typeof c.label === "string" ? c.label : "",
 		produced: toNumber(c.produced),
@@ -300,6 +324,7 @@ export function worldFacts(snap: WorldSnapshot): WorldFacts {
 		industries,
 		industrySites,
 		cargoCatalog,
+		freightLinks,
 		cargoTotals,
 		engines,
 		companyCargo,
@@ -351,6 +376,7 @@ function observationProbe(): WorldSnapshot {
 		industriesTotal: 1,
 		industrySites: [{ id: 1, name: "probe", x: 2, y: 3 }],
 		cargoCatalog: [{ label: "COAL", freight: true, producers: [1], consumers: [2] }],
+		freightLinks: [{ cargo: "COAL", producer: 1 }],
 		cargoTotals: [{ label: "COAL", produced: 1, transported: 1 }],
 		engines: [{ id: 1, name: "probe", speed: 1, cargo: "COAL" }],
 		companyCargo: {

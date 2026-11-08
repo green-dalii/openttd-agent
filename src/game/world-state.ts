@@ -183,6 +183,13 @@ export interface WorldSnapshot {
 	cargoCatalog?: CargoCatalogEntry[];
 	/** 按货种聚合的上月产量/运量（原始计数）。 */
 	cargoTotals: CargoAmounts[];
+	/**
+	 * 货运可运链路（货运 F3）：哪些产方真的装得上货。
+	 *
+	 * 缺席 = 该 GS 没报（**不是**"没有可运的货"）；空数组 = 引擎算出来
+	 * **一个都没有**（真的装不上货）。
+	 */
+	freightLinks?: FreightLink[];
 	/** P1-2 车型目录；空 = 未计量。 */
 	engines: { id: number; name: string; speed: number; cargo?: string | null }[];
 	/**
@@ -235,6 +242,22 @@ export interface CargoAmounts {
 	produced: number | null;
 	/** 上月运量；null = 未上报/不适用（**不是 0**，D60；`-1` 是 OpenTTD 的「无此货」）。 */
 	transported: number | null;
+}
+
+/**
+ * 一条**货运可运链路**（货运 F3）：这个货可以从这个产方装走。
+ *
+ * 为什么需要它：车站收什么货由**引擎按集货区**算 —— 矿场旁的车站**不收煤**
+ * （真机探针），所以"这里有煤"不等于"这里能装煤"。模型看不见这条事实，
+ * 就会反复提出根本装不上货的线路。
+ *
+ * 缺席 = 该 GS 没报（**不是**"这张图上不能运货"）。
+ */
+export interface FreightLink {
+	/** 货种标签（稳定，如 "COAL"）。 */
+	cargo: string;
+	/** 产方产业 id（能装货的那一侧）。 */
+	producer: number;
 }
 
 /** 一个产业的上月读数（GS 采样，原始计数）。 */
@@ -361,6 +384,7 @@ export class WorldState {
 	private industrySites: IndustrySite[] = [];
 	/** 货种目录：哪些货是货运、谁产、谁收。 */
 	private cargoCatalog: CargoCatalogEntry[] = [];
+	private freightLinks: FreightLink[] = [];
 	private cargoTotals: CargoAmounts[] = [];
 	/** P1-2：可选车型目录（引擎 id/名字/速度/能拉的货）。空 = 未计量（不是没有车）。 */
 	private engines: { id: number; name: string; speed: number; cargo: string | null }[] = [];
@@ -484,6 +508,7 @@ export class WorldState {
 			industriesTotal: this.industriesTotal,
 			industrySites: [...this.industrySites],
 			cargoCatalog: [...this.cargoCatalog],
+			freightLinks: [...this.freightLinks],
 			cargoTotals: [...this.cargoTotals],
 			engines: [...this.engines],
 			worldEvents: this.worldEvents.map((e) => ({ ...e })),
@@ -578,6 +603,20 @@ export class WorldState {
 				producers: (Array.isArray(c.producers) ? c.producers : []).map(Number).filter(Number.isFinite),
 				consumers: (Array.isArray(c.consumers) ? c.consumers : []).map(Number).filter(Number.isFinite),
 			}));
+	}
+
+	/**
+	 * 替换**货运可运链路**（GS 的 `freight_links`）。
+	 *
+	 * 顺序按 (货种, 产方 id) 升序（确定；模型的顺序不承载任何建议）。
+	 * 空数组 = 引擎算出来**一个可装的产方都没有**（真的装不上货）；
+	 * 缺席（没调这个 setter）= 该 GS 没报。
+	 */
+	setFreightLinks(list: FreightLink[]): void {
+		this.freightLinks = (Array.isArray(list) ? list : [])
+			.filter((l) => l && typeof l.cargo === "string" && l.cargo !== "" && Number.isFinite(Number(l.producer)))
+			.map((l) => ({ cargo: String(l.cargo), producer: Number(l.producer) }))
+			.sort((a, b) => (a.cargo === b.cargo ? a.producer - b.producer : a.cargo < b.cargo ? -1 : 1));
 	}
 
 	/**
