@@ -46,6 +46,13 @@
   "a producer industry to a consumer industry".
 
 ### Added
+- **The freight numbers reach the screen.** The server had been computing them for a while: the
+  scorecard splits cargo from passengers, and the attribution knows what each freight line
+  delivered - but neither was drawn anywhere. The Run page's route table now has a **Delivered**
+  column (how much that line delivered; a delivery that cannot be attributed to one line says so
+  instead of showing a number, and a line with no reading shows a dash), and a freight route shows
+  its two **industries** rather than two towns. The Compare page draws the **cargo / passenger
+  split** on the Result axis, with the server's own wording of what the split measures.
 - **A freight line now says how much it delivered, and it enters the decision ledger in its own
   shape.** The engine does not record which vehicle delivered what where, so a per-line delivery
   figure has always been a *derived* number - and there was nothing to derive it from: the game
@@ -521,23 +528,17 @@
 ### Added (Dashboard 打磨)
 **多页仪表盘（无构建链，按角色分目录）**
 - `src/web/public/pages/{live,llm,sessions}.html` + `assets/css/style.css` + `assets/js/{common,live,providers,sessions}.js`
-- `WebServer` 导出 `PAGES` 路由表（URL → 文件，单一事实源）；`/` `/llm` `/sessions` 三个独立子页
-- LLM 配置从 Live 页**解耦为独立 Providers 子页**
+- `WebServer` 导出 `PAGES` 路由表（URL → 文件，单一事实源）；LLM 配置从 Live 页**解耦为独立 Providers 子页**
 
 **多 Provider 接入（发挥 pi-ai 内置目录，不再手填）**
-- `provider-catalog.ts`: 暴露 pi-ai **39 个内置 provider / ~1900 个模型**（`providers/all` 的
-  `getBuiltinProviders`/`getBuiltinModels`），含 API 形态、上下文窗口、价格、认证方式
-- **环境变量自动检测**：用「合成 env 探测」求出每个 provider **真正接受**的变量名 （31/39 已解析；如 huggingface→`HF_TOKEN`、google→`GEMINI_API_KEY`、moonshotai→`MOONSHOT_API_KEY`）， 不触碰真实 process.env；剩余 8 个 OAuth/云凭证 provider 给出明确 hint
-- `file-credential-store.ts`: **文件版 `CredentialStore`**（`credentials.json`, 0600），
-  密钥重启不丢（pi-ai 默认 store 仅在内存）
-- `provider.ts` 新增 `buildBrain()`：catalog 路径直接用 `builtinModels()` 选中模型
-  （baseUrl/认证由 pi-ai 解析），custom 路径保留原 `createProvider` 行为
+- `provider-catalog.ts`: 暴露 pi-ai **39 个内置 provider / ~1900 个模型**，含 API 形态、上下文窗口、价格、认证方式
+- **环境变量自动检测**：用「合成 env 探测」求出每个 provider **真正接受**的变量名（31/39 已解析），不触碰真实 process.env；剩余 8 个 OAuth/云凭证 provider 给出明确 hint
+- `file-credential-store.ts`: **文件版 `CredentialStore`**（`credentials.json`, 0600），密钥重启不丢
+- `provider.ts` 新增 `buildBrain()`：catalog 路径直接用 `builtinModels()` 选中模型，custom 路径保留原 `createProvider` 行为
 - `llm-api.ts` + REST: `GET|POST /api/llm`、`GET /api/llm/catalog[/:id]`、`DELETE /api/llm/credentials/:id`
 
 **Agent 遥测（token / 思考 / 每步）**
-- `telemetry.ts`: 消费 pi-agent-core `AgentEvent` → 累计 `AssistantMessage.usage`
-  （input/output/cache/reasoning/total/cost），**按 turn 与按 tool 分组**，捕获
-  `thinking_delta` 思考流与每步 log（含工具耗时/成功失败）
+- `telemetry.ts`: 消费 pi-agent-core `AgentEvent` → 累计 `AssistantMessage.usage`（input/output/cache/reasoning/total/cost），**按 turn 与按 tool 分组**，捕获 `thinking_delta` 思考流与每步 log
 - CLI `--agent` 现在也起 dashboard（`--web-port`）；`agent.subscribe()` → 遥测 → WS（≥250ms 节流）
 - Live 页新增：KPI 卡、tokens-per-turn 图、tool 统计、思考列表、Agent 步骤流、阶段性总结时间线
 
@@ -547,9 +548,7 @@
 - Sessions 页：历史局列表（状态/耗时/token/成本）+ 单局复盘
 
 **事件呈现（从「极客 JSON」到结构化）**
-- 前端 `categoryOf()` 分类 + Tag 配色 + `briefOf()` **人类可读摘要**
-  （如 `£297.8k cash · loan £100k · income £1.2k`），类别过滤 chips，
-  原始 JSON 保留但**默认折叠**（满足「保留原始 log 形态」）
+- 前端 `categoryOf()` 分类 + Tag 配色 + `briefOf()` **人类可读摘要**（如 `£297.8k cash · loan £100k · income £1.2k`），类别过滤 chips，原始 JSON 保留但**默认折叠**
 - `scripts/llm-stub.ts` 现在按 OpenAI 规范返回 usage chunk，使 token 计量可离线验证
 
 ### Fixed

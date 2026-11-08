@@ -48,7 +48,7 @@
 | **D6b：真实 payload + 传输层可见性** | ✅ `payloadHash`/`payloadCount` 进 manifest；`retries`/`faults` 进 telemetry | SPEC §10.115 |
 | **D6 收尾 + #22 + 溯源/成本诚实** | ✅ live 双后端 9/9；`gameVersion`、`costKnown`、manifest 单一投影 | SPEC §10.115 |
 | **P4：用量/费用上限** | ✅ 已合并（Issue #27 关闭） | SPEC §10.115 |
-| **货运 F1–F4**（#13 的最后一块）：F1 观测 ✅ / F2 计量 ✅ / F3 动作 ✅（真机交付 120 吨煤）/ **F4 归因 🔵**（A3+A4 读数与归因 ✅、A5 台账形状 ✅ → A6 页面） | 🔵 进行中 | `ROADMAP.md`「待办」#0；SPEC §10.126；Issue #13 |
+| **货运 F1–F4**（#13 的最后一块）：F1 观测 ✅ / F2 计量 ✅ / F3 动作 ✅（真机交付 120 吨煤）/ **F4 归因 ✅**（A3+A4 读数与归因、A5 台账形状、A6 页面接线） | ✅ | SPEC §10.126；Issue #13 |
 | **A2 逐轴配对统计**（Issue #87）：配对只对「逐局能取标量」的轴有意义 ⇒ 能力/效率/稳定性三条，成长轴不进配对；配对按「局」定 ⇒ 一个轴缺读数只整格丢掉，不会把两局错配 | ✅ | SPEC §10.126；`src/evolution/bench-stats.ts` |
 | **Dashboard 全面 CoDesign** | ✅ B1–B6 与呈现面改造（A1–A16）全部合并 | `docs/DASHBOARD-AUDIT-2026-10-31.md` |
 | **早期阶段（Phase A–C 重构、NEXT-2 决策空间）** | ✅ 已完成 | SPEC §10.45–§10.63 |

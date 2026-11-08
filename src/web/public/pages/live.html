@@ -415,6 +415,8 @@
                 <td x-text="'#' + r.job"></td>
                 <td x-text="r.endpoints" :title="r.endpointsHint || ''"></td>
                 <td x-text="r.cargo" :title="r.cargoHint || ''"></td>
+                <td class="num" :class="r.deliveredHint ? 'dim' : ''" :title="r.deliveredHint || ''"
+                    x-text="r.delivered"></td>
                 <td class="num" x-text="r.vehicles"></td>
                 <td class="num" x-text="r.waiting"></td>
                 <td class="num" :class="r.incomeHint ? 'dim' : ''" :title="r.incomeHint || 'income per game day (year to date ÷ days)'"

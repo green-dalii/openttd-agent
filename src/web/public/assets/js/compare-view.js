@@ -56,6 +56,10 @@
         ability: [
           reading(`${abilityMeasure} / game day`, m.ability && m.ability.mean),
           reading("Median", m.ability && m.ability.median),
+          // 货运 F4（A6）：**货物与客运的拆分**（服务端口径，页面不重算）。
+          // 拆分没测到时是 null ⇒ “not measured”，不是 0。
+          reading("Cargo delivered", m.ability && m.ability.cargoDelivered, 1),
+          reading("Passengers delivered", m.ability && m.ability.passengersDelivered, 1),
           reading("Stations", m.ability && m.ability.stations, 1),
           reading("Vehicles", m.ability && m.ability.vehicles, 1),
         ],
@@ -74,6 +78,11 @@
           text: m.growth && m.growth.verdict ? String(m.growth.verdict) : NOT_MEASURED,
           known: Boolean(m.growth && m.growth.verdict),
         },
+        // 货运 F4（A6）：拆分口径由服务端给（页面不写第二份措辞）。
+        splitMeasure: m.ability && m.ability.splitMeasure ? String(m.ability.splitMeasure) : "",
+        splitKnown:
+          typeof (m.ability && m.ability.cargoDelivered) === "number" ||
+          typeof (m.ability && m.ability.passengersDelivered) === "number",
         growthMessage: m.growth && m.growth.message ? String(m.growth.message) : "",
         outcomes: outcomeRows(m),
       };
@@ -94,6 +103,26 @@
       hint: String(o && o.hint ? o.hint : ""),
       count: typeof (o && o.count) === "number" ? o.count : 0,
     }));
+  }
+
+  /**
+   * The **delivery split** of one model: cargo vs passengers.
+   *
+   * The server owns the numbers *and* the wording of what they count
+   * (`splitMeasure`); the page only lays them out. A missing split is "not
+   * measured", never zero.
+   */
+  function deliverySplit(m) {
+    const ability = (m && m.ability) || {};
+    return {
+      measure: ability.splitMeasure ? String(ability.splitMeasure) : "",
+      cargo: typeof ability.cargoDelivered === "number" ? ability.cargoDelivered : null,
+      passengers:
+        typeof ability.passengersDelivered === "number" ? ability.passengersDelivered : null,
+      known:
+        typeof ability.cargoDelivered === "number" ||
+        typeof ability.passengersDelivered === "number",
+    };
   }
 
   /** The runs left out, counted by reason (the server's own reasons). */
@@ -445,6 +474,7 @@
     planProblems,
     planQueueState,
     modelRows,
+    deliverySplit,
     exclusionRows,
     comparison,
     comparisonRows,

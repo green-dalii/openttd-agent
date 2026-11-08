@@ -73,6 +73,10 @@ interface RouteRow {
 	cargoHint?: string;
 	/** F3：这条线是不是货运线（cargo 既不是 PASS 也不是缺省）。 */
 	freight: boolean;
+	/** 货运 F4（A5）：这条线运了多少（推导值）；"not attributable" = 归不出来。 */
+	delivered: string;
+	deliveredHint?: string;
+	_delivered: number | null;
 	key: string;
 }
 
@@ -1279,6 +1283,36 @@ describe("routeRows / routesSorted / routesNote（仪表盘线路面板）", () 
 		const unknown = rows.find((r) => r._job === 102)!;
 		expect(unknown.cargo).toBe("—");
 		expect(unknown.cargoHint).toMatch(/did not report/);
+	});
+
+	it("routeRows（货运 F4 / A5）：货运线显示**产业两端** + 运了多少（推导值）", () => {
+		const v = makeView();
+		v.routes = [
+			{
+				job: 1000, vehicles: 2, waiting: 30, profitYtd: 2192, incomePerDay: 12,
+				kind: "freight", cargoCarried: "COAL", fromIndustry: 28, toIndustry: 53,
+				delivered: 80,
+			},
+			{
+				job: 1001, vehicles: 1, waiting: 0, profitYtd: 0, incomePerDay: null,
+				kind: "freight", cargoCarried: "COAL", fromIndustry: 30, toIndustry: 53,
+				delivered: null, deliveredReason: "2 routes share COAL at industry 53",
+			},
+			{ job: 900, vehicles: 6, waiting: 12, profitYtd: 3650, incomePerDay: 18.25, townA: 4, townB: 20, cargoCarried: "PASS" },
+		];
+		v.routesAvailable = true;
+		const rows = v.routeRows();
+		const freight = rows.find((r) => r._job === 1000)!;
+		expect(freight.endpoints).toBe("industry 28 → 53");
+		expect(freight.delivered).toBe("80");
+		expect(freight.deliveredHint).toMatch(/derived/);
+		// 归不出来 ⇒ 写明白（不是 0）。
+		const shared = rows.find((r) => r._job === 1001)!;
+		expect(shared.delivered).toBe("not attributable");
+		expect(shared.deliveredHint).toMatch(/2 routes share/);
+		// 客运线不有产业两端，也没有归因读数 ⇒ “—”。
+		const pax = rows.find((r) => r._job === 900)!;
+		expect(pax.delivered).toBe("—");
 	});
 
 	it("routesSorted：**`null` 永远排最后**（升序也排最后，不是最小值）", () => {

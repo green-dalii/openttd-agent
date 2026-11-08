@@ -92,6 +92,9 @@
     // F3：**这条线运的货**（GS 自报）。客运线 = PASS，货运线 = COAL/GOOD/…
     // 缺席 = GS 没报 ⇒ 显示 "—"，不是"空"。
     { id: "cargo", label: "Cargo", align: "left" },
+    // 货运 F4（A5）：这条线运了多少。**推导值**（引擎不记哪辆车送到哪）⇒
+    // 列头写清楚。缺席 = 没测到；null = 归不出来（不是 0）。
+    { id: "delivered", label: "Delivered", align: "num" },
     { id: "vehicles", label: "Veh", align: "num" },
     { id: "waiting", label: "Waiting", align: "num" },
     { id: "income", label: "Income / day", align: "num" },
@@ -99,7 +102,8 @@
   ];
 
   /** 可排序的列（`endpoints` 是文本，排序无意义）。 */
-  const ROUTE_SORTABLE = ["job", "vehicles", "waiting", "income", "profit"];
+  // 货运 F4（A5）："delivered" 也可排（排的是推导值；归不出来的行排在最后）。
+  const ROUTE_SORTABLE = ["job", "delivered", "vehicles", "waiting", "income", "profit"];
 
   const num = (v) => {
     const n = Number(v);
@@ -711,6 +715,14 @@
           const hasPair = Number.isFinite(Number(r.townA)) && Number.isFinite(Number(r.townB));
           // 这条线运的货（GS 自报）：缺席 = 未计量 ⇒ "—"，**不是**""。
           const cargoRaw = r.cargoCarried === undefined || r.cargoCarried === null ? "" : String(r.cargoCarried);
+          // 货运 F4（A5）：这条线是客运还是货运；货运线的两端是**产业**。
+          const isFreight = r.kind === "freight";
+          const hasIndustries =
+            Number.isFinite(Number(r.fromIndustry)) && Number.isFinite(Number(r.toIndustry));
+          // 货运 F4（A5）：这条线运了多少（**推导值**；null = 归不出来）。
+          const deliveredRaw =
+            r.delivered === undefined || r.delivered === null ? null : Number(r.delivered);
+          const deliveredKnown = deliveredRaw !== null && Number.isFinite(deliveredRaw);
           return {
             key: String(job),
             job,
@@ -718,11 +730,35 @@
             cargoHint: cargoRaw !== "" ? undefined : "the GS did not report what this line carries",
             // 货运线的两端是**产业**，客运线的是城镇 ⇒ 两者的"等待"含义不同
             // （乘客 vs 吨）。列名保持中性，含义由这一行自己说。
-            freight: cargoRaw !== "" && cargoRaw !== "PASS",
+            freight: isFreight || (cargoRaw !== "" && cargoRaw !== "PASS"),
             // 端点显示**城镇名**（2026-09-25）：`#4 → #8` 看不出是哪两座城，
             // 而"为什么选了这两座"正是复盘第一个要回答的问题。没有名字时回退 `#4`。
-            endpoints: hasPair ? `${this.townName(r.townA)} → ${this.townName(r.townB)}` : "—",
-            endpointsHint: hasPair ? undefined : "endpoints unknown (not in the route ledger)",
+            // 货运线的两端是产业 ⇒ 显示产业 id（服务端给的数字，不编名字）。
+            endpoints: isFreight
+              ? hasIndustries
+                ? `industry ${r.fromIndustry} → ${r.toIndustry}`
+                : "—"
+              : hasPair
+                ? `${this.townName(r.townA)} → ${this.townName(r.townB)}`
+                : "—",
+            endpointsHint: isFreight
+              ? hasIndustries
+                ? undefined
+                : "the two industries of this freight line are unknown"
+              : hasPair
+                ? undefined
+                : "endpoints unknown (not in the route ledger)",
+            // 运了多少（推导值）：缺席 = 没测到，null = 归不出来。
+            delivered: deliveredKnown
+              ? U.fmtInt(deliveredRaw)
+              : r.delivered === null
+                ? "not attributable"
+                : "—",
+            deliveredHint: deliveredKnown
+              ? "derived from the per-destination delivery readings (the engine does not record which vehicle delivered what)"
+              : r.delivered === null
+                ? String(r.deliveredReason || "the delivery cannot be attributed to one line")
+                : "no attribution reading for this line",
             vehicles: U.fmtInt(vehicles),
             waiting: U.fmtInt(waiting),
             // 去重所需（2026-09-25）：共享车站会让同一辆车/同一批乘客被每条用到该站的
@@ -744,6 +780,7 @@
             idle: vehicles === 0,
             /* 排序用的原始数值（null = 无值）。模板不碰这些。 */
             _job: job,
+            _delivered: deliveredKnown ? deliveredRaw : null,
             _vehicles: vehicles,
             _waiting: waiting,
             _income: perDayKnown ? perDayRaw : null,
@@ -759,7 +796,7 @@
        * 升序时把"不可测"排在榜首，会被读成"最差的线路排在前面"——那正好相反。
        */
       routesSorted() {
-        const field = { job: "_job", vehicles: "_vehicles", waiting: "_waiting", income: "_income", profit: "_profit" }[
+        const field = { job: "_job", delivered: "_delivered", vehicles: "_vehicles", waiting: "_waiting", income: "_income", profit: "_profit" }[
           this.routeSortKey
         ];
         const key = field || "_income";
