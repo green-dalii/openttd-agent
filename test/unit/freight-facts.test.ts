@@ -234,6 +234,8 @@ describe("hub：货运计量进世界状态", () => {
 		} as unknown as GameEvent);
 		expect(w.setCompanyCargo).toHaveBeenCalledWith({
 			byCargo: [{ label: "COAL", amount: 120 }, { label: "GRAIN", amount: 0 }],
+			// 逐 (货种, 产业)：这个 GS 没报 ⇒ 空数组（不是「每条都是 0」）。
+			byIndustry: [],
 			quarterDelivered: 900,
 			monitored: { cargoes: 2, destinations: 11 },
 			gaps: { dropped: 1 },
@@ -251,6 +253,7 @@ describe("模型看得见货运计量（投影 → 决策上下文 / observe）"
 		engines: [],
 		companyCargo: {
 			byCargo: [{ label: "COAL", amount: 120 }],
+			byIndustry: [{ label: "COAL", industry: 53, amount: 120 }],
 			quarterDelivered: 900,
 			monitored: { cargoes: 1, destinations: 5 },
 			gaps: { dropped: 0 },

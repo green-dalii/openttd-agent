@@ -22,6 +22,10 @@ import { decodeExecutorPhase, type ExecutorErrorMessage } from "../game/executor
 import { gameDayFromRawDate, convertDateToYmd } from "../game/payload-parsers.js";
 import type { WebServer } from "../web/server.js";
 import type { RouteStats } from "./route-stats.js";
+import {
+	attributeFreightDeliveries,
+	type FreightAttributionResult,
+} from "./freight-attribution.js";
 import type { SessionStore } from "./session-store.js";
 
 /**
@@ -117,6 +121,13 @@ export interface SignalHub {
 	 * route-stats.ts so the arithmetic stays unit-testable.
 	 */
 	getRouteStats(): RouteStats[];
+	/**
+	 * 货运 F4（A4）：把逐 (货种, 产业) 的交付读数归到**我们的一条线**上。
+	 *
+	 * 归因值是**推导值**（引擎不记“哪辆车送到了哪”）⇒ 报告与页面必须标明它是
+	 * 推导的；分不出来时给 `null` + 原因，不许猜。
+	 */
+	getFreightAttribution(): FreightAttributionResult;
 	/** Used by the decision loop to detect fleet/station deltas. */
 	prevStats(): { vehicles: number; stations: number } | null;
 	/** Last ack payload for build_bus_route (kept for the stage-view snapshot). */
@@ -408,12 +419,21 @@ export function makeSignalHub(refs: SignalHubRefs): SignalHub {
 					// 公司口径（货运 F2）：本会话累计（monitor 的**单轴**：货运交付到产业）
 					// + 游戏季度总量 + 计量缺口。
 					// 缺字段时**不调用** setter：老 GS 与新 harness 混跑时不能清空已知事实。
-					if (Array.isArray(p.own_delivered) || typeof p.own_quarter === "number" || p.own_monitored !== undefined || p.own_gaps !== undefined) {
+					if (Array.isArray(p.own_delivered) || typeof p.own_quarter === "number" || p.own_monitored !== undefined || p.own_gaps !== undefined || Array.isArray(p.own_by_industry)) {
 						refs.world.setCompanyCargo({
 							byCargo: Array.isArray(p.own_delivered)
 								? (p.own_delivered as { label?: unknown; amount?: unknown }[]).map((c) => ({
 										label: String(c.label ?? ""),
 										amount: Number(c.amount) || 0,
+									}))
+								: [],
+							// 货运 F4（A3）：逐 (货种, 产业) 的累计——归因的原料。
+							// 旧 GS 不报这个字段 ⇒ 空数组（**不是**“每条都是 0”）。
+							byIndustry: Array.isArray(p.own_by_industry)
+								? (p.own_by_industry as { label?: unknown; industry?: unknown; amount?: unknown }[]).map((r) => ({
+										label: String(r.label ?? ""),
+										industry: Number(r.industry),
+										amount: Number(r.amount) || 0,
 									}))
 								: [],
 							quarterDelivered: typeof p.own_quarter === "number" ? (p.own_quarter as number) : null,
@@ -608,6 +628,10 @@ export function makeSignalHub(refs: SignalHubRefs): SignalHub {
 							// **这条线运的货**（F3 的看板要用）：客运线 = PASS，
 							// 货运线 = COAL/GOOD/…（GS 自报；缺席 = 未计量）。
 							...(typeof p.cargoCarried === "string" ? { cargoCarried: p.cargoCarried } : {}),
+							// 货运 F4（A3）：货运线的**两端产业 id**（产方 / 收方）。
+							// 缺席 = 客运线（不适用）⇒ 不补 0（0 是真的产业 id 0）。
+							...(numOrUndef(p.fromIndustry) !== undefined ? { fromIndustry: numOrUndef(p.fromIndustry) } : {}),
+							...(numOrUndef(p.toIndustry) !== undefined ? { toIndustry: numOrUndef(p.toIndustry) } : {}),
 								...(numOrUndef(p.engineApplied) !== undefined ? { engineApplied: numOrUndef(p.engineApplied) } : {}),
 								...(numOrUndef(p.endsA) !== undefined ? { endsA: numOrUndef(p.endsA) } : {}),
 								...(numOrUndef(p.endsB) !== undefined ? { endsB: numOrUndef(p.endsB) } : {}),
@@ -677,6 +701,18 @@ export function makeSignalHub(refs: SignalHubRefs): SignalHub {
 		prevStats: () => prevStats,
 		getLastRoute: () => lastRoute,
 		getRouteStats: () => [...routeStats.values()].sort((a, b) => a.job - b.job),
+		// 货运 F4（A4）：读数在**世界状态**里（monitor 累计），线路在**route-stats**
+		// 里（GS 报的两端产业 id + 货种）⇒ 两者在这里相遇并归因。
+		getFreightAttribution: () => {
+			const readings = refs.world.snapshot().companyCargo?.byIndustry ?? [];
+			const lines = [...routeStats.values()].map((r) => ({
+				job: r.job,
+				cargo: r.cargoCarried,
+				fromIndustry: r.fromIndustry,
+				toIndustry: r.toIndustry,
+			}));
+			return attributeFreightDeliveries(readings, lines);
+		},
 		replayBootEvents(session) {
 			for (const ev of bootEvents) session.appendEvent(ev);
 			bootEvents.length = 0;

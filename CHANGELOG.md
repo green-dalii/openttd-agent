@@ -46,6 +46,17 @@
   "a producer industry to a consumer industry".
 
 ### Added
+- **A freight line now says how much it delivered.** The engine does not record which vehicle
+  delivered what where, so a per-line delivery figure has always been a *derived* number - and
+  until now there was nothing to derive it from: the game script reported the cargo totals but
+  dropped the destination, and the route table did not say which industries a line served. The
+  script now also reports the delivery **per (cargo, receiving industry)** and the **two industry
+  ids of every freight line**, and the harness attributes each delivery to the one line that
+  serves that cargo at that industry. When several of our lines share it, the delivery is **not
+  split** - it is reported as unattributable with the reason; when no line of ours serves it the
+  amount is reported separately rather than dropped, so the attributed total never silently looks
+  like the company total. Real machine (seed 4242, a coal line 28 -> 53): 160 tonnes attributed
+  to that line, nothing unattributed.
 - **The paired comparison now answers on every axis.** It used to compute exactly one metric - cargo +
   passengers delivered per game day - so the efficiency axis (delivered per 1M tokens) and the stability
   axis (share of tool calls that failed) had **no paired interval at all**. That is how "the efficiency
@@ -594,7 +605,7 @@
 ### Verified (真机)
 - **手**：`boot→work→stA_ok→stB_ok→road_built(r103)→dpt_ok→dpt_conn→bus_live→done stN2 r103 bus`；`vehicles=3 stations=2`；站队列被消化
 - **脑**：真实 HTTP provider（`--agent` + 本地 OpenAI 兼容端点）→ LLM 工具调用 → 命令通道 → 施工 → 经济回灌；审计 JSONL 落盘
-- **真机 E2E**（2026-09-09）：dashboard 保存 → `<dataDir>/llm.json` → **另一进程** `--agent`（显式清空所有 `LLM_*` env）读到该文件并走 REAL provider、真发 HTTP、产生 `build_bus_route` 工具调用；`GET /api/llm` 全程不回显 key（SPEC §10.16-8/9）
+- **真机 E2E**（2026-09-09）：dashboard 保存 → `<dataDir>/llm.json` → **另一进程** `--agent`（清空所有 `LLM_*` env）走 REAL provider、真发 HTTP、产生 `build_bus_route` 工具调用；`GET /api/llm` 全程不回显 key（SPEC §10.16-8/9）
 
 ### Notes
 - **"盈利"验收未完成**：属带脑决策质量（选镇/投资规模），需真实 LLM + 更长观察期（见 ROADMAP v0.2.1）
@@ -608,12 +619,10 @@
 - **长驻观测循环** (`src/game/runner.ts`): spawn → start_ai → AdminClient → WorldState → WebServer 广播 + 周期 poll；SIGINT 优雅关闭
 - **AI 可用性探测** (`src/game/ai-registry.ts`)、**BigInt-safe 序列化** (`src/util/json.ts`)
 - **Web 服务器 + 仪表盘** (`src/web/server.ts` + `public/*`): HTTP 静态 + WS 扇出；原生 HTML+Canvas，无构建链
-- **CLI `--watch`**: 起服 + start_ai + 长驻采集 + 仪表盘；`--ai`/`--web-port` 参数
-- **测试**: `test/live/observation.test.ts`（@live 真机集成）；`ws` 是唯一的运行时依赖
+- **CLI `--watch`**: 起服 + start_ai + 长驻采集 + 仪表盘；`--ai`/`--web-port` 参数；**测试** `test/live/observation.test.ts`（@live 真机集成）；`ws` 是唯一的运行时依赖
 
 ### Fixed
-- `decodeErrorText` 修正: ServerError 是单 NUL 字符串而非 cstr 对
-- economy payload 的 BigInt 在 JSON 序列化崩溃（probe 无公司从未触达）—— 现在全链路 BigInt-safe
+- `decodeErrorText` 修正: ServerError 是单 NUL 字符串而非 cstr 对；economy payload 的 BigInt 在 JSON 序列化崩溃（probe 无公司从未触达）—— 现在全链路 BigInt-safe
 
 ### Verified (真机)
 - `rcon start_ai "CPU"` → company_new → company_info(isAi) → company_economy(money=100000 loan=100000)
@@ -625,8 +634,7 @@
 - **包管理器切换到 pnpm**: 移除 `node_modules`/`package-lock.json`；改用 `pnpm-lock.yaml`；脚本从 `npm run *` 改为 `pnpm *`；移除未使用的 `zod` 依赖；声明 `pnpm.onlyBuiltDependencies`（esbuild）允许构建脚本。（注：pnpm 传递 CLI 参数不需要 `--`）
 
 ### Added (MVP — 脚手架 + Admin Port 最小闭环)
-- **工程脚手架**: TypeScript strict + ESM + vitest + eslint flat config；`pnpm run gate`（typecheck+lint+test 一键门禁）
-- **开发规范**: `AGENTS.md`（TDD 先行 / 门禁铁律 / 职责与禁止项）；`ROADMAP.md`（渐进式计划）
+- **工程脚手架**: TypeScript strict + ESM + vitest + eslint flat config；`pnpm run gate`（typecheck+lint+test 一键门禁）；**开发规范** `AGENTS.md`；`ROADMAP.md`
 - **Admin Port 协议层** (`src/game/admin-protocol.ts`): 完整 packet 类型枚举（对齐 `tcp_admin.h`）+ 帧编解码（u16 LE 含自身长度前缀）+ 增量流式拆帧
 - **Payload 解析** (`src/game/payload-parsers.ts`, `src/game/observer.ts`): OpenTTD 日历算法（锚点 712223=1950-01-01 已真机校准）+ CompanyEconomy/Info/Stats/Chat/Console/GameScript/Date 规范化
 - **蓝图通道** (`src/game/blueprint.ts`): 高层动作 → GS 蓝图 JSON（job 0..999 / path ≤200 校验）
@@ -638,5 +646,4 @@
 - `SPEC.md` v0.2: 固化两轮源码级调研（动作面/观察模型/通信链路/GS-only 候选）
 
 ### Fixed / Verified (M0 实测)
-- Admin listener 需要 `secrets.cfg` 中非空 `admin_password`（OpenTTD 15 将密码移出 `openttd.cfg`）；手写 `secrets.cfg` 会被 OpenTTD 重建清空 → 必须先生成再 patch
-- headless 起服参数与日历锚点均已真机校准；新地图无公司属预期行为
+- Admin listener 需要 `secrets.cfg` 中非空 `admin_password`（OpenTTD 15 将密码移出 `openttd.cfg`）；手写 `secrets.cfg` 会被 OpenTTD 重建清空 → 必须先生成再 patch；headless 起服参数与日历锚点均已真机校准；新地图无公司属预期行为

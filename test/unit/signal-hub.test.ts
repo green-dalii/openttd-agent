@@ -492,6 +492,8 @@ describe("GS state：产业/货种/公司口径（P1+P2）", () => {
 		} as unknown as GameEvent);
 		expect(w.setCompanyCargo).toHaveBeenCalledWith({
 			byCargo: [{ label: "COAL", amount: 120 }],
+			// 逐 (货种, 产业)：这个 GS 没报 ⇒ 空数组（不是「每条都是 0」）。
+			byIndustry: [],
 			quarterDelivered: 5000,
 			monitored: { cargoes: 3, destinations: 17 },
 			gaps: { dropped: 1 },
@@ -508,6 +510,7 @@ describe("GS state：产业/货种/公司口径（P1+P2）", () => {
 		} as unknown as GameEvent);
 		expect(w.setCompanyCargo).toHaveBeenCalledWith({
 			byCargo: [],
+			byIndustry: [],
 			quarterDelivered: null,
 			monitored: null,
 			gaps: null,

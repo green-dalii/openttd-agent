@@ -1668,6 +1668,14 @@ class BridgeV1 extends GSController {
     _own_pairs = null;
     _own_lost = 0;
     _own_err = "";
+    // 货运 F4（A3）：逐 **(货种, 产业)** 的会话累计。
+    //   _own_by_industry = [{label, industry, amount}]：每次 monitor 读到增量时
+    //   **按目的地产业分开记**（不合并到货种）⇒ 归因时才能知道"这批货送到了哪"。
+    // 为什么必须多带这一层：GS 本来就**逐对去读**（`GetIndustryDeliveryAmount`
+    //   循环），合并到货种就把"送到哪"这个信息**丢掉了** ⇒ 逐线路归因缺的不是
+    //   算法，是这个读数（SPEC §10.126）。
+    // 用**数组**不用动态键的表（Squirrel 的表是严格的，D44/D95）。
+    _own_by_industry = null;
     // 施工方（executor）的公司 id。
     //
     // 为什么不能用 `GSCompany.COMPANY_SELF`：Bridge GS 是**服务器脚本**
@@ -1856,6 +1864,13 @@ class BridgeV1 extends GSController {
                 // 与 `cargoApplied`（后来的改装指令的生效值）是两个事实。
                 if (lineCargo != null && lineCargo >= 0) {
                     payload.rawset("cargoCarried", GSCargo.GetCargoLabel(lineCargo));
+                }
+                // 货运 F4（A3）：货运线的**两端产业 id**（产方 / 收方）。
+                // 客运线没有（它的两端是城镇）⇒ 字段缺席 = 不适用，不是 0。
+                // 有了它，harness 才能把"送到产业 X 的货"归到"唯一服务 X 的线"。
+                if (rec.rawin("fromIndustry") && rec.rawin("toIndustry")) {
+                    payload.rawset("fromIndustry", rec.fromIndustry);
+                    payload.rawset("toIndustry", rec.toIndustry);
                 }
                 // P1-3：登记车辆中此刻**停在库里**的 id（IsStoppedInDepot 已验证）。
                 // 有了它 harness 才能分解「在途/在库」；缺失保持字段缺席。
@@ -2461,6 +2476,7 @@ class BridgeV1 extends GSController {
         // 我们自己的累加器往 Squirrel 的严格表里写动态键，抛异常把整个
         // CollectFacts 打断了（MEMORY D94 / D95）。
         local own_by_cargo = [];
+        local own_by_industry = [];
         local own_monitored = { cargoes = 0, destinations = 0 };
         local own_gaps = { dropped = this._own_lost, error = this._own_err };
 
@@ -2493,6 +2509,10 @@ class BridgeV1 extends GSController {
             }
             if (!seen) totals.append({ label = cinfo.label, amount = 0 });
         }
+        // 逐 (货种, 产业) 的累计（货运 F4 / A3）：**不合并到货种** ⇒ 归因时知道
+        // "送到哪"。同样用数组（表不能动态建键，D44/D95）。
+        local by_industry = this._own_by_industry;
+        if (by_industry == null) by_industry = [];
 
         // 公司还没建出来（executor 还没开工）⇒ **监视无从谈起**：monitor 是按
         // (公司, 货种, 产业) 三元组记的，公司不存在就没有增量 ⇒ 这既不是失败，
@@ -2523,12 +2543,30 @@ class BridgeV1 extends GSController {
                 foreach (t in totals) {
                     if (t.label == p.label) { t.amount = t.amount + amt; break; }
                 }
+                // 逐 (货种, 产业) 累加（F4/A3）：先找同一条，找不到就**新建一条**
+                // （数组，不是动态键的表）。
+                local found = false;
+                foreach (r in by_industry) {
+                    if (r.label == p.label && r.industry == p.industry) {
+                        r.amount = r.amount + amt;
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) by_industry.append({ label = p.label, industry = p.industry, amount = amt });
             }
         }
 
         this._own_totals = totals;
         this._own_pairs = pairs;
+        this._own_by_industry = by_industry;
         foreach (t in totals) own_by_cargo.append({ label = t.label, amount = t.amount });
+        // 逐 (货种, 产业) 的累计：模型看得见（"运到哪"是事实），harness 拿它归因。
+        local own_by_industry = [];
+        foreach (r in by_industry) {
+            if (r.amount == 0) continue;   // 0 是"监视了但没交付"，不占一行
+            own_by_industry.append({ label = r.label, industry = r.industry, amount = r.amount });
+        }
         own_monitored = { cargoes = cargo_count, destinations = pairs.len() };
         own_gaps = { dropped = this._own_lost, error = this._own_err };
 
@@ -2545,6 +2583,7 @@ class BridgeV1 extends GSController {
             // 货运可运链路（货运 F3）：哪些产方真的装得上货。
             freight_links = freight_links,
             own_delivered = own_by_cargo,
+            own_by_industry = own_by_industry,
             own_quarter = quarter,
             own_monitored = own_monitored,
             own_gaps = own_gaps,
@@ -2699,6 +2738,8 @@ class BridgeV1 extends GSController {
                     cargo_totals = (f == null) ? [] : f.cargo_totals,
                     freight_links = (f == null) ? [] : f.freight_links,
                     own_delivered = (f == null) ? [] : f.own_delivered,
+                    // 逐 (货种, 产业)：归因的原料（A3）。形状恒定 ⇒ 字段一直在。
+                    own_by_industry = (f == null) ? [] : f.own_by_industry,
                     own_quarter = (f == null) ? null : f.own_quarter,
                     own_monitored = (f == null) ? null : f.own_monitored,
                     own_gaps = (f == null) ? null : f.own_gaps,
@@ -3399,6 +3440,12 @@ class BridgeV1 extends GSController {
         local frec = {};
         frec.rawset("tA", siteA[0]);
         frec.rawset("tB", siteB[0]);
+        // 货运 F4（A3）：这条线的**两端产业 id**（产方 / 收方）。
+        // 为什么必须报上来：GS 的 cargo monitor 只知道"本公司往某个产业送了
+        // 多少"，它**不知道是哪条线送的** ⇒ 要归因就得知道"哪些线服务这个
+        // 产业" ⇒ 线路登记表必须带着它的两个产业 id（否则 harness 只能猜）。
+        frec.rawset("fromIndustry", producer);
+        frec.rawset("toIndustry", consumer);
         this._routes.rawset(job_str, frec);
         GSAdmin.Send({ kind = "ack", cmd = "build_freight_route", job = job,
                        cargo = GSCargo.GetCargoLabel(cargo),
