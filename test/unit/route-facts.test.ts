@@ -22,7 +22,7 @@ describe("routeFactsFromLedger —— 账本行 → 结构化事实", () => {
 	it("完成的线：记录 pair、决策号、完成标记", () => {
 		const facts = routeFactsFromLedger([
 			{
-				order: { job: 100, fromTown: 9, toTown: 12, decision: 2, orderedAt: 1000 },
+				order: { kind: "passenger", job: 100, fromTown: 9, toTown: 12, decision: 2, orderedAt: 1000 },
 				outcome: { completed: true, doneDate: "1950-03-14" },
 			},
 		]);
@@ -39,7 +39,7 @@ describe("routeFactsFromLedger —— 账本行 → 结构化事实", () => {
 	it("未完成的线如实保留 completed:false（不得美化）", () => {
 		const facts = routeFactsFromLedger([
 			{
-				order: { job: 101, fromTown: 9, toTown: 17, decision: 3, orderedAt: 2000 },
+				order: { kind: "passenger", job: 101, fromTown: 9, toTown: 17, decision: 3, orderedAt: 2000 },
 				outcome: { completed: false },
 			},
 		]);
@@ -56,7 +56,7 @@ describe("save/load —— JSONL 持久化（跨局累积）", () => {
 	it("保存后可读回，且同 pair 同结局不重复", () => {
 		const dir = `/tmp/route-facts-test-${Date.now()}`;
 		const facts = [
-			{ from: 9, to: 12, decision: 2, completed: true, doneDate: "1950-03-14" },
+			{ kind: "passenger" as const, from: 9, to: 12, decision: 2, completed: true, doneDate: "1950-03-14" },
 		];
 		saveRouteFacts(dir, facts);
 		saveRouteFacts(dir, facts); // 同一对再次入库
@@ -68,10 +68,10 @@ describe("save/load —— JSONL 持久化（跨局累积）", () => {
 	it("同 pair 不同结局共存（上次建成、这次没建成，都是事实）", () => {
 		const dir = `/tmp/route-facts-test2-${Date.now()}`;
 		saveRouteFacts(dir, [
-			{ from: 9, to: 12, decision: 2, completed: true },
+			{ kind: "passenger" as const, from: 9, to: 12, decision: 2, completed: true },
 		]);
 		saveRouteFacts(dir, [
-			{ from: 9, to: 12, decision: 5, completed: false },
+			{ kind: "passenger" as const, from: 9, to: 12, decision: 5, completed: false },
 		]);
 		const loaded = loadRouteFacts(dir);
 		expect(loaded).toHaveLength(2);
@@ -81,7 +81,7 @@ describe("save/load —— JSONL 持久化（跨局累积）", () => {
 describe("formatRouteFactsForInjection —— 注入格式（事实，不是建议）", () => {
 	it("完成的线：陈述 pair/完成/日期，不给建议", () => {
 		const lines = formatRouteFactsForInjection([
-			{ from: 9, to: 12, decision: 2, completed: true, doneDate: "1950-03-14", savedAt: 1 },
+			{ kind: "passenger" as const, from: 9, to: 12, decision: 2, completed: true, doneDate: "1950-03-14", savedAt: 1 },
 		]);
 		expect(lines).toHaveLength(1);
 		expect(lines[0]).toContain("9->12");
@@ -93,7 +93,7 @@ describe("formatRouteFactsForInjection —— 注入格式（事实，不是建�
 
 	it("未完成的线：如实说未观测到完成", () => {
 		const lines = formatRouteFactsForInjection([
-			{ from: 9, to: 17, decision: 3, completed: false, savedAt: 2 },
+			{ kind: "passenger" as const, from: 9, to: 17, decision: 3, completed: false, savedAt: 2 },
 		]);
 		expect(lines[0]).toContain("9->17");
 		expect(lines[0]).toMatch(/no completion observed|not completed/i);
@@ -109,7 +109,7 @@ describe("C-1 门控：--no-memory 必须同时关闭 route facts（m3f 实测�
 		const dir = mkdtempSync(join(tmpdir(), "rf-"));
 		const { RouteLedger: RL } = await import("../../src/agent/route-ledger.js");
 		const ledger = new RL();
-		ledger.record({ job: 100, fromTown: 9, toTown: 12, decision: 1, orderedAt: 1 });
+		ledger.record({ kind: "passenger", job: 100, fromTown: 9, toTown: 12, decision: 1, orderedAt: 1 });
 		saveRouteFacts(dir, routeFactsFromLedger(ledger.all()));
 		expect(routeFactsProviderFor(dir, false)()).toEqual([]); // 控制臂
 		expect(routeFactsProviderFor(dir, true)().length).toBe(1); // 处理臂
@@ -122,7 +122,7 @@ describe("C-1 门控：--no-memory 必须同时关闭 route facts（m3f 实测�
  */
 describe("routeFactsFromLedger —— 经济事实（N2-3）", () => {
 	const line = (job: number, from: number, to: number) => ({
-		order: { job, fromTown: from, toTown: to, decision: 1, orderedAt: 1000 },
+		order: { kind: "passenger" as const, job, fromTown: from, toTown: to, decision: 1, orderedAt: 1000 },
 		outcome: { completed: true, doneDate: "1950-03-14" },
 	});
 	const stats = (job: number, vehicles: number, profit: number, waiting: number, gameDate = 400) =>

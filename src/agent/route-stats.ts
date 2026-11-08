@@ -131,7 +131,10 @@ export function formatRouteStats(s: RouteStats): string {
 
 /** 账本行（route-ledger.ts）在本模块需要的最小形状。 */
 export interface LedgerPair {
-	order: { job: number; fromTown: number; toTown: number };
+	order:
+		| { kind?: "passenger"; job: number; fromTown: number; toTown: number }
+		// 货运 F4（A5）：货运线的账本行没有城镇对（它的两端是产业）⇒ 形状**分开**。
+		| { kind: "freight"; job: number; fromIndustry: number; toIndustry: number; cargo: string };
 }
 
 /**
@@ -169,7 +172,7 @@ export function joinRoutesWithLedger(
 				...(r.fromIndustry !== undefined ? { fromIndustry: r.fromIndustry } : {}),
 				...(r.toIndustry !== undefined ? { toIndustry: r.toIndustry } : {}),
 			};
-			if (pair) {
+			if (pair && pair.kind !== "freight") {
 				out.townA = pair.fromTown;
 				out.townB = pair.toTown;
 			}

@@ -10,6 +10,7 @@
 import { buildReflectionEvidence } from "../evolution/reflect.js";
 import { routeFactsFromLedger, saveRouteFacts } from "../evolution/route-facts.js";
 import type { RouteStats } from "./route-stats.js";
+import type { FreightAttributionResult } from "./freight-attribution.js";
 import type { Agent } from "@earendil-works/pi-agent-core";
 import type { Model } from "@earendil-works/pi-ai";
 import { runReflection } from "../evolution/reflection-run.js";
@@ -48,6 +49,13 @@ export interface FinalizeAndReflectArgs {
 	 * finalize step reads whatever the hub last saw, without owning the hub.
 	 */
 	getRouteStats: () => RouteStats[];
+	/**
+	 * 货运 F4（A5）：逐线路的**推导**交付量（`freight-attribution.ts` 的结果）。
+	 *
+	 * 给了就把“这条线运了多少”写进事实（`null` = 归不出来 + 原因）；没给
+	 * （旧调用方）行为不变。
+	 */
+	getFreightAttribution?: () => FreightAttributionResult;
 	/** Assigned arm, recorded in the metric so it is never inferred (N2-5 fix). */
 	arm: "treatment" | "control";
 	/**
@@ -123,6 +131,7 @@ export async function runFinalizeAndReflect(args: FinalizeAndReflectArgs): Promi
 		pendingActions,
 		routeLedger,
 		getRouteStats,
+		getFreightAttribution,
 		arm,
 		freezeStats,
 		reflectLlm,
@@ -232,7 +241,15 @@ export async function runFinalizeAndReflect(args: FinalizeAndReflectArgs): Promi
 		// line ended up doing. Joining them is what turns "I ordered 9->12" into
 		// "9->12 ended with 6 vehicles, 146 waiting, -308 profit".
 		const statsByJob = new Map(getRouteStats().map((r) => [r.job, r]));
-		saveRouteFacts(cfg.dataDir, routeFactsFromLedger(routeLedger.all(), statsByJob));
+		// 货运 F4（A5）：把**推导的**逐线路交付量一起写进事实（归不出来 ⇒ null + 原因）。
+		const deliveredByJob = new Map<number, { amount: number | null; reason: string | null }>();
+		for (const r of getFreightAttribution?.().routes ?? []) {
+			deliveredByJob.set(r.job, { amount: r.amount, reason: r.reason });
+		}
+		saveRouteFacts(
+			cfg.dataDir,
+			routeFactsFromLedger(routeLedger.all(), statsByJob, deliveredByJob),
+		);
 		try {
 			const report = await runReflection({
 				streamFn: reflectLlm.streamFn,

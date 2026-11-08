@@ -648,10 +648,13 @@ export function makeSignalHub(refs: SignalHubRefs): SignalHub {
 					if (p.kind === "ack" && (p.cmd === "build_bus_route" || p.cmd === "build_freight_route")) {
 						lastRoute = p;
 					}
-					// 台账只登记**客运**线路：它的形状是"两端城镇"，而货运线的两端
-					// 是**产业** ⇒ 塞进城镇字段就是编造（货运线进台账是 F4 的活）。
+					// 台账登记**两种**线路，但**用两种形状**（货运 F4 / A5）：
+					// 客运线的两端是城镇，货运线的两端是**产业**（+ 货种）⇒ 显式
+					// 分开，而不是把产业塞进城镇字段（那会变成 `null/null`，而它
+					// **还进模型上下文**）。
 					if (p.kind === "ack" && p.cmd === "build_bus_route") {
 						refs.routeLedger.record({
+							kind: "passenger",
 							job: Number(p.job),
 							fromTown: Number(p.townA),
 							toTown: Number(p.townB),
@@ -661,6 +664,29 @@ export function makeSignalHub(refs: SignalHubRefs): SignalHub {
 							// only place that knows which command this job is.
 							command: String(p.cmd),
 						});
+					}
+					if (p.kind === "ack" && p.cmd === "build_freight_route") {
+						const job = Number(p.job);
+						const fromIndustry = Number(p.producer);
+						const toIndustry = Number(p.consumer);
+						const cargo = String(p.cargo ?? "");
+						// 端点/货种缺一不可（缺了就是半条事实）⇒ 不记，也不编。
+						if (
+							Number.isInteger(fromIndustry) &&
+							Number.isInteger(toIndustry) &&
+							cargo !== ""
+						) {
+							refs.routeLedger.record({
+								kind: "freight",
+								job,
+								fromIndustry,
+								toIndustry,
+								cargo,
+								decision: refs.getDecisionCount(),
+								orderedAt: Date.now(),
+								command: String(p.cmd),
+							});
+						}
 					}
 				}
 			}

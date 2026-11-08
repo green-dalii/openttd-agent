@@ -13,7 +13,15 @@
 /** How many observed world events one route keeps (newest kept). */
 export const ROUTE_EVENT_LIMIT = 20;
 
+/**
+ * A **passenger** route order (its two ends are towns).
+ *
+ * 货运 F4（A5）：台账的记录形状必须装得下它要记的事实 —— 客运线的两端是**城镇**，
+ * 货运线的两端是**产业** ⇒ 两种**显式分开**的记录（而不是把产业塞进城镇字段：
+ * 那样会变成 `null/null`，而它**还进模型上下文**，垃圾不只是脏数据）。
+ */
 export interface RouteOrder {
+	kind: "passenger";
 	job: number;
 	fromTown: number;
 	toTown: number;
@@ -30,6 +38,31 @@ export interface RouteOrder {
 	 */
 	command?: string;
 }
+
+/**
+ * A **freight** route order (its two ends are industries, plus the cargo).
+ *
+ * 事实来源: GS 的 `build_freight_route` ack（`producer`/`consumer`/`cargo`）。
+ */
+export interface FreightRouteOrder {
+	kind: "freight";
+	job: number;
+	/** The producing industry (the line's start). */
+	fromIndustry: number;
+	/** The consuming industry (the line's end). */
+	toIndustry: number;
+	/** The cargo the line carries ("COAL", …). */
+	cargo: string;
+	/** Decision (turn) that ordered this route. */
+	decision: number;
+	/** Wall-clock ms when the ack arrived. */
+	orderedAt: number;
+	/** The command that ordered this job. */
+	command?: string;
+}
+
+/** Either kind of route order. */
+export type AnyRouteOrder = RouteOrder | FreightRouteOrder;
 
 export interface RouteOutcome {
 	/** In-game date string when the executor reported done for this job. */
@@ -52,18 +85,18 @@ export interface RouteOutcome {
 }
 
 export interface LedgerLine {
-	order: RouteOrder;
+	order: AnyRouteOrder;
 	outcome: RouteOutcome;
 }
 
 export class RouteLedger {
-	private orders = new Map<number, RouteOrder>();
+	private orders = new Map<number, AnyRouteOrder>();
 	private outcomes = new Map<number, RouteOutcome>();
 	/** vehicle id -> the job whose route it belongs to (from the route stats). */
 	private vehicleJobs = new Map<number, number>();
 
-	/** A build order was acked by the GS. */
-	record(order: RouteOrder): void {
+	/** A build order was acked by the GS (passenger or freight). */
+	record(order: AnyRouteOrder): void {
 		this.orders.set(order.job, order);
 		if (!this.outcomes.has(order.job)) {
 			this.outcomes.set(order.job, { completed: false });
@@ -125,9 +158,15 @@ export class RouteLedger {
 		for (const job of [...this.orders.keys()].sort((a, b) => a - b)) {
 			const order = this.orders.get(job)!;
 			const outcome = this.outcomes.get(job)!;
+			// 两种线**各说各的**（货运 F4 / A5）：客运说城镇，货运说产业与货种。
+			// 绝不说 “towns null->null”（那是把一条货运线塞进客运形状的后果，
+			// 而它**还进模型上下文**）。
+			const what =
+				order.kind === "freight"
+					? `freight route job ${job} (${order.cargo}, industry ${order.fromIndustry}->${order.toIndustry})`
+					: `route job ${job} (towns ${order.fromTown}->${order.toTown})`;
 			out.push(
-				`route job ${job} (towns ${order.fromTown}->${order.toTown}) was ordered at ` +
-					`decision ${order.decision}` +
+				`${what} was ordered at decision ${order.decision}` +
 					(outcome.completed
 						? ` and the executor reported it built${outcome.doneDate ? ` on ${outcome.doneDate}` : ""}`
 						: " but no completion was observed before the run ended") +

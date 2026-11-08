@@ -1099,6 +1099,9 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 		cfg, world: _world, session, telemetry,
 		executorPhase: hub.getPhase(), reachedDone: hub.getReachedDone(), scheduler, pendingActions, routeLedger,
 		getRouteStats: () => hub.getRouteStats(),
+		// 货运 F4（A5）：逐线路的**推导**交付量 ⇒ 写进事实（History 能说
+		// “这条决策运了多少货”）。
+		getFreightAttribution: () => hub.getFreightAttribution(),
 		gsErrors: hub.getGsErrors(),
 		toolBudgetBlocks: getBudgetBlocks(),
 		// 局是在**暂停中**结束的吗（agent 自己按的）？这是 outcome 的独立事实，
