@@ -272,6 +272,11 @@
           return window.CompareView.comparison(this.payload);
         },
 
+        /** The server's paired verdicts, one row per axis (Issue #87). */
+        comparisonRows() {
+          return window.CompareView.comparisonRows(this.payload);
+        },
+
         /** The runs (the drill-down list). */
         runRows() {
           return window.CompareView.runRows(this.payload);

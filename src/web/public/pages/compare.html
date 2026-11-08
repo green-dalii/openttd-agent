@@ -340,6 +340,40 @@
             <div class="kpi-v" x-text="comparison() && comparison().ci ? ('[' + comparison().ci[0].toFixed(2) + ', ' + comparison().ci[1].toFixed(2) + ']') : 'not measured'"></div></div>
         </div>
       </div>
+      <!-- Every axis, one row each (Issue #87): the headline above answers the
+           main axis only; the other axes used to have NO interval at all, so
+           "the efficiency axis looks separable" was never a verdict. Every
+           verdict here is the server's - the page computes nothing. -->
+      <div x-show="comparisonRows().length" class="cmp-axes">
+        <table class="cmp-axis-table">
+          <thead>
+            <tr><th>Axis</th><th>What is compared</th><th>Better</th><th>Verdict</th><th>Pairs</th><th>Mean difference</th><th>95% CI</th></tr>
+          </thead>
+          <tbody>
+            <template x-for="row in comparisonRows()" :key="row.axis + row.what">
+              <tr>
+                <td x-text="row.axis"></td>
+                <td x-text="row.what"></td>
+                <td>
+                  <!-- The server says who came out better: the verdict word is
+                       a direction ("a_higher" = A's number is the bigger one)
+                       and on the efficiency axis the bigger number is the worse
+                       one - so the page must not read a direction as a win.
+                       The wording comes from the view module (one place). -->
+                  <span x-text="row.better"></span>
+                </td>
+                <td>
+                  <span class="badge" :class="row.known ? 'ok' : 'dim'" x-text="row.verdict"></span>
+                </td>
+                <td x-text="row.pairs"></td>
+                <td x-text="row.meanDiff !== null ? row.meanDiff.toFixed(2) : 'not measured'"></td>
+                <td x-text="row.ci ? ('[' + row.ci[0].toFixed(2) + ', ' + row.ci[1].toFixed(2) + ']') : 'not measured'"></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+        <p class="hint">"not determinable" means the interval cannot decide - too few pairs, or it contains 0. It is not a statement that the two models are equal. "no quality" marks a metric that carries no better or worse (more stations is not automatically better).</p>
+      </div>
       <p class="hint" x-show="!comparison()">
         Pick two models above to compare them on the same worlds (same seed, same repeat).
       </p>

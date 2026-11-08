@@ -218,3 +218,38 @@ describe("Compare: did the compared runs answer the same question?", () => {
 		expect(view.surface.scaffoldHashes).toEqual(["aaaa1111"]);
 	});
 });
+
+describe("buildCompareView：配对判定按轴给（Issue #87）", () => {
+	it("两个模型被选中时，载荷带上每个可配对指标的判定", () => {
+		const rows = [1, 2, 3].flatMap((seed) => [
+			row({ id: `a${seed}`, llmModel: "model-a", manifest: { servedModel: "model-a", backend: "agent" } as never, seed, deliveredRun: 200, simulatedDays: 100 }),
+			row({ id: `b${seed}`, llmModel: "model-b", manifest: { servedModel: "model-b", backend: "agent" } as never, seed, deliveredRun: 100, simulatedDays: 100 }),
+		]);
+		const payload = buildCompareView(rows, { models: ["model-a", "model-b"] });
+		expect(Array.isArray(payload.comparisons)).toBe(true);
+		const ids = payload.comparisons.map((c) => c.metricId);
+		expect(ids).toContain("ability.deliveredPerGameDay");
+		expect(ids).toContain("efficiency.deliveredPerMillionTokens");
+		expect(ids).toContain("stability.toolFailureRate");
+		for (const c of payload.comparisons) {
+			expect(c.axisLabel.length).toBeGreaterThan(0);
+			expect(c.unit.length).toBeGreaterThan(0);
+			// 「谁更好」要么是模型名（服务端说的），要么是 null（不可判定 / 无好坏方向）。
+			expect(c.betterModel === null || typeof c.betterModel === "string").toBe(true);
+		}
+		// 能力轴：A 交付更多 ⇒ A 更好（方向由服务端给出）。
+		const ability = payload.comparisons.find((c) => c.metricId === "ability.deliveredPerGameDay");
+		expect(ability?.betterWhen).toBe("higher");
+		expect(ability?.betterModel).toBe("model-a");
+		// 站点数不带好坏方向。
+		const stations = payload.comparisons.find((c) => c.metricId === "ability.stations");
+		expect(stations?.betterWhen).toBeNull();
+		expect(stations?.betterModel).toBeNull();
+	});
+
+	it("没选两个模型时没有配对判定（不猜）", () => {
+		const payload = buildCompareView([row({ id: "r1" })]);
+		expect(payload.comparisons).toEqual([]);
+		expect(payload.comparison).toBeNull();
+	});
+});

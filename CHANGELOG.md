@@ -9,6 +9,14 @@
 
 ## [Unreleased]
 ### Fixed
+- **A pair could have compared the wrong two runs.** The pairing key is (seed, repeat), but the repeat
+  index was counted over the rows that **had a reading** - so a run with no reading for one metric was
+  skipped and the runs behind it moved forward. On the stability axis a run that made no tool call
+  (no failure rate to measure) therefore shifted its partner, and the interval was computed from a
+  comparison of two different runs. The cells are now the **runs** - the repeat index is counted over
+  the comparable runs and does not depend on the metric - so a pair means the same two runs on every
+  axis, and a cell with a missing reading on one side is dropped whole (n gets smaller, the other
+  pairs do not move).
 - **"Not applicable" was reported as zero.** The game script encodes a reading it does not have as JSON
   `null` (a negative engine reading - the industry does not produce or does not accept that
   cargo - becomes `null`, so the payload shape never changes). Two readers on our side went through
@@ -38,6 +46,18 @@
   "a producer industry to a consumer industry".
 
 ### Added
+- **The paired comparison now answers on every axis.** It used to compute exactly one metric - cargo +
+  passengers delivered per game day - so the efficiency axis (delivered per 1M tokens) and the stability
+  axis (share of tool calls that failed) had **no paired interval at all**. That is how "the efficiency
+  axis looks separable" could sit in a plan for a whole benchmark round without ever being a verdict.
+  The comparison is now a function of the axis; the registry of comparable metrics owns the wording
+  (what is counted, in what unit, which way is better) so the report and the page cannot drift apart;
+  the benchmark report and the Compare page list **every** axis with its verdict, its n and its interval.
+  Growth stays out of it on purpose - its metric is a slope across runs, not a per-run number - and a
+  pair with a missing reading on one side is still dropped rather than counted as a zero difference.
+  The verdict word states a **direction** ("the other model's number is the bigger one"), which on the
+  efficiency axis is the *worse* one - so the server now also says **which model came out better**, and
+  a metric that carries no quality (more stations is not automatically better) says so instead.
 - **Freight deliveries are measured now, and a freight line can be built.** The game script reports what
   *this company* delivered, per cargo, with the engine's own cargo monitor (one axis, accumulated on our
   side because the monitor hands out the delta and resets, every gap reported - a total with a gap is a
@@ -478,19 +498,12 @@
 - `dashboard-core.test.ts` 新增「阶段总结必须反映真实遥测」回归用例
 
 ### Fixed（浏览器实测发现，CDP 逐条验证）
-- **协议层符号错误**：`money/loan/income/companyValue` 是 **int64**（OpenTTD `Money`）， 却按 `uint64` 读 → 亏损公司显示 `£18446744073.71B`。新增 `ByteReader.int64()`， 与 `SPEC.md` §10.6 一致；真机已验证显示 `-£6.0k`
-- **现金曲线刷新即清空**：历史只存在页面内存，违反"服务端是真源" → 上移到 `WorldState`（有界 600 点），`snapshot` 携带，前端 seed；真机验证刷新前后曲线一致
-- **空状态图表跳高**：无数据分支跳过 `fit()`，画布停留在默认 300×200 → 空状态也按 容器宽度设置 backing store（含回归测试）
+- **协议层符号错误**：`money/loan/income/companyValue` 是 **int64**（OpenTTD `Money`），却按 `uint64` 读 → 亏损公司显示 `£18446744073.71B`。新增 `ByteReader.int64()`，与 `SPEC.md` §10.6 一致；真机已验证显示 `-£6.0k`
+- **现金曲线刷新即清空**：历史只存在页面内存，违反"服务端是真源" → 上移到 `WorldState`（有界 600 点），`snapshot` 携带，前端 seed
+- **空状态图表跳高**：无数据分支跳过 `fit()`，画布停留在默认 300×200 → 空状态也按容器宽度设置 backing store（含回归测试）
 - **迷你趋势线错位**：`paintSparks` 把同一份数据画到所有 tile → 改为按 tile 对齐
-- **组合框分组失效**：选项未按组排序导致组标题重复出现 14 次 → 加 `sort` 并按 「Ready now → Needs key → OAuth」排序
+- **组合框分组失效**：选项未按组排序导致组标题重复出现 14 次 → 加 `sort` 并按「Ready now → Needs key → OAuth」排序
 - 大数字尾部粘 delta chip → chip 移入独立行
-
-### Verified
-- `pnpm run gate` 全绿：**170 passed / 1 skipped**
-- 真机 `--agent`：`/`、`/providers`、`/llm`(别名)、`/sessions` 与全部静态资源均 200；
-  **运行中**（status=running）meta.json 已有 checkpoint 且数字正确
-  （`1 decisions, 1 tool calls, 1,790 tokens`）；关闭后写入第二条 + 成绩单；无残留监听
-- **真实浏览器（Chrome headless + CDP）**：三页 **0 个 console 异常**； 组合框实测「输入 deep → ↑↓ → Enter」选中 deepseek，模型目录 4 条， 环境变量就绪时显示「ready — no action needed」；`canvas` 真实绘制 （网格线/面积/折线，非空白）；截图存档于验证流程
 
 ## [0.3.0] - 2026-09-10
 
@@ -537,7 +550,6 @@
 - SPEC §10.16 增补真机 E2E 事实与「合并不得烘焙默认值」原则
 
 ### Verified
-- `pnpm run gate` 全绿：**151 passed / 1 skipped**
 - 真机：`--watch` 三页 200、WS snapshot/event、session 落盘；
   `--agent`（仅靠 llm.json，无任何 `LLM_*` env）走 REAL provider →
   `tokens: in=1738 out=52 reasoning=13 total=1790`、`tools: 1 calls, 0 failed`、
@@ -582,10 +594,7 @@
 ### Verified (真机)
 - **手**：`boot→work→stA_ok→stB_ok→road_built(r103)→dpt_ok→dpt_conn→bus_live→done stN2 r103 bus`；`vehicles=3 stations=2`；站队列被消化
 - **脑**：真实 HTTP provider（`--agent` + 本地 OpenAI 兼容端点）→ LLM 工具调用 → 命令通道 → 施工 → 经济回灌；审计 JSONL 落盘
-- **单测**：90 passed / 1 skipped（含本地 HTTP stub 的真实 provider 链路测试）
-- **真机 E2E**（2026-09-09）: dashboard 保存 → `<dataDir>/llm.json` → **另一进程**
-  `--agent`（显式清空所有 `LLM_*` env）读到该文件并走 REAL provider、真发 HTTP、
-  产生 `build_bus_route` 工具调用；`GET /api/llm` 全程不回显 key（SPEC §10.16-8/9）
+- **真机 E2E**（2026-09-09）：dashboard 保存 → `<dataDir>/llm.json` → **另一进程** `--agent`（显式清空所有 `LLM_*` env）读到该文件并走 REAL provider、真发 HTTP、产生 `build_bus_route` 工具调用；`GET /api/llm` 全程不回显 key（SPEC §10.16-8/9）
 
 ### Notes
 - **"盈利"验收未完成**：属带脑决策质量（选镇/投资规模），需真实 LLM + 更长观察期（见 ROADMAP v0.2.1）
@@ -594,56 +603,40 @@
 ## [0.1.0] - 2026-09-08
 
 ### Added (观测闭环 M1)
-- **`src/game/admin-client.ts`**: 完整 AdminClient（connect/join/subscribe/poll/rcon/gs + 状态回调 + 优雅关闭）；默认订阅 date/company/economy/stats/console
-- **`src/game/world-state.ts`**: 内存权威状态（日期/公司注册表/economy/stats/环形事件缓冲）
-- **`src/game/runner.ts`**: 长驻观测循环（spawn → start_ai → AdminClient → WorldState → WebServer 广播 + 周期 poll）；SIGINT 优雅关闭
-- **`src/game/ai-registry.ts`**: AI 可用性探测（已知内置集 + `OPENTTD_AI_LIST` 覆盖）
-- **`src/util/json.ts`**: BigInt-safe 序列化（economy 的 u64 money/loan 不丢精度）
-- **`src/web/server.ts` + `public/*`**: HTTP 静态 + WS 扇出；原生 HTML+Canvas 仪表盘（公司卡片/现金曲线/事件流），无构建链
-- **CLI `--watch`**: 起服 + start_ai + 长驻采集 + Web 仪表盘；`--ai`/`--web-port` 参数
-- **`test/live/observation.test.ts`**: @live 真机集成（`LIVE_TESTS=1` 才跑）
-- **`ws` 依赖**: 唯一运行时依赖（WebSocket）
+- **Admin 客户端** (`src/game/admin-client.ts`): connect/join/subscribe/poll/rcon/gs + 状态回调 + 优雅关闭；默认订阅 date/company/economy/stats/console
+- **世界状态** (`src/game/world-state.ts`): 内存权威状态（日期/公司注册表/economy/stats/环形事件缓冲）
+- **长驻观测循环** (`src/game/runner.ts`): spawn → start_ai → AdminClient → WorldState → WebServer 广播 + 周期 poll；SIGINT 优雅关闭
+- **AI 可用性探测** (`src/game/ai-registry.ts`)、**BigInt-safe 序列化** (`src/util/json.ts`)
+- **Web 服务器 + 仪表盘** (`src/web/server.ts` + `public/*`): HTTP 静态 + WS 扇出；原生 HTML+Canvas，无构建链
+- **CLI `--watch`**: 起服 + start_ai + 长驻采集 + 仪表盘；`--ai`/`--web-port` 参数
+- **测试**: `test/live/observation.test.ts`（@live 真机集成）；`ws` 是唯一的运行时依赖
 
 ### Fixed
 - `decodeErrorText` 修正: ServerError 是单 NUL 字符串而非 cstr 对
 - economy payload 的 BigInt 在 JSON 序列化崩溃（probe 无公司从未触达）—— 现在全链路 BigInt-safe
 
 ### Verified (真机)
-- `rcon start_ai "CPU"` → company_new → company_info(isAi) → company_economy(poll 即时返回, money=100000 loan=100000)
+- `rcon start_ai "CPU"` → company_new → company_info(isAi) → company_economy(money=100000 loan=100000)
 - `--watch` 端到端: dashboard HTTP 200; WS snapshot + 增量 economy/date 事件（seq 单调递增）; SIGINT 优雅关闭无残留
 
 ## [0.0.1] - 2026-09-07
 
 ### Changed
-- **包管理器切换到 pnpm**: 移除 `node_modules`/`package-lock.json`；改用 `pnpm-lock.yaml`；
-  脚本从 `npm run *` 改为 `pnpm *`；移除未使用的 `zod` 依赖；声明
-  `pnpm.onlyBuiltDependencies`（esbuild）允许构建脚本。磁盘占用更小、安装更快。
-  （注：pnpm 传递 CLI 参数不需要 `--`，如 `pnpm run cli --probe`）
+- **包管理器切换到 pnpm**: 移除 `node_modules`/`package-lock.json`；改用 `pnpm-lock.yaml`；脚本从 `npm run *` 改为 `pnpm *`；移除未使用的 `zod` 依赖；声明 `pnpm.onlyBuiltDependencies`（esbuild）允许构建脚本。（注：pnpm 传递 CLI 参数不需要 `--`）
 
 ### Added (MVP — 脚手架 + Admin Port 最小闭环)
 - **工程脚手架**: TypeScript strict + ESM + vitest + eslint flat config；`pnpm run gate`（typecheck+lint+test 一键门禁）
 - **开发规范**: `AGENTS.md`（TDD 先行 / 门禁铁律 / 职责与禁止项）；`ROADMAP.md`（渐进式计划）
-- **Admin Port 协议层** (`src/game/admin-protocol.ts`)
-  - 完整 packet 类型枚举（值对齐 `tcp_admin.h`）+ UpdateType/Frequency 枚举
-  - 帧编解码（u16 LE 含自身长度前缀 + u8 type + payload；NUL 结尾字符串；LE 整数）
-  - `FrameWriter` / `ByteReader` / `FrameStreamParser`（增量流式拆帧）
-- **Payload 解析** (`src/game/payload-parsers.ts`, `src/game/observer.ts`)
-  - OpenTTD 日历算法（raw date → y/m/d；锚点 712223=1950-01-01 已真机校准）
-  - CompanyEconomy/CompanyInfo/CompanyStats/Chat/Console/GameScript/Date 规范化事件
-  - `decodeWelcome` / `decodeServerRconResponse`
+- **Admin Port 协议层** (`src/game/admin-protocol.ts`): 完整 packet 类型枚举（对齐 `tcp_admin.h`）+ 帧编解码（u16 LE 含自身长度前缀）+ 增量流式拆帧
+- **Payload 解析** (`src/game/payload-parsers.ts`, `src/game/observer.ts`): OpenTTD 日历算法（锚点 712223=1950-01-01 已真机校准）+ CompanyEconomy/Info/Stats/Chat/Console/GameScript/Date 规范化
 - **蓝图通道** (`src/game/blueprint.ts`): 高层动作 → GS 蓝图 JSON（job 0..999 / path ≤200 校验）
-- **进程管理** (`src/game/process-manager.ts`)
-  - 隔离 data dir；generate-then-patch 配置（绕过 OpenTTD 15 覆盖手写 `secrets.cfg` 的行为）
-  - spawn/stop/日志尾/`waitForAdminPort` 探活
-- **配置** (`src/config.ts`): env 驱动的全量可配（二进制/端口/seed/年份/地图尺寸）
-- **CLI** (`src/cli/run.ts`): `--probe`（真机最小闭环）+ `--dry-run`
+- **进程管理** (`src/game/process-manager.ts`): 隔离 data dir；generate-then-patch 配置；spawn/stop/日志尾/端口探活
+- **配置** (`src/config.ts`) 与 **CLI** (`src/cli/run.ts`): env 驱动的全量可配；`--probe`（真机最小闭环）+ `--dry-run`
 - **测试**: 40 个单测（codec golden / 日历 / 蓝图 / observer / 配置 / 进程生命周期），全绿
 
 ### Changed
-- `SPEC.md` v0.2: 固化两轮源码级调研（动作面/观察模型/通信链路/GS-only 候选）；v0.0.1 完成后新增 §10.6 M0 实测结果
+- `SPEC.md` v0.2: 固化两轮源码级调研（动作面/观察模型/通信链路/GS-only 候选）
 
 ### Fixed / Verified (M0 实测)
-- Admin listener 需要 `secrets.cfg` 中非空 `admin_password`（OpenTTD 15 将密码移出 `openttd.cfg`）
-- 手写 `secrets.cfg` 会被 OpenTTD 重建清空 → 必须先生成再 patch
-- headless 起服参数与日历锚点均已真机校准
-- 新地图无公司属预期行为（CompanyEconomy 需公司存在才推送）
+- Admin listener 需要 `secrets.cfg` 中非空 `admin_password`（OpenTTD 15 将密码移出 `openttd.cfg`）；手写 `secrets.cfg` 会被 OpenTTD 重建清空 → 必须先生成再 patch
+- headless 起服参数与日历锚点均已真机校准；新地图无公司属预期行为

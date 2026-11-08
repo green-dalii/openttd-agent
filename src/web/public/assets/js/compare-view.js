@@ -124,6 +124,65 @@
   }
 
   /**
+   * The paired verdict **per axis** (Issue #87).
+   *
+   * Every verdict is the server's, verbatim. The page must not turn "not
+   * determinable" into "no difference", and it must not recompute an
+   * interval - it only lays the rows out.
+   */
+  function comparisonRows(payload) {
+    const list = payload && Array.isArray(payload.comparisons) ? payload.comparisons : [];
+    return list.map((c) => {
+      /**
+       * Which model came out better - **the server's answer**, never guessed
+       * here. The verdict word is a direction ("a_higher" = A's number is the
+       * bigger one) and on the efficiency axis the bigger number is the worse
+       * one, so the page must not read the direction as a quality judgement.
+       */
+      const betterModel = typeof c.betterModel === "string" ? c.betterModel : null;
+      const betterWhen = c.betterWhen === "higher" || c.betterWhen === "lower" ? c.betterWhen : null;
+      return {
+        axis: String(c.axisLabel ?? ""),
+        what: `${String(c.label ?? "")} (${String(c.unit ?? "")})`,
+        verdict: String(c.verdict ?? "not determinable"),
+        message: String(c.message ?? ""),
+        pairs: Array.isArray(c.pairs) ? c.pairs.length : 0,
+        known: c.verdict === "a_higher" || c.verdict === "b_higher",
+        meanDiff: typeof c.meanDiff === "number" ? c.meanDiff : null,
+        ci: Array.isArray(c.diffCi95) ? c.diffCi95 : null,
+        betterModel: betterModel,
+        betterWhen: betterWhen,
+        /**
+         * The wording of the "Better" cell, decided here (one place) from the
+         * server's fields: a named model, or "no quality" for a metric that
+         * carries no better/worse, or the server's own "not determinable".
+         */
+        better: betterText({ betterModel: betterModel, betterWhen: betterWhen }),
+      };
+    });
+  }
+
+  /**
+   * The "Better" cell of one axis row.
+   *
+   * Three cases, all decided by the server's fields:
+   *   - the server named a model ⇒ "<model> (<higher|lower> is better)";
+   *   - the metric carries no quality ⇒ "no quality";
+   *   - the metric has a quality direction but the verdict did not decide ⇒
+   *     "not determinable" (the server's own word).
+   *
+   * The page renders this string as it is - it does not decide anything.
+   */
+  function betterText(row) {
+    const r = row || {};
+    if (typeof r.betterModel === "string" && r.betterModel) {
+      return `${r.betterModel} (${r.betterWhen} is better)`;
+    }
+    if (r.betterWhen === "higher" || r.betterWhen === "lower") return "not determinable";
+    return "no quality";
+  }
+
+  /**
    * The four axes as four small charts - one per axis, because the axes have
    * different units and a single shared scale would be a lie.
    *
@@ -388,6 +447,8 @@
     modelRows,
     exclusionRows,
     comparison,
+    comparisonRows,
+    betterText,
     runRows,
     modelNames,
     questionGroups,
