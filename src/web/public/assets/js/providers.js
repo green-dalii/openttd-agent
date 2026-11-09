@@ -50,6 +50,8 @@
 
         /* ------------------------------- init ------------------------------- */
         async init() {
+          // 切语言时重画（旋钮取值的显示名按 id 翻）。
+          U.bindLocale(this);
           U.renderChrome();
           await this.loadCatalog();
           await this.loadSettings();

@@ -48,13 +48,16 @@
       // copies it instead of writing a second label that would drift.
       const abilityMeasure = m.ability && m.ability.measure ? String(m.ability.measure) : "Delivered";
       const efficiencyMeasure = m.efficiency && m.efficiency.measure ? String(m.efficiency.measure) : abilityMeasure;
+      // 口径的**措辞**归服务端；前端按 id 翻（没有译文就回落到服务端的原文）。
+      const abilityMeasureText = term(`measure.${m.ability?.measureId ?? ""}`, abilityMeasure);
+      const efficiencyMeasureText = term(`measure.${m.efficiency?.measureId ?? ""}`, efficiencyMeasure);
       return {
         model: String(m.model ?? "unknown"),
         requested: Array.isArray(m.requestedModels) ? m.requestedModels.join(", ") : "",
         runs: typeof m.runs === "number" ? m.runs : 0,
         excluded: typeof m.excluded === "number" ? m.excluded : 0,
         ability: [
-          reading(`${abilityMeasure} / game day`, m.ability && m.ability.mean),
+          reading(`${abilityMeasureText} / ${unitOf("ability.deliveredPerGameDay", "game day")}`, m.ability && m.ability.mean),
           reading("Median", m.ability && m.ability.median),
           // 货运 F4（A6）：**货物与客运的拆分**（服务端口径，页面不重算）。
           // 拆分没测到时是 null ⇒ “not measured”，不是 0。
@@ -64,7 +67,7 @@
           reading("Vehicles", m.ability && m.ability.vehicles, 1),
         ],
         efficiency: [
-          reading(`${efficiencyMeasure} / M tokens`, m.efficiency && m.efficiency.deliveredPerMillionTokens, 1),
+          reading(`${efficiencyMeasureText} / ${unitOf("efficiency.deliveredPerMillionTokens", "M tokens")}`, m.efficiency && m.efficiency.deliveredPerMillionTokens, 1),
           reading("Tokens / decision", m.efficiency && m.efficiency.tokensPerDecision, 0),
           reading("Seconds / run", m.efficiency && m.efficiency.secondsPerRun, 0),
           reading("Cost / run", m.efficiency && m.efficiency.costPerRun, 4),
@@ -79,7 +82,10 @@
           known: Boolean(m.growth && m.growth.verdict),
         },
         // 货运 F4（A6）：拆分口径由服务端给（页面不写第二份措辞）。
-        splitMeasure: m.ability && m.ability.splitMeasure ? String(m.ability.splitMeasure) : "",
+        splitMeasure: term(
+          `measure.${m.ability?.splitMeasureId ?? ""}`,
+          m.ability && m.ability.splitMeasure ? String(m.ability.splitMeasure) : "",
+        ),
         splitKnown:
           typeof (m.ability && m.ability.cargoDelivered) === "number" ||
           typeof (m.ability && m.ability.passengersDelivered) === "number",
@@ -95,14 +101,31 @@
    * 页面不重写词表：十类成因的名字与含义由服务端给（`describeOutcome`），这里只照抄。
    * 旧记录里没有这一项（`outcomeDistribution`）时退回空数组——不是自己编一份。
    */
+  /** The server-owned wording, localised by id (B5); the server's text is the fallback. */
+  function term(id, fallback) {
+    return window.UI && typeof window.UI.term === "function" ? window.UI.term(id, fallback) : fallback;
+  }
+
+  /** The unit of a paired metric, by its id (the server's registry owns the wording). */
+  function unitOf(metricId, fallback) {
+    return term(`metric.${metricId}.unit`, fallback);
+  }
+
   function outcomeRows(m) {
     const list = m && m.stability && Array.isArray(m.stability.outcomeDistribution) ? m.stability.outcomeDistribution : [];
-    return list.map((o) => ({
-      code: String(o && o.code ? o.code : ""),
-      label: String(o && o.label ? o.label : ""),
-      hint: String(o && o.hint ? o.hint : ""),
-      count: typeof (o && o.count) === "number" ? o.count : 0,
-    }));
+    return list.map((o) => {
+      const code = String(o && o.code ? o.code : "");
+      const label = String(o && o.label ? o.label : "");
+      const hint = String(o && o.hint ? o.hint : "");
+      return {
+        code,
+        // The server owns the wording (B5); the front end localises it **by id**
+        // and falls back to the server's text when it has no translation.
+        label: term(`outcome.${code}`, label),
+        hint: term(`outcome.${code}.hint`, hint),
+        count: typeof (o && o.count) === "number" ? o.count : 0,
+      };
+    });
   }
 
   /**
@@ -115,7 +138,7 @@
   function deliverySplit(m) {
     const ability = (m && m.ability) || {};
     return {
-      measure: ability.splitMeasure ? String(ability.splitMeasure) : "",
+      measure: term(`measure.${ability.splitMeasureId ?? ""}`, ability.splitMeasure ? String(ability.splitMeasure) : ""),
       cargo: typeof ability.cargoDelivered === "number" ? ability.cargoDelivered : null,
       passengers:
         typeof ability.passengersDelivered === "number" ? ability.passengersDelivered : null,
@@ -170,9 +193,15 @@
        */
       const betterModel = typeof c.betterModel === "string" ? c.betterModel : null;
       const betterWhen = c.betterWhen === "higher" || c.betterWhen === "lower" ? c.betterWhen : null;
+      // The metric's wording belongs to the server's registry (PAIRED_METRICS);
+      // the front end localises it **by the metric's id** and falls back to the
+      // server's text.
+      const metricId = String(c.metricId ?? "");
+      const label = term(`metric.${metricId}.label`, String(c.label ?? ""));
+      const unit = term(`metric.${metricId}.unit`, String(c.unit ?? ""));
       return {
         axis: String(c.axisLabel ?? ""),
-        what: `${String(c.label ?? "")} (${String(c.unit ?? "")})`,
+        what: unit ? `${label} (${unit})` : label,
         verdict: String(c.verdict ?? "not determinable"),
         message: String(c.message ?? ""),
         pairs: Array.isArray(c.pairs) ? c.pairs.length : 0,
@@ -248,12 +277,12 @@
     const abilityMeasure = m0.ability && m0.ability.measure ? String(m0.ability.measure) : "Delivered";
     return [
       axis("ability", "Result", (m) => ({
-        label: `${(m.ability && m.ability.measure) || abilityMeasure} / game day`,
+        label: `${term(`measure.${m.ability?.measureId ?? ""}`, (m.ability && m.ability.measure) || abilityMeasure)} / ${unitOf("ability.deliveredPerGameDay", "game day")}`,
         value: m.ability && m.ability.mean,
         text: num(m.ability && m.ability.mean, 2),
       })),
       axis("efficiency", "Efficiency", (m) => ({
-        label: `${(m.efficiency && m.efficiency.measure) || abilityMeasure} / M tokens`,
+        label: `${term(`measure.${m.efficiency?.measureId ?? ""}`, (m.efficiency && m.efficiency.measure) || abilityMeasure)} / ${unitOf("efficiency.deliveredPerMillionTokens", "M tokens")}`,
         value: m.efficiency && m.efficiency.deliveredPerMillionTokens,
         text: num(m.efficiency && m.efficiency.deliveredPerMillionTokens, 0),
       })),

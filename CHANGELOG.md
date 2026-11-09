@@ -41,15 +41,25 @@
   "a producer industry to a consumer industry".
 
 ### Added
+- **The server's own vocabulary is now translated too - by id.** The outcome classes, the
+  problem codes, the delivery measures and the knob values are the **server's** wording, and the
+  server keeps exactly one canonical wording of them. The front end now looks them up **by id**
+  (`outcome.token_cap`, `problem.no_credential`) and falls back to the server's text when it has
+  no translation, so the wording is never copied into the front-end table. The server sends the
+  ids along with the text, and a test checks the table's coverage against the server's own lists
+  - a new id without a translation fails the build. The growth axis' analysis sentences keep the
+  server's wording: they carry variable numbers.
 - **The Chinese interface now covers the text the scripts render too.** The hints, empty states,
-  legends and labels that the pages draw at runtime - about 440 more strings - are translated as
-  well, including the composed one-line summaries (a run's effect, a turn's digest), which are
-  translated piece by piece.
+  legends and labels the pages draw at runtime - about 440 more strings - are translated too.
 - **The language switch stopped working for anything rendered after the page loaded.** The
   translation of newly rendered text was scheduled on `requestAnimationFrame`, which only runs
   while the page is being painted - so in a background tab (or a headless browser) the observer
   never fired again and everything Alpine drew afterwards stayed English, with nothing in the
   console. The work is now scheduled with `setTimeout`, which does not depend on painting.
+- **The interface now picks up the language before the first paint.** The framework starts in a
+  microtask, so it rendered before the language runtime had initialised - everything it drew
+  looked up in the default language and stayed there. The runtime now initialises on the
+  framework's own start event.
 - **The dashboard's Chinese interface is now complete for its static copy.** Every visible
   sentence in the four pages (Run / Compare / History / Configure) has a Chinese translation —
   324 of them, where before 226 of them silently fell back to English. The pages also had
@@ -71,12 +81,11 @@
   receiving industry)** and the **two industry ids of every freight line**, and the harness
   attributes each delivery to the one line that serves that cargo at that industry. When several
   of our lines share it the delivery is **not split** - it is reported as unattributable with the
-  reason; when no line of ours serves it the amount is reported separately rather than dropped,
-  so the attributed total never silently looks like the company total. The ledger had one shape
-  ("two towns"), so a freight line could only enter it as `null/null` - and those sentences are
-  injected into the model's context: `route towns null->null was ordered at decision 2`. Passenger
-  and freight routes are now **two explicit record kinds**, the de-duplication key includes the
-  kind and the two ends, and the injected sentence says what the line really is, including how
+  reason; when no line of ours serves it the amount is reported separately rather than dropped.
+  The ledger had one shape ("two towns"), so a freight line could only enter it as `null/null` -
+  and those sentences are injected into the model's context. Passenger and freight routes are now
+  **two explicit record kinds**, the de-duplication key includes the kind and the two ends, and
+  the injected sentence says what the line really is, including how
   much it delivered and that the figure is derived. Real machine (seed 4242, a coal line 28 ->
   53): 160 tonnes attributed to that line, the fact reads `kind: freight, industries 28 -> 53,
   COAL, delivered 80`, and no fact has a null end any more.
@@ -528,42 +537,34 @@
 ### Added (Dashboard 打磨)
 **多页仪表盘（无构建链，按角色分目录）**
 - `src/web/public/pages/{live,llm,sessions}.html` + `assets/css/style.css` + `assets/js/{common,live,providers,sessions}.js`
-- `WebServer` 导出 `PAGES` 路由表（URL → 文件，单一事实源）；LLM 配置从 Live 页**解耦为独立 Providers 子页**
+- `WebServer` 导出 `PAGES` 路由表（单一事实源）；LLM 配置**解耦为独立子页**
 
 **多 Provider 接入（发挥 pi-ai 内置目录，不再手填）**
-- `provider-catalog.ts`: 暴露 pi-ai **39 个内置 provider / ~1900 个模型**，含 API 形态、上下文窗口、价格、认证方式
-- **环境变量自动检测**：用「合成 env 探测」求出每个 provider **真正接受**的变量名（31/39 已解析），不触碰真实 process.env；剩余 8 个 OAuth/云凭证 provider 给出明确 hint
+- `provider-catalog.ts`: 暴露 pi-ai **39 个内置 provider / ~1900 个模型**；**环境变量自动检测**求出每个 provider 真正接受的变量名（31/39，不触碰真实 process.env）
 - `file-credential-store.ts`: **文件版 `CredentialStore`**（`credentials.json`, 0600），密钥重启不丢
-- `provider.ts` 新增 `buildBrain()`：catalog 路径直接用 `builtinModels()` 选中模型，custom 路径保留原 `createProvider` 行为
-- `llm-api.ts` + REST: `GET|POST /api/llm`、`GET /api/llm/catalog[/:id]`、`DELETE /api/llm/credentials/:id`
+- `provider.ts` 新增 `buildBrain()`；REST: `GET|POST /api/llm`、`GET /api/llm/catalog[/:id]`、`DELETE /api/llm/credentials/:id`
 
 **Agent 遥测（token / 思考 / 每步）**
-- `telemetry.ts`: 消费 pi-agent-core `AgentEvent` → 累计 `AssistantMessage.usage`（input/output/cache/reasoning/total/cost），**按 turn 与按 tool 分组**，捕获 `thinking_delta` 思考流与每步 log
-- CLI `--agent` 现在也起 dashboard（`--web-port`）；`agent.subscribe()` → 遥测 → WS（≥250ms 节流）
-- Live 页新增：KPI 卡、tokens-per-turn 图、tool 统计、思考列表、Agent 步骤流、阶段性总结时间线
+- `telemetry.ts`: 消费 pi-agent-core `AgentEvent` → 累计 token 用量，**按 turn 与按 tool 分组**，捕获思考流与每步 log
+- CLI `--agent` 也起 dashboard（`--web-port`）；Live 页新增 KPI 卡、token 图、tool 统计、思考列表、步骤流、阶段性总结时间线
 
 **多 Session（局）管理与复盘**
-- `session-store.ts`: 每局落 `<dataDir>/sessions/<id>/{meta,events,audit,telemetry}` +
-  `index.json`；`--watch`/`--agent` 均自动建局并在结束时写入**成绩单 + 阶段性总结**
-- Sessions 页：历史局列表（状态/耗时/token/成本）+ 单局复盘
+- `session-store.ts`: 每局落 `<dataDir>/sessions/<id>/{meta,events,audit,telemetry}` + `index.json`，结束时写入**成绩单 + 阶段性总结**
+- Sessions 页：历史局列表 + 单局复盘
 
 **事件呈现（从「极客 JSON」到结构化）**
-- 前端 `categoryOf()` 分类 + Tag 配色 + `briefOf()` **人类可读摘要**（如 `£297.8k cash · loan £100k · income £1.2k`），类别过滤 chips，原始 JSON 保留但**默认折叠**
-- `scripts/llm-stub.ts` 现在按 OpenAI 规范返回 usage chunk，使 token 计量可离线验证
+- 前端 `categoryOf()` 分类 + Tag 配色 + `briefOf()` **人类可读摘要**，原始 JSON 保留但**默认折叠**
+- `scripts/llm-stub.ts` 按 OpenAI 规范返回 usage chunk，使 token 计量可离线验证
 
 ### Fixed
 - **密钥写入后 `hasStoredKey` 仍为 false**：dashboard 保存走 pi-ai 的异步 `modify()`， 同一 tick 内回读会 stale → 改用同步 `set/remove/has` 路径（新增 `llm-api.test.ts` 锁定）
 - **重构丢掉 `providers.js` 的 else 分支**导致浏览器语法错误 → 新增 `web-assets.test.ts`（`node --check` 全部脚本、校验 href/src 与 `window.UI` 符号） 作为**无构建链前端**的永久门禁
 
 ### Docs
-- 新增 `docs/DASHBOARD-API.md`：dashboard 前后端**冻结契约**（路由/类型/REST/WS/Tag 规则/module 契约）
-- SPEC §10.16 增补真机 E2E 事实与「合并不得烘焙默认值」原则
+- 新增 `docs/DASHBOARD-API.md`：dashboard 前后端**冻结契约**；SPEC §10.16 增补真机 E2E 事实与「合并不得烘焙默认值」原则
 
 ### Verified
-- 真机：`--watch` 三页 200、WS snapshot/event、session 落盘；
-  `--agent`（仅靠 llm.json，无任何 `LLM_*` env）走 REAL provider →
-  `tokens: in=1738 out=52 reasoning=13 total=1790`、`tools: 1 calls, 0 failed`、
-  meta.json 阶段性总结与成绩单写入。
+- 真机：`--watch` 三页 200、WS snapshot/event、session 落盘；`--agent`（仅靠 llm.json）走 REAL provider → token 用量、工具调用与阶段性总结均写入 meta.json。
 
 ## [0.2.0] - 2026-09-09
 

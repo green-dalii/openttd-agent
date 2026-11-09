@@ -44,6 +44,13 @@ interface UiModule {
 	fmtGameDate(v: any): string;
 	deltaClass(v: any): string;
 	deltaChip(v: any): string;
+	// i18n
+	/** Translate a server-owned term by id; falls back to the server's wording. */
+	term(id: string, fallback: string): string;
+	/** The unit of a paired metric, by the metric's id. */
+	termUnit(metricId: string, fallback: string): string;
+	/** Make an Alpine component redraw itself when the language changes. */
+	bindLocale(component: any): void;
 	// events
 	categoryOf(e: any): string;
 	categoryClass(c: any): string;

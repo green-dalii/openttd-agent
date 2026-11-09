@@ -51,6 +51,8 @@
 
         /* ------------------------------- init ------------------------------- */
         async init() {
+          // 切语言时重画（服务端词汇按 id 翻的那一层）。
+          U.bindLocale(this);
           // 训练面板（P0-3）：跨局账本。失败不挡页面（面板显示空态说明）。
           //
           // 事实（2026-10-30 修）：这里原来取的是 `/api/metrics` —— **那个端点从来
@@ -214,7 +216,10 @@
         savegameInfo() { return (this.data && this.data.savegame) || null; },
         savegamePath() { const sg = this.savegameInfo(); return sg && sg.path ? sg.path : "—"; },
         /** 列表项的索引事实（模块级纯函数；不为每行新建 model）。 */
-        runFacts(session) { return window.SessionsView.runFacts(session); },
+        runFacts(session) {
+          void this.localeTick; // 结局类按 id 翻（切语言要重算）
+          return window.SessionsView.runFacts(session);
+        },
 
         /** The run's manifest rows (B6): what this run actually was. */
         manifestRows() {

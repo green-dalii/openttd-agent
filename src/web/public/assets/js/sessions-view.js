@@ -208,7 +208,15 @@
             : cls === "unknown"
               ? "dim"
               : "warn";
-      out.push({ k: "outcome", v: String(o.label || cls), tone, title: String(o.hint || "") });
+      // The outcome class is the **server's** wording (B5); the front end
+      // localises it by the class id and falls back to the server's text.
+      const label = window.UI && typeof window.UI.term === "function"
+        ? window.UI.term(`outcome.${cls}`, String(o.label || cls))
+        : String(o.label || cls);
+      const hint = window.UI && typeof window.UI.term === "function"
+        ? window.UI.term(`outcome.${cls}.hint`, String(o.hint || ""))
+        : String(o.hint || "");
+      out.push({ k: "outcome", v: label, tone, title: hint });
     }
 
     // ① 交付量（本项目的主结果；跨季度积分的 deliveredRun 才是可比的量）

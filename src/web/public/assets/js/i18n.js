@@ -294,6 +294,30 @@
   }
 
   /**
+   * 初始化时机：**必须在 Alpine 渲染之前**。
+   *
+   * 为什么（2026-11 实测）：Alpine 的启动是 `queueMicrotask(...)` ⇒ 它在
+   * 脚本跑到一半时就开始渲染 ⇒ 而 i18n 的初始化挂在 DOMContentLoaded 上 ⇒
+   * **Alpine 先渲染，i18n 后初始化** ⇒ 那些**按 id 翻**的服务端词汇（结局类、
+   * 旋钮取值）在渲染那一刻用的还是默认语言（英文）⇒ 界面永远停在英文，
+   * 而普通文案会被 i18n 事后翻好 ⇒ **只有那部分看起来"没翻"**。
+   *
+   * ⇒ 监听 `alpine:init`（Alpine 启动前触发）⇒ 目标语言在它渲染前就位了。
+   */
+  function initOnce() {
+    if (init.done) {
+      // 已经初始化过（DOMContentLoaded 又来一次）⇒ 只重刷一遍界面。
+      translateTree(document.body);
+      return;
+    }
+    init.done = true;
+    init();
+  }
+  init.done = false;
+
+  document.addEventListener("alpine:init", initOnce);
+
+  /**
    * DOM 变了（Alpine 渲染出新的文字）⇒ 再翻一次。
    *
    * **必须用 `setTimeout`，不能用 `requestAnimationFrame`**（2026-11 实测）：
@@ -320,6 +344,21 @@
     locale: () => locale,
     supported: SUPPORTED.slice(),
     t,
+    /**
+     * 翻**服务端拥有的词**：按 id 查（`outcome.token_cap`、`problem.no_credential`）。
+     *
+     * 为什么按 id 而不是按文案：前端词表里若出现服务端的措辞，那就是**第二份**
+     * 规范文案（B5 说服务端只有一份）⇒ 服务端改一个字，前端就悄悄回落到英文。
+     * 按 id 时，服务端的措辞仍然只有一份；**没翻的 id 回落到服务端的原文**
+     * （不是空白、不是猜的翻译）。
+     */
+    term(id, fallback) {
+      if (locale === DEFAULT_LOCALE) return fallback;
+      if (typeof id !== "string" || id === "") return fallback;
+      const table = window.I18nTerms || {};
+      const v = table[id];
+      return typeof v === "string" && v !== "" ? v : fallback;
+    },
     setLocale,
     init,
     onChange(fn) {
@@ -331,8 +370,8 @@
   };
 
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", init);
+    document.addEventListener("DOMContentLoaded", initOnce);
   } else {
-    init();
+    initOnce();
   }
 })();

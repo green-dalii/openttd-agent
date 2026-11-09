@@ -35,6 +35,13 @@ export interface BenchConditions {
 export const DELIVERED_MEASURE = "cargo + passengers delivered";
 
 /**
+ * The **id** of that wording — so a front end can localise it without copying
+ * the wording (B5: the server owns one canonical wording; the front end
+ * translates by id and falls back to this text when it has no translation).
+ */
+export const DELIVERED_MEASURE_ID = "delivered";
+
+/**
  * The passenger label the GS reports (OpenTTD's cargo label for CT_PASSENGERS).
  */
 export const PASSENGER_CARGO_LABEL = "PASS";
@@ -43,6 +50,8 @@ export interface AbilityAxis {
 	runs: number;
 	/** What the delivery numbers count (server's wording; see DELIVERED_MEASURE). */
 	measure: string;
+	/** The id of that wording, so a front end can localise it by id (B5). */
+	measureId: string;
 	/**
 	 * The split, in the **monitor measure** (what the GS's cargo monitor saw
 	 * unloaded at the monitored towns/industries - not the admin's accepted
@@ -55,6 +64,8 @@ export interface AbilityAxis {
 	passengersDelivered: number | null;
 	/** The split's own wording (so the page does not write a second one). */
 	splitMeasure: string;
+	/** The id of that wording (so a front end can localise it by id). */
+	splitMeasureId: string;
 	/** Cargo + passengers delivered per game day: mean and median over comparable runs. */
 	mean: number | null;
 	median: number | null;
@@ -66,6 +77,8 @@ export interface AbilityAxis {
 export interface EfficiencyAxis {
 	/** What the delivery numbers count (server's wording; see DELIVERED_MEASURE). */
 	measure: string;
+	/** The id of that wording (so a front end can localise it by id). */
+	measureId: string;
 	deliveredPerMillionTokens: number | null;
 	tokensPerDecision: number | null;
 	/** Wall-clock seconds per run (mean). */
@@ -148,6 +161,9 @@ function perDay(m: GameMetric): number | null {
 /** How the split is measured, in the server's words. */
 export const SPLIT_MEASURE = "delivered to monitored towns/industries, by cargo type";
 
+/** The id of that wording (see DELIVERED_MEASURE_ID). */
+export const SPLIT_MEASURE_ID = "splitByCargoType";
+
 /**
  * Split the deliveries of the comparable runs into cargo and passengers.
  *
@@ -216,9 +232,11 @@ export function buildScorecard(
 		const ability: AbilityAxis = {
 			runs: used.length,
 			measure: DELIVERED_MEASURE,
+			measureId: DELIVERED_MEASURE_ID,
 			cargoDelivered: split.cargo,
 			passengersDelivered: split.passengers,
 			splitMeasure: SPLIT_MEASURE,
+			splitMeasureId: SPLIT_MEASURE_ID,
 			mean: mean(days),
 			median: median(days),
 			stations: mean(used.map((m) => (typeof m.stations === "number" ? m.stations : null))),
@@ -227,6 +245,7 @@ export function buildScorecard(
 
 		const efficiency: EfficiencyAxis = {
 			measure: DELIVERED_MEASURE,
+			measureId: DELIVERED_MEASURE_ID,
 			deliveredPerMillionTokens:
 				tokensSum > 0 && deliveredSum > 0 ? (deliveredSum / tokensSum) * 1_000_000 : null,
 			tokensPerDecision: mean(

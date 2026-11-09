@@ -67,6 +67,8 @@
 
         /* ------------------------------- init ------------------------------- */
         async init() {
+          // 切语言时重画（服务端词汇按 id 翻的那一层）。
+          U.bindLocale(this);
           U.renderChrome();
           await this.load();
           await this.loadPlanState();
@@ -259,6 +261,9 @@
         /* ------------------------------ view ------------------------------- */
         /** The model rows (four axes each). */
         modelRows() {
+          // 读一次 localeTick：切语言时 Alpine 会重新算这个属性 ⇒
+          // **服务端词汇（结局类、度量口径）按 id 翻的那一层也跟着重算**。
+          void this.localeTick;
           return window.CompareView.modelRows(this.payload);
         },
 
@@ -274,6 +279,7 @@
 
         /** The server's paired verdicts, one row per axis (Issue #87). */
         comparisonRows() {
+          void this.localeTick; // 逐轴指标的措辞按 id 翻（切语言要重算）
           return window.CompareView.comparisonRows(this.payload);
         },
 

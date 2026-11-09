@@ -367,6 +367,7 @@ window.I18nMessages = {
     "is it getting better — and why a run does not count": "是不是在变好 —— 以及一局为什么不算数",
     "TRAINING": "训练",
     "runs": "局",
+    "{0} run": "{0} 局",
     "comparable": "可比",
     "excluded": "被排除",
     "deliveredRun = cargo + passengers delivered per run window (game days). Filled points are comparable runs; hollow points are excluded, each with its named reason (a stopped run is not a failed run).":

@@ -14,6 +14,10 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { visibleTexts, needsTranslation } from "./helpers/i18n-static.js";
+import { OUTCOME_CLASSES } from "../../src/evolution/outcome.js";
+import { PROBLEM_CODES } from "../../src/agent/problems.js";
+import { PAIRED_METRICS } from "../../src/evolution/bench-stats.js";
+import { DELIVERED_MEASURE_ID, SPLIT_MEASURE_ID } from "../../src/evolution/scorecard.js";
 
 const PUBLIC = join(process.cwd(), "src/web/public");
 const ASSETS = join(PUBLIC, "assets/js");
@@ -117,12 +121,92 @@ describe("i18n 消息表", () => {
 });
 
 /**
- * 页面静态文案的覆盖度（Issue #88）。
+ * 服务端词汇的覆盖度（Issue #88 第三批）。
  *
- * 为什么要有这条守卫：i18n 用「源文本作键」，所以**漏一条译文**不会报错，
- * 只会让那一处在中文界面里**默默变成英文**。单测不查它 ⇒ 中文界面永远
- * 半中半英，而且没人知道缺了哪些。
+ * 结局十类、问题码、度量口径、逐轴指标：**服务端只有一份规范文案**（B5），
+ * 前端按 **id** 翻 ⇒ 新增一个 id 而忘了翻 ⇒ 中文界面里那一处**默默回落成
+ * 服务端的英文原文**（不报错）。
+ *
+ * ⇒ 词表的覆盖度由**服务端的清单**校验：服务端能产出哪个 id，这里就得有
+ * 哪个 id 的词条。
  */
+describe("服务端词汇按 id 翻（terms.js）", () => {
+	function terms(): Record<string, string> {
+		const src = read(join(ASSETS, "terms.js"));
+		const start = src.indexOf("window.I18nTerms");
+		if (start < 0) throw new Error("terms.js 没有 window.I18nTerms");
+		let depth = 0;
+		let end = -1;
+		for (let i = src.indexOf("{", start); i < src.length; i++) {
+			if (src[i] === "{") depth += 1;
+			else if (src[i] === "}") {
+				depth -= 1;
+				if (depth === 0) {
+					end = i + 1;
+					break;
+				}
+			}
+		}
+		if (end < 0) throw new Error("terms.js 的对象没有闭合");
+		const json = src
+			.slice(src.indexOf("{", start), end)
+			.replace(/\/\*[\s\S]*?\*\//g, "")
+			.replace(/,(\s*[}\]])/g, "$1");
+		return JSON.parse(json) as Record<string, string>;
+	}
+
+	it("结局十类都有词条（类名与含义）", () => {
+		const t = terms();
+		const missing: string[] = [];
+		for (const code of OUTCOME_CLASSES) {
+			for (const id of [`outcome.${code}`, `outcome.${code}.hint`]) {
+				if (!t[id]) missing.push(id);
+			}
+		}
+		expect(missing, `这些结局 id 没有中文词条：${missing.join(", ")}`).toEqual([]);
+	});
+
+	it("问题码都有词条", () => {
+		const t = terms();
+		const missing = PROBLEM_CODES.filter((code) => !t[`problem.${code}`]);
+		expect(missing, `这些问题码没有中文词条：${missing.join(", ")}`).toEqual([]);
+	});
+
+	it("度量口径都有词条", () => {
+		const t = terms();
+		const missing = [DELIVERED_MEASURE_ID, SPLIT_MEASURE_ID].filter((id) => !t[`measure.${id}`]);
+		expect(missing, `这些度量口径没有中文词条：${missing.join(", ")}`).toEqual([]);
+	});
+
+	it("逐轴指标的措辞都有词条", () => {
+		const t = terms();
+		const missing: string[] = [];
+		for (const m of PAIRED_METRICS) {
+			for (const id of [`metric.${m.id}.label`, `metric.${m.id}.unit`]) {
+				if (!(id in t)) missing.push(id);
+			}
+		}
+		expect(missing, `这些逐轴指标没有中文词条：${missing.join(", ")}`).toEqual([]);
+	});
+
+	it("词条不为空（服务端的措辞不为空时，译文也不能为空）", () => {
+		const t = terms();
+		const empty: string[] = [];
+		for (const m of PAIRED_METRICS) {
+			// 有些指标**本来就没有单位**（失败率）⇒ 那一条的译文也允许为空。
+			if (m.unit.trim() !== "" && String(t[`metric.${m.id}.unit`] ?? "").trim() === "") {
+				empty.push(`metric.${m.id}.unit`);
+			}
+			if (String(t[`metric.${m.id}.label`] ?? "").trim() === "") empty.push(`metric.${m.id}.label`);
+		}
+		for (const [k, v] of Object.entries(t)) {
+			if (k.startsWith("metric.")) continue;
+			if (v.trim() === "") empty.push(k);
+		}
+		expect(empty, `这些词条是空的：${empty.join(", ")}`).toEqual([]);
+	});
+
+});
 describe("四页静态文案的中文覆盖", () => {
 	const zh = (): Record<string, string> => catalog().zh ?? {};
 

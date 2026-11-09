@@ -208,7 +208,9 @@
                    process's own configuration). -->
               <option value="" x-text="blankLabel()"></option>
               <template x-for="o in (f.options || [])" :key="o">
-                <option :value="o" x-text="o"></option>
+                <!-- The label is localised (by the knob's key + the value's id);
+                     the **value** stays the server's id — it travels in the request. -->
+                <option :value="o" x-text="knobOptionLabel(f.key, o)"></option>
               </template>
             </select>
           </template>
@@ -265,7 +267,8 @@
 </main>
 </div>
 
-<script src="/assets/js/locales.js"></script>
+<script src="/assets/js/terms.js"></script>
+    <script src="/assets/js/locales.js"></script>
 <script src="/assets/js/i18n.js"></script>
 <script src="/assets/js/common.js"></script>
   <!-- uPlot must come before ucharts.js, which reads window.uPlot. -->
