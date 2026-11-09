@@ -106,6 +106,22 @@ const InspectVehicleSchema = Type.Object({
 	vehicle: Type.Number({ description: "The vehicle id (from observe() / a route's vehicle list)" }),
 });
 
+/**
+ * `get_industries` / `get_cargo` —— **按需全量**（"数据按需全量"）。
+ *
+ * 为什么需要：观测面是**周期采样**的 —— 产业只带产量前 12 个（载荷不能无限长），
+ * 货种只带**有产量**的那些 ⇒ 模型分不清"这个产业没产量"与"这个产业没测到"
+ * （D60：缺失 ≠ 0），也看不见全图。**要全量就问一次**：这两个工具**只读**，
+ * 不改变世界。
+ */
+const GetIndustriesSchema = Type.Object({
+	cargo: Type.Optional(
+		Type.String({ description: "Optional cargo label (e.g. 'COAL'); omit for every cargo" }),
+	),
+});
+
+const GetCargoSchema = Type.Object({});
+
 const InspectTownSchema = Type.Object({
 	town: Type.Number({ description: "The town id (from observe())" }),
 });
@@ -755,6 +771,106 @@ export function inspectVehicleTool(deps: AgentDeps): AgentTool<typeof InspectVeh
 	};
 }
 
+/**
+ * `get_industries` — the **full** industry list, on demand.
+ *
+ * 观测面只带产量前 12 个（取样）；这里给全图，且与取样**同一个扫描**
+ * （GS 的 `ScanCargo()`）⇒ 全量与取样不会漂。
+ */
+export function getIndustriesTool(deps: AgentDeps): AgentTool<typeof GetIndustriesSchema, ActionResult> {
+	return {
+		name: "get_industries",
+		label: "Get Industries",
+		description:
+			"Get the FULL list of industries on the map: id, cargo, name, last month's production and transport, and stock. " +
+			"observe() only carries a sample (the top producers by production); this returns every industry, " +
+			"which also tells 'no production' from 'not measured'. Read-only.",
+		executionMode: "sequential",
+		parameters: GetIndustriesSchema,
+		execute: async (_id, params) => {
+			const cmd: Record<string, unknown> = { cmd: "list_industries" };
+			if (typeof params.cargo === "string" && params.cargo !== "") cmd.cargo = params.cargo;
+			const answer = await deps.sink.gameScriptAwait?.(JSON.stringify(cmd), INSPECT_TIMEOUT_MS);
+			if (answer === undefined) {
+				return toResult({
+					ok: false,
+					summary: "get_industries is not available in this run (no answer channel); no industries were listed",
+				});
+			}
+			if (answer === null) {
+				return toResult({
+					ok: false,
+					summary: `no answer from the game within ${INSPECT_TIMEOUT_MS} ms; no industries were listed`,
+				});
+			}
+			if (answer.ok !== true) {
+				return toResult({
+					ok: false,
+					summary: `the game could not list the industries: ${String(answer.reason ?? "unknown reason")}`,
+					data: answer,
+				});
+			}
+			const data = (answer.data ?? {}) as Record<string, unknown>;
+			const rows = Array.isArray(data.industries) ? (data.industries as unknown[]) : [];
+			return toResult({
+				ok: true,
+				summary: `${rows.length} industries on the map (full list): ${JSON.stringify(data)}`,
+				data,
+			});
+		},
+	};
+}
+
+/**
+ * `get_cargo` — every cargo type's readings, on demand.
+ *
+ * 观测面的 `cargoTotals` 只报**有产量**的货种 ⇒ "没有产量"与"没测到"分不开
+ * （D60）。这里给**每一个**货种（含 0 产量的），生产/运量/是不是货运。
+ */
+export function getCargoTool(deps: AgentDeps): AgentTool<typeof GetCargoSchema, ActionResult> {
+	return {
+		name: "get_cargo",
+		label: "Get Cargo",
+		description:
+			"Get the readings for EVERY cargo type on the map: label, whether it is freight, last month's production and transport. " +
+			"observe() only lists the cargo types that had production; use this to tell 'no production' from 'not measured'. Read-only.",
+		executionMode: "sequential",
+		parameters: GetCargoSchema,
+		execute: async (_id) => {
+			const answer = await deps.sink.gameScriptAwait?.(
+				JSON.stringify({ cmd: "list_cargo" }),
+				INSPECT_TIMEOUT_MS,
+			);
+			if (answer === undefined) {
+				return toResult({
+					ok: false,
+					summary: "get_cargo is not available in this run (no answer channel); no cargo was listed",
+				});
+			}
+			if (answer === null) {
+				return toResult({
+					ok: false,
+					summary: `no answer from the game within ${INSPECT_TIMEOUT_MS} ms; no cargo was listed`,
+				});
+			}
+			if (answer.ok !== true) {
+				return toResult({
+					ok: false,
+					summary: `the game could not list the cargo types: ${String(answer.reason ?? "unknown reason")}`,
+					data: answer,
+				});
+			}
+			const data = (answer.data ?? {}) as Record<string, unknown>;
+			const rows = Array.isArray(data.readings) ? (data.readings as unknown[]) : [];
+			return toResult({
+				ok: true,
+				summary: `${rows.length} cargo types (full list): ${JSON.stringify(data)}`,
+				data,
+			});
+		},
+	};
+}
+
 /** `inspect_town` — ask the game about ONE town. */
 export function inspectTownTool(deps: AgentDeps): AgentTool<typeof InspectTownSchema, ActionResult> {
 	return {
@@ -807,6 +923,8 @@ export function createTools(deps: AgentDeps): AgentTool<TSchema, ActionResult>[]
 		observeTool(deps),
 		inspectVehicleTool(deps),
 		inspectTownTool(deps),
+		getIndustriesTool(deps),
+		getCargoTool(deps),
 		estimateRouteTool(deps),
 		inspectRouteTool(deps),
 		buildBusRouteTool(deps),

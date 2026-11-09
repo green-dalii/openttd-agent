@@ -1332,12 +1332,64 @@
         });
       },
 
+      /**
+       * The **full** industry list, fetched on demand ("数据按需全量").
+       *
+       * null = 没展开（快照里只有**取样**：产量前 12 个）⇒ 载荷不涨；
+       * 展开后 = 全图（行数与 GS 报的一致）。
+       */
+      fullIndustries: null,
+      /** True while the full list is shown. */
+      industryExpanded: false,
+      /** The message of the last expand attempt (empty = nothing to say). */
+      industryExpandNote: "",
+
+      /**
+       * Ask the running game for the **whole** industry list.
+       *
+       * 为什么要有：观测面只带**取样**（载荷不能无限长），而"这个产业有没有产量"
+       * 与"这个产业没测到"分不开（D60）⇒ 要全量就**按需问一次**。
+       * 拿不到就说没拿到（不是"空列表"）。
+       */
+      async expandAllIndustries() {
+        if (this.industryExpanded) {
+          this.industryExpanded = false;
+          this.fullIndustries = null;
+          this.industryExpandNote = "";
+          return;
+        }
+        this.industryExpandNote = "";
+        try {
+          const r = await fetch("/api/run/full/industries");
+          if (!r.ok) {
+            this.industryExpandNote = `the game did not answer with the full list (HTTP ${r.status})`;
+            return;
+          }
+          const data = await r.json();
+          const rows = Array.isArray(data.industries) ? data.industries : null;
+          if (!rows) {
+            this.industryExpandNote = "the game answered without an industry list";
+            return;
+          }
+          this.fullIndustries = rows;
+          this.industryExpanded = true;
+        } catch (e) {
+          this.industryExpandNote = `could not reach the game: ${e instanceof Error ? e.message : String(e)}`;
+        }
+      },
+
       /** 产业样本行（按产量降序）。stock 为 null 时显示 —（该产业不接受该货）。 */
       industryRows() {
-        const list = Array.isArray(this.industries) ? this.industries : [];
+        const source = this.industryExpanded && Array.isArray(this.fullIndustries) ? this.fullIndustries : this.industries;
+        const list = Array.isArray(source) ? source : [];
         return list
           .map((i) => ({
-            key: String(i.id),
+            // The key must be unique **per row**: one industry can appear several
+            // times (once per cargo it produces) ⇒ keying by id alone collides
+            // and Alpine renders fewer rows than the array has (real browser,
+            // 2026-11-08). The (id, cargo) pair is the row's identity — the same
+            // one the game script uses.
+            key: `${i.id}:${i.cargo ?? ""}`,
             id: i.id,
             name: i.name || this.cargoName(i.cargo),
             cargo: this.cargoName(i.cargo),
@@ -1349,13 +1401,35 @@
           .sort((a, b) => b._produced - a._produced);
       },
 
-      /** 取样说明（诚实：这是取样，不是全图）。 */
+      /** 取样说明（诚实：这是取样，不是全图；展开后明说"全量"）。 */
       industrySampleNote() {
         if (this.industryAvailable !== true) return "";
         const rows = this.industryRows();
         if (!rows.length) return "";
+        // 一行 = 一个产业的**一种货** ⇒ 计数要按**不同的产业**（否则"12 of 50"
+        // 里��� 12 与 50 不是同一个口径）。
+        const distinct = new Set(rows.map((r) => r.id)).size;
         const total = Number.isFinite(Number(this.industriesTotal)) ? U.fmtInt(this.industriesTotal) : "unknown";
-        return `largest ${rows.length} of ${total} industries · sampled by production (not the whole map)`;
+        if (this.industryExpanded) {
+          // 全量列表也只覆盖**有读数的**产业（一个不产货的产业没有任何读数）
+          // ⇒ 老实说"48 行 · 50 个里的 42 个"，不说"全部"。
+          return `${rows.length} rows · ${distinct} of ${total} industries have readings (fetched on demand)`;
+        }
+        return `largest ${distinct} of ${total} industries · sampled by production (not the whole map)`;
+      },
+
+      /** The expand button's label (it toggles). */
+      industryExpandLabel() {
+        return this.industryExpanded ? "show the sample again" : "expand all";
+      },
+
+      /** Whether the expand button should be shown at all (a sample smaller than the map). */
+      industryExpandable() {
+        if (this.industryAvailable !== true) return false;
+        if (this.industryExpanded) return true;
+        const total = Number(this.industriesTotal);
+        const rows = this.industryRows().length;
+        return Number.isFinite(total) && total > rows;
       },
 
       /** 与 `townsNote()` 同约定：空串 = 可显示；非空 = 为什么没有。 */

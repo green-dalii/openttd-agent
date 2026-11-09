@@ -777,7 +777,9 @@ describe("Squirrel 桥：产业/货种/公司口径上报", () => {
 	});
 
 	it("库存为负 → null（'该产业不接受此货' 不是 '库存 0'）", () => {
-		const fn = src.slice(src.indexOf("function CollectFacts("), src.indexOf("function Start("));
+		// 扫描搬到了 `ScanCargo()`（周期快照与按需全量查询共用同一份）⇒
+		// 守卫跟到**扫描**里，而不是某个函数名。
+		const fn = src.slice(src.indexOf("function ScanCargo("), src.indexOf("function CollectFacts("));
 		expect(fn).toMatch(/stock\s*<\s*0/);
 	});
 

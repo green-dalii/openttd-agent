@@ -48,7 +48,7 @@ function fauxAgent(deps: AgentDeps, responses: Parameters<ReturnType<typeof crea
 }
 
 describe("createAgent", () => {
-	it("installs the tools (eleven + the two L2 queries) and the default system prompt", () => {
+	it("installs the tools (eleven + the L2 queries + the on-demand full data) and the default system prompt", () => {
 		const { deps } = fakeDeps();
 		const faux = createFauxCore({});
 		faux.setResponses([fauxAssistantMessage("hi")]);
@@ -57,6 +57,9 @@ describe("createAgent", () => {
 			"observe",
 			"inspect_vehicle",
 			"inspect_town",
+			// "数据按需全量"：观测面只带取样，要全量就问一次（只读）。
+			"get_industries",
+			"get_cargo",
 			"estimate_route",
 			"inspect_route",
 			"build_bus_route",

@@ -21,18 +21,15 @@
   was computed from two different runs. The cells are now the **runs**, and a cell missing a reading
   on one side is dropped whole.
 - **"Not applicable" was reported as zero.** The game script encodes a missing reading as JSON `null`
-  (so the payload shape never changes), but two of our readers went through `Number(value)` - and
-  `Number(null)` is `0` - so "this industry does not accept this cargo" became "stockpile: 0 tonnes",
-  for the hundreds of industries that do not accept their own cargo. Every raw counter now asks
-  "missing?" before "non-negative?". The observation fingerprint does not move.
+  (so the payload shape never changes), but two readers went through `Number(value)` - and
+  `Number(null)` is `0` - so "this industry does not accept this cargo" became "stockpile: 0 tonnes".
+  Every raw counter now asks "missing?" before "non-negative?".
 - **The decision context swallowed two facts it had already been given.** The financing facts and
-  the pushed events were passed into the decision context and then dropped: the function took them
-  as input and never put them in its output. The readings were in the projection all along, so the
-  observation fingerprint does not move; a test now pins "passed in means present in the output".
+  the pushed events were passed into the decision context and then dropped. The readings were in
+  the projection all along, so the observation fingerprint does not move.
 - **The navigation now reaches every page.** A page URL was a hand-written table in the server's
   memory, so a page added after the server started was unreachable ("not found"). The routes are now
-  **derived from the files** in `public/pages/`, and a URL that is not a page answers with **the list
-  of pages that exist**. The smoke check now visits all four pages.
+  **derived from the files** in `public/pages/`, and an unknown URL answers with the list of pages.
 
 - **The model can finally see the freight world.** A freight line is "which mine, which plant", and the
   model could see neither: the GS now reports a **cargo catalogue** (which cargo is freight, which
@@ -41,6 +38,12 @@
   "a producer industry to a consumer industry".
 
 ### Added
+- **The full map is now one question away.** The observation carries a **sample** of the industries
+  (the top producers) and only the cargo types that had production - which keeps the payload
+  small, but leaves the model unable to tell "no production" from "not measured". Two read-only
+  tools (`get_industries`, `get_cargo`) now fetch the whole thing on demand, and the Run page's
+  industry table has an **expand all** button that does the same. The sample and the full list
+  come from **one scan** in the game script, so they cannot drift.
 - **The server's own vocabulary is now translated too - by id.** The outcome classes, the
   problem codes, the delivery measures and the knob values are the **server's** wording, and the
   server keeps exactly one canonical wording of them. The front end now looks them up **by id**
@@ -50,22 +53,19 @@
   - a new id without a translation fails the build. The growth axis' analysis sentences keep the
   server's wording: they carry variable numbers.
 - **The Chinese interface now covers the text the scripts render too.** The hints, empty states,
-  legends and labels the pages draw at runtime - about 440 more strings - are translated too.
+  legends and labels the pages draw at runtime - about 440 more strings - are translated.
 - **The language switch stopped working for anything rendered after the page loaded.** The
   translation of newly rendered text was scheduled on `requestAnimationFrame`, which only runs
-  while the page is being painted - so in a background tab (or a headless browser) the observer
-  never fired again and everything Alpine drew afterwards stayed English, with nothing in the
-  console. The work is now scheduled with `setTimeout`, which does not depend on painting.
+  while the page is painted - so in a background tab the observer never fired again and
+  everything the framework drew afterwards stayed English, with nothing in the console.
 - **The interface now picks up the language before the first paint.** The framework starts in a
   microtask, so it rendered before the language runtime had initialised - everything it drew
-  looked up in the default language and stayed there. The runtime now initialises on the
-  framework's own start event.
+  looked up in the default language and stayed there.
 - **The dashboard's Chinese interface is now complete for its static copy.** Every visible
-  sentence in the four pages (Run / Compare / History / Configure) has a Chinese translation —
-  324 of them, where before 226 of them silently fell back to English. The pages also had
-  Chinese text hard-coded in the markup (leftovers from the Chinese-only interface), so the
-  **English** interface was showing half-Chinese captions; those are now English source text
-  with a Chinese translation.
+  sentence in the four pages (Run / Compare / History / Configure) has a Chinese translation -
+  324 of them, where before 226 silently fell back to English. The pages also had Chinese text
+  hard-coded in the markup (leftovers from the Chinese-only interface), so the **English** interface
+  was showing half-Chinese captions; those are now English source text with a translation.
 - **The freight numbers reach the screen.** The server had been computing them for a while: the
   scorecard splits cargo from passengers, and the attribution knows what each freight line
   delivered - but neither was drawn anywhere. The Run page's route table now has a **Delivered**

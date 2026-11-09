@@ -495,10 +495,16 @@ export async function runServe(cfg: Config, opts: ServeOptions = {}): Promise<Se
 			}
 			const runOpts = applyKnobOptions(
 				resolveRunOptions(opts, web, {
-					onReady: (h: { stop: () => void; pause: () => void; resume: () => void }) => {
+					onReady: (h: {
+						stop: () => void;
+						pause: () => void;
+						resume: () => void;
+						fullData?: (kind: "industries" | "cargo") => Promise<unknown>;
+					}) => {
 						hooks.stop = h.stop;
 						hooks.pause = h.pause;
 						hooks.resume = h.resume;
+						hooks.fullData = h.fullData;
 					},
 					// agent 自己按暂停 → **supervisor 是 run 状态的唯一写者**。
 					// pause("agent") 会调 hooks.pause（= scheduler.pause + rcon，与页面同路径）
@@ -562,6 +568,8 @@ export async function runServe(cfg: Config, opts: ServeOptions = {}): Promise<Se
 			stop: () => supervisor.stop(),
 			pause: () => supervisor.pause(),
 			resume: () => supervisor.resume(),
+			// 按需全量（页面"展开全部"）：问正在跑的游戏要**完整**的列表。
+			fullData: (kind) => supervisor.fullData(kind),
 		},
 	});
 	await web.start();

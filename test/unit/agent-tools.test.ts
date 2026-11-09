@@ -431,6 +431,9 @@ describe("createTools", () => {
 			// Issue #13：L2 查询（问一个具体的问题，答案进工具结果）
 			"inspect_vehicle",
 			"inspect_town",
+			// "数据按需全量"：观测面只带取样，要全量就问一次（只读）。
+			"get_industries",
+			"get_cargo",
 			"estimate_route",
 			"inspect_route",
 			"build_bus_route",

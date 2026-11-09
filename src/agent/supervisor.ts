@@ -45,6 +45,12 @@ export interface RunHooks {
 	resume?: () => void;
 	/** Called by the run when it has fully finished. */
 	onStopped?: () => void;
+	/**
+	 * Ask the running game for the **full** industry / cargo list.
+	 *
+	 * "数据按需全量": 观测面只带取样（载荷不涨），要全量时按需问一次。
+	 */
+	fullData?: (kind: "industries" | "cargo") => Promise<unknown>;
 }
 
 export interface SupervisorOptions {
@@ -113,6 +119,17 @@ export class RunSupervisor {
 		}
 		this.hooks = hooks;
 		this.set({ state: "running", startedAt: Date.now(), error: null });
+	}
+
+	/**
+	 * The full industry / cargo list, straight from the running game.
+	 *
+	 * Absent => no run is active (or the run does not expose the channel) ⇒ the
+	 * caller says so; it never invents an empty list.
+	 */
+	async fullData(kind: "industries" | "cargo"): Promise<unknown> {
+		if (!this.hooks.fullData) return null;
+		return this.hooks.fullData(kind);
 	}
 
 	/** Ask the run to stop. Completion is signalled via onStopped/markFinished. */

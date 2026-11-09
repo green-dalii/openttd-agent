@@ -137,6 +137,14 @@ export interface RunHooks {
 	 * silently "nothing to do").
 	 */
 	plan?: PlanHooks;
+	/**
+	 * The **full** industry / cargo list, straight from the running game
+	 * ("数据按需全量": the observation carries a sample; the page asks for the
+	 * whole thing when the user expands it).
+	 *
+	 * Absent => the endpoint answers 404 (no run, no channel ⇒ say so).
+	 */
+	fullData?: (kind: "industries" | "cargo") => Promise<unknown>;
 }
 
 /**
@@ -624,6 +632,17 @@ export class WebServer {
 						if (Array.isArray(problems)) return json(400, { error: message, problems });
 						return json(409, { error: message });
 					}
+				}
+				if (action === "full" && req.method === "GET") {
+					// 按需全量：问正在跑的游戏要完整列表（观测面仍只带取样）。
+					if (!this.runHooks.fullData) return json(404, { error: "full data is not available" });
+					const kind = segments[3] === "cargo" ? "cargo" : "industries";
+					const data = await this.runHooks.fullData(kind);
+					if (!data) {
+						// 没有拿到就**说没拿到**（不是"空列表"）。
+						return json(503, { error: "the game did not answer with the full list" });
+					}
+					return json(200, data);
 				}
 				if (action === "stop" && req.method === "POST") {
 					try {
