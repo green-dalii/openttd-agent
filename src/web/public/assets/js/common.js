@@ -920,12 +920,55 @@ function pickColor(i) {
 }
 
 /* Expose to page scripts (no modules => no build concerns). */
+/**
+ * Make an Alpine component redraw itself when the language changes.
+ *
+ * Why it is needed: `x-text` is evaluated **when the element renders**, and the
+ * language switch happens **later** ⇒ the value it wrote is stale ⇒ the page
+ * keeps the old language. The i18n runtime can fix that for ordinary text (it
+ * walks the DOM), but **not** for the server's terms (the outcome classes, the
+ * knob options): those are looked up **by id**, and the DOM only holds the
+ * rendered text.
+ *
+ * The counter has to be read **inside** the computed properties that show a
+ * term, so that reading them again (which Alpine does when the counter
+ * changes) re-runs the whole chain.
+ *
+ * Call it from the component's `init()` with `this` (the reactive proxy) —
+ * mutating a plain object would not trigger a redraw.
+ */
+function bindLocale(component) {
+  component.localeTick = 0;
+  if (!window.I18n || typeof window.I18n.onChange !== "function") return;
+  window.I18n.onChange(() => {
+    component.localeTick += 1;
+  });
+}
+
+/**
+ * Translate a **server-owned term** by id (B5: the server keeps one canonical
+ * wording; the front end localises by id and falls back to that wording).
+ *
+ * Why it lives here and not in every view: the lookup must be the **same**
+ * everywhere (a second implementation is a second list of ids).
+ */
+function term(id, fallback) {
+  return window.I18n && typeof window.I18n.term === "function" ? window.I18n.term(id, fallback) : fallback;
+}
+
+/** The unit of a paired metric, by the metric's id (see PAIRED_METRICS). */
+function termUnit(metricId, fallback) {
+  return term(`metric.${metricId}.unit`, fallback);
+}
+
 window.UI = {
   // dom
   $, esc,
   // format
   fmtInt, fmtMoney, fmtTok, fmtCost, fmtCostKnown, fmtDuration, fmtAgo, fmtClock, fmtPct, fmtGameDate,
   deltaClass, deltaChip,
+  // i18n
+  term, termUnit, bindLocale,
   // events
   categoryOf, categoryClass, categoryLabel, categoryCounts, eventMatches, briefOf,
   // widgets

@@ -245,11 +245,33 @@
 
       /** The actionable hints the server gave (one per problem). */
       problemHints() {
-        return this.problems.map((p) => ({
-          code: p.code || "",
-          message: p.message || "",
-          hint: p.hint || "",
-        }));
+        void this.localeTick; // 问题码的 hint 按 id 翻（切语言要重算）
+        // The problem's **code** is the server's; the canonical hint for that
+        // code lives on the server (B5). The front end localises the hint **by
+        // the code** and falls back to the server's wording.
+        const term = (id, fallback) =>
+          window.UI && typeof window.UI.term === "function" ? window.UI.term(id, fallback) : fallback;
+        return this.problems.map((p) => {
+          const code = p.code || "";
+          return {
+            code,
+            message: p.message || "",
+            hint: term(`problem.${code}`, p.hint || ""),
+          };
+        });
+      },
+
+      /**
+       * The display name of a knob option — **the value stays the server's id**
+       * (it travels in the request); only the label is localised.
+       */
+      knobOptionLabel(key, value) {
+        // 读一次 localeTick：切语言时 Alpine 会重新算这个表达式 ⇒ 旋钮取值的
+        // 显示名（按 id 翻）也跟着重算。
+        void this.localeTick;
+        return window.UI && typeof window.UI.term === "function"
+          ? window.UI.term(`knob.${key}.${value}`, value)
+          : value;
       },
 
       /* ------------------------------ actions ---------------------------- */
