@@ -845,7 +845,8 @@ function renderLangSwitch(header) {
     .map(
       (l) =>
         `<button type="button" class="lang-btn${l === current ? " active" : ""}" data-locale="${l}"` +
-        ` aria-pressed="${l === current ? "true" : "false"}">${l === "zh" ? "中文" : "EN"}</button>`,
+        ` aria-pressed="${l === current ? "true" : "false"}" data-i18n-keep>` +
+        `${l === "zh" ? "中文" : "EN"}</button>`,
     )
     .join("");
   wrap.addEventListener("click", (ev) => {

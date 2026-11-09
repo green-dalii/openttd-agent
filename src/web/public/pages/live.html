@@ -587,8 +587,8 @@
       <span class="dim">what it has actually accomplished</span></div>
     <section class="grid two">
       <div class="panel">
-        <div class="panel-head"><h2>Staged summaries <span class="dim">阶段性总结</span></h2>
-          <span class="dim" x-text="stages.length ? stages.length + ' recorded' : ''"></span></div>
+        <div class="panel-head"><h2>Staged summaries <span class="dim">a summary per construction phase</span></h2>
+          <span class="dim" x-text="stages.length ? stages.length + ' summaries recorded' : ''"></span></div>
         <ol class="timeline">
           <template x-for="c in stagesShown()" :key="c.gameDate + '-' + c.turn">
             <li>
@@ -603,16 +603,16 @@
         <div class="snap-more" x-show="stagesHiddenCount() > 0 || stagesExpanded">
           <button type="button" class="btn" @click="stagesExpanded = !stagesExpanded"
                   x-text="stagesExpanded
-                    ? '收起（只看最新 ' + stagesLimit + ' 段）'
-                    : '展开其余 ' + stagesHiddenCount() + ' 段'"></button>
-          <span class="dim" x-text="stages.length + ' recorded'"></span>
+                    ? 'collapse (latest ' + stagesLimit + ' summaries)'
+                    : 'show the remaining ' + stagesHiddenCount() + ' summaries'"></button>
+          <span class="dim" x-text="stages.length + ' summaries recorded'"></span>
         </div>
       </div>
       <!-- 快照面板跨整行：它是这一组里**视觉信息最重**的一块，挤在半宽里只能放 2 列、
            每格 ~310px（用户实测反馈"每个图表过窄"）。跨行后 4 列 × ~320px：格子更大、
            行数更少，整页也更短。 -->
       <div class="panel span-all">
-        <div class="panel-head"><h2>Stage views <span class="dim">阶段性画面</span></h2>
+        <div class="panel-head"><h2>Stage views <span class="dim">the world at that moment</span></h2>
           <span class="dim">real minimap, zoomed to the work</span></div>
         <div class="stage-snaps">
           <template x-for="v in stageViewsShown()" :key="v.index ?? (v.gameDate + '-' + (v.phase || ''))">
@@ -652,9 +652,9 @@
           <div class="snap-more" x-show="stageViewsHiddenCount() > 0 || stageViewsExpanded">
             <button type="button" class="btn" @click="stageViewsExpanded = !stageViewsExpanded"
                   x-text="stageViewsExpanded
-                    ? '收起（只看最新 ' + stageViewsLimit + ' 张）'
-                    : '展开其余 ' + stageViewsHiddenCount() + ' 张'"></button>
-            <span class="dim" x-text="stageViews.length + ' captured'"></span>
+                    ? 'collapse (latest ' + stageViewsLimit + ' images)'
+                    : 'show the remaining ' + stageViewsHiddenCount() + ' images'"></button>
+            <span class="dim" x-text="stageViews.length + ' images captured'"></span>
           </div>
           <div class="snap-legend">
             <div class="snap-legend-row">
@@ -754,7 +754,7 @@
     -->
     <section class="panel" id="action-surface" x-show="actionSurface()" x-cloak>
       <div class="panel-head">
-        <h2>Action surface <span class="dim">agent 能做的动作</span></h2>
+        <h2>Action surface <span class="dim">what the agent can do</span></h2>
         <span class="dim" x-text="actionSurface() ? actionSurface().summary : ''"></span>
       </div>
       <ul class="acts">
@@ -785,7 +785,7 @@
          arrives (no game context yet). -->
     <section class="panel memory-note" x-show="memory !== null">
       <div class="panel-head">
-        <h2>Memory in effect <span class="dim">跨局记忆注入</span></h2>
+        <h2>Memory in effect <span class="dim">injected from earlier games</span></h2>
         <span class="dim">what the agent was given before this game started</span>
       </div>
       <p class="now-text" x-text="memoryInEffect().summary"></p>
@@ -897,7 +897,7 @@
                     x-text="$ui.categoryLabel($ui.categoryOf(ev.kind))"></span>
               <span class="kind" x-text="ev.kind"></span>
               <span class="brief" x-text="$ui.briefOf(ev)"></span>
-              <button class="raw-toggle" type="button" @click="toggleRaw($event)">json</button>
+              <button class="raw-toggle" type="button" @click="toggleRaw($event)" data-i18n-keep>json</button>
               <pre class="raw" :hidden="!evRaw" x-text="JSON.stringify(ev.payload, null, 2)"></pre>
             </li>
           </template>

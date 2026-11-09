@@ -32,6 +32,12 @@
   /** 编译过的模式（每个语言一份）：`{re, out}`。 */
   const compiled = new Map();
   const listeners = new Set();
+  /**
+   * 每个被翻过的文本节点的原文：`{source, translated}`。
+   * 用 WeakMap（不是 DOM 属性）：原文必须跟着**文本节点**走 —— 写在父元素上
+   * 的话，还原时会把父元素里的 `<code>`/`<strong>` 一起抹掉。
+   */
+  const sources = new WeakMap();
 
   function messages(lang) {
     const table = (window.I18nMessages && window.I18nMessages[lang]) || null;
@@ -78,6 +84,19 @@
   }
 
   /**
+   * 查表用的键：**空白归一**后的文本。
+   *
+   * 为什么必须归一：HTML 源码里一个句子常常换行写，而 DOM 里的文本节点
+   * **保留那些换行与缩进**（浏览器不会把元素内部的换行变成空格）。
+   * 于是源码里的 "and its\n      metric row" 与表里的键
+   * "and its metric row" 对不上 ⇒ 那一段**默默不翻**（2026-11 实测：
+   * 七句换行写的文案全部漏掉）。
+   */
+  function keyOf(text) {
+    return text.replace(/\s+/g, " ").trim();
+  }
+
+  /**
    * 翻译一段文本：先查精确表，再查带占位的模式，最后回落源文本。
    * @param {string} text
    * @returns {string}
@@ -85,10 +104,11 @@
   function t(text) {
     if (typeof text !== "string" || text === "") return text;
     if (locale === DEFAULT_LOCALE) return text;
+    const key = keyOf(text);
     const table = messages(locale);
-    if (Object.prototype.hasOwnProperty.call(table, text)) return table[text];
+    if (Object.prototype.hasOwnProperty.call(table, key)) return table[key];
     for (const { re, out } of patternsFor(locale)) {
-      const m = re.exec(text);
+      const m = re.exec(key);
       if (!m) continue;
       let i = 0;
       return out.replace(/\{0\}/g, () => m[++i] ?? "");
@@ -99,15 +119,22 @@
   /** 一段文本是否需要翻译（精确命中或命中模式）。 */
   function isTranslatable(text) {
     if (typeof text !== "string" || text === "") return false;
+    const key = keyOf(text);
     const table = messages(locale);
-    if (Object.prototype.hasOwnProperty.call(table, text)) return true;
-    return patternsFor(locale).some(({ re }) => re.test(text));
+    if (Object.prototype.hasOwnProperty.call(table, key)) return true;
+    return patternsFor(locale).some(({ re }) => re.test(key));
   }
 
   /**
    * 把一棵 DOM 里的文本节点换成译文。
-   * 只动「整段就是一个文本节点」的节点：拼接出来的富文本（`textContent` 里
-   * 混着多个子节点）不动，避免把结构拆坏。
+   *
+   * 每个文本节点**独立**翻译：一句被内联 `<code>` 打断的句子会被切成几段，
+   * 每段各翻各的（中文按片段写，读起来仍是一句）。曾经这里要求「父元素里
+   * 只能有一段文字」，结果那句话**整句都不翻** —— 那是漏，不是讲究。
+   *
+   * 原文记在 `sources`（WeakMap，键是文本节点本身）：切语言时把节点还原成
+   * 原文再翻一次。曾经把原文写在**父元素**的 `data-i18n-src` 上，还原时用
+   * `textContent` 写回 —— 那会把父元素里的 `<code>`、`<strong>` 一起抹掉。
    */
   function translateTree(root) {
     if (!root || !root.nodeType) return 0;
@@ -119,11 +146,6 @@
         }
         const text = node.nodeValue;
         if (!text || !text.trim()) return NodeFilter.FILTER_REJECT;
-        // 只在整段文本就是一个节点时替换（父元素里没有别的文字兄弟）。
-        const parent = node.parentElement;
-        if (!parent) return NodeFilter.FILTER_REJECT;
-        const siblings = Array.from(parent.childNodes).filter((n) => n.nodeType === 3 && n.nodeValue.trim());
-        if (siblings.length > 1) return NodeFilter.FILTER_REJECT;
         return isTranslatable(text.trim()) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
       },
     });
@@ -132,15 +154,23 @@
     while (walker.nextNode()) nodes.push(walker.currentNode);
     for (const node of nodes) {
       const raw = node.nodeValue;
-      // 查表用去空格的文本，写回时保留首尾空白（标记里常有排版空格）。
-      const trimmed = raw.trim();
+      const trimmed = keyOf(raw);
+      const known = sources.get(node);
+      // 节点上现在的文字是不是我们翻的？是 ⇒ 原文还在 `sources` 里；
+      // 不是 ⇒ 这是页面新写的文字（Alpine 重渲染），它自己就是原文。
+      const isOurs = Boolean(known && known.translated === raw);
+      const source = isOurs ? known.source : raw;
       const translated = t(trimmed);
-      if (translated !== trimmed) {
-        const lead = raw.slice(0, raw.length - raw.trimStart().length);
-        const tail = raw.slice(raw.trimEnd().length);
-        node.nodeValue = lead + translated + tail;
-        n += 1;
+      if (translated === trimmed) {
+        // 没有译文：把当前文字记成原文，免得以后还原时用旧原文覆盖新文字。
+        sources.set(node, { source: raw, translated: raw });
+        continue;
       }
+      const lead = raw.slice(0, raw.length - raw.trimStart().length);
+      const tail = raw.slice(raw.trimEnd().length);
+      node.nodeValue = lead + translated + tail;
+      sources.set(node, { source, translated: node.nodeValue });
+      n += 1;
     }
     return n;
   }
@@ -167,48 +197,37 @@
 
   /**
    * 把 DOM 还原成源文本（每个被翻过的节点记住原文）。
-   * 用 `data-i18n-src` 存原文：切语言时先还原，再翻一次，译文不必再猜原文。
+   * 原文存在 `sources` 里（WeakMap）：切语言时先还原，再翻一次，
+   * 译文不必再猜原文。
    */
   function restoreSource() {
     for (const node of document.querySelectorAll("[data-i18n-src]")) {
       node.textContent = node.getAttribute("data-i18n-src");
       node.removeAttribute("data-i18n-src");
     }
-  }
-
-  function init() {
-    locale = readStored() || DEFAULT_LOCALE;
-    document.documentElement.setAttribute("lang", locale === "zh" ? "zh-CN" : "en");
-    // 先把源文本标出来（即使当前是英文），这样第一次切语言能还原。
-    markSource();
-    translateTree(document.body);
-    observe();
-  }
-
-  /** 标记所有「整段文本」节点的原文，供切语言时还原。 */
-  function markSource() {
+    // 文本节点级还原：把每个被翻过的节点写回它的原文。
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
       acceptNode(node) {
-        for (let el = node.parentElement; el; el = el.parentElement) {
-          if (SKIP_TAGS.has(el.tagName)) return NodeFilter.FILTER_REJECT;
-        }
-        const parent = node.parentElement;
-        if (!parent) return NodeFilter.FILTER_REJECT;
-        const siblings = Array.from(parent.childNodes).filter((n) => n.nodeType === 3 && n.nodeValue.trim());
-        if (siblings.length > 1) return NodeFilter.FILTER_REJECT;
-        // 只标**只有一个子节点**的元素：还原时用 textContent 写回，
-        // 若元素里还有别的子节点，写回会把它们抹掉（runbar 那种布局就会掉标签）。
-        if (parent.childNodes.length !== 1) return NodeFilter.FILTER_REJECT;
-        return node.nodeValue && node.nodeValue.trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+        return sources.has(node) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
       },
     });
     const nodes = [];
     while (walker.nextNode()) nodes.push(walker.currentNode);
     for (const node of nodes) {
-      const parent = node.parentElement;
-      if (!parent) continue;
-      if (!parent.getAttribute("data-i18n-src")) parent.setAttribute("data-i18n-src", node.nodeValue);
+      const known = sources.get(node);
+      if (!known) continue;
+      // 只有当节点上还是我们写的译文时才还原：页面重新写过这个节点的话，
+      // 旧原文会把新内容盖掉。
+      if (known.translated !== node.nodeValue) continue;
+      node.nodeValue = known.source;
     }
+  }
+
+  function init() {
+    locale = readStored() || DEFAULT_LOCALE;
+    document.documentElement.setAttribute("lang", locale === "zh" ? "zh-CN" : "en");
+    translateTree(document.body);
+    observe();
   }
 
   /** DOM 变了（Alpine 渲染出新的文字）⇒ 再翻一次。 */
@@ -220,7 +239,6 @@
       queued = true;
       const run = () => {
         queued = false;
-        markSource();
         translateTree(document.body);
       };
       if (window.requestAnimationFrame) window.requestAnimationFrame(run);

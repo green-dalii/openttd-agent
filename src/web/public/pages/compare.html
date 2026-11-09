@@ -295,7 +295,7 @@
          sentences inside a table cell squeeze the whole table. -->
     <section class="panel" x-show="!loading && !error && hasRuns()">
       <div class="panel-head">
-        <h2>Outcomes <span class="dim">每一类结果各有多少局（服务端判定）</span></h2>
+        <h2>Outcomes <span class="dim">how many runs per outcome class (the server decides)</span></h2>
         <span class="dim" x-text="outcomeModelCount() + ' model(s)'"></span>
       </div>
       <div class="oc-list">
@@ -321,7 +321,7 @@
          invisible, so no comparison could ever be asked for). -->
     <section class="panel" x-show="!loading && !error && hasRuns()">
       <div class="panel-head">
-        <h2>Paired comparison <span class="dim">同一批 seed 上的配对差异</span></h2>
+        <h2>Paired comparison <span class="dim">paired differences on the same seeds</span></h2>
         <span class="dim" x-text="comparison() ? (comparison().modelA + ' vs ' + comparison().modelB) : ''"></span>
       </div>
       <!-- The verdict is the server's (pairedComparison). The page never
@@ -385,7 +385,7 @@
     <!-- ===================== ③ the exclusions ===================== -->
     <section class="panel" x-show="!loading && !error && exclusionRows().length">
       <div class="panel-head">
-        <h2>Excluded runs <span class="dim">按原因计数</span></h2>
+        <h2>Excluded runs <span class="dim">counted by reason</span></h2>
         <span class="dim" x-text="'dropped runs are not a smaller sample, they are a different question'"></span>
       </div>
       <div class="kpis">
@@ -401,7 +401,7 @@
     <!-- ===================== ④ the runs ===================== -->
     <section class="panel" x-show="!loading && !error && runRows().length">
       <div class="panel-head">
-        <h2>The runs <span class="dim">每一局都能下钻</span></h2>
+        <h2>The runs <span class="dim">every run can be drilled into</span></h2>
         <span class="dim" x-text="runRows().length + ' run(s)'"></span>
       </div>
       <div class="tbl-wrap">

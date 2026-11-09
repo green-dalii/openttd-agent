@@ -13,6 +13,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { visibleTexts, needsTranslation } from "./helpers/i18n-static.js";
 
 const PUBLIC = join(process.cwd(), "src/web/public");
 const ASSETS = join(PUBLIC, "assets/js");
@@ -59,7 +60,13 @@ describe("i18n 消息表", () => {
 	it("每条 msgid 都还在源文本里（源改了、表没改 ⇒ 页面悄悄回落到英文）", () => {
 		const src = sourceText();
 		const zh = catalog().zh ?? {};
-		const stale = Object.keys(zh).filter((k) => !src.includes(k));
+		const stale = Object.keys(zh).filter((k) => {
+			if (src.includes(k)) return false;
+			// 带占位的键（"{0} summaries recorded"）不会逐字出现在源里 ——
+			// 它是**模式**：查它的字面部分还在不在源里。
+			if (!k.includes("{0}")) return true;
+			return !k.split("{0}").every((part) => part === "" || src.includes(part));
+		});
 		expect(stale, `这些译文已经对不上源文本：${stale.join(" | ")}`).toEqual([]);
 	});
 
@@ -79,12 +86,65 @@ describe("i18n 消息表", () => {
 		}
 	});
 
-	it("只收录界面自己的文案：服务端词汇（结局类、问题码）不在表里", () => {
+	it("只收录界面自己的文案：服务端的**规范文案**不在表里", () => {
 		const zh = catalog().zh ?? {};
-		// 服务端只有一份规范文案（B5）；前端再翻一份就是第二份。
-		for (const serverSide of ["Built, delivered nothing", "Token cap", "no_credential"]) {
-			expect(Object.keys(zh), `服务端文案不该在前端表里：${serverSide}`).not.toContain(serverSide);
+		// 服务端只有一份规范文案（B5）：结局类的 hint、问题码的 hint 都在服务端，
+		// 前端再抄一份就是第二份 ⇒ 它们按 **id** 翻（见 PR C），不按文案翻。
+		// （**类名**可以与页面自己的用词重合 —— 例如页面上也有一个叫
+		//   "Token cap" 的旋钮，那是页面的文案，不是服务端的文案。）
+		const serverSide = [
+			"the run delivered cargo and passengers - a real result",
+			"construction finished but nothing was delivered - look at the route and the vehicles",
+			"the run ended before any construction finished - the agent never got a line up",
+			"the model never got to act: every call was rejected - wrong arguments, or no budget left",
+			"the run was stopped from inside (set_pause) - not a learning result",
+			"the environment stopped advancing, not the agent - not a learning result",
+			"the run hit the time limit before the horizon - a shorter answer, not a worse one",
+			"the run hit the token limit before the horizon - raise the limit to let it finish",
+			"the run hit the cost limit before the horizon - raise the limit to let it finish",
+			"not enough readings to name the outcome - not the same as 'nothing happened'",
+			"no_credential",
+		];
+		for (const text of serverSide) {
+			expect(Object.keys(zh), `服务端文案不该在前端表里：${text}`).not.toContain(text);
 		}
+	});
+});
+
+/**
+ * 页面静态文案的覆盖度（Issue #88）。
+ *
+ * 为什么要有这条守卫：i18n 用「源文本作键」，所以**漏一条译文**不会报错，
+ * 只会让那一处在中文界面里**默默变成英文**。单测不查它 ⇒ 中文界面永远
+ * 半中半英，而且没人知道缺了哪些。
+ */
+describe("四页静态文案的中文覆盖", () => {
+	const zh = (): Record<string, string> => catalog().zh ?? {};
+
+	it("页面上每一句可见文案都有中文译文", () => {
+		const missing: string[] = [];
+		for (const file of readdirSync(PAGES)) {
+			if (!file.endsWith(".html")) continue;
+			const html = read(join(PAGES, file));
+			for (const { text, line } of visibleTexts(html)) {
+				if (!needsTranslation(text)) continue; // 纯符号 / 数字
+				if (zh()[text]) continue;
+				missing.push(`${file}:${line} ${JSON.stringify(text)}`);
+			}
+		}
+		expect(missing, `这些文案在中文界面里会默默变回英文：\n${missing.join("\n")}`).toEqual([]);
+	});
+
+	it("页面的源文本是英文（源里混进中文 ⇒ 英文界面会出现半句中文）", () => {
+		const chinese: string[] = [];
+		for (const file of readdirSync(PAGES)) {
+			if (!file.endsWith(".html")) continue;
+			const html = read(join(PAGES, file));
+			for (const { text, line } of visibleTexts(html)) {
+				if (/[一-龥]/.test(text)) chinese.push(`${file}:${line} ${JSON.stringify(text)}`);
+			}
+		}
+		expect(chinese, `源文本里有中文：\n${chinese.join("\n")}`).toEqual([]);
 	});
 });
 
