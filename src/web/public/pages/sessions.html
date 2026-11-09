@@ -270,7 +270,7 @@
 
             <div>
               <details class="evidence">
-              <summary>Staged summaries <span class="dim">阶段性总结</span></summary>
+              <summary>Staged summaries</summary>
               <template x-if="checkpoints().length">
                 <ol class="timeline">
                   <template x-for="c in checkpoints()" :key="`${c.gameDate}-${c.turn}`">
@@ -296,7 +296,7 @@
                           x-text="$ui.categoryLabel($ui.categoryOf(ev.kind))"></span>
                     <span class="kind" x-text="ev.kind"></span>
                     <span class="brief" x-text="$ui.briefOf(ev)"></span>
-                    <button class="raw-toggle" type="button" @click="$raw.toggle($event)">json</button>
+                    <button class="raw-toggle" type="button" @click="$raw.toggle($event)" data-i18n-keep>json</button>
                     <pre class="raw" hidden x-text="JSON.stringify(ev.payload, null, 2)"></pre>
                   </li>
                 </template>
@@ -395,7 +395,7 @@
     <!-- ===================== ① is the memory working? ===================== -->
     <section class="panel" x-show="!loading && !error && !empty()">
       <div class="panel-head">
-        <h2>Is it working? <span class="dim">记忆有没有用</span></h2>
+        <h2>Is it working?</h2>
         <span class="dim">same seed, with vs without lessons — SPEC §5.2 #3</span>
       </div>
       <!-- The verdict comes from the server. Below MIN_LESSON_SAMPLE per arm it
@@ -421,8 +421,8 @@
     <!-- ========================= ② across games ========================= -->
     <section class="panel" x-show="!loading && !error && metrics().length">
       <div class="panel-head">
-        <h2>Across games <span class="dim">跨局</span></h2>
-        <span class="dim" x-text="gameRows().length + ' recorded'"></span>
+        <h2>Across games</h2>
+        <span class="dim" x-text="gameRows().length + ' runs recorded'"></span>
       </div>
       <div class="chart-box"><div id="evo-chart" x-ref="evoChart" x-effect="drawCurve()"></div></div>
       <div class="tbl-wrap">
@@ -452,7 +452,7 @@
     <!-- ========================== ③ lessons ========================== -->
     <section class="panel" x-show="!loading && !error && lessons().length">
       <div class="panel-head">
-        <h2>Lessons <span class="dim">教训库</span></h2>
+        <h2>Lessons</h2>
         <span class="dim">distilled from finished games; injected when confirmed</span>
       </div>
       <ol class="mem-library">
@@ -473,11 +473,11 @@
     <!-- ========================= ④ strategies ========================= -->
     <section class="panel" x-show="!loading && !error && strategies().length">
       <div class="panel-head">
-        <h2>Strategy candidates <span class="dim">策略候选</span></h2>
+        <h2>Strategy candidates</h2>
         <span class="dim" x-text="injectableCount() + ' injectable'"></span>
       </div>
       <p class="dim">
-        Injection needs <strong>both</strong> gates: the evidence gate
+        <strong>Both</strong> gates must pass: the evidence gate
         (measured profit above threshold, in ≥ 2 games) and human confirmation.
         The profit reading comes from each run's record — never from the model's own claim.
         The engine only advises — nothing takes effect until you tick it.

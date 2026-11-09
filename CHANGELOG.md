@@ -9,35 +9,30 @@
 
 ## [Unreleased]
 ### Fixed
-- **A pair could have compared the wrong two runs.** The pairing key is (seed, repeat), but the repeat
-  index was counted over the rows that **had a reading** - so a run with no reading for one metric was
-  skipped and the runs behind it moved forward. On the stability axis a run that made no tool call
-  (no failure rate to measure) therefore shifted its partner, and the interval was computed from a
-  comparison of two different runs. The cells are now the **runs** - the repeat index is counted over
-  the comparable runs and does not depend on the metric - so a pair means the same two runs on every
-  axis, and a cell with a missing reading on one side is dropped whole (n gets smaller, the other
-  pairs do not move).
-- **"Not applicable" was reported as zero.** The game script encodes a reading it does not have as JSON
-  `null` (a negative engine reading - the industry does not produce or does not accept that
-  cargo - becomes `null`, so the payload shape never changes). Two readers on our side went through
-  `Number(value)`, and `Number(null)` is `0`, so "this industry does not accept this cargo" turned
-  into "stockpile: 0 tonnes" - for the hundreds of industries that do not accept their own cargo.
-  The page already knew how to print "not applicable"; it never received it. Every raw counter now
-  asks "missing?" before "non-negative?", and the guards cover the case the game script actually
-  sends: an explicit `null` (the old guards only covered `-1` and an absent field). The observation
-  fingerprint does not move.
+- **The language switch did not translate everything, and it did not translate it back.** Three
+  silent faults: a sentence written across two lines in the page source kept its line breaks in the
+  DOM, so the lookup key never matched; a sentence broken up by an inline `<code>` was never
+  translated at all; and switching to Chinese and back left the page mixed, because the original
+  text was remembered on the **parent** element and restoring it rewrote the parent's whole text -
+  taking the inline `<code>` with it. The lookup normalises whitespace, every text node is
+  translated on its own, and the original text is kept per text node.
+- **A pair could have compared the wrong two runs.** The repeat index was counted over the rows that
+  **had a reading**, so a run with no reading for one metric shifted its partner and the interval was
+  computed from two different runs. The cells are now the **runs** (the index does not depend on the
+  metric), and a cell missing a reading on one side is dropped whole.
+- **"Not applicable" was reported as zero.** The game script encodes a missing reading as JSON `null`
+  (so the payload shape never changes), but two of our readers went through `Number(value)` - and
+  `Number(null)` is `0` - so "this industry does not accept this cargo" became "stockpile: 0 tonnes",
+  for the hundreds of industries that do not accept their own cargo. Every raw counter now asks
+  "missing?" before "non-negative?". The observation fingerprint does not move.
 - **The decision context swallowed two facts it had already been given.** The company's financing
-  facts (how much more it could borrow) and the events the engine pushes at it were passed into the
-  decision context - and then dropped on the floor: the function took them as input and never put
-  them in its output. The model could see them by asking `observe()`, but the context it is handed at
-  every decision had neither. The readings were in the projection all along, so the observation
-  fingerprint does not move; a test now pins "passed in means present in the output".
+  facts and the pushed events were passed into the decision context and then dropped: the function
+  took them as input and never put them in its output. The readings were in the projection all along,
+  so the observation fingerprint does not move; a test now pins "passed in means present in the output".
 - **The navigation now reaches every page.** A page URL was a hand-written table in the server's
-  memory, so a page added after the server started was unreachable: the browser got a bare "not
-  found" and the page looked like it had never been built. The routes are now **derived from the
-  files** in `public/pages/` (`pages/<name>.html` is served at `/<name>`), a file added while the
-  server runs is picked up, and a URL that is not a page answers with **the list of pages that
-  exist** plus the hint that the process may be older than the files. The smoke check now visits all four pages.
+  memory, so a page added after the server started was unreachable ("not found"). The routes are now
+  **derived from the files** in `public/pages/`, and a URL that is not a page answers with **the list
+  of pages that exist**. The smoke check now visits all four pages.
 
 - **The model can finally see the freight world.** A freight line is "which mine, which plant", and the
   model could see neither: the GS now reports a **cargo catalogue** (which cargo is freight, which
@@ -46,6 +41,12 @@
   "a producer industry to a consumer industry".
 
 ### Added
+- **The dashboard's Chinese interface is now complete for its static copy.** Every visible
+  sentence in the four pages (Run / Compare / History / Configure) has a Chinese translation —
+  324 of them, where before 226 of them silently fell back to English. The pages also had
+  Chinese text hard-coded in the markup (leftovers from the Chinese-only interface), so the
+  **English** interface was showing half-Chinese captions; those are now English source text
+  with a Chinese translation.
 - **The freight numbers reach the screen.** The server had been computing them for a while: the
   scorecard splits cargo from passengers, and the attribution knows what each freight line
   delivered - but neither was drawn anywhere. The Run page's route table now has a **Delivered**

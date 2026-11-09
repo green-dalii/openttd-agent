@@ -25,7 +25,7 @@
  *         否则 CI 里会把环境失败误读成产品失败。
  */
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { setTimeout as sleep } from "node:timers/promises";
 
 import { mkdtempSync, rmSync } from "node:fs";
@@ -505,6 +505,95 @@ for (const path of PAGE_URLS) {
   for (const n of noisy) pageProblems.push(`${path}: 控制台 ${n.level}: ${n.text.slice(0, 160)}`);
 }
 console.log("PAGES:", JSON.stringify(pageViews, null, 2));
+
+/* ======================================================================
+ * 语言切换（Issue #88）：中文界面要真的翻，切回英文要真的还原
+ * ----------------------------------------------------------------------
+ * 为什么单测给不了：翻译发生在**真实 DOM** 上（文本节点被替换），
+ * 而前端的单测脚手架（frontend-harness.ts）用的是假 DOM，没有树遍历。
+ * 三件事必须成立：
+ *   ① 切成中文后，页面上不再有英文的**静态文案**（动态文案另算）；
+ *   ② 切回英文后，**不留任何中文**（还原必须逐节点精确，不能只还原一半
+ *      —— 曾经把原文写在父元素上，一还原就把父元素里的 <code> 抹掉）；
+ *   ③ 全程控制台干净。
+ * ====================================================================== */
+const I18N_COLLECT = `(() => {
+  const SKIP = new Set(['SCRIPT','STYLE','CODE','PRE','TEXTAREA']);
+  const out = [];
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  while (walker.nextNode()) {
+    const node = walker.currentNode;
+    let el = node.parentElement, blocked = false;
+    for (; el; el = el.parentElement) {
+      if (SKIP.has(el.tagName)) { blocked = true; break; }
+      if (el.getAttribute && el.getAttribute('data-i18n-keep') !== null) { blocked = true; break; }
+    }
+    if (blocked) continue;
+    const text = (node.nodeValue || '').replace(/\\s+/g, ' ').trim();
+    if (!text) continue;
+    out.push(text);
+  }
+  return out;
+})()`;
+
+/**
+ * The static copy of a page: the text between tags in the page file.
+ *
+ * 只用于**冒烟检查**（浏览器层面的粗筛）；精确口径在
+ * `test/unit/i18n.test.ts`（它用同一个规则的小解析器）。这里的实现故意
+ * 简单：多收几条不会让检查失败（收进来的字符串若不在 DOM 里就算「已翻」）。
+ */
+function staticStringsOf(html) {
+  const masked = html
+    .replace(/<(script|style)[\s\S]*?<\/\1>/gi, "")
+    .replace(/<!--[\s\S]*?-->/g, "");
+  const out = new Set();
+  const re = />([^<>]+)</g;
+  let m;
+  while ((m = re.exec(masked))) {
+    const t = m[1].replace(/\s+/g, " ").trim();
+    // 只留**像文案**的句子：至少三个英文字母。纯符号（"#"、"/"）是属性
+    // 碎片，不是界面文案，不必检查。
+    if (!/[A-Za-z]{3}/.test(t)) continue;
+    out.add(t);
+  }
+  return [...out];
+}
+
+const PAGE_FILES = { "/": "live.html", "/compare": "compare.html", "/sessions": "sessions.html", "/configure": "configure.html" };
+const STATIC_STRINGS = {};
+for (const [path, file] of Object.entries(PAGE_FILES)) {
+  const html = readFileSync(new global.URL(`../src/web/public/pages/${file}`, import.meta.url), "utf8");
+  STATIC_STRINGS[path] = staticStringsOf(html);
+}
+
+for (const path of PAGE_URLS) {
+  await send("Page.navigate", { url: new global.URL(path, URL).toString() });
+  await sleep(2000);
+  // 中文模式下的静态文案：源码里的英文句子必须已经不在 DOM 里了。
+  const zhTexts = await send("Runtime.evaluate", {
+    expression: `(async () => { window.I18n && window.I18n.setLocale('zh'); await new Promise(r => setTimeout(r, 600)); return ${I18N_COLLECT}; })()`,
+    awaitPromise: true,
+    returnByValue: true,
+  });
+  const zhList = zhTexts.result?.value ?? [];
+  const enTexts = await send("Runtime.evaluate", {
+    expression: `(async () => { window.I18n && window.I18n.setLocale('en'); await new Promise(r => setTimeout(r, 600)); return ${I18N_COLLECT}; })()`,
+    awaitPromise: true,
+    returnByValue: true,
+  });
+  const enList = enTexts.result?.value ?? [];
+  const leaked = enList.filter((t) => /[一-龥]/.test(t));
+  const zhSet = new Set(zhList);
+  const stillEnglish = STATIC_STRINGS[path].filter((s) => zhSet.has(s));
+  if (stillEnglish.length) {
+    pageProblems.push(`${path}: ${stillEnglish.length} 条静态文案在中文界面里还是英文（例：${stillEnglish.slice(0, 3).join(" | ")}）`);
+  }
+  if (leaked.length) {
+    pageProblems.push(`${path}: 切回英文后还留着中文（例：${leaked.slice(0, 3).join(" | ")}）`);
+  }
+}
+console.log("I18N: 每个页面都查过「中文界面无英文静态文案」与「切回英文无残留中文」");
 
 /* ======================================================================
  * 比较计划（Issue #48）：Compare 页上的计划区必须**存在**且是**诚实的空态**
