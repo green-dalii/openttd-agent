@@ -506,8 +506,14 @@
     <section class="panel" x-show="!industryNote()">
       <div class="panel-head">
         <h2>Industry detail</h2>
-        <span class="dim" x-text="industrySampleNote()"></span>
+        <div class="actions">
+          <span class="dim" x-text="industrySampleNote()"></span>
+          <!-- 按需全量：观测面只带取样（载荷不涨）；要全图时问游戏要一次。 -->
+          <button type="button" class="btn sm" x-show="industryExpandable()"
+                  x-text="industryExpandLabel()" @click="expandAllIndustries()"></button>
+        </div>
       </div>
+      <p class="empty" x-show="industryExpandNote" x-text="industryExpandNote"></p>
       <table>
         <thead>
           <tr><th>#</th><th>Industry</th><th>Cargo</th><th class="num">Produced</th><th class="num">Transported</th>

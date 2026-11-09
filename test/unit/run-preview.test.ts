@@ -110,7 +110,11 @@ describe("the preview and the manifest agree", () => {
 		// 2026-11-03: a72a663cdd126090 → 41d82339b2925645（货运 F1：observe 的描述
 		// 说清楚它还带**货种目录**与**产业坐标**——描述属于脚手架指纹 ⇒ 改描述就是
 		// 换脚手架）。⇒ 货运 F1 之后的所有局与之前的所有局**互不可比**。
-		expect(preview.scaffoldHash).toBe("3b19310088baff6e");
+		// 2026-11-08: 3b19310088baff6e → d89a898b6d575e4a（"数据按需全量"：工具表多了
+		// 两个**只读**的按需全量工具 `get_industries` / `get_cargo`——工具表属于
+		// 脚手架指纹 ⇒ 加工具就是换脚手架）。⇒ 这一版之后的所有局与之前的所有局
+		// **互不可比**（Compare 按组分开，明写出来）。
+		expect(preview.scaffoldHash).toBe("d89a898b6d575e4a");
 	});
 
 	it("keeps the cost-known fact honest (a live-only model has no price table)", () => {

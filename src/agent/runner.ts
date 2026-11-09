@@ -148,7 +148,18 @@ export interface AgentRunOptions {
 	web?: unknown;
 	/** External control hooks for the supervisor (stop/pause/resume). */
 	control?: {
-		onReady?: (h: { stop: () => void; pause: () => void; resume: () => void }) => void;
+		onReady?: (h: {
+			stop: () => void;
+			pause: () => void;
+			resume: () => void;
+			/**
+			 * Ask the game for the **full** industry / cargo list ("数据按需全量").
+			 *
+			 * 观测面只带**取样**（产业按产量前 12、货种只报有产量的）⇒ 载荷不涨；
+			 * 要全量时**按需问一次**（页面与 agent 工具都走这里）。
+			 */
+			fullData?: (kind: "industries" | "cargo") => Promise<unknown>;
+		}) => void;
 		/**
 		 * agent **自己**改了暂停状态（`set_pause`）。serve 用它把归因写进 supervisor
 		 * （唯一写者）；没有它（CLI 单跑）时 runner 自己 publishRun。
@@ -634,8 +645,25 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 		});
 	};
 
+	// 按需全量：问 GS 要**完整**的产业/货种读数，并**缓存**（同一局反复展开
+	// 不该反复扫全图）。缓存只在局内有效（世界会变）。
+	const fullDataCache = new Map<string, unknown>();
+	const fullData = async (kind: "industries" | "cargo"): Promise<unknown> => {
+		const cached = fullDataCache.get(kind);
+		if (cached !== undefined) return cached;
+		const answer = await client?.gameScriptAwait?.(
+			JSON.stringify({ cmd: kind === "industries" ? "list_industries" : "list_cargo" }),
+			5000,
+		);
+		if (!answer || answer.ok !== true) return null;
+		const data = (answer.data ?? null) as unknown;
+		fullDataCache.set(kind, data);
+		return data;
+	};
+
 	opts.control?.onReady?.({
 		stop: requestStop,
+		fullData,
 		pause: () => {
 			// W2：页面按钮与 supervisor.pause("agent") 都走这里（同一funnel），
 			// 所以这一处就能覆盖 serve 模式下**所有**人为暂停的来源。

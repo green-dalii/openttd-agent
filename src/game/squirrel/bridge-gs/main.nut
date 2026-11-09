@@ -2369,10 +2369,23 @@ class BridgeV1 extends GSController {
      *   GSCargoMonitor.Get{Town,Industry}DeliveryAmount(company, cargo, id, keep_monitoring)
      *   GSCompany.GetQuarterlyCargoDelivered(company, 0)  // 0 = 当前经济季度
      */
-    function CollectFacts() {
-        local all_industries = GSIndustryList();
+    /**
+     * 产业与货种的**全量扫描**（一次）。
+     *
+     * 为什么单独一个方法：周期快照（取样）与**按需全量**查询必须用**同一份**
+     * 扫描 —— 两处各写一遍，两边的数字就会漂（而漂了没人知道）。
+     *
+     * 返回：
+     *   industries —— 全部产业（id / 货种 / 名字 / 产量 / 运量 / 库存），按产量降序；
+     *   catalog —— 货种目录（标签 / 是不是货运 / 谁产 / 谁收）；
+     *   totals —— **有产量**的货种的合计（观测面用的那份）；
+     *   readings —— **每一个**货种的读数（含 0 产量的：没测到 ≠ 0）；
+     *   monitor —— 货运货种 × 收方产业（货运 F2 的监视集合）。
+     */
+    function ScanCargo() {
         local industry_list = [];
         local cargo_totals = [];
+        local cargo_readings = [];
         // 货种目录（2026-11-03，货运 F1）：标签 + 是不是货运 + 谁产谁收。
         // 为什么单独一份：`cargo_totals` 只报**有产量的**货种，而"能不能用卡车运"
         // 是**货种本身的属性**（`GSCargo.IsFreight`）；"谁生产它 / 谁接受它"是引擎
@@ -2384,9 +2397,6 @@ class BridgeV1 extends GSController {
         // （货种的数字下标只有那里有；目录里只留标签与名字，那是模型看得懂的部分）。
         local monitor_pairs = [];
         local monitor_cargoes = 0;
-        // 产业位置与名字（**全部**产业）：模型要选线路就得知道"在哪儿"。
-        // 以前只有产量前 12 的产业有名字，而且**一个坐标都没有**。
-        local industry_index = [];
 
         // --- 产业侧（按货种遍历）---
         for (local c = 0; c < 64; c++) {
@@ -2432,19 +2442,50 @@ class BridgeV1 extends GSController {
                     monitor_pairs.append({ cargo = c, industry = cid, label = label });
                 }
             }
+            // **每一个**货种的读数（含 0 产量的）：观测面的 `cargo_totals` 只报
+            // 有产量的货种 ⇒ 模型分不清"这个货种没有产量"和"这个货种没测到"
+            // （D60：缺失 ≠ 0）。按需全量查询给的是完整的一份。
+            cargo_readings.append({ label = label, freight = is_freight,
+                                    produced = sum_prod, transported = sum_trans });
             if (sum_prod > 0 || sum_trans > 0) {
                 cargo_totals.append({ label = label, produced = sum_prod, transported = sum_trans });
             }
         }
-        // 产量降序 + 上限：不能把全图产业塞进每个载荷。
-        // 降序按产量；null 产量排最后（null 不做算术，先归一再比）。
+        // 产量降序：null 产量排最后（null 不做算术，先归一再比）。
         industry_list.sort(function(ia, ib) {
             local pa = (ia.produced == null) ? -1 : ia.produced;
             local pb = (ib.produced == null) ? -1 : ib.produced;
             return pb - pa;
         });
-        if (industry_list.len() > 12) industry_list.resize(12);
         cargo_totals.sort(function(ca, cb) { return cb.produced - ca.produced; });
+
+        return {
+            industries = industry_list,
+            catalog = cargo_catalog,
+            totals = cargo_totals,
+            readings = cargo_readings,
+            monitor = monitor_pairs,
+            monitor_cargoes = monitor_cargoes,
+        };
+    }
+
+    function CollectFacts() {
+        local all_industries = GSIndustryList();
+        // 产业位置与名字（**全部**产业）：模型要选线路就得知道"在哪儿"。
+        // 以前只有产量前 12 的产业有名字，而且**一个坐标都没有**。
+        local industry_index = [];
+
+        // 扫描（产业 / 货种 / 货运监视集合）——与按需全量查询共用 `ScanCargo()`。
+        local scan = this.ScanCargo();
+        local industry_list = scan.industries;
+        local cargo_totals = scan.totals;
+        local cargo_catalog = scan.catalog;
+        local monitor_pairs = scan.monitor;
+        local monitor_cargoes = scan.monitor_cargoes;
+
+        // 产量降序**已经**在扫描里排好；这里只做**上限**：不能把全图产业塞进
+        // 每个载荷（全量留给按需查询）。
+        if (industry_list.len() > 12) industry_list.resize(12);
 
         // 货运可运链路（货运 F3）：**能装货的产方**。
         // 车站收什么货是引擎按集货区算的 ⇒ "这里有煤"不等于"这里能装煤"
@@ -3118,6 +3159,25 @@ class BridgeV1 extends GSController {
                 growth_rate = GSTown.GetGrowthRate(id),
             };
             GSAdmin.Send({ kind = "answer", id = ans_id, ok = true, data = data });
+        } else if (cmd == "list_industries") {
+            // 按需**全量**产业（"数据按需全量"）：观测面只带产量前 12 个
+            // （载荷不能无限长），模型想要全图时**问一次**。
+            // 全量与取样**同一个扫描**（`ScanCargo()`）⇒ 两边不会漂。
+            local ans_id = -1;
+            if (obj.rawin("id")) ans_id = obj["id"];
+            local scan = this.ScanCargo();
+            GSAdmin.Send({ kind = "answer", id = ans_id, ok = true,
+                           data = { industries = scan.industries,
+                                    total = scan.industries.len() } });
+        } else if (cmd == "list_cargo") {
+            // 按需**全量**货种读数：含**没有产量**的货种（观测面的 `cargo_totals`
+            // 只报有产量的 ⇒ 分不清"没有产量"与"没测到"，D60）。
+            local ans_id = -1;
+            if (obj.rawin("id")) ans_id = obj["id"];
+            local scan = this.ScanCargo();
+            GSAdmin.Send({ kind = "answer", id = ans_id, ok = true,
+                           data = { readings = scan.readings,
+                                    total = scan.readings.len() } });
         } else if (cmd == "probe_route_cm") {
             // AB-4a: build AND run a route with the GS alone (NEXT-4 acceptance).
             this.StartProbeRoute();
