@@ -17,18 +17,18 @@
   taking the inline `<code>` with it. The lookup normalises whitespace, every text node is
   translated on its own, and the original text is kept per text node.
 - **A pair could have compared the wrong two runs.** The repeat index was counted over the rows that
-  **had a reading**, so a run with no reading for one metric shifted its partner and the interval was
-  computed from two different runs. The cells are now the **runs** (the index does not depend on the
-  metric), and a cell missing a reading on one side is dropped whole.
+  **had a reading**, so a run with no reading for one metric shifted its partner and the interval
+  was computed from two different runs. The cells are now the **runs**, and a cell missing a reading
+  on one side is dropped whole.
 - **"Not applicable" was reported as zero.** The game script encodes a missing reading as JSON `null`
   (so the payload shape never changes), but two of our readers went through `Number(value)` - and
   `Number(null)` is `0` - so "this industry does not accept this cargo" became "stockpile: 0 tonnes",
   for the hundreds of industries that do not accept their own cargo. Every raw counter now asks
   "missing?" before "non-negative?". The observation fingerprint does not move.
-- **The decision context swallowed two facts it had already been given.** The company's financing
-  facts and the pushed events were passed into the decision context and then dropped: the function
-  took them as input and never put them in its output. The readings were in the projection all along,
-  so the observation fingerprint does not move; a test now pins "passed in means present in the output".
+- **The decision context swallowed two facts it had already been given.** The financing facts and
+  the pushed events were passed into the decision context and then dropped: the function took them
+  as input and never put them in its output. The readings were in the projection all along, so the
+  observation fingerprint does not move; a test now pins "passed in means present in the output".
 - **The navigation now reaches every page.** A page URL was a hand-written table in the server's
   memory, so a page added after the server started was unreachable ("not found"). The routes are now
   **derived from the files** in `public/pages/`, and a URL that is not a page answers with **the list
@@ -41,6 +41,15 @@
   "a producer industry to a consumer industry".
 
 ### Added
+- **The Chinese interface now covers the text the scripts render too.** The hints, empty states,
+  legends and labels that the pages draw at runtime - about 440 more strings - are translated as
+  well, including the composed one-line summaries (a run's effect, a turn's digest), which are
+  translated piece by piece.
+- **The language switch stopped working for anything rendered after the page loaded.** The
+  translation of newly rendered text was scheduled on `requestAnimationFrame`, which only runs
+  while the page is being painted - so in a background tab (or a headless browser) the observer
+  never fired again and everything Alpine drew afterwards stayed English, with nothing in the
+  console. The work is now scheduled with `setTimeout`, which does not depend on painting.
 - **The dashboard's Chinese interface is now complete for its static copy.** Every visible
   sentence in the four pages (Run / Compare / History / Configure) has a Chinese translation —
   324 of them, where before 226 of them silently fell back to English. The pages also had
@@ -363,20 +372,15 @@
 - `web-assets` 增强：同时校验 `const elX = $("id")` 这类**别名**（此前漏检）
 
 ### Added（真实画面：小地图快照）
-- `src/game/minimap.ts`：`captureMinimap()` 请求 `screenshot minimap` 并**轮询 mtime**
-  确认落盘后归档（固定 sleep 会归档到上一张）
-- 每个施工阶段写 `<session>/stages/NNN.png`（与同名几何描述 JSON 配对），
-  `GET /api/sessions/:id/stages/:n.png` 提供（仅接受 `NNN.png`，拒绝路径穿越）
+- `src/game/minimap.ts`：`captureMinimap()` 请求 `screenshot minimap` 并**轮询 mtime** 确认落盘后归档
+- 每个施工阶段写 `<session>/stages/NNN.png`，`GET /api/sessions/:id/stages/:n.png` 提供（拒绝路径穿越）
 - Live 页实时显示新捕获的图（WS 帧 `stageImage`），Sessions 页可回放全阶段
-- 拿不到图时降级为示意图（`stage-view.ts`）
 
 ### Verified（真机，本轮）
-- **真实小地图**：`screenshot minimap` → 256×256 PNG，逐阶段归档且**内容随施工变化** （4114/4124/4129 字节，sha 不同）；浏览器实测 `naturalWidth=256 loaded=true`， 0 console 异常
-- 决策数由 **1 → 4+**（phase_change 驱动，随运行持续增加）；`llm.kind=real`；token 正常
-- `--serve` 全链路：idle → start agent → pause（server.log 有 pause）→ resume →
-  stop（session 落 `aborted`）→ **不重启进程再起 watch**；重复 start 返回 409
-- 浏览器实测（CDP，禁用缓存）：**0 console 异常**，运行控制条可见、
-  6 张阶段示意图真实绘制（canvas 非空）、token/步骤/轮次表均有数据
+- **真实小地图**：`screenshot minimap` → 256×256 PNG，逐阶段归档且**内容随施工变化**；浏览器实测 0 console 异常
+- 决策数由 **1 → 4+**（phase_change 驱动）；`llm.kind=real`；token 正常
+- `--serve` 全链路：idle → start agent → pause → resume → stop（session 落 `aborted`）→ **不重启进程再起 watch**；重复 start 返回 409
+- 浏览器实测（CDP，禁用缓存）：**0 console 异常**，运行控制条可见、阶段示意图真实绘制
 
 ## [0.5.0] - 2026-09-11
 
@@ -414,14 +418,9 @@
 
 ### Verified
 - `pnpm run gate` 全绿：**200 passed / 1 skipped**
-- 真机（Chrome headless + CDP）：
-  - 拒绝启动三条路径实测：无 LLM / 无二进制 / 端口占用，均 `Nothing was started`，
-    **未 spawn 任何进程、未写 session**
-  - LLM 不可达时拒绝启动；**密钥未出现在任何输出**（`sk-` 出现次数 0）
-  - SIGKILL 模拟崩溃 → 盘上 `running`；重启后 `reconciled 1 abandoned session`，
-    仪表盘由 `running` 变为 **`interrupted`**；同时并存 `running`（当前）与
-    `aborted`（优雅停止）三种状态各就各位
-  - Token 图：柱底 193 / 地板 194（基线正确）、网格 4360px、图例与汇总正常
+- 真机（Chrome headless + CDP）：拒绝启动三条路径（无 LLM / 无二进制 / 端口占用）均 `Nothing was started`，**未 spawn 任何进程、未写 session**；LLM 不可达时拒绝启动且**密钥未出现在任何输出**
+- SIGKILL 模拟崩溃 → 盘上 `running`；重启后 `reconciled 1 abandoned session`，仪表盘由 `running` 变为 **`interrupted`**
+- Token 图：柱底 193 / 地板 194（基线正确）、网格 4360px、图例与汇总正常
 
 ## [0.4.0] - 2026-09-11
 

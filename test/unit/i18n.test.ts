@@ -59,13 +59,18 @@ function sourceText(): string {
 describe("i18n 消息表", () => {
 	it("每条 msgid 都还在源文本里（源改了、表没改 ⇒ 页面悄悄回落到英文）", () => {
 		const src = sourceText();
+		// 只留字母与数字再比：源码里一句常常是**几个字面量拼起来**的（中间隔着
+		// `+ "..."`），拼起来的整句不会逐字出现在源里；把标点与代码符号也去掉，
+		// 才能跨过字面量的边界去比对。
+		const stripped = src.replace(/[^A-Za-z0-9]+/g, "");
 		const zh = catalog().zh ?? {};
 		const stale = Object.keys(zh).filter((k) => {
 			if (src.includes(k)) return false;
 			// 带占位的键（"{0} summaries recorded"）不会逐字出现在源里 ——
 			// 它是**模式**：查它的字面部分还在不在源里。
-			if (!k.includes("{0}")) return true;
-			return !k.split("{0}").every((part) => part === "" || src.includes(part));
+			const parts = k.split(/\{[0-9]+\}/).filter((p) => p !== "");
+			if (parts.length === 0) return true;
+			return !parts.every((part) => stripped.includes(part.replace(/[^A-Za-z0-9]+/g, "")));
 		});
 		expect(stale, `这些译文已经对不上源文本：${stale.join(" | ")}`).toEqual([]);
 	});
