@@ -27,6 +27,8 @@
   /** 不翻译的容器：原始证据、脚本、样式。 */
   const SKIP_TAGS = new Set(["SCRIPT", "STYLE", "CODE", "PRE", "TEXTAREA"]);
 
+  /** 复合句的分隔符（页面上用它把几段读数拼成一行）。 */
+  const PART_SEPARATOR = " · ";
   /** 当前语言（存储值 or 默认）。 */
   let locale = DEFAULT_LOCALE;
   /** 编译过的模式（每个语言一份）：`{re, out}`。 */
@@ -64,17 +66,41 @@
   }
 
   /**
-   * 把 `{0}` 占位的 msgid 编译成正则。
-   * `(.+?)` 尽量少吞字符：锚定整串，替换时按捕获组回填。
+   * 把带占位符的 msgid 编译成正则。
+   *
+   * 占位符是 `{0}`、`{1}`……（**可以多个**）：`(.+?)` 尽量少吞字符，锚定整串；
+   * 替换时按**序号**回填 —— 译文里的 `{1}` 拿到源文里 `{1}` 捕到的那一段。
+   * 一句里常有多个数字（"0 active / 0 total"），所以多占位符是常态。
    */
   function compile(table) {
     const out = [];
     for (const [key, value] of Object.entries(table)) {
-      if (!key.includes("{0}")) continue;
-      const parts = key.split("{0}");
-      const re = new RegExp("^" + parts.map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("(.+?)") + "$");
-      out.push({ re, out: String(value) });
+      const parts = key.split(/(\{[0-9]+\})/);
+      if (!parts.some((p) => /^\{[0-9]+\}$/.test(p))) continue;
+      const order = [];
+      let pattern = "";
+      for (const part of parts) {
+        const ph = /^\{(\d+)\}$/.exec(part);
+        if (ph) {
+          order.push(Number(ph[1]));
+          pattern += "(.+?)";
+        } else {
+          pattern += part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        }
+      }
+      out.push({
+        re: new RegExp("^" + pattern + "$"),
+        out: String(value),
+        order,
+        // **具体度**：字面部分越长，模式越具体。
+        // 为什么需要它："{0} runs" 与 "shown across {0} comparable runs" 都能匹配
+        // "shown across 6 comparable runs" ⇒ 谁先命中取决于**表里的顺序** ⇒
+        // 换个顺序就把整句吃掉一半（实测："shown across 6 comparable 局"）。
+        literal: key.replace(/\{[0-9]+\}/g, "").length,
+      });
     }
+    // 更具体的先试。
+    out.sort((a, b) => b.literal - a.literal);
     return out;
   }
 
@@ -97,6 +123,54 @@
   }
 
   /**
+   * 翻一段文本；**翻不出来就返回 null**。
+   *
+   * 三层规则（从整到碎）：
+   *   ① 精确表（键 = 源文本）；
+   *   ② 带占位的模式（`{0}` 按序号回填，回填的片段也会再翻一次）；
+   *   ③ **复合句**：整句没有词条，但它是几段拼起来的（"Money -£43,995 · Income
+   *      -£43,995"）⇒ 按分隔符拆开逐段翻，再拼回去。
+   *
+   * 为什么要③：那些摘要是**界面文案**，不是证据；没有它，它们永远是英文。
+   */
+  function translateOnce(text, depth) {
+    const key = keyOf(text);
+    const table = messages(locale);
+    if (Object.prototype.hasOwnProperty.call(table, key)) return table[key];
+    for (const { re, out, order } of patternsFor(locale)) {
+      const m = re.exec(key);
+      if (!m) continue;
+      // 按序号回填：源文的 {1} → 译文里的 {1}。
+      // 回填进去的片段**本身可能还是英文**（"data now" 里的 "now" 来自
+      // `Intl.RelativeTimeFormat`）⇒ 先把片段翻好（限深，免得自己吃自己）。
+      const captured = new Map();
+      order.forEach((idx, i) => {
+        const raw = m[i + 1] ?? "";
+        captured.set(idx, depth < 2 ? translateOnce(raw, depth + 1) ?? raw : raw);
+      });
+      let fallback = 0;
+      return out.replace(/\{(\d+)\}/g, (whole, n) => {
+        const idx = Number(n);
+        if (captured.has(idx)) return captured.get(idx);
+        const value = captured.get(order[fallback]) ?? "";
+        fallback += 1;
+        return value || whole;
+      });
+    }
+    if (depth < 2 && key.includes(PART_SEPARATOR)) {
+      const parts = key.split(PART_SEPARATOR);
+      let changed = false;
+      const translated = parts.map((p) => {
+        const one = translateOnce(p, depth + 1);
+        if (one !== null && one !== p) changed = true;
+        return one === null ? p : one;
+      });
+      if (changed) return translated.join(PART_SEPARATOR);
+    }
+    return null;
+  }
+
+  /**
    * 翻译一段文本：先查精确表，再查带占位的模式，最后回落源文本。
    * @param {string} text
    * @returns {string}
@@ -104,25 +178,14 @@
   function t(text) {
     if (typeof text !== "string" || text === "") return text;
     if (locale === DEFAULT_LOCALE) return text;
-    const key = keyOf(text);
-    const table = messages(locale);
-    if (Object.prototype.hasOwnProperty.call(table, key)) return table[key];
-    for (const { re, out } of patternsFor(locale)) {
-      const m = re.exec(key);
-      if (!m) continue;
-      let i = 0;
-      return out.replace(/\{0\}/g, () => m[++i] ?? "");
-    }
-    return text;
+    const out = translateOnce(text, 0);
+    return out === null ? text : out;
   }
 
-  /** 一段文本是否需要翻译（精确命中或命中模式）。 */
+  /** 一段文本是否需要翻译（精确命中、命中模式，或能拆成可翻的片段）。 */
   function isTranslatable(text) {
     if (typeof text !== "string" || text === "") return false;
-    const key = keyOf(text);
-    const table = messages(locale);
-    if (Object.prototype.hasOwnProperty.call(table, key)) return true;
-    return patternsFor(locale).some(({ re }) => re.test(key));
+    return translateOnce(text, 0) !== null;
   }
 
   /**
@@ -230,19 +293,25 @@
     observe();
   }
 
-  /** DOM 变了（Alpine 渲染出新的文字）⇒ 再翻一次。 */
+  /**
+   * DOM 变了（Alpine 渲染出新的文字）⇒ 再翻一次。
+   *
+   * **必须用 `setTimeout`，不能用 `requestAnimationFrame`**（2026-11 实测）：
+   * rAF 只在页面**正在渲染**时才会跑 ⇒ 标签页切到后台、或者无头浏览器里
+   * 页面不渲染时，它**永远不触发** ⇒ `queued` 永远为 true ⇒ 观察器**从此
+   * 死掉**（后面渲染出来的文字全是英文，而控制台干干净净）。
+   * `setTimeout(0)` 没有这个依赖，还能把一串突变合并成一次翻译。
+   */
   function observe() {
     if (typeof MutationObserver === "undefined") return;
     let queued = false;
     const observer = new MutationObserver(() => {
       if (queued) return;
       queued = true;
-      const run = () => {
+      setTimeout(() => {
         queued = false;
         translateTree(document.body);
-      };
-      if (window.requestAnimationFrame) window.requestAnimationFrame(run);
-      else setTimeout(run, 0);
+      }, 0);
     });
     observer.observe(document.body, { childList: true, subtree: true, characterData: true });
   }
