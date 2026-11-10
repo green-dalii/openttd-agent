@@ -64,6 +64,8 @@ window.I18nTerms = {
 	/* ---- 逐轴指标目录（PAIRED_METRICS 的措辞） ---- */
 	"metric.ability.deliveredPerGameDay.label": "货物 + 旅客交付量",
 	"metric.ability.deliveredPerGameDay.unit": "每游戏日",
+	"metric.ability.cargoDeliveredPerGameDay.label": "货物交付量",
+	"metric.ability.cargoDeliveredPerGameDay.unit": "每游戏日",
 	"metric.ability.stations.label": "车站数",
 	"metric.ability.stations.unit": "局末",
 	"metric.ability.vehicles.label": "车辆数",

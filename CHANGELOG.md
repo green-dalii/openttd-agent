@@ -13,12 +13,12 @@
   the cost cap, the horizon or the wall clock ran out - or because the construction did not finish -
   has produced its data, so it is a **result**, not a failure: the exit code is now 0. Real failures
   (the game script never came up, the game crashed, the runner threw) still exit 1, so CI is not
-  flooded by normal stops. The run's *result* is in the manifest's outcome.
+  flooded. The run's *result* is in the manifest's outcome.
 - **The language switch did not translate everything, and it did not translate it back.** Three
   silent faults: a sentence written across two lines kept its line breaks in the DOM, so the lookup
   key never matched; a sentence broken up by an inline `<code>` was never translated at all; and
-  switching to Chinese and back left the page mixed, because the original text was remembered on
-  the **parent** element and restoring it rewrote the parent's whole text.
+  switching back to English left the page mixed, because the original text was remembered on the
+  **parent** element and restoring it rewrote the parent's whole text.
 - **A pair could have compared the wrong two runs.** The repeat index was counted over the rows that
   **had a reading**, so a run with no reading for one metric shifted its partner. The cells are now
   the **runs**, and a cell missing a reading on one side is dropped whole.
@@ -38,6 +38,8 @@
   industries produce it, which **accept** it - the engine's own answer), the **position and name of every
   industry**, and the cargo each road engine carries. Real machine (seed 4242): the model planned to link
   "a producer industry to a consumer industry".
+- **The freight numbers reach the screen (2).** The Compare page draws the **cargo / passenger
+  split** of the deliveries, and the server hands over the measure wording with it.
 
 ### Added
 - **The full map is now one question away.** The observation carries a **sample** of the industries
@@ -66,12 +68,16 @@
   324 of them, where before 226 silently fell back to English. The pages also had Chinese text
   hard-coded in the markup (leftovers from the Chinese-only interface), so the **English** interface
   was showing half-Chinese captions; those are now English source text with a translation.
+- **The freight axis has a paired comparison.** A benchmark comparison now also reports **cargo
+  delivered per game day** (the game script's cargo monitor, cargo half only - a different measure
+  from the main axis, and never added to it). Passengers are not in it: the monitor does not count
+  them, so there is no reading to report. A run with no cargo reading is **not measured**, not zero.
 - **The freight numbers reach the screen.** The server had been computing them for a while: the
   scorecard splits cargo from passengers, and the attribution knows what each freight line
   delivered - but neither was drawn anywhere. The Run page's route table now has a **Delivered**
   column (how much that line delivered; a delivery that cannot be attributed to one line says so
-  instead of showing a number, and a line with no reading shows a dash), and a freight route shows
-  its two **industries** rather than two towns. The Compare page draws the **cargo / passenger
+  instead of showing a number, and a line with no reading shows a dash), a freight route shows its
+  two **industries** rather than two towns, and the Compare page draws the **cargo / passenger
   split** on the Result axis, with the server's own wording of what the split measures.
 - **A freight line now says how much it delivered, and it enters the decision ledger in its own
   shape.** The engine does not record which vehicle delivered what where, so a per-line delivery
@@ -85,8 +91,8 @@
   The ledger had one shape ("two towns"), so a freight line could only enter it as `null/null` -
   and those sentences are injected into the model's context. Passenger and freight routes are now
   **two explicit record kinds**, the de-duplication key includes the kind and the two ends, and
-  the injected sentence says what the line really is, including how
-  much it delivered and that the figure is derived. Real machine (seed 4242, a coal line 28 ->
+  the injected sentence says what the line really is, including how much it delivered and that the
+  figure is derived. Real machine (seed 4242, a coal line 28 ->
   53): 160 tonnes attributed to that line, the fact reads `kind: freight, industries 28 -> 53,
   COAL, delivered 80`, and no fact has a null end any more.
 - **The paired comparison now answers on every axis.** It used to compute exactly one metric - cargo +
@@ -97,10 +103,9 @@
   (what is counted, in what unit, which way is better) so the report and the page cannot drift apart;
   the benchmark report and the Compare page list **every** axis with its verdict, its n and its interval.
   Growth stays out of it on purpose - its metric is a slope across runs, not a per-run number - and a
-  pair with a missing reading on one side is still dropped rather than counted as a zero difference.
-  The verdict word states a **direction** ("the other model's number is the bigger one"), which on the
-  efficiency axis is the *worse* one - so the server now also says **which model came out better**, and
-  a metric that carries no quality (more stations is not automatically better) says so instead.
+  pair with a missing reading on one side is dropped rather than counted as a zero difference. The
+  verdict word states a **direction**, which on the efficiency axis is the *worse* one - so the server
+  now also says **which model came out better**.
 - **Freight deliveries are measured now, and a freight line can be built.** The game script reports what
   *this company* delivered, per cargo, with the engine's own cargo monitor (one axis, accumulated on our
   side because the monitor hands out the delta and resets, every gap reported - a total with a gap is a
@@ -112,9 +117,7 @@
   accepting** a cargo does not stop the industry from handing it over (that is the station's *rating*),
   but a vehicle **cannot unload** at a station that does not accept the cargo - so the loading site only
   has to cover the producer, while the unloading site must accept the cargo. A refused command now reaches
-  the model (it used to only reach the log, so the model would repeat the same impossible order), and the
-  route table shows what each line carries. Fingerprints moved (`41d82339b2925645` ->
-  `3b19310088baff6e`, `9aab3d22e9e95961` -> `103aabed827a8def`): runs across that boundary are not comparable.
+  the model (it used to only reach the log, so the model would repeat the same impossible order).
 - **The model can now ask the game a question and get the answer.** The observation surface is a
   **periodic sample**: it says what the world looks like right now, never what *its own vehicle* is
   doing, how much it carries or what it earned. Two read-only tools close that gap: `inspect_vehicle`
@@ -122,8 +125,7 @@
   population, houses, location, growth rate). The channel is the admin port's gameScript **with an
   answer**: the client injects an id, the GS replies `{kind:"answer", id, ok, data}`, and the two are
   matched by id; when there is no answer the tool says it could not ask - it never claims "no such
-  vehicle". The tool list changed, so the **scaffold fingerprint** moved (`2f5b438b462d21a3` ->
-  `a72a663cdd126090`) - runs across that boundary are not comparable.
+  vehicle".
 
 - **A decision now has a result on the world's side.** "The executor says it built the line" is not a
   result; "the first vehicle reached the station" is. The join is the **vehicle id**: the executor's route
@@ -162,10 +164,7 @@
   already carried the loan, but not how much more could be borrowed - and the **interest rate is not
   exposed by the engine at all**, so that one stays "not measured" rather than a guess. The Bridge GS
   now reads the company's loan ceiling (it has to enter company mode to do it) and reports it, so the
-  projection carries `financing { loanCeiling, loanInterval }` (real machine: 300000 / 10000). The system
-  prompt also states the mechanism the model could not see: the executor raises the loan to the ceiling
-  before it starts building - which moves the **scaffold fingerprint** (`74f2e64d1e930df3` ->
-  `2f5b438b462d21a3`), so runs across that boundary are a *different scaffold*.
+  projection carries `financing { loanCeiling, loanInterval }` (real machine: 300000 / 10000).
 
 - **The model can finally see every town, and the dashboard knows which slice it saw.** The Bridge GS
   reported the ten biggest towns only, so every other town reached the model as a bare number (`#14 ->

@@ -16,7 +16,7 @@
 
 import type { GameMetric } from "./metrics.js";
 import { metricExclusion } from "./metrics.js";
-import { DELIVERED_MEASURE } from "./scorecard.js";
+import { DELIVERED_MEASURE, PASSENGER_CARGO_LABEL } from "./scorecard.js";
 
 /** The axes a **per-run scalar** can live on. Growth is not one of them. */
 export type PairedAxis = "ability" | "efficiency" | "stability";
@@ -67,6 +67,31 @@ function finite(v: unknown): number | null {
 }
 
 /**
+ * The freight axis' own number: cargo delivered (the GS cargo monitor's cargo
+ * half) per game day.
+ *
+ * 为什么单独一条而不是复用主轴: 主轴量的是 **admin 口径**的"货物 + 旅客交付"
+ * （`deliveredRun`），而这里量的是 **monitor 口径**的**货物**那一半 ⇒ 两个口径
+ * 不可相加、也不可互相替代（见 `scorecard.ts` 的 `splitByCargo`）。
+ * 货运轴要问的是一个**更窄**的问题："模型能不能真的自己建起一条会运货的线" ⇒
+ * 它的判据只能是货物那一半（monitor 只统计货物，不统计客运 ⇒ 旅客半边**没有**
+ * 读数，不能拿"0"冒充）。
+ *
+ * 缺失 ≠ 0：这一局没有货物拆分读数（monitor 没报 / 早于 F2 的脚手架）⇒ null。
+ */
+function cargoPerGameDay(m: GameMetric): number | null {
+	const split = m.deliveredByCargo;
+	if (!Array.isArray(split) || split.length === 0) return null;
+	if (typeof m.simulatedDays !== "number" || m.simulatedDays <= 0) return null;
+	let cargo = 0;
+	for (const c of split) {
+		if (c.label === PASSENGER_CARGO_LABEL) continue;
+		cargo += c.amount;
+	}
+	return cargo / m.simulatedDays;
+}
+
+/**
  * The registry — the single place that knows which metrics can be paired and
  * what they are called.
  *
@@ -101,6 +126,15 @@ export const PAIRED_METRICS: PairedMetric[] = [
 		unit: "at the end of the run",
 		betterWhen: null,
 		value: (m) => finite(m.vehicles),
+	},
+	{
+		id: "ability.cargoDeliveredPerGameDay",
+		axis: "ability",
+		axisLabel: "Result",
+		label: "cargo delivered",
+		unit: "per game day",
+		betterWhen: "higher",
+		value: cargoPerGameDay,
 	},
 	{
 		id: "efficiency.deliveredPerMillionTokens",

@@ -96,6 +96,28 @@ describe("配对指标的目录（轴 = 逐局能取标量的轴）", () => {
 		expect(pairedMetric("ability.stations").betterWhen).toBeNull();
 	});
 
+	it("货运轴也有配对指标（monitor 的货物交付量/游戏日）", () => {
+		const m = pairedMetric("ability.cargoDeliveredPerGameDay");
+		expect(m.axis).toBe("ability");
+		expect(m.betterWhen).toBe("higher");
+		expect(m.unit).toBe("per game day");
+		// monitor 的口径：只有货物那一半（PASS 是旅客，不算货物）。
+		const cargo = row({
+			deliveredByCargo: [
+				{ label: "COAL", amount: 120 },
+				{ label: "PASS", amount: 40 },
+			],
+			simulatedDays: 250,
+		});
+		expect(m.value(cargo)).toBeCloseTo(120 / 250, 10);
+	});
+
+	it("没测到货物拆分 ⇒ 货物轴读数是 null（不是 0）", () => {
+		const m = pairedMetric("ability.cargoDeliveredPerGameDay");
+		expect(m.value(row({ deliveredByCargo: null }))).toBeNull();
+		expect(m.value(row({ deliveredByCargo: [] }))).toBeNull();
+	});
+
 	it("未知指标 id 报出来（不静默退回主轴）", () => {
 		expect(() => pairedMetric("nope")).toThrow(/nope/);
 	});

@@ -159,7 +159,7 @@ score: {
 
 | 轴 | 逐局标量（配对用） | 辅助标量（也可配对） |
 |---|---|---|
-| 能力 | `deliveredRun / game-day` | 站点数、车辆数、货物吨数/游戏日 |
+| 能力 | `deliveredRun / game-day` | 站点数、车辆数、货物吨数/游戏日（`ability.cargoDeliveredPerGameDay`，**monitor 口径**，与主轴**不可相加**） |
 | 效率 | `deliveredRun / 1M tokens` | 每决策 token、每局墙钟 |
 | 稳定性 | 工具失败率（`toolFailures / toolCalls`） | GS 错误率/局 |
 
