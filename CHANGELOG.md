@@ -47,8 +47,8 @@
 ### Docs
 - **The profit reading no longer claims to be something it is not.** The promotion gate read
   `income / 365` as "profit per game day", but the admin `income` is the **net cash flow of the current
-  economy year** (360 days, reset at the year boundary); the measurement definitions are now written down
-  (SPEC §10.55 / §10.76, `docs/EVOLUTION.md`) and the correction is the first item of the plan.
+  year** (our games run in calendar mode: the year is the calendar year, and it resets on 1 January); the
+  measurement definitions are now written down (SPEC §10.55 / §10.76) and the correction is the plan's first item.
 
 ### Added
 - **The full map is now one question away.** The observation carries a **sample** of the industries
