@@ -51,16 +51,28 @@ interface Args {
 	 * 进去，每一格都会因为"没有凭证"而失败。
 	 */
 	credentials?: string;
+	/**
+	 * A provider model list (`models-cache.json`) to copy into every cell.
+	 *
+	 * 为什么需要: 走**目录**（catalog）这条路的 provider，模型清单存在
+	 * `<dataDir>/models-cache.json`（Providers 页"从 provider 刷新"写下的那份）
+	 * ⇒ 新的 data dir 里没有它 ⇒ 运行前的闸会说"provider 不认识这个模型"。
+	 * 把同一份清单复制进每一格 ⇒ 每格看到的是**同一个 provider 的同一份清单**
+	 * ⇒ 矩阵比较的仍然是同一个问题。
+	 */
+	modelsCache?: string;
 }
 
 const USAGE = `usage: tsx scripts/bench.ts --root <dir> --models a,b --seeds 11,22 [--repeats 3]
   [--game-days 300] [--scenario prebuilt|freeform] [--start-year 1950] [--map 256x256]
-  [--seconds 900] [--effect 0.5 --cv 1] [--credentials <file>] [--dry-run]
+  [--seconds 900] [--effect 0.5 --cv 1] [--credentials <file>] [--models-cache <file>]
+  [--dry-run]
 
   Every (model, seed, repeat) cell gets its own data dir under <root>, so memory
   never crosses cells. --effect/--cv pre-register the comparison: an
   under-powered matrix is refused before any run starts. --credentials copies a
-  credentials file into every cell (the key must stay out of the repository).`;
+  credentials file into every cell (the key must stay out of the repository);
+  --models-cache copies the provider's model list (same reason).`;
 
 function parseArgs(argv: string[]): Args {
 	const get = (flag: string): string | undefined => {
@@ -88,6 +100,7 @@ function parseArgs(argv: string[]): Args {
 		...(get("--cv") !== undefined ? { cv: Number(get("--cv")) } : {}),
 		seconds: Number(get("--seconds") ?? 900),
 		...(get("--credentials") !== undefined ? { credentials: get("--credentials")! } : {}),
+		...(get("--models-cache") !== undefined ? { modelsCache: get("--models-cache")! } : {}),
 	};
 }
 
@@ -110,6 +123,18 @@ export function installCredentials(source: string, cellDir: string): void {
 }
 
 /**
+ * Copy the provider's model list into one cell's data dir.
+ *
+ * 为什么需要: 目录（catalog）provider 的模型清单在 `<dataDir>/models-cache.json`
+ * ⇒ 新目录里没有它 ⇒ 运行前的闸会说"provider 不认识这个模型"⇒ 矩阵第一格就
+ * 失败。这份清单是 provider 自己的（Providers 页刷新时拿到的），复制它只是把
+ * **同一个 provider 的同一份清单**放进每一格。
+ */
+export function installModelsCache(source: string, cellDir: string): void {
+	copyFileSync(source, join(cellDir, "models-cache.json"));
+}
+
+/**
  * Check the credentials file **before** the matrix starts.
  *
  * 为什么要在跑前查: 缺凭证的格子会**跑到一半**才失败 ⇒ 已经烧掉的 token 与
@@ -123,14 +148,25 @@ export function checkCredentials(source: string | undefined): void {
 	}
 }
 
+/** The same check for the provider's model list (fail before the first cell). */
+export function checkModelsCache(source: string | undefined): void {
+	if (!source) return;
+	const path = resolve(source);
+	if (!existsSync(path)) {
+		throw new Error(`models cache not found: ${path}`);
+	}
+}
+
 function runCell(
 	cell: { model: string; seed: number; dataDir: string },
 	world: BenchWorld,
 	seconds: number,
 	credentials?: string,
+	modelsCache?: string,
 ): number {
 	mkdirSync(cell.dataDir, { recursive: true });
 	if (credentials) installCredentials(credentials, cell.dataDir);
+	if (modelsCache) installModelsCache(modelsCache, cell.dataDir);
 	const logPath = join(cell.dataDir, "run.log");
 	const fd = openSync(logPath, "a");
 	// The model is passed through the same env var the CLI already uses, so the
@@ -196,6 +232,7 @@ function main(argv: string[]): number {
 	// otherwise fail half-way through the matrix.
 	try {
 		checkCredentials(args.credentials);
+		checkModelsCache(args.modelsCache);
 	} catch (e) {
 		console.error(`!! ${(e as Error).message}`);
 		return 1;
@@ -239,7 +276,7 @@ function main(argv: string[]): number {
 	let failed = 0;
 	for (const cell of plan.cells) {
 		cleanupGame();
-		const code = runCell(cell, world, args.seconds, args.credentials);
+		const code = runCell(cell, world, args.seconds, args.credentials, args.modelsCache);
 		if (code !== 0) {
 			failed++;
 			console.log(`!! ${cell.model} seed=${cell.seed} rep=${cell.repeat} rc=${code} (log: ${join(cell.dataDir, "run.log")})`);
