@@ -10,7 +10,8 @@
  */
 
 import { access } from "node:fs/promises";
-import { pathToFileURL } from "node:url";
+import { realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { loadConfig, ConfigError, type Config } from "../config.js";
 import { OpenTTDProcessManager } from "../game/process-manager.js";
 import { AdminUpdateFrequency, AdminUpdateType } from "../game/admin-protocol.js";
@@ -546,7 +547,12 @@ function isEntryPoint(): boolean {
 	const arg = process.argv[1];
 	if (!arg) return false;
 	try {
-		return import.meta.url === pathToFileURL(arg).href;
+		// Compare the **real** paths: macOS's `/tmp` is a symlink to
+		// `/private/tmp`, so `import.meta.url` carries the resolved path while
+		// `process.argv[1]` carries the path as it was typed - comparing the
+		// strings would decide "not the entry point" and the CLI would exit
+		// **without doing anything**, silently.
+		return realpathSync(fileURLToPath(import.meta.url)) === realpathSync(arg);
 	} catch {
 		return false;
 	}

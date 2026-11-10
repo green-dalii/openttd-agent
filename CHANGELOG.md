@@ -9,11 +9,17 @@
 
 ## [Unreleased]
 ### Fixed
+- **The benchmark matrix could not use a real provider, and it could also do nothing at all.** Every
+  cell is its own data directory (memory must not cross cells) while the key lives outside the
+  repository, so a cell had no credentials and failed; `--credentials` now copies the file into
+  each cell (0600, never printed, checked before the first cell runs). Separately, the script's
+  "do not run on import" check compared paths as strings - under a symlinked path it **exited
+  silently having done nothing**; it now compares real paths, and a test fails if it goes quiet.
 - **A run that stopped at its budget no longer exits 1.** A run that ends because the token cap,
   the cost cap, the horizon or the wall clock ran out - or because the construction did not finish -
   has produced its data, so it is a **result**, not a failure: the exit code is now 0. Real failures
-  (the game script never came up, the game crashed, the runner threw) still exit 1, so CI is not
-  flooded. The run's *result* is in the manifest's outcome.
+  (the game script never came up, the game crashed, the runner threw) still exit 1. The run's
+  *result* is in the manifest's outcome.
 - **The language switch did not translate everything, and it did not translate it back.** Three
   silent faults: a sentence written across two lines kept its line breaks in the DOM, so the lookup
   key never matched; a sentence broken up by an inline `<code>` was never translated at all; and
@@ -46,32 +52,29 @@
   (the top producers) and only the cargo types that had production - which keeps the payload
   small, but leaves the model unable to tell "no production" from "not measured". Two read-only
   tools (`get_industries`, `get_cargo`) now fetch the whole thing on demand, and the Run page's
-  industry table has an **expand all** button that does the same. The sample and the full list
-  come from **one scan** in the game script, so they cannot drift.
+  industry table has an **expand all** button. Sample and full list come from **one scan**.
 - **The server's own vocabulary is now translated too - by id.** The outcome classes, the
   problem codes, the delivery measures and the knob values are the **server's** wording, and the
   server keeps exactly one canonical wording of them. The front end now looks them up **by id**
   (`outcome.token_cap`, `problem.no_credential`) and falls back to the server's text when it has
-  no translation, so the wording is never copied into the front-end table. A test checks the
-  table's coverage against the server's own lists - a new id without a translation fails the build.
+  no translation. A test checks the table's coverage against the server's own lists.
 - **The Chinese interface now covers the text the scripts render too.** The hints, empty states,
-  legends and labels the pages draw at runtime - about 440 more strings - are translated as well.
+  legends and labels the pages draw at runtime - about 440 more strings - are translated.
 - **The language switch stopped working for anything rendered after the page loaded.** The
   translation of newly rendered text was scheduled on `requestAnimationFrame`, which only runs
   while the page is painted - so in a background tab the observer never fired again and
-  everything the framework drew afterwards stayed English, with nothing in the console.
+  everything drawn afterwards stayed English, with nothing in the console.
 - **The interface now picks up the language before the first paint.** The framework starts in a
   microtask, so it rendered before the language runtime had initialised - everything it drew looked
-  up in the default language and stayed there. The runtime now initialises on the framework's start.
+  up in the default language. The runtime now initialises on the framework's start.
 - **The dashboard's Chinese interface is now complete for its static copy.** Every visible
   sentence in the four pages (Run / Compare / History / Configure) has a Chinese translation -
   324 of them, where before 226 silently fell back to English. The pages also had Chinese text
-  hard-coded in the markup (leftovers from the Chinese-only interface), so the **English** interface
-  was showing half-Chinese captions; those are now English source text with a translation.
+  hard-coded in the markup, so the **English** interface showed half-Chinese captions.
 - **The freight axis has a paired comparison.** A benchmark comparison now also reports **cargo
   delivered per game day** (the game script's cargo monitor, cargo half only - a different measure
-  from the main axis, and never added to it). Passengers are not in it: the monitor does not count
-  them, so there is no reading to report. A run with no cargo reading is **not measured**, not zero.
+  from the main axis, never added to it). Passengers are not in it: the monitor does not count them.
+  A run with no cargo reading is **not measured**, not zero.
 - **The freight numbers reach the screen.** The server had been computing them for a while: the
   scorecard splits cargo from passengers, and the attribution knows what each freight line
   delivered - but neither was drawn anywhere. The Run page's route table now has a **Delivered**
@@ -80,52 +83,51 @@
   two **industries** rather than two towns, and the Compare page draws the **cargo / passenger
   split** on the Result axis, with the server's own wording of what the split measures.
 - **A freight line now says how much it delivered, and it enters the decision ledger in its own
-  shape.** The engine does not record which vehicle delivered what where, so a per-line delivery
-  figure has always been a *derived* number - and there was nothing to derive it from: the game
-  script reported the cargo totals but dropped the destination, and the route table did not say
-  which industries a line served. The script now also reports the delivery **per (cargo,
-  receiving industry)** and the **two industry ids of every freight line**, and the harness
-  attributes each delivery to the one line that serves that cargo at that industry. When several
-  of our lines share it the delivery is **not split** - it is reported as unattributable with the
-  reason; when no line of ours serves it the amount is reported separately rather than dropped.
-  The ledger had one shape ("two towns"), so a freight line could only enter it as `null/null` -
-  and those sentences are injected into the model's context. Passenger and freight routes are now
-  **two explicit record kinds**, the de-duplication key includes the kind and the two ends, and
-  the injected sentence says what the line really is, including how much it delivered and that the
-  figure is derived. Real machine (seed 4242, a coal line 28 ->
-  53): 160 tonnes attributed to that line, the fact reads `kind: freight, industries 28 -> 53,
-  COAL, delivered 80`, and no fact has a null end any more.
-- **The paired comparison now answers on every axis.** It used to compute exactly one metric - cargo +
-  passengers delivered per game day - so the efficiency axis (delivered per 1M tokens) and the stability
-  axis (share of tool calls that failed) had **no paired interval at all**. That is how "the efficiency
-  axis looks separable" could sit in a plan for a whole benchmark round without ever being a verdict.
-  The comparison is now a function of the axis; the registry of comparable metrics owns the wording
-  (what is counted, in what unit, which way is better) so the report and the page cannot drift apart;
-  the benchmark report and the Compare page list **every** axis with its verdict, its n and its interval.
-  Growth stays out of it on purpose - its metric is a slope across runs, not a per-run number - and a
-  pair with a missing reading on one side is dropped rather than counted as a zero difference. The
-  verdict word states a **direction**, which on the efficiency axis is the *worse* one - so the server
-  now also says **which model came out better**.
-- **Freight deliveries are measured now, and a freight line can be built.** The game script reports what
-  *this company* delivered, per cargo, with the engine's own cargo monitor (one axis, accumulated on our
-  side because the monitor hands out the delta and resets, every gap reported - a total with a gap is a
-  **lower bound**), and the model can now order a **freight line**: `build_freight_route(cargo,
-  from_industry, to_industry)` - the model picks the cargo and the two industries, the scaffold finds the
-  station sites by the engine's own rules, lays the road, builds the depot, buys and refits the truck and
-  starts it. Real machine (seed 4242): coal mine 28 -> power station 53, **5 tonnes delivered**.
-  Two engine rules are baked in, and the first one corrected an earlier conclusion: a station **not
-  accepting** a cargo does not stop the industry from handing it over (that is the station's *rating*),
-  but a vehicle **cannot unload** at a station that does not accept the cargo - so the loading site only
-  has to cover the producer, while the unloading site must accept the cargo. A refused command now reaches
-  the model (it used to only reach the log, so the model would repeat the same impossible order).
+shape.** The engine does not record which vehicle delivered what where, so a per-line delivery
+figure has always been a *derived* number - and there was nothing to derive it from: the game script
+reported the cargo totals but dropped the destination, and the route table did not say which
+industries a line served. The script now also reports the delivery **per (cargo, receiving
+industry)** and the **two industry ids of every freight line**, and the harness attributes each
+delivery to the one line that serves that cargo at that industry. When several of our lines share it
+the delivery is **not split** - it is reported as unattributable with the reason; when no line of
+ours serves it the amount is reported separately rather than dropped. The ledger had one shape ("two
+towns"), so a freight line could only enter it as `null/null` - and those sentences are injected
+into the model's context. Passenger and freight routes are now **two explicit record kinds**, the
+de-duplication key includes the kind and the two ends, and the injected sentence says what the line
+really is, including how much it delivered and that the figure is derived. Real machine (seed 4242,
+a coal line 28 -> 53): 160 tonnes attributed to that line, the fact reads `kind: freight, industries
+28 -> 53, COAL, delivered 80`, and no fact has a null end any more.
+- **The paired comparison now answers on every axis.** It used to compute exactly one metric - cargo
++ passengers delivered per game day - so the efficiency axis (delivered per 1M tokens) and the
+stability axis (share of tool calls that failed) had **no paired interval at all**. That is how "the
+efficiency axis looks separable" could sit in a plan for a whole benchmark round without ever being
+a verdict. The comparison is now a function of the axis; the registry of comparable metrics owns the
+wording (what is counted, in what unit, which way is better) so the report and the page cannot drift
+apart; the benchmark report and the Compare page list **every** axis with its verdict, its n and its
+interval. Growth stays out of it on purpose - its metric is a slope across runs, not a per-run
+number - and a pair with a missing reading on one side is dropped rather than counted as a zero
+difference. The verdict word states a **direction**, which on the efficiency axis is the *worse* one
+- so the server now also says **which model came out better**.
+- **Freight deliveries are measured now, and a freight line can be built.** The game script reports
+what *this company* delivered, per cargo, with the engine's own cargo monitor (one axis, accumulated
+on our side because the monitor hands out the delta and resets, every gap reported - a total with a
+gap is a **lower bound**), and the model can now order a **freight line**:
+`build_freight_route(cargo, from_industry, to_industry)` - the model picks the cargo and the two
+industries, the scaffold finds the station sites by the engine's own rules, lays the road, builds
+the depot, buys and refits the truck and starts it. Real machine (seed 4242): coal mine 28 -> power
+station 53, **5 tonnes delivered**. Two engine rules are baked in, and the first one corrected an
+earlier conclusion: a station **not accepting** a cargo does not stop the industry from handing it
+over (that is the station's *rating*), but a vehicle **cannot unload** at a station that does not
+accept the cargo - so the loading site only has to cover the producer, while the unloading site must
+accept the cargo. A refused command now reaches the model (it used to only reach the log, so the
+model would repeat the same impossible order).
 - **The model can now ask the game a question and get the answer.** The observation surface is a
   **periodic sample**: it says what the world looks like right now, never what *its own vehicle* is
   doing, how much it carries or what it earned. Two read-only tools close that gap: `inspect_vehicle`
   (name, location, type, engine, age, speed, load, profit this year) and `inspect_town` (name,
   population, houses, location, growth rate). The channel is the admin port's gameScript **with an
   answer**: the client injects an id, the GS replies `{kind:"answer", id, ok, data}`, and the two are
-  matched by id; when there is no answer the tool says it could not ask - it never claims "no such
-  vehicle".
+  matched by id; when there is no answer the tool says it could not ask.
 
 - **A decision now has a result on the world's side.** "The executor says it built the line" is not a
   result; "the first vehicle reached the station" is. The join is the **vehicle id**: the executor's route
@@ -135,14 +137,14 @@
   vehicle we do not know is **not attributed** (attribution must not be guessed).
 
 - **The model can finally see what the game pushes at it.** The engine pushes events to the
-  GameScript (a vehicle was lost, the first vehicle reached a station, an industry opened) - and our
-  Bridge GS **drained them and threw them away**: only the admin-port event was handled, so a model
-  could never see "my bus arrived" unless it happened to look at exactly the right moment. The GS now
-  maps the engine's event types onto a **closed vocabulary** (the seven kinds are listed in SPEC
-  §10.78), the world state keeps them in order (bounded to 50), and the projection carries them - so
-  `observe()` and every decision context show what happened. Real machine (real model, seed 4242): the
-  first vehicle reaching each station arrived twice. Two Squirrel traps came with it (MEMORY D95): a
-  **class member must be declared** before it is assigned, and **reading a missing key throws**.
+GameScript (a vehicle was lost, the first vehicle reached a station, an industry opened) - and our
+Bridge GS **drained them and threw them away**: only the admin-port event was handled, so a model
+could never see "my bus arrived" unless it happened to look at exactly the right moment. The GS now
+maps the engine's event types onto a **closed vocabulary** (the seven kinds are listed in SPEC
+§10.78), the world state keeps them in order (bounded to 50), and the projection carries them - so
+`observe()` and every decision context show what happened. Real machine (real model, seed 4242): the
+first vehicle reaching each station arrived twice. Two Squirrel traps came with it (MEMORY D95): a
+**class member must be declared** before it is assigned, and **reading a missing key throws**.
 
 ### Fixed
 - **The cargo monitor was never missing - our own accumulator was broken.** On 2026-11-01 this project
@@ -151,14 +153,14 @@
   wrote into a Squirrel table with a key that did not exist yet, Squirrel tables are strict - the write
   threw, the facts collector died, and the empty result was read as "the API returns null". What the
   engine really does not expose stays unmeasured: **per station / per route**. The research:
-  `docs/PER-LINE-DELIVERY-FEASIBILITY.md` - **do not change the engine or the script language**.
+  `docs/PER-LINE-DELIVERY-FEASIBILITY.md` - **do not change the engine**.
 
 ### Added
 - **A comparison only compares one question.** Runs that answered a **different** question - a
   different scaffold, a different observation surface, a different slice of the world - are no longer
   mixed into one table. The server groups the metric rows by the manifest's own fields (scaffold +
   observation shape + observation policy), the page offers the groups, and the numbers below belong to
-  **one** group; the runs in the other groups are counted, not dropped.
+  **one** group; the other groups are counted, not dropped.
 
 - **The model can finally see its financing, and it knows why its balance moves.** The company facts
   already carried the loan, but not how much more could be borrowed - and the **interest rate is not
@@ -178,9 +180,8 @@
   still have seen different worlds - and nothing said so. The payload fingerprint cannot answer it
   across runs (it contains the world, so it differs on every seed - it would cry wolf), so there is
   now a third fingerprint: the **structure** of the world facts the model sees (which facts, which
-  types; values and array lengths ignored), computed from a probe world that fills every branch. It
-  depends on the code only ⇒ it can be computed **before** a run, both backends record it, and the
-  preview promises it.
+  types; values and array lengths ignored). It depends on the code only ⇒ it can be computed
+  **before** a run, both backends record it, and the preview promises it.
 
 - **A comparison can start from the comparison.** The Compare page could only look at runs that already existed: picking the models, the worlds and the caps and then *starting that plan* was impossible. The plan is now computed **server-side** (the page estimates nothing): how many runs it would start, which caps apply, whether the spend is measurable, which model each cell uses - with the same field names the manifest uses, so plan and finished run compare field by field. Launching runs the cells **one after another** (one process, one game port); a failed cell is recorded and the rest still run. The refusals happen before anything starts: a cost cap on a model without a price table, an unknown model, or a plan that collides with a running game.
 
