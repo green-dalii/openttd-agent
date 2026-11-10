@@ -9,22 +9,20 @@
 
 ## [Unreleased]
 ### Fixed
-- **The benchmark matrix could not use a real provider, and it could also do nothing at all.** Every
-  cell is its own data directory (memory must not cross cells) while the key lives outside the
-  repository, so a cell had no credentials and failed; `--credentials` now copies the file into
-  each cell (0600, never printed, checked before the first cell runs). Separately, the script's
-  "do not run on import" check compared paths as strings - under a symlinked path it **exited
-  silently having done nothing**; it now compares real paths, and a test fails if it goes quiet.
-- **A run that stopped at its budget no longer exits 1.** A run that ends because the token cap,
-  the cost cap, the horizon or the wall clock ran out - or because the construction did not finish -
-  has produced its data, so it is a **result**, not a failure: the exit code is now 0. Real failures
-  (the game script never came up, the game crashed, the runner threw) still exit 1. The run's
-  *result* is in the manifest's outcome.
-- **The language switch did not translate everything, and it did not translate it back.** Three
-  silent faults: a sentence written across two lines kept its line breaks in the DOM, so the lookup
-  key never matched; a sentence broken up by an inline `<code>` was never translated at all; and
-  switching back to English left the page mixed, because the original text was remembered on the
-  **parent** element and restoring it rewrote the parent's whole text.
+- **The benchmark matrix could not use a real provider, and it could also do nothing at all.** Every cell is its own
+  data directory (memory must not cross cells) while the key lives outside the repository, so a cell had no
+  credentials and failed; `--credentials` now copies the file into each cell (0600, never printed, checked before the
+  first cell runs). Separately, the script's "do not run on import" check compared paths as strings - under a
+  symlinked path it **exited silently having done nothing**; it now compares real paths, and a test fails if it goes
+  quiet.
+- **A run that stopped at its budget no longer exits 1.** A run that ends because the token cap, the cost cap, the
+  horizon or the wall clock ran out - or because the construction did not finish - has produced its data, so it is a
+  **result**, not a failure: the exit code is now 0. Real failures (the game script never came up, the game crashed,
+  the runner threw) still exit 1. The run's *result* is in the manifest's outcome.
+- **The language switch did not translate everything, and it did not translate it back.** Three silent faults: a
+  sentence written across two lines kept its line breaks in the DOM, so the lookup key never matched; a sentence
+  broken up by an inline `<code>` was never translated at all; and switching back to English left the page mixed,
+  because the original text was remembered on the **parent** element and restoring it rewrote the parent's whole text.
 - **A pair could have compared the wrong two runs.** The repeat index was counted over the rows that
   **had a reading**, so a run with no reading for one metric shifted its partner. The cells are now
   the **runs**, and a cell missing a reading on one side is dropped whole.
@@ -39,13 +37,18 @@
   memory, so a page added after the server started was unreachable ("not found"). The routes are now
   **derived from the files** in `public/pages/`.
 
-- **The model can finally see the freight world.** A freight line is "which mine, which plant", and the
-  model could see neither: the GS now reports a **cargo catalogue** (which cargo is freight, which
-  industries produce it, which **accept** it - the engine's own answer), the **position and name of every
-  industry**, and the cargo each road engine carries. Real machine (seed 4242): the model planned to link
-  "a producer industry to a consumer industry".
-- **The freight numbers reach the screen (2).** The Compare page draws the **cargo / passenger
-  split** of the deliveries, and the server hands over the measure wording with it.
+- **The model can finally see the freight world.** A freight line is "which mine, which plant", and the model could
+  see neither: the GS now reports a **cargo catalogue** (which cargo is freight, which industries produce it, which
+  **accept** it - the engine's own answer), the **position and name of every industry**, and the cargo each road
+  engine carries. Real machine (seed 4242): the model planned to link "a producer industry to a consumer industry".
+- **The freight numbers reach the screen (2).** The Compare page draws the **cargo / passenger split** of the
+  deliveries, and the server hands over the measure wording with it.
+
+### Docs
+- **The profit reading no longer claims to be something it is not.** The promotion gate read
+  `income / 365` as "profit per game day", but the admin `income` is the **net cash flow of the current
+  economy year** (360 days, reset at the year boundary); the measurement definitions are now written down
+  (SPEC §10.55 / §10.76, `docs/EVOLUTION.md`) and the correction is the first item of the plan.
 
 ### Added
 - **The full map is now one question away.** The observation carries a **sample** of the industries
@@ -75,28 +78,25 @@
   delivered per game day** (the game script's cargo monitor, cargo half only - a different measure
   from the main axis, never added to it). Passengers are not in it: the monitor does not count them.
   A run with no cargo reading is **not measured**, not zero.
-- **The freight numbers reach the screen.** The server had been computing them for a while: the
-  scorecard splits cargo from passengers, and the attribution knows what each freight line
-  delivered - but neither was drawn anywhere. The Run page's route table now has a **Delivered**
-  column (how much that line delivered; a delivery that cannot be attributed to one line says so
-  instead of showing a number, and a line with no reading shows a dash), a freight route shows its
-  two **industries** rather than two towns, and the Compare page draws the **cargo / passenger
-  split** on the Result axis, with the server's own wording of what the split measures.
+- **The freight numbers reach the screen.** The server had been computing them for a while: the scorecard splits cargo
+  from passengers, and the attribution knows what each freight line delivered - but neither was drawn anywhere. The
+  Run page's route table now has a **Delivered** column (how much that line delivered; a delivery that cannot be
+  attributed to one line says so instead of showing a number, and a line with no reading shows a dash), a freight
+  route shows its two **industries** rather than two towns, and the Compare page draws the **cargo / passenger split**
+  on the Result axis, with the server's own wording of what the split measures.
 - **A freight line now says how much it delivered, and it enters the decision ledger in its own
-shape.** The engine does not record which vehicle delivered what where, so a per-line delivery
-figure has always been a *derived* number - and there was nothing to derive it from: the game script
-reported the cargo totals but dropped the destination, and the route table did not say which
-industries a line served. The script now also reports the delivery **per (cargo, receiving
-industry)** and the **two industry ids of every freight line**, and the harness attributes each
-delivery to the one line that serves that cargo at that industry. When several of our lines share it
-the delivery is **not split** - it is reported as unattributable with the reason; when no line of
-ours serves it the amount is reported separately rather than dropped. The ledger had one shape ("two
-towns"), so a freight line could only enter it as `null/null` - and those sentences are injected
-into the model's context. Passenger and freight routes are now **two explicit record kinds**, the
-de-duplication key includes the kind and the two ends, and the injected sentence says what the line
-really is, including how much it delivered and that the figure is derived. Real machine (seed 4242,
-a coal line 28 -> 53): 160 tonnes attributed to that line, the fact reads `kind: freight, industries
-28 -> 53, COAL, delivered 80`, and no fact has a null end any more.
+shape.** The engine does not record which vehicle delivered what where, so a per-line delivery figure has always been
+  a *derived* number - and there was nothing to derive it from: the game script reported the cargo totals but dropped
+  the destination, and the route table did not say which industries a line served. The script now also reports the
+  delivery **per (cargo, receiving industry)** and the **two industry ids of every freight line**, and the harness
+  attributes each delivery to the one line that serves that cargo at that industry. When several of our lines share it
+  the delivery is **not split** - it is reported as unattributable with the reason; when no line of ours serves it the
+  amount is reported separately rather than dropped. The ledger had one shape ("two towns"), so a freight line could
+  only enter it as `null/null` - and those sentences are injected into the model's context. Passenger and freight
+  routes are now **two explicit record kinds**, the de-duplication key includes the kind and the two ends, and the
+  injected sentence says what the line really is, including how much it delivered and that the figure is derived. Real
+  machine (seed 4242, a coal line 28 -> 53): 160 tonnes attributed to that line, the fact reads `kind: freight,
+  industries 28 -> 53, COAL, delivered 80`, and no fact has a null end any more.
 - **The paired comparison now answers on every axis.** It used to compute exactly one metric - cargo
 + passengers delivered per game day - so the efficiency axis (delivered per 1M tokens) and the
 stability axis (share of tool calls that failed) had **no paired interval at all**. That is how "the
