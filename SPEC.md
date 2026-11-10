@@ -484,8 +484,15 @@ JSON + GSSign 标牌邮箱）、`OpenTTDLab`（受控 Squirrel AI + admin port�
 ### 10.55 NEXT-2 N2-4：主指标换成收益流 + 标定结果（2026-09-16）
 **过程** → `CHANGELOG.md`。**仍为真的事实**：主指标是**收益流**，不是成本。
 - 事实（2026-11-11 复核 OpenTTD 15.3 源码）：admin 的 `income` = `-Σ company->yearly_expenses[0]`（`network_admin.cpp`）⇒ 它是
-  **当前经济年迄今的净现金流**（收入科目记为负费用）⇒ **不是运营利润**；经济年 = **360 天**（`TimerGameEconomy::DAYS_IN_ECONOMY_YEAR`），
-  年边界 `rotate + fill(0)` ⇒ **跨年归零**；**日历**年仍是 365/366 天 ⇒ **两个"年"不能混用**。
+  **当前年迄今的净现金流**（收入科目记为负费用）⇒ **不是运营利润**；年边界 `rotate + fill(0)` ⇒ **跨年归零**。
+- 事实（2026-11-11 更正上一条的年长）：**我们的局跑在 calendar 模式**（真机实测 1950-01-15 → 1950-11-02 = 291 天 = 日历天）
+  ⇒ 经济日期与日历同步 ⇒ **经济年 = 日历年（365/366 天）**，YTD 读数在 **1 月 1 日**归零；`TimerGameEconomy::DAYS_IN_ECONOMY_YEAR = 360`
+  的注释自己写着 "**when in wallclock timekeeping mode**"（`timer_game_economy.h`）⇒ **"经济年 360 天"对本项目是错的**。
+- 事实（2026-11-11）：**admin 的年度/季度读数挂在年/季边界，且顺序对"分段积分"有利**：引擎在 1 月 1 日**先**发 admin 年度读数
+  （`network_server.cpp` 的年度定时器优先级 `NONE`），**之后**才把公司费用与车辆利润归零（`company_cmd.cpp` 的 `Priority::COMPANY`、
+  `vehicle.cpp` 的 `Priority::VEHICLE`）⇒ 那一刻的年度读数是**上一整年**的完整值；同理 `deliveredCargo` 是**当季**计数（季边界 = 1/4/7/10 月 1 日）。
+- 事实（2026-11-11）：**车辆的 YTD 利润是运营利润**：引擎把运输收入记进 `profit_this_year`、把运行成本记成负值（`economy.cpp`）⇒
+  `GSVehicle.GetProfitThisYear()` **不含**基建/购车/利息（admin 的 `income` 含）⇒ 门槛要的量引擎侧有，但它**同样在年边界归零**。
 
 ### 10.56 N2-5 首轮 A/B 判废：臂划分缺陷（2026-09-17）
 **仍为真**：臂划分必须按**首次真实动作**判定；否则会把 control/treatment 判反，得到「方向反转」的假结论（`MEMORY.md` D20）。
@@ -566,8 +573,12 @@ JSON + GSSign 标牌邮箱）、`OpenTTDLab`（受控 Squirrel AI + admin port�
 - 事实（2026-11-10 真机）:**词表与工具描述会漂移**（同一次真机）：货运 F3 把 `build_freight_route` 加进 `STRATEGY_ACTIONS`，但 `record_strategy` 的描述里没写它 ⇒ 模型把货运模式记成 `build_bus_route`（5 条采样里有 4 条）⇒ 同一个想法被拆成两张卡。描述现在由 `STRATEGY_ACTIONS` 生成，并有守卫要求词表里的每个动作都出现在描述里。
 - 事实（2026-11-10 真机）:**当前门槛下晋升不可达**（真机两局 500 日）：利润闸是 `每游戏日 > 5000/300 ≈ 16.67`（即**年收入 > £6083**），而 MiniMax-M2.5 的最好一局是 **+£1662/年（4.55/日）**，另一局 **-£31112** ⇒ **没有一局达到门槛** ⇒ 策略库至今 0 晋升（候选池里有卡，但 `enabled=false` 且未过闸）。
 - 事实（2026-11-11）：**这个读数口径本身是错的**：`profitPerDay = income / 365`（`reflection-run.ts`）里的 `income` 是**当年迄今净现金
-  流**（§10.55）⇒ ① 除数 365 是**日历**年（经济年 360 天）；② 局跨过经济年时它**只覆盖最后一个经济年** ⇒ 它**不是"这一局的每游戏
-  日利润"**，却拿去和门槛比 ⇒ **口径修正前门槛不可判定**。
+  流**（§10.55）⇒ ① 除数 365 是**整年长度**，而分母必须是**这一局实际经过的游戏日**；② 局跨过年边界（1 月 1 日）时它**只覆盖
+  最后一年** ⇒ 它**不是"这一局的每游戏日利润"**，却拿去和门槛比 ⇒ **口径修正前门槛不可判定**。**同一族错误还有两处**：`gameDayFromRawDate`
+  （`payload-parsers.ts`）把日历投影成**虚构的 360 天年**（每年丢 5 天）⇒ "250 游戏日"其实约 256 **日历**天；`route-stats.ts` 的
+  `dayOfYear(gameDate) = gameDate % 365` **不是年内第几天**，且分母的年与分子（车辆 YTD 利润）的年**不同步** ⇒ 跨年后的"每日收益"失真。
+  修正**不需要改 GS**：`convertDateToYmd` 已是引擎口径的精确换算（raw date 0 = 0000-01-01，前推格里历，live capture 已验证），且 GS 的
+  `gameDate` 与 admin 的 raw **同一纪元** ⇒ 观测面指纹不变，矩阵可比性不受影响。
 
 ### 10.77 R2b 实施结果：反思改走 Agent + 记录工具（2026-09-18/19）
 **仍为真**：反思复用**同一个 `Agent`** + 记录型工具（`src/evolution/reflect-tools.ts`），带 `validateLesson()`；入口 `runReflection({streamFn, model, dataDir, facts, now})`。
