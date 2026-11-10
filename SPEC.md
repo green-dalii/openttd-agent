@@ -559,6 +559,9 @@ JSON + GSSign 标牌邮箱）、`OpenTTDLab`（受控 Squirrel AI + admin port�
 ### 10.76 R2 实施结果：经验 = 带实测读数的观察（2026-09-18）
 **仍为真**：经验（`Lesson`）必须带**实测读数**：`outcome:{metric,before,after}`；撤回（retraction）在去重时优先。
 依据：`src/evolution/lessons.ts`；教训 `MEMORY.md` D29。
+- 事实（2026-11-10 真机）:**一局里模型可以记多条同模式采样**（真机 seed 11、502 日：5 条采样）⇒ 旧实现把**每条采样**都追加进 `profitPerDayPerRun`，而闸把数组长度当成"已验证局数"⇒ **单局三条高值采样就能过闸**，SPEC §5.3 的"已验证局≥2"**从未被强制**。现在卡片**一局一个读数**（`profitPerDayPerRun[i]` 与 `sourceSessionIds[i]` 一一对应），闸按**不同局**计数。
+- 事实（2026-11-10 真机）:**词表与工具描述会漂移**（同一次真机）：货运 F3 把 `build_freight_route` 加进 `STRATEGY_ACTIONS`，但 `record_strategy` 的描述里没写它 ⇒ 模型把货运模式记成 `build_bus_route`（5 条采样里有 4 条）⇒ 同一个想法被拆成两张卡。描述现在由 `STRATEGY_ACTIONS` 生成，并有守卫要求词表里的每个动作都出现在描述里。
+- 事实（2026-11-10 真机）:**当前门槛下晋升不可达**（真机两局 500 日）：利润闸是 `每游戏日 > 5000/300 ≈ 16.67`（即**年收入 > £6083**），而 MiniMax-M2.5 的最好一局是 **+£1662/年（4.55/日）**，另一局 **-£31112** ⇒ **没有一局达到门槛** ⇒ 策略库至今 0 晋升（候选池里有卡，但 `enabled=false` 且未过闸）。
 
 ### 10.77 R2b 实施结果：反思改走 Agent + 记录工具（2026-09-18/19）
 **仍为真**：反思复用**同一个 `Agent`** + 记录型工具（`src/evolution/reflect-tools.ts`），带 `validateLesson()`；入口 `runReflection({streamFn, model, dataDir, facts, now})`。
@@ -1276,17 +1279,12 @@ compaction 冲突）在 `docs/HARNESS-MIGRATION.md` §3（带坐标），此处�
 
 ### 10.126 货运：计量（F2）、动作（F3）与归因的地基（F4 前置调研）（2026-11-08）
 
-- 事实：`GSCargoMonitor` 是**读一次清零的增量**（`script_cargomonitor.hpp`：每次读返回"上次读之后的增量"并把累计清零）⇒ 累计**必须由 harness 做**；城镇轴与产业轴会把**同一笔交付**记两次 ⇒ 只取**产业交付**。
-- 事实：**Bridge GS 是服务器脚本**（`[game_scripts]`），**它没有自己的公司** ⇒ `GSCompany.COMPANY_SELF` 解析成无效公司，`GetIndustryDeliveryAmount` **返回 -1（不是抛异常）** ⇒ 真机 38 个目的地全部 failed、读数一个都没有。修法：用 **executor 的公司 id**（命令里带来的，默认 0）——失败**不丢增量**，但读数缺一个 ⇒ 记进缺口。
-- 事实：缺口只报**真丢了的**（`own_gaps = {dropped, error}`）：目的地消失前未结算的增量拿不回来了 ⇒ 累计值是**下界**。**公司还没建出来时那些 -1 不算缺口**（那时 monitor 里根本没有增量，什么都没丢）—— 算进去会让页面谎称「累计是下界」。真机（seed 4242，客运脚手架）：`own_monitored = {cargoes: 9, destinations: 38}`、9 个货种**全为 0**（诚实：只建客运线路 ⇒ 没有货运交付）、`gaps = {dropped: 0}`。
-- 事实：观测面变了（投影多了"本公司货运交付"）⇒ 观测面结构指纹 `7390249eb5b1347c` → **`9aab3d22e9e95961`**（此前此后**互不可比**）；脚手架指纹没动（`41d82339b2925645`：提示词与工具表未变）。
+- 事实：观测面变了（投影多了"本公司货运交付"）⇒ 观测面结构指纹 `7390249eb5b1347c` → **`9aab3d22e9e95961`**（此前此后**互不可比**）；脚手架指纹没动（`41d82339b2925645`：提示词与工具表未变）。`GSCargoMonitor` 是**读一次清零的增量**（`script_cargomonitor.hpp`：每次读返回"上次读之后的增量"并把累计清零）⇒ 累计**必须由 harness 做**；城镇轴与产业轴会把**同一笔交付**记两次 ⇒ 只取**产业交付**。
+- 事实：**Bridge GS 是服务器脚本**（`[game_scripts]`），**它没有自己的公司** ⇒ `GSCompany.COMPANY_SELF` 解析成无效公司，`GetIndustryDeliveryAmount` **返回 -1（不是抛异常）** ⇒ 真机 38 个目的地全部 failed、读数一个都没有。修法：用 **executor 的公司 id**（命令里带来的，默认 0）——失败**不丢增量**，但读数缺一个 ⇒ 记进缺口。缺口只报**真丢了的**（`own_gaps = {dropped, error}`）：目的地消失前未结算的增量拿不回来了 ⇒ 累计值是**下界**。**公司还没建出来时那些 -1 不算缺口**（那时 monitor 里根本没有增量，什么都没丢）—— 算进去会让页面谎称「累计是下界」。真机（seed 4242，客运脚手架）：`own_monitored = {cargoes: 9, destinations: 38}`、9 个货种**全为 0**（诚实：只建客运线路 ⇒ 没有货运交付）、`gaps = {dropped: 0}`。
 - 事实（**纠正 §10.124 的推论**）：**"车站收不收货"不等于"产业交不交货"**（2026-11-08）。产业把货交给车站看的是**车站的 rating**（`station_cmd.cpp` 的 `CanMoveGoodsToStation`：`rating == 0` 才拒收），新车站的 rating 是 **175**（`INITIAL_STATION_RATING`）⇒ **车站不收这个货，产业照样把货送到站上等着**。旧结论"矿场旁的站不收煤 ⇒ 煤运不走"**不成立**。但**卸货**侧相反：车在**不收货**的站是卸不下来的（`economy.cpp` 的 `LoadCargo`/`UnloadCargo`："The station does not accept our goods anymore" ⇒ 货被退回而不是交付）⇒ **装货侧只要罩住产方，卸货侧必须收货 >= 8**。真机（seed 4242）：煤矿 28 → 电站 53，货车站 → 路 → 车库 → 货车（`Balogh Coal Truck`），**交付 5 吨煤**（cargo monitor 的产业轴非零）。
 - 事实：**集货半径是 3，不是 4**（2026-11-08）：15.3 默认**开着** modified_catchment ⇒ `GSStation.GetCoverageRadius(STATION_TRUCK_STOP)` = **3**（`CA_TRUCK`；`CA_UNMODIFIED` 才是 4）。⇒ "产方与收方必须在同一座车站的集货区里"这个约束**比想象的更紧**（真机实测：seed 4242 上最近的"产方→收方"是 15 格 ⇒ 没有任何一对产业能用一座车站同时罩住 ⇒ **产业→产业的货运线在小地图上不存在**；可行的是"产方 → 电站/工厂"这种**长距离**线路，货车把煤从矿场拉到电站）。
 - 事实：货运动作面（货运 F3）：`build_freight_route(cargo, from_industry, to_industry)` —— **模型决定运什么货、运去哪**；脚手架负责**怎么落地**（按引擎规则选站址 ⇒ 铺路 ⇒ 车库 ⇒ 买车改装 ⇒ 挂路线，**复用**客运那套 `LayPath`）。GS 侧装货站/卸货站的规则**不同**（见上一条）；任何一条不满足 ⇒ **具名拒绝**并说清原因（不静默），且**拒绝会进模型的决策上下文**（此前 GS 的 `err` 只进计数器与日志 ⇒ 模型只会重复同一个建不成的命令）。脚手架指纹 `41d82339b2925645` → **`3b19310088baff6e`**（工具表变了）；观测面结构指纹 `9aab3d22e9e95961` → **`103aabed827a8def`**（投影多了"可装货的产方"）。
 
-- 事实：GS 的 cargo monitor 累计**只按货种上报**（`own_delivered` = `[{label, amount}]`）⇒ **逐 (货种, 产业) 的增量被丢掉**。而 GS 本来就**逐对去读**（`GetIndustryDeliveryAmount` 循环）⇒ 补报只是把已经读到的数多带一层 ⇒ **逐线路归因缺的不是算法，是这个读数**（`docs/PER-LINE-DELIVERY-FEASIBILITY.md` §4.2 的归因规则：某城镇/产业**只被我们一条线**服务 ⇒ 归它；被多条线服务 ⇒ **不可分摊**，记 `null` + 说明）。
-- 事实：**路线台账的形状是"两端城镇"** ⇒ **货运线装不进去**。真机（真实模型货运局）留下的 `route-facts.jsonl` 里，5 条货运线成了 `from:null,to:null` ⇒ 注入模型的句子变成 `route towns null->null was ordered at decision 2`（**垃圾进上下文**）。F3 起货运 ack **不进台账**（只进 `lastRoute` 给地图）⇒ 决策→结果台账里**没有货运**。⇒ 台账的记录形状必须能装"产业对 + 货种"，否则要么丢、要么编。
-- 事实：**货运拆分的服务端那一半已经算好了**：`buildScorecard` 已经产出 `ability.cargoDelivered` / `passengersDelivered`（F2 的 monitor 累计喂进 `deliveredByCargo`），但**页面上没有任何地方画它**（全仓库只有 scorecard 与单测提到这两个字段）⇒ 货运轴缺的只是**接线**，口径（`DELIVERED_MEASURE` / `SPLIT_MEASURE`）也是现成的。
 - 事实：**配对统计按轴给结论**（2026-11-08，Issue #87）：配对只对**逐局能取标量**的轴有意义 ⇒ 能力（`deliveredRun / game-day`）、效率（`deliveredRun / 1M tokens`）、稳定性（工具失败率）三条；**成长轴不进配对**（它的主指标是**跨局斜率**，由分数卡的成长曲线给出）。指标目录（`PAIRED_METRICS`）是**措辞的唯一出处**（标签、单位与**好坏方向**），配对判定由服务端给出（页面不重算）。⚠ 上一条（"配对统计只算主轴"）已不成立：旧 6 格的**度量行已不在磁盘上**（`/tmp/pB*` 只剩空目录，全盘无 `metrics.jsonl`）⇒ **聚合数推不出配对 CI**（配对需要**逐对的差值**）⇒ 旧格子只能估方差，次级轴的结论必须由**新矩阵**给出。
  - 事实：**货运轴有自己的配对指标**（2026-11-08）：`ability.cargoDeliveredPerGameDay` = GS cargo monitor 的**货物**那一半 / 游戏日（口径与主轴的 admin 口径**不可相加**）；monitor **只统计货物不统计客运** ⇒ 旅客半边**没有读数**，不能拿 0 冒充；这一局没有货物拆分读数 ⇒ **null**（"没测到"），不是 0。
  - 事实：**配对的重复序号必须按“局”数，不能按“有读数的行”数**：否则某轴上缺读数的一局被跳过 ⇒ 后面的局往前挪 ⇒ **A 的第 2 局与 B 的第 1 局**被配成一对 ⇒ 区间算的是两局不同的比较。修法：槽位在**可比较的行**上数（与指标无关）⇒ 缺读数只让该**整格**被丢掉（n 变小），别的配对不动。

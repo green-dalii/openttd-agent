@@ -328,23 +328,23 @@ first vehicle reaching each station arrived twice. Two Squirrel traps came with 
   reports failures with the exact URLs and statuses — including "no credential, so the refresh was
   skipped", which pi-ai does silently. Models that only the provider knows are marked "live · price
   unknown", and they are persisted so the agent process can run them.
-- Runs could be **stopped and look like failures**: pause attribution, world-frozen runs
-  and unfinished horizons are now named and excluded from comparisons.
+- **The promotion gate counted samples, not games, and the model was never told the freight action
+  exists.** A run can record the same pattern several times; each recording appended a profit
+  reading to the card, and the gate read the number of readings as the number of **verified games**
+  - so one lucky run could promote a pattern on its own, and the "verified in 2 independent games"
+  rule was not enforced. A card now carries one reading per game and the gate counts distinct
+  games. Separately, `build_freight_route` joined the pattern vocabulary with the freight work but
+  the tool description still listed only the older actions, so a real run recorded its freight
+  patterns as `build_bus_route` - the same idea split into two cards. The description is now
+  generated from the vocabulary, and a test fails if it drifts.
+- **Several readings that disagreed with themselves**: deltas folded unread readings to zero
+  ("no change" where nothing had been measured), fleet counts disagreed (route table vs company
+  stats), the world clock came from a `Monthly` channel and could be stale for a whole month, a
+  partial game-script failure was silent (one bad API call could kill a whole reply), and runs that
+  were stopped could look like failures (pause attribution, world-frozen runs and unfinished
+  horizons are now named and excluded from comparisons).
 
-- **Deltas folded unread readings to zero** - the model read "no change" where nothing had been measured.
-
-- **Fleet counts disagreed with themselves** (route table vs company stats).
-
-- **Charts flickered and grew** (per-frame `devicePixelRatio` multiplication; width→height feedback loop) - fixed and guarded by a time-series smoke check at dpr=2.
-
-- **World clock came from a `Monthly` channel** and could be stale for a whole month.
-
-- **Partial GS failure was silent**: one bad API call could kill a whole reply.
-
-- `--serve` kept a stale `llm.json`, so Start after saving a provider still said
-  "not configured".
-
-- **`test:live` was red on main** (it picked `events.jsonl` as the newest session) and left OpenTTD running when it failed, which silently disabled 13 preflight tests.
+- **Charts flickered and grew** (per-frame `devicePixelRatio` multiplication; width→height feedback loop) - fixed and guarded by a time-series smoke check at dpr=2. `--serve` also kept a stale `llm.json`, so Start after saving a provider still said "not configured", and **`test:live` was red on main** (it picked `events.jsonl` as the newest session) and left OpenTTD running when it failed, which disabled 13 preflight tests.
 ## [0.6.0] - 2026-09-11
 
 > **本轮的主要工作是"把实现拉回 SPEC"**，而不是加功能。审计真机 Session 日志发现，

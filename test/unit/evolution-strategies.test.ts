@@ -336,4 +336,17 @@ describe("strategies: the identity vocabulary belongs to the code", () => {
 			strategyId("build_bus_route", { cargo: "LVST", townB: 9, to: "B" }),
 		);
 	});
+
+	it("record_strategy 的描述把词表里的每个动作都写出来（模型得知道能写什么）", async () => {
+		// 真机发现（2026-11-10）：货运 F3 加了 build_freight_route，但描述里没写
+		// ⇒ 模型把货运模式记成 build_bus_route ⇒ 同一个想法被拆成两张卡。
+		const { createReflectionTools } = await import("../../src/evolution/reflect-tools.js");
+		const tool = createReflectionTools({ lessons: [], strategies: [], rejections: [] }, { sessionId: "s", seed: 1, now: 0 })
+			.find((t) => t.name === "record_strategy")!;
+		const schema = tool.parameters as { properties?: Record<string, { description?: string }> };
+		const desc = `${tool.description} ${schema.properties?.action?.description ?? ""}`;
+		for (const action of STRATEGY_ACTIONS) {
+			expect(desc).toContain(action);
+		}
+	});
 });

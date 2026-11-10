@@ -19,7 +19,7 @@ import { Type } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { validateLesson, type ReflectionContext } from "./lessons.js";
 import type { Lesson } from "./types.js";
-import { strategyIdentityProblem, type StrategySample } from "./strategies.js";
+import { strategyIdentityProblem, STRATEGY_ACTIONS, type StrategySample } from "./strategies.js";
 
 /** 反思阶段收集到的、已通过校验的条目。 */
 export interface ReflectionSink {
@@ -67,10 +67,13 @@ const LessonParams = Type.Object({
 
 const StrategyParams = Type.Object({
 	action: Type.String({
+		// 词表由代码拥有（STRATEGY_ACTIONS），描述里必须**逐个列出**：
+		// 模型只能写它看得见的动作。货运 F3 加了 build_freight_route 而这里没写
+		// ⇒ 真机里模型把货运模式记成 build_bus_route ⇒ 同一个想法被拆成两张卡
+		// （真机发现 2026-11-10）。守卫见 test/unit/evolution-strategies.test.ts。
 		description:
-			"Tool name the pattern used. Must be one the agent can actually call " +
-			"(build_bus_route, set_route_vehicles, set_route_cargo, set_route_engine, " +
-			"retire_route, set_pause).",
+			"Tool name the pattern used. Must be one the agent can actually call (" +
+			`${STRATEGY_ACTIONS.join(", ")}).`,
 	}),
 	params: Type.Optional(Type.Record(Type.String(), Type.Union([Type.Number(), Type.String()]))),
 	// No `value` field: the profit reading is stamped by the harness from the run's
