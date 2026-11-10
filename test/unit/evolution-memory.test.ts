@@ -66,7 +66,8 @@ function card(over: Partial<StrategyCard> = {}): StrategyCard {
 		params,
 		profitPerDayPerRun: [MIN_STRATEGY_PROFIT_PER_DAY + 10, MIN_STRATEGY_PROFIT_PER_DAY + 20],
 		evidence: ["money +18000"],
-		sourceSessionIds: ["s1"],
+		// 一局一个读数：两个读数 ⇒ 两个独立局（真机发现 2026-11-10）。
+		sourceSessionIds: ["s1", "s2"],
 		createdAt: NOW - 1000,
 		enabled: true,
 		...over,

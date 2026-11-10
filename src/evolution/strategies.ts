@@ -144,6 +144,25 @@ function isValidSample(s: unknown): s is StrategySample {
 }
 
 /**
+ * 把卡片里的「读数数组 + 来源局数组」配成 (局, 读数) 对：**一局一个读数**。
+ *
+ * 真机发现（2026-11-10）：一局里模型可以记多条同模式采样 ⇒ 旧实现把每条采样
+ * 都追加进 `profitPerDayPerRun`，而闸把数组长度当成「验证局数」⇒ **单局三条
+ * 高值采样就能过闸**，SPEC §5.3 的「已验证局≥2」形同虚设。
+ * 配不上的旧卡（两个数组长度不等）只按能配上的前缀算局数（偏保守）。
+ */
+function verifiedReadings(card: StrategyCard): { sessionId: string; value: number }[] {
+	const values = (Array.isArray(card.profitPerDayPerRun) ? card.profitPerDayPerRun : []).filter((v) =>
+		Number.isFinite(Number(v)),
+	);
+	const sessions = Array.isArray(card.sourceSessionIds) ? card.sourceSessionIds : [];
+	const n = Math.min(values.length, sessions.length);
+	const bySession = new Map<string, number>();
+	for (let i = 0; i < n; i++) bySession.set(String(sessions[i]), Number(values[i]));
+	return [...bySession.entries()].map(([sessionId, value]) => ({ sessionId, value }));
+}
+
+/**
  * Merge new samples into existing cards, accumulating one value sample per game.
  *
  * Cards start `enabled: false`: SPEC §5.3 says the engine only *advises*, and
@@ -157,9 +176,24 @@ export function mergeStrategySamples(
 	now = Date.now(),
 ): StrategyCard[] {
 	const byId = new Map<string, StrategyCard>();
+	/** 每个卡片的 (局 → 读数)：同一局只留一个读数（见 `verifiedReadings`）。 */
+	const readings = new Map<string, Map<string, number>>();
+
+	const readingsOf = (id: string): Map<string, number> => {
+		let m = readings.get(id);
+		if (!m) {
+			m = new Map();
+			readings.set(id, m);
+		}
+		return m;
+	};
 
 	for (const card of Array.isArray(existing) ? existing : []) {
-		if (card && typeof card.id === "string" && card.id) byId.set(card.id, { ...card });
+		if (card && typeof card.id === "string" && card.id) {
+			byId.set(card.id, { ...card });
+			const m = readingsOf(card.id);
+			for (const r of verifiedReadings(card)) m.set(r.sessionId, r.value);
+		}
 	}
 
 	// Sort samples deterministically before accumulating, so `valuePerRun` does not
@@ -183,15 +217,16 @@ export function mergeStrategySamples(
 
 		const prev = byId.get(id);
 		const evidence = cleanList(s.evidence);
+		// 同一局再记一次同一模式 ⇒ 覆盖该局的读数，不新增一局。
+		readingsOf(id).set(s.sessionId, Number(s.profitPerDay));
 		if (!prev) {
 			byId.set(id, {
 				id,
 				name: s.action,
 				action: s.action,
 				params: { ...(s.params || {}) },
-				profitPerDayPerRun: [Number(s.profitPerDay)],
 				evidence,
-				sourceSessionIds: [s.sessionId],
+				sourceSessionIds: [],
 				createdAt: Number.isFinite(Number(s.createdAt)) ? Number(s.createdAt) : now,
 				enabled: false,
 			});
@@ -203,11 +238,19 @@ export function mergeStrategySamples(
 		const sessions = new Set([...(prev.sourceSessionIds || []), s.sessionId]);
 		byId.set(id, {
 			...prev,
-			profitPerDayPerRun: [...(prev.profitPerDayPerRun || []), Number(s.profitPerDay)],
 			evidence: mergedEvidence,
 			sourceSessionIds: [...sessions].sort(),
 			createdAt: Math.min(Number(prev.createdAt) || now, Number(s.createdAt) || now),
 		});
+	}
+
+	// 读数与来源局保持一一对应（按局 id 排序 ⇒ 两个数组同序）。
+	for (const [id, card] of byId) {
+		const m = readings.get(id);
+		if (!m || m.size === 0) continue;
+		const sessions = [...m.keys()].sort();
+		card.sourceSessionIds = sessions;
+		card.profitPerDayPerRun = sessions.map((s) => m.get(s)!);
 	}
 
 	return [...byId.values()].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
@@ -244,11 +287,10 @@ export function evaluatePromotion(
 
 	// 旧卡（2026-11-01 之前）只有模型自报的 `valuePerRun`：**没有**利润读数 ⇒ 不可晋升。
 	// 那是"没测到"，不是"测到 0"——所以不给它们一个值。
-	const values = (Array.isArray(card?.profitPerDayPerRun) ? card.profitPerDayPerRun : []).filter(
-		(v) => Number.isFinite(Number(v)),
-	);
-	const runs = values.length;
-	const value = runs ? values.reduce((a, b) => a + Number(b), 0) / runs : 0;
+	// 「已验证局数」= **独立局数**，不是读数个数（真机发现 2026-11-10）。
+	const readings = verifiedReadings(card);
+	const runs = readings.length;
+	const value = runs ? readings.reduce((a, r) => a + r.value, 0) / runs : 0;
 
 	if (runs < minRuns) {
 		return {
