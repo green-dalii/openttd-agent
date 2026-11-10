@@ -317,5 +317,18 @@ export async function runFinalizeAndReflect(args: FinalizeAndReflectArgs): Promi
 		}
 	}
 
-	return reachedDone ? 0 : 1;
+	// 退出码：**止损不是失败**。
+	//
+	// 为什么（2026-11-08，ROADMAP 的"止损型 run 一律 exit 1"）：一局因为
+	// token/花费上限、视界、墙钟、agent 自己暂停而**收场**时，数据是齐的
+	// （manifest + 度量 + 台账）⇒ 那是**一次正常的结果** ⇒ 退出码 0。
+	// 施工没做完也是**结果**（agent 不会建线 —— 那是学习结果，不是崩溃）。
+	//
+	// ⇒ 退出码只回答"**harness 跑完了这一局吗**"：真失败（GS 没起来、游戏崩了、
+	// runner 抛错）走的是**别的路径**（runner 里那些 `return 1` 与 CLI 的 catch）
+	// ⇒ CI 不会被正常止损刷屏，而真失败仍然是红的。
+	//
+	// 这一局的**结果**在 manifest 的 outcome 里（结局十类，B5）⇒ CI 该读那个，
+	// 不是读退出码。
+	return 0;
 }
