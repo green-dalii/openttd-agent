@@ -483,6 +483,9 @@ JSON + GSSign 标牌邮箱）、`OpenTTDLab`（受控 Squirrel AI + admin port�
 
 ### 10.55 NEXT-2 N2-4：主指标换成收益流 + 标定结果（2026-09-16）
 **过程** → `CHANGELOG.md`。**仍为真的事实**：主指标是**收益流**，不是成本。
+- 事实（2026-11-11 复核 OpenTTD 15.3 源码）：admin 的 `income` = `-Σ company->yearly_expenses[0]`（`network_admin.cpp`）⇒ 它是
+  **当前经济年迄今的净现金流**（收入科目记为负费用）⇒ **不是运营利润**；经济年 = **360 天**（`TimerGameEconomy::DAYS_IN_ECONOMY_YEAR`），
+  年边界 `rotate + fill(0)` ⇒ **跨年归零**；**日历**年仍是 365/366 天 ⇒ **两个"年"不能混用**。
 
 ### 10.56 N2-5 首轮 A/B 判废：臂划分缺陷（2026-09-17）
 **仍为真**：臂划分必须按**首次真实动作**判定；否则会把 control/treatment 判反，得到「方向反转」的假结论（`MEMORY.md` D20）。
@@ -562,6 +565,9 @@ JSON + GSSign 标牌邮箱）、`OpenTTDLab`（受控 Squirrel AI + admin port�
 - 事实（2026-11-10 真机）:**一局里模型可以记多条同模式采样**（真机 seed 11、502 日：5 条采样）⇒ 旧实现把**每条采样**都追加进 `profitPerDayPerRun`，而闸把数组长度当成"已验证局数"⇒ **单局三条高值采样就能过闸**，SPEC §5.3 的"已验证局≥2"**从未被强制**。现在卡片**一局一个读数**（`profitPerDayPerRun[i]` 与 `sourceSessionIds[i]` 一一对应），闸按**不同局**计数。
 - 事实（2026-11-10 真机）:**词表与工具描述会漂移**（同一次真机）：货运 F3 把 `build_freight_route` 加进 `STRATEGY_ACTIONS`，但 `record_strategy` 的描述里没写它 ⇒ 模型把货运模式记成 `build_bus_route`（5 条采样里有 4 条）⇒ 同一个想法被拆成两张卡。描述现在由 `STRATEGY_ACTIONS` 生成，并有守卫要求词表里的每个动作都出现在描述里。
 - 事实（2026-11-10 真机）:**当前门槛下晋升不可达**（真机两局 500 日）：利润闸是 `每游戏日 > 5000/300 ≈ 16.67`（即**年收入 > £6083**），而 MiniMax-M2.5 的最好一局是 **+£1662/年（4.55/日）**，另一局 **-£31112** ⇒ **没有一局达到门槛** ⇒ 策略库至今 0 晋升（候选池里有卡，但 `enabled=false` 且未过闸）。
+- 事实（2026-11-11）：**这个读数口径本身是错的**：`profitPerDay = income / 365`（`reflection-run.ts`）里的 `income` 是**当年迄今净现金
+  流**（§10.55）⇒ ① 除数 365 是**日历**年（经济年 360 天）；② 局跨过经济年时它**只覆盖最后一个经济年** ⇒ 它**不是"这一局的每游戏
+  日利润"**，却拿去和门槛比 ⇒ **口径修正前门槛不可判定**。
 
 ### 10.77 R2b 实施结果：反思改走 Agent + 记录工具（2026-09-18/19）
 **仍为真**：反思复用**同一个 `Agent`** + 记录型工具（`src/evolution/reflect-tools.ts`），带 `validateLesson()`；入口 `runReflection({streamFn, model, dataDir, facts, now})`。
@@ -1039,6 +1045,10 @@ IsBuildable + GetName + GetMaxSpeed，四个 API 均实测存在）——agent �
 
 ### 10.113 P2-1/P2-2 代码侧：实验 runner 默认 + 学习曲线分析核（2026-10-08）
 
+- 事实（2026-11-11 复核 15.3 源码与本机二进制）：**同存档反事实 fork 不需要新写 GS**：专用服务器支持 `-g savegame` 直接从存档
+  开局（本机 `--help` 实测）；控制台有 **`save`** 命令 ⇒ 可用现有的 RCON 通道在任意决策点存档；**GameScript 状态随存档存取**
+  （`ScriptInstance::Save()`）⇒ Bridge GS 状态会一并恢复 ⇒ 只差"同一存档读两次、同一命令 ⇒ 同一资金轨迹"的**确定性探针**。
+
 **P2-1 预登记默认**（`scripts/run-experiment.ts`）：
 - `--scenario` 默认 **prebuilt**（方差更小；两臂同场景是可比性前提）
 - `--game-days` 默认 **300**（≥ G7 的 180 天可比线；G7 检查与默认同源）
@@ -1198,56 +1208,33 @@ compaction 冲突）在 `docs/HARNESS-MIGRATION.md` §3（带坐标），此处�
 - 事实：**GS 相位必须归档**才可复盘：`signal-hub` 把每个非心跳 exec 事件写成 `gs_exec` 审计记录（此前只在实时流里，跑完的局就查不到了）。**effect = 与下一次决策快照的差**（钱/收入/车/站/交付/游戏日）；最后一个决策没有"下一个快照" ⇒ effect = `null`（**没测到**，D60）。**会话 hook 只有一处构造**（`sessionHooks(dataDir)`）：runner 的 `web.attach({sessions})` 会**替换**掉 server 的 hook ——两份构造曾让时间线在**run 一开始就从页面上消失**；`repo-hygiene` 有守卫。 真机：决策 2 下了 4 个 job，相位与工具、效果同在一行，由 `job` 连接。
 ### 10.121 Compare 视图是**投影**：四轴、判定与排除都不是页面算的（B4，2026-10-25）
 
-- 事实：`GET /api/compare` 是**只读**的：四轴来自 `buildScorecard`，配对判定来自
-  `pairedComparison`，排除原因来自 `metricExclusion`——**页面一个数都不重算、也不下判断**。
-  分组用**实际服务的模型**（`manifest.servedModel`）⇒ 网关替换**可见**；每局能下钻到
-  History（`/sessions?run=<id>`）。
-- 真机（隔离 data dir，`minimax-cn` / `MiniMax-M3.1-Flash` + 本地 stub，各 2 个 seed）：两模型 × 两 seed 出四轴 + 配对判定（2 对 ⇒ "not determinable"），无价目表一侧写 `not measured`；**比较只发生在"同一个问题"之内**（2026-11-02，用户决定 (b)）：Compare 按 **manifest 自己的三元组**（脚手架 + 观测面结构 + 观测策略）给度量行**分组**，一次只比**一组**，别的组**披露**（`runsOutsideGroup`）、不混进任何数字（默认组 = **局数最多**的那组 ⇒ 2026-10-31 那轮 6 格自成一组；真机：两组，组内配对差仍为 **-0.270**）。
-
+- 事实：`GET /api/compare` 是**只读**的：四轴来自 `buildScorecard`，配对判定来自 `pairedComparison`，排除原因来自
+  `metricExclusion`——**页面一个数都不重算、也不下判断**；分组用**实际服务的模型**（`manifest.servedModel`）⇒ 网关替换**可见**；每局能下钻到 History（`/sessions?run=<id>`）。比较只发生在"同一个问题"之内（2026-11-02，用户决定 (b)）：按 **manifest 自己的三元组**（脚手架 + 观测面结构 + 观测策略）给度量行**分组**，一次只比**一组**，别的组**披露**（`runsOutsideGroup`）、不混进任何数字（默认组 = **局数最多**的那组 ⇒ 2026-10-31 那轮 6 格自成一组）。真机（隔离 data dir，`minimax-cn` / `MiniMax-M3.1-Flash` + 本地 stub，各 2 个 seed）：四轴 + 配对判定（2 对 ⇒ "not determinable"），无价目表一侧写 `not measured`。
 - 事实：**观测面有自己的两枚指纹**（2026-11-02）：`scaffoldHash` 只覆盖提示词 + 工具，**不覆盖观测面**；`payloadShapeHash`
   含**世界**（城镇名、产业清单）⇒ **每个 seed 都不同** ⇒ 拿它跨局比较会**误报**"不是同一个问题"（假警报比没警报更坏）。
   于是新增 ① `observationShapeHash`：**投影的结构**（有哪些事实、什么类型；值全抹掉、数组长度不计），由**填满所有分支的
   探针世界**算出 ⇒ 只依赖代码、**跑前就能算**、两种后端都记录（真机 `f06107cdb4c77a59`，**预览与 manifest 逐字段相同**）；
   ② `observationPolicy`：**GS 自报**它暴露了世界的哪一部分（`towns=all;industries=top12`）——"看到全部 26 座城"与
   "只看到人口前 10"是**两个不同的问题**，哪怕字段结构一模一样 ⇒ 策略也进 manifest。
-- 事实：**L2 查询工具接上了**（2026-11-02，Issue #13 的第二项）：观测面是**周期采样**——它说"世界此刻
-  长什么样"，不说"**我那辆车**在干什么、载了多少、赚了多少"。新增两个**只读**工具：
-  `inspect_vehicle`（车名/位置/车型/引擎/车龄/速度/载客/今年利润）与 `inspect_town`（名字/人口/房屋/
-  位置/增长率）。通道 = admin 端口的 gameScript **带答案**（客户端注入 `id`，GS 回
-  `{kind:"answer", id, ok, data}`，按 id 相接）；**拿不到答案就说拿不到**（超时/通道不存在 ⇒ 报"没
-  问到"，**绝不**报"没有这辆车"）。真机：`inspect_town 23` → `{name:"Plunbury", population:2519,
-  houses:54, growth_rate:39}`；`inspect_town 999` → `no such town`。⚠ **工具表变了 ⇒ 脚手架指纹
-  `2f5b438b462d21a3` → `a72a663cdd126090`** ⇒ 2026-10-31 那轮 6 格基准与之后所有局**互不可比**。
-- 事实：**决策→结果台账接上了**（2026-11-02，Issue #13 的第三项）：执行器说"我建好了"**不是**
-  结果，"世界随后发生了什么"才是。连接键是**车辆 id**：执行器的 route-stats 报这条线的
-  `vehiclesIds`，推送事件报车辆 ⇒ 二者相接，"决策 3 订的那条线在 1950-03-01 有首车到站"就成了
-  一条**可入账的事实**（台账的 `observed`，并随路线事实跨局落库）。**不认识的车上的事件不归因**
+- 事实：**L2 查询工具接上了**（2026-11-02，Issue #13 的第二项）：观测面是**周期采样**——它说"世界此刻长什么样"，不说"**我那辆车**在干什么、载了多少、赚了多少"。新增两个**只读**工具：`inspect_vehicle`（车名/位置/车型/引擎/车龄/速度/载客/今年利润）与 `inspect_town`（名字/人口/房屋/位置/增长率）。通道 = admin 端口的 gameScript **带答案**（客户端注入 `id`，GS 回 `{kind:"answer", id, ok, data}`，按 id 相接）；**拿不到答案就说拿不到**（超时/通道不存在 ⇒ 报"没问到"，**绝不**报"没有这辆车"）。真机：`inspect_town 23` → `{name:"Plunbury", population:2519, houses:54, growth_rate:39}`；`inspect_town 999` → `no such town`。⚠ **工具表变了 ⇒ 脚手架指纹 `2f5b438b462d21a3` → `a72a663cdd126090`** ⇒ 2026-10-31 那轮 6 格基准与之后所有局**互不可比**。
+- 事实：**决策→结果台账接上了**（2026-11-02，Issue #13 的第三项）：执行器说"我建好了"**不是**结果，"世界随后发生了什么"才是。
+  连接键是**车辆 id**：执行器的 route-stats 报这条线的 `vehiclesIds`，推送事件报车辆 ⇒ 二者相接，"决策 3 订的那条线在
+  1950-03-01 有首车到站"就成了**可入账的事实**（台账的 `observed`，并随路线事实跨局落库）。**不认识的车上的事件不归因**
   （不许猜）。此前记忆只能回忆"我建没建 / 赚没赚钱"，记不住"世界对我这条线做了什么"。
-- 事实：**引擎的推送事件进了观测面**（2026-11-02，Issue #13 S7d）：引擎把事件推给 GameScript
-  （`Game::NewEvent`），而我们的 GS **只处理 admin 端口事件，其余整个丢掉** ⇒ 模型看不到"我的车到站了 /
-  被报废了"。现在 GS 把引擎的事件类型映射到**封闭词表**（`vehicle_lost` / `station_first_vehicle` /
-  `vehicle_waiting_in_depot` / `vehicle_unprofitable` / `industry_open` / `industry_close` /
-  `town_founded`）⇒ 世界状态按序记住（有界 50 条）⇒ 投影带 `events` ⇒ `observe()` 与决策上下文都带着它。
-  真机（真实模型，seed 4242）：**首车到站**两次到达 harness（`station_first_vehicle`，车站 0/1、
-  车 8）⇒ 模型第一次能看见"我的车到了"。⚠ 两个 Squirrel 陷阱（MEMORY D44 的第三/四个形态）：
-  ① **类成员必须先声明**（类的表也是严格的）——不声明就赋值会抛 `the index '_x' does not exist`，
-  整个 GS 停摆；② **读不存在的键会抛** ⇒ 事件载荷必须**形状恒定**（缺的就是 null）且先
-  `rawin` 再读。
-  投影多了 `events` ⇒ 观测面结构指纹 `f06107cdb4c77a59` → **`1808f8babae13cb0`**。
-- 事实：**融资事实进了观测面**（2026-11-02，Issue #13）：GS 在**公司模式**里读
-  `GSCompany.GetMaxLoanAmount()`（`COMPANY_SELF` 在全局脚本里无效）⇒ 投影带
-  `financing{loanCeiling, loanInterval}`（真机：上限 300000、间隔 10000）。**利息率引擎根本不暴露**
-  ⇒ **"没测到"，不猜**。系统提示另补一句**融资机制**（执行器开工前先把贷款提到上限）⇒ 脚手架指纹
-  `74f2e64d1e930df3` → **`2f5b438b462d21a3`**；投影多了 `financing` ⇒ 观测面结构指纹
-  `ba1cc7959b170e8d` → `f06107cdb4c77a59` ⇒ 2026-10-31 那轮 6 格基准从此是**另一个问题**。
-- 事实：**GS 现在报全图城镇**（2026-11-02，Issue #13）：以前只报人口前 10，样本外的城镇对模型只剩一个
-  编号（`#14 → #2`）。真机（seed 4242）：**26 座城全部带名字**进 `observe()`（城镇块 ~1.8 KB）。
-- 事实：**比较计划是同一套预览的矩阵版**（Issue #48，`src/agent/compare-plan.ts`）：格子 = 模型 × seed；
-  **只估"运行"**（几局、封顶、花费能不能测），**不估结果**；字段名与 manifest 同名同义。"花费能不能测"
-  是**逐格**的事实：只有每格都有价目表才是 `costKnown=true`，否则"没测到"。一个进程只能跑一局 ⇒ 格子
-  **顺序**跑（`PlanQueue`），一格失败被记下、后面继续；与已有运行冲突 ⇒ 409，**一局都不启动**。真机：费用
-  上限 + 无价目表 ⇒ 400 `unpriced_with_cost_cap` 且没有游戏进程；未知模型 ⇒ `unknown_model`；页面点
-  "Launch this plan"（逐格确认）⇒ 跑完的 manifest 与计划**逐字段相同**。
+- 事实：**引擎的推送事件进了观测面**（2026-11-02，Issue #13 S7d）：引擎把事件推给 GameScript（`Game::NewEvent`），而我们的
+  GS **只处理 admin 端口事件，其余整个丢掉** ⇒ 模型看不到"我的车到站了 / 被报废了"。现在 GS 把引擎的事件类型映射到
+  **封闭词表**（`vehicle_lost` / `station_first_vehicle` / `vehicle_waiting_in_depot` / `vehicle_unprofitable` /
+  `industry_open` / `industry_close` / `town_founded`）⇒ 世界状态按序记住（有界 50 条）⇒ 投影带 `events` ⇒ `observe()`
+  与决策上下文都带着它。真机（真实模型，seed 4242）：**首车到站**两次到达 harness ⇒ 模型第一次能看见"我的车到了"。⚠ 两个
+  Squirrel 陷阱（MEMORY D44 的第三/四个形态）：① **类成员必须先声明**（类的表也是严格的）⇒ 不声明就赋值会抛
+  `the index '_x' does not exist`，整个 GS 停摆；② **读不存在的键会抛** ⇒ 事件载荷必须**形状恒定**（缺的就是 null）且先 `rawin` 再读。投影多了 `events` ⇒ 观测面结构指纹 `f06107cdb4c77a59` → **`1808f8babae13cb0`**。
+- 事实：**融资事实进了观测面**（2026-11-02，Issue #13）：GS 在**公司模式**里读 `GSCompany.GetMaxLoanAmount()`
+  （`COMPANY_SELF` 在全局脚本里无效）⇒ 投影带 `financing{loanCeiling, loanInterval}`（真机：上限 300000、间隔 10000）。
+  **利息率引擎根本不暴露** ⇒ **"没测到"，不猜**。系统提示另补一句**融资机制**（执行器开工前先把贷款提到上限）⇒ 脚手架指纹 `74f2e64d1e930df3` → **`2f5b438b462d21a3`**；投影多了 `financing` ⇒ 观测面结构指纹 `ba1cc7959b170e8d` → `f06107cdb4c77a59` ⇒ 2026-10-31 那轮 6 格基准从此是**另一个问题**。
+- 事实：**GS 现在报全图城镇**（2026-11-02，Issue #13）：以前只报人口前 10，样本外的城镇对模型只剩一个编号（`#14 → #2`）。
+  真机（seed 4242）：**26 座城全部带名字**进 `observe()`（城镇块 ~1.8 KB）。
+- 事实：**比较计划是同一套预览的矩阵版**（Issue #48，`src/agent/compare-plan.ts`）：格子 = 模型 × seed；**只估"运行"**
+  （几局、封顶、花费能不能测），**不估结果**；字段名与 manifest 同名同义。"花费能不能测"是**逐格**的事实：只有每格都有价目表才是 `costKnown=true`，否则"没测到"。一个进程只能跑一局 ⇒ 格子**顺序**跑（`PlanQueue`），一格失败被记下、后面继续；与已有运行冲突 ⇒ 409，**一局都不启动**。真机：费用上限 + 无价目表 ⇒ 400 `unpriced_with_cost_cap` 且没有游戏进程；未知模型 ⇒ `unknown_model`；页面点 "Launch this plan"（逐格确认）⇒ 跑完的 manifest 与计划**逐字段相同**。
 
 ### 10.122 结局词表是**封闭**的，错误的 hint 也只有**一份**（B5，2026-10-25）
 
@@ -1295,4 +1282,7 @@ compaction 冲突）在 `docs/HARNESS-MIGRATION.md` §3（带坐标），此处�
  - 事实：**退出码只回答"harness 跑完了这一局吗"**（2026-11-08）：一局因 token/花费上限、视界、墙钟、agent 自己暂停而**收场**（或施工没做完）时数据是齐的 ⇒ 那是**一次正常的结果** ⇒ 退出码 **0**；真失败（GS 没起来、游戏崩了、runner 抛错）仍走别的路径 ⇒ **1**。此前"止损型 run 一律 exit 1"让每一次预算用尽的正常运行都在 CI 里报红 ⇒ 真失败被淹没。**这一局的结果在 manifest 的 outcome 里**（结局十类）⇒ CI 该读那个，不是读退出码。
  - 事实：**取样与全量必须来自同一次扫描**（"数据按需全量"，2026-11-08）：观测面只带**取样**（产业按产量前 12、货种只报**有产量**的那些 ⇒ 载荷不涨）；要全量时**按需问一次**（GS 的 `list_industries` / `list_cargo` ⇒ agent 的只读工具 `get_industries` / `get_cargo` ⇒ 页面的"展开全部"）。两边**共用 GS 的 `ScanCargo()`** ⇒ 全量与取样不会漂（真机：全量 48 行 / 42 个产业，取样的前 12 行**全部**在全量里；货种读数 11 个，其中 **5 个产量为 0** ⇒ 没有它们就分不清"没有产量"与"没测到"，D60）。**行身份不等于实体 id**：一个产业可以**按货种出现多次** ⇒ 表格的 key 必须是 **(id, cargo)** ⇒ 用 id 当 key 会让 Alpine 少画行（真机实测：展开后 48 行只画出 6 行）。
  - 事实：**F4 的数字现在**到了屏幕上**（货运 F4 / A6）：① Run 页的线路表多一列 **Delivered**（该线运了多少，**推导值**；归不出来写 “not attributable” + 原因；没读数写 “—”）且货运线的两端显示为**产业**（`industry 28 → 53`）；② Compare 页的能力轴画出**货物/客运拆分**（`Cargo delivered` / `Passengers delivered`，**服务端口径** `splitMeasure` 一并给出）—— 服务端早就算好了（`buildScorecard` 的 `ability.cargoDelivered` / `passengersDelivered`），缺的只是**接线**。真机（seed 4242）：线路表 = `#1000 | industry 28 → 53 | COAL | 120 | 4 | 95 | £8 | £2.57k`（与公司口径的 “OUR DELIVERIES 120” 一致），Compare 的 Result 列 = “Cargo delivered 140 / Passengers delivered 0”。
+- 事实（2026-11-11 复核 15.3 源码）：**收入侧事实已经现成**：`GSCargo.GetCargoIncome(cargo, distance, days_in_transit)` 与
+  `GSEngine.GetCapacity/GetMaxSpeed/GetPrice/GetRunningCost` 都存在，且两个类的标注是 **`@api ai game`** ⇒ **GS 可调** ⇒ 模型可以在花钱前
+  算这条线的收入/成本（当前 `estimate_route` 只有 Manhattan 距离与道路成本下界）。
 - 依据：`src/game/squirrel/bridge-gs/main.nut`（`own_delivered`）、`src/agent/route-ledger.ts`、`src/agent/route-facts.ts`、`src/evolution/scorecard.ts`、`src/evolution/bench-stats.ts`；教训 `MEMORY.md` D97/D98。
