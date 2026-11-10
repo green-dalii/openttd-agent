@@ -177,6 +177,10 @@ pnpm exec tsx scripts/run-experiment.ts --dir /tmp/abXX --n 5 --game-days 300 --
 
 # 学习曲线（同一 agent 连续 N 局、记忆累积；N 上限 10）
 pnpm exec tsx scripts/run-experiment.ts --dir /tmp/seqXX --mode sequential --sessions 10
+
+# 基准矩阵（每格独立 data dir；--credentials 把仓库外的 key 复制进每一格）
+pnpm exec tsx scripts/bench.ts --root /tmp/pB7 --models MiniMax-M3.1-Flash,MiniMax-M2.5 \
+  --seeds 11,22,33 --repeats 1 --game-days 250 --credentials /tmp/pCred/credentials.json --dry-run
 ```
 
 - 门禁：`pnpm run gate`（typecheck + lint + vendor 校验 + 单测）。

@@ -18,8 +18,9 @@
  *   pnpm exec tsx scripts/bench.ts --root /tmp/bench ... --effect 0.5 --cv 1
  */
 import { spawnSync } from "node:child_process";
-import { mkdirSync, openSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, openSync, realpathSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { planMatrix, type BenchWorld } from "../src/evolution/bench-plan.js";
 import { buildScorecard, type BenchConditions } from "../src/evolution/scorecard.js";
 import { renderReportMarkdown } from "../src/evolution/bench-report.js";
@@ -42,15 +43,24 @@ interface Args {
 	cv?: number;
 	/** Seconds per run (wall-clock cap); 0 = none. */
 	seconds: number;
+	/**
+	 * A credentials file to copy into every cell's data dir.
+	 *
+	 * 为什么需要: 每个格子是**独立**的 data dir（记忆不得跨格），而模型的 key
+	 * 只存在于**仓库之外**的 `credentials.json`（仓库里不许有 key）⇒ 不复制
+	 * 进去，每一格都会因为"没有凭证"而失败。
+	 */
+	credentials?: string;
 }
 
 const USAGE = `usage: tsx scripts/bench.ts --root <dir> --models a,b --seeds 11,22 [--repeats 3]
   [--game-days 300] [--scenario prebuilt|freeform] [--start-year 1950] [--map 256x256]
-  [--seconds 900] [--effect 0.5 --cv 1] [--dry-run]
+  [--seconds 900] [--effect 0.5 --cv 1] [--credentials <file>] [--dry-run]
 
   Every (model, seed, repeat) cell gets its own data dir under <root>, so memory
   never crosses cells. --effect/--cv pre-register the comparison: an
-  under-powered matrix is refused before any run starts.`;
+  under-powered matrix is refused before any run starts. --credentials copies a
+  credentials file into every cell (the key must stay out of the repository).`;
 
 function parseArgs(argv: string[]): Args {
 	const get = (flag: string): string | undefined => {
@@ -77,6 +87,7 @@ function parseArgs(argv: string[]): Args {
 		...(get("--effect") !== undefined ? { effect: Number(get("--effect")) } : {}),
 		...(get("--cv") !== undefined ? { cv: Number(get("--cv")) } : {}),
 		seconds: Number(get("--seconds") ?? 900),
+		...(get("--credentials") !== undefined ? { credentials: get("--credentials")! } : {}),
 	};
 }
 
@@ -86,8 +97,40 @@ function cleanupGame(): void {
 	spawnSync("sleep", ["2"]);
 }
 
-function runCell(cell: { model: string; seed: number; dataDir: string }, world: BenchWorld, seconds: number): number {
+/**
+ * Copy the credentials file into one cell's data dir.
+ *
+ * 铁律: ① **只复制，不打印**（key 不进日志、不进报告）；② 目标权限 0600；
+ * ③ 每格一份（格子之间不共享）⇒ 复制的是**文件**，不是进程的环境变量。
+ */
+export function installCredentials(source: string, cellDir: string): void {
+	const target = join(cellDir, "credentials.json");
+	copyFileSync(source, target);
+	chmodSync(target, 0o600);
+}
+
+/**
+ * Check the credentials file **before** the matrix starts.
+ *
+ * 为什么要在跑前查: 缺凭证的格子会**跑到一半**才失败 ⇒ 已经烧掉的 token 与
+ * 时间全部白花 ⇒ 凭证的事要在**第一格之前**说清楚。
+ */
+export function checkCredentials(source: string | undefined): void {
+	if (!source) return;
+	const path = resolve(source);
+	if (!existsSync(path)) {
+		throw new Error(`credentials file not found: ${path}`);
+	}
+}
+
+function runCell(
+	cell: { model: string; seed: number; dataDir: string },
+	world: BenchWorld,
+	seconds: number,
+	credentials?: string,
+): number {
 	mkdirSync(cell.dataDir, { recursive: true });
+	if (credentials) installCredentials(credentials, cell.dataDir);
 	const logPath = join(cell.dataDir, "run.log");
 	const fd = openSync(logPath, "a");
 	// The model is passed through the same env var the CLI already uses, so the
@@ -121,110 +164,146 @@ function runCell(cell: { model: string; seed: number; dataDir: string }, world: 
 	return r.status ?? -1;
 }
 
-const args = parseArgs(process.argv.slice(2));
-if (!args.root || args.models.length === 0 || args.seeds.length === 0) {
-	console.error(USAGE);
-	process.exit(2);
-}
-
-const world: BenchWorld = {
-	scenario: args.scenario,
-	horizonDays: args.gameDays,
-	startYear: args.startYear,
-	mapSize: args.mapSize,
-};
-
-let plan;
-try {
-	plan = planMatrix({
-		models: args.models,
-		seeds: args.seeds,
-		repeats: args.repeats,
-		world,
-		root: args.root,
-		...(args.effect !== undefined && args.cv !== undefined ? { power: { effectSize: args.effect, cv: args.cv } } : {}),
-	});
-} catch (e) {
-	// Pre-registration refusals are the point, not a bug: print them plainly.
-	console.error(`!! ${(e as Error).message}`);
-	process.exit(1);
-}
-
-console.log(`matrix: ${plan.cells.length} cell(s), ${plan.runsPerModel} run(s) per model`);
-console.log(`world: scenario=${world.scenario} horizon=${world.horizonDays} startYear=${world.startYear} map=${world.mapSize.join("x")}`);
-if (plan.power) {
-	console.log(`pre-registered: +${Math.round(plan.power.effectSize * 100)}% effect at CV ${Math.round(plan.power.cv * 100)}% (needs ${plan.power.requiredPerArm}/model)`);
-} else {
-	console.log("pre-registered: no (a comparison from this matrix will report 'not determinable' rather than a p-value)");
-}
-for (const c of plan.cells) console.log(`  ${c.model} seed=${c.seed} rep=${c.repeat} -> ${c.dataDir}`);
-
-if (args.dryRun) process.exit(0);
-
-// --- run the matrix (serial: one game instance at a time) ---
-let failed = 0;
-for (const cell of plan.cells) {
-	cleanupGame();
-	const code = runCell(cell, world, args.seconds);
-	if (code !== 0) {
-		failed++;
-		console.log(`!! ${cell.model} seed=${cell.seed} rep=${cell.repeat} rc=${code} (log: ${join(cell.dataDir, "run.log")})`);
-	}
-}
-cleanupGame();
-
-// --- report ---
-const conditions: BenchConditions = {
-	scenario: world.scenario,
-	horizonDays: world.horizonDays,
-	seeds: args.seeds,
-	repeats: args.repeats,
-};
-const all: GameMetric[] = plan.cells.flatMap((c) => {
+/**
+ * True when this file is the process entry point.
+ *
+ * 为什么需要: 单测要 import 这个脚本里的**纯函数**（凭证的复制与检查）⇒ 顶层
+ * 代码必须不自动跑（否则 import 就开始跑矩阵了）。
+ *
+ * **必须比较 realpath**: macOS 的 `/tmp` 是 `/private/tmp` 的符号链接 ⇒
+ * `import.meta.url` 带的是**解析后**的路径，而 `process.argv[1]` 带的是
+ * **调用时**的路径 ⇒ 直接比字符串会**判成"不是入口"** ⇒ 脚本**什么都不做**
+ * 就退出（静默无操作，最坏的一种失败）。仓库放在符号链接路径下时会踩到。
+ */
+export function isEntryPoint(): boolean {
+	const arg = process.argv[1];
+	if (!arg) return false;
 	try {
-		return readMetrics(c.dataDir);
+		return realpathSync(fileURLToPath(import.meta.url)) === realpathSync(arg);
 	} catch {
-		return [];
-	}
-});
-const card = buildScorecard(all, { conditions });
-// The paired verdicts, per axis (Issue #87): one comparison per metric that
-// can be compared pair by pair, so the report answers every axis instead of
-// only the main one.
-const pairComparisons: Record<string, ReturnType<typeof pairedComparisons>> = {};
-const allComparisons: ReturnType<typeof pairedComparisons> = [];
-for (let i = 0; i < args.models.length; i++) {
-	for (let j = i + 1; j < args.models.length; j++) {
-		const list = pairedComparisons(all, args.models[i]!, args.models[j]!);
-		pairComparisons[`${args.models[i]} vs ${args.models[j]}`] = list;
-		allComparisons.push(...list);
+		return false;
 	}
 }
-const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-mkdirSync(args.root, { recursive: true });
-const jsonPath = join(args.root, `bench-${stamp}.json`);
-writeFileSync(jsonPath, `${JSON.stringify({ plan, conditions, scorecard: card, comparisons: pairComparisons }, null, 2)}\n`, "utf8");
-const mdPath = join(args.root, `bench-${stamp}.md`);
-writeFileSync(mdPath, renderReportMarkdown(card, new Date(), allComparisons), "utf8");
 
-console.log("");
-console.log(`runs: ${plan.cells.length - failed} ok, ${failed} failed`);
-console.log(`report: ${jsonPath}`);
-console.log(`        ${mdPath}`);
+function main(argv: string[]): number {
+	const args = parseArgs(argv);
+	if (!args.root || args.models.length === 0 || args.seeds.length === 0) {
+		console.error(USAGE);
+		return 2;
+	}
 
-// Pairwise, paired-by-seed comparisons (only meaningful with >= 2 models).
-if (args.models.length >= 2) {
-	console.log("");
-	console.log("paired comparisons (same seed, same repeat), per axis:");
-	for (let i = 0; i < args.models.length; i++) {
-		for (let j = i + 1; j < args.models.length; j++) {
-			const pair = `${args.models[i]} vs ${args.models[j]}`;
-			for (const cmp of pairedComparisons(all, args.models[i]!, args.models[j]!)) {
-				console.log(`  [${cmp.axisLabel}] ${cmp.label} (${cmp.unit}): ${cmp.verdict} - ${cmp.message}`);
-			}
-			console.log(`  (${pair})`);
+	// The credentials are checked **before** the first cell: a missing key would
+	// otherwise fail half-way through the matrix.
+	try {
+		checkCredentials(args.credentials);
+	} catch (e) {
+		console.error(`!! ${(e as Error).message}`);
+		return 1;
+	}
+
+	const world: BenchWorld = {
+		scenario: args.scenario,
+		horizonDays: args.gameDays,
+		startYear: args.startYear,
+		mapSize: args.mapSize,
+	};
+
+	let plan;
+	try {
+		plan = planMatrix({
+			models: args.models,
+			seeds: args.seeds,
+			repeats: args.repeats,
+			world,
+			root: args.root,
+			...(args.effect !== undefined && args.cv !== undefined ? { power: { effectSize: args.effect, cv: args.cv } } : {}),
+		});
+	} catch (e) {
+		// Pre-registration refusals are the point, not a bug: print them plainly.
+		console.error(`!! ${(e as Error).message}`);
+		return 1;
+	}
+
+	console.log(`matrix: ${plan.cells.length} cell(s), ${plan.runsPerModel} run(s) per model`);
+	console.log(`world: scenario=${world.scenario} horizon=${world.horizonDays} startYear=${world.startYear} map=${world.mapSize.join("x")}`);
+	if (plan.power) {
+		console.log(`pre-registered: +${Math.round(plan.power.effectSize * 100)}% effect at CV ${Math.round(plan.power.cv * 100)}% (needs ${plan.power.requiredPerArm}/model)`);
+	} else {
+		console.log("pre-registered: no (a comparison from this matrix will report 'not determinable' rather than a p-value)");
+	}
+	for (const c of plan.cells) console.log(`  ${c.model} seed=${c.seed} rep=${c.repeat} -> ${c.dataDir}`);
+
+	if (args.dryRun) return 0;
+
+	// --- run the matrix (serial: one game instance at a time) ---
+	let failed = 0;
+	for (const cell of plan.cells) {
+		cleanupGame();
+		const code = runCell(cell, world, args.seconds, args.credentials);
+		if (code !== 0) {
+			failed++;
+			console.log(`!! ${cell.model} seed=${cell.seed} rep=${cell.repeat} rc=${code} (log: ${join(cell.dataDir, "run.log")})`);
 		}
 	}
+	cleanupGame();
+
+	// --- report ---
+	const conditions: BenchConditions = {
+		scenario: world.scenario,
+		horizonDays: world.horizonDays,
+		seeds: args.seeds,
+		repeats: args.repeats,
+	};
+	const all: GameMetric[] = plan.cells.flatMap((c) => {
+		try {
+			return readMetrics(c.dataDir);
+		} catch {
+			return [];
+		}
+	});
+	const card = buildScorecard(all, { conditions });
+	// The paired verdicts, per axis (Issue #87): one comparison per metric that
+	// can be compared pair by pair, so the report answers every axis instead of
+	// only the main one.
+	const pairComparisons: Record<string, ReturnType<typeof pairedComparisons>> = {};
+	const allComparisons: ReturnType<typeof pairedComparisons> = [];
+	for (let i = 0; i < args.models.length; i++) {
+		for (let j = i + 1; j < args.models.length; j++) {
+			const list = pairedComparisons(all, args.models[i]!, args.models[j]!);
+			pairComparisons[`${args.models[i]} vs ${args.models[j]}`] = list;
+			allComparisons.push(...list);
+		}
+	}
+	const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+	mkdirSync(args.root, { recursive: true });
+	const jsonPath = join(args.root, `bench-${stamp}.json`);
+	writeFileSync(jsonPath, `${JSON.stringify({ plan, conditions, scorecard: card, comparisons: pairComparisons }, null, 2)}\n`, "utf8");
+	const mdPath = join(args.root, `bench-${stamp}.md`);
+	writeFileSync(mdPath, renderReportMarkdown(card, new Date(), allComparisons), "utf8");
+
+	console.log("");
+	console.log(`runs: ${plan.cells.length - failed} ok, ${failed} failed`);
+	console.log(`report: ${jsonPath}`);
+	console.log(`        ${mdPath}`);
+
+	// Pairwise, paired-by-seed comparisons (only meaningful with >= 2 models).
+	if (args.models.length >= 2) {
+		console.log("");
+		console.log("paired comparisons (same seed, same repeat), per axis:");
+		for (let i = 0; i < args.models.length; i++) {
+			for (let j = i + 1; j < args.models.length; j++) {
+				const pair = `${args.models[i]} vs ${args.models[j]}`;
+				for (const cmp of pairedComparisons(all, args.models[i]!, args.models[j]!)) {
+					console.log(`  [${cmp.axisLabel}] ${cmp.label} (${cmp.unit}): ${cmp.verdict} - ${cmp.message}`);
+				}
+				console.log(`  (${pair})`);
+			}
+		}
+	}
+
+	return failed === 0 ? 0 : 1;
 }
 
-process.exit(failed === 0 ? 0 : 1);
+if (isEntryPoint()) {
+	process.exit(main(process.argv.slice(2)));
+}
