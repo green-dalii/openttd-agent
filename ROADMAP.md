@@ -100,7 +100,7 @@ game `3993`、web `8198`）；**不跑宽泛 pkill**；实验期间不跑 gate�
 
 ---
 
-## 🔴 COMPACT 后从这里接续（2026-11-08）
+## 🔴 COMPACT 后从这里接续（2026-11-10）
 
 > 给"compact 后的我自己"的恢复手册。**按顺序做，不必重新推导**。
 
@@ -137,14 +137,18 @@ Configure）；#13 S7 除货运线路外全部（城镇名 / 融资事实 / 推�
 缺的是读数不是算法（**A3 已补上这一层**）；③ 台账的形状是"城镇对" ⇒ 货运线硬塞会变
 `null/null` 并进模型上下文（**A5 已改成两种记录**）；④ 货运拆分**服务端已算好、页面没画**
 （**A6 已接线**：Run 页多一列 Delivered、Compare 页画出货物/客运拆分）。
-当前指纹：scaffold **`3b19310088baff6e`**、观测面 **`103aabed827a8def`**（变了就会分组，Compare 按组比）。
+**i18n 三批 ✅**（Issue #88：静态文案 / 动态字面量 / 服务端词汇按 id）；**数据按需全量 ✅**（Issue #13：
+`get_industries`/`get_cargo` + 页面"展开全部"，取样与全量同一扫描）；**退出码语义 ✅**（正常收场=0）；
+**货运轴配对指标 ✅**；**基准矩阵自带 credentials 与 models-cache ✅**；**策略晋升闸数局不数采样 ✅**
+（PR #102：单局曾能过闸；已修，且模型现在看得见 `build_freight_route`）。
+当前指纹：scaffold **`d89a898b6d575e4a`**、观测面 **`103aabed827a8def`**（变了就会分组，Compare 按组比）。
 
 **三条不得违反的不变量**：① harness 默认关（`AGENT_HARNESS=0`）；② harness compaction 必须关；
 ③ 完成 = `AGENTS.md` §5.1 八条真机断言全绿（单测绿不算）。
 
-**当前阻塞（需所有者）**：**provider 额度** —— 真实模型局在反思阶段报 429「已达到 Token Plan
-用量上限」；配置里只有 `minimax-cn` 一个 provider ⇒ **阶段 B 与策略晋升证明都做不了**。
-需要：续费 / 换 provider / 换 key（顺带把待轮换的 key 一起处理）。
+**当前阻塞（需所有者）**：**provider 额度已恢复**（2026-11-10 起真实模型局不再 429）⇒ 阶段 B 的矩阵
+与策略晋升证明**都能跑**；但晋升门槛仍差得远（门槛 = 年收入 £6083，两局实测 +£1662 / -£31112）
+⇒ ⇒ **要的不是额度，是"模型能不能开出一条赚钱的线"**。若要换 key，请顺带轮换待处理的旧 key。
 
 ### 3. 环境事实（易变）
 
@@ -152,12 +156,12 @@ Configure）；#13 S7 除货运线路外全部（城镇名 / 融资事实 / 推�
 `docs/STARTUP-AND-LIFECYCLE.md`。两条最容易踩的：`dashboard:smoke` 默认占 **8899**
 （临时服务别占它）；真机实验用隔离目录 `/tmp/pXX` + admin 3991 / game 3993。
 
-### 4. 最近的交接点（2026-11-08）
+### 4. 最近的交接点（2026-11-10）
 
 - `main` = 最新合并的 PR（`git log --oneline -3`）。**不要再在本文引用 commit SHA**——
   一次历史重写就会让它悬空。
-- 门禁：`pnpm run gate` = 119 files / 1983 tests；带真机的 `pnpm run test:live` = 121 files /
-  1992 tests。
+- 门禁：`pnpm run gate` = 126 files / 2053 tests（9 skipped）；`shazam_verify` 独立跑（LSP 诊断 +
+  broken references + orphan 复核：前端那 28 个是已知误报）。
 - 开放 Issue：#1（跟踪）、#13（世界事实）。
 - Dashboard 四页已就位：`/`(Run) `/compare` `/history` `/configure`（`/providers` 302）。
 - 每阶段**分支 + PR**（英文 commit、正文 `Closes #N` / `Part of #N`、squash 合并）；
