@@ -9,17 +9,19 @@
 
 ## [Unreleased]
 ### Fixed
+- **A run that stopped at its budget no longer exits 1.** A run that ends because the token cap,
+  the cost cap, the horizon or the wall clock ran out - or because the construction did not finish -
+  has produced its data, so it is a **result**, not a failure: the exit code is now 0. Real failures
+  (the game script never came up, the game crashed, the runner threw) still exit 1, so CI is not
+  flooded by normal stops. The run's *result* is in the manifest's outcome.
 - **The language switch did not translate everything, and it did not translate it back.** Three
-  silent faults: a sentence written across two lines in the page source kept its line breaks in the
-  DOM, so the lookup key never matched; a sentence broken up by an inline `<code>` was never
-  translated at all; and switching to Chinese and back left the page mixed, because the original
-  text was remembered on the **parent** element and restoring it rewrote the parent's whole text -
-  taking the inline `<code>` with it. The lookup normalises whitespace, every text node is
-  translated on its own, and the original text is kept per text node.
+  silent faults: a sentence written across two lines kept its line breaks in the DOM, so the lookup
+  key never matched; a sentence broken up by an inline `<code>` was never translated at all; and
+  switching to Chinese and back left the page mixed, because the original text was remembered on
+  the **parent** element and restoring it rewrote the parent's whole text.
 - **A pair could have compared the wrong two runs.** The repeat index was counted over the rows that
-  **had a reading**, so a run with no reading for one metric shifted its partner and the interval
-  was computed from two different runs. The cells are now the **runs**, and a cell missing a reading
-  on one side is dropped whole.
+  **had a reading**, so a run with no reading for one metric shifted its partner. The cells are now
+  the **runs**, and a cell missing a reading on one side is dropped whole.
 - **"Not applicable" was reported as zero.** The game script encodes a missing reading as JSON `null`
   (so the payload shape never changes), but two readers went through `Number(value)` - and
   `Number(null)` is `0` - so "this industry does not accept this cargo" became "stockpile: 0 tonnes".
@@ -29,7 +31,7 @@
   the projection all along, so the observation fingerprint does not move.
 - **The navigation now reaches every page.** A page URL was a hand-written table in the server's
   memory, so a page added after the server started was unreachable ("not found"). The routes are now
-  **derived from the files** in `public/pages/`, and an unknown URL answers with the list of pages.
+  **derived from the files** in `public/pages/`.
 
 - **The model can finally see the freight world.** A freight line is "which mine, which plant", and the
   model could see neither: the GS now reports a **cargo catalogue** (which cargo is freight, which
@@ -48,19 +50,17 @@
   problem codes, the delivery measures and the knob values are the **server's** wording, and the
   server keeps exactly one canonical wording of them. The front end now looks them up **by id**
   (`outcome.token_cap`, `problem.no_credential`) and falls back to the server's text when it has
-  no translation, so the wording is never copied into the front-end table. The server sends the
-  ids along with the text, and a test checks the table's coverage against the server's own lists
-  - a new id without a translation fails the build. The growth axis' analysis sentences keep the
-  server's wording: they carry variable numbers.
+  no translation, so the wording is never copied into the front-end table. A test checks the
+  table's coverage against the server's own lists - a new id without a translation fails the build.
 - **The Chinese interface now covers the text the scripts render too.** The hints, empty states,
-  legends and labels the pages draw at runtime - about 440 more strings - are translated.
+  legends and labels the pages draw at runtime - about 440 more strings - are translated as well.
 - **The language switch stopped working for anything rendered after the page loaded.** The
   translation of newly rendered text was scheduled on `requestAnimationFrame`, which only runs
   while the page is painted - so in a background tab the observer never fired again and
   everything the framework drew afterwards stayed English, with nothing in the console.
 - **The interface now picks up the language before the first paint.** The framework starts in a
-  microtask, so it rendered before the language runtime had initialised - everything it drew
-  looked up in the default language and stayed there.
+  microtask, so it rendered before the language runtime had initialised - everything it drew looked
+  up in the default language and stayed there. The runtime now initialises on the framework's start.
 - **The dashboard's Chinese interface is now complete for its static copy.** Every visible
   sentence in the four pages (Run / Compare / History / Configure) has a Chinese translation -
   324 of them, where before 226 silently fell back to English. The pages also had Chinese text
