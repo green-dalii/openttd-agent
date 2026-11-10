@@ -102,6 +102,29 @@ describe("strategies: mergeStrategySamples", () => {
 		expect(b[0]!.sourceSessionIds).toEqual(["s1"]);
 	});
 
+	it("同一局里的多条采样只留一个读数（一局只算一局）", () => {
+		// 真机发现（2026-11-10）：一局里模型记了 3 条同模式采样 ⇒ 旧实现把 3 个
+		// 读数塞进一张卡，而闸把"读数个数"当成"验证局数"⇒ 单局即可过闸。
+		const cards = mergeStrategySamples(
+			[sample({ sessionId: "s1" }), sample({ sessionId: "s1" }), sample({ sessionId: "s1" })],
+			[],
+			NOW,
+		);
+		expect(cards).toHaveLength(1);
+		expect(cards[0]!.profitPerDayPerRun).toHaveLength(1);
+		expect(cards[0]!.sourceSessionIds).toEqual(["s1"]);
+	});
+
+	it("读数与来源局一一对应（排序后不串位）", () => {
+		const cards = mergeStrategySamples(
+			[sample({ sessionId: "s2", profitPerDay: 200 }), sample({ sessionId: "s1", profitPerDay: 100 })],
+			[],
+			NOW,
+		);
+		expect(cards[0]!.sourceSessionIds).toEqual(["s1", "s2"]);
+		expect(cards[0]!.profitPerDayPerRun).toEqual([100, 200]);
+	});
+
 	it("不同模式各自成卡（白名单参数不同 = 不同的模式）", () => {
 		const cards = mergeStrategySamples(
 			[sample(), sample({ action: "set_route_cargo", params: { cargo: "PASS" } })],
@@ -211,6 +234,15 @@ describe("strategies: evaluatePromotion(SPEC §5.3 双重门槛)", () => {
 		expect(Number.isFinite(r.value)).toBe(true);
 	});
 
+	it("一局里的多条高值采样过不了闸（SPEC §5.3 要两个独立局）", () => {
+		// 真机发现（2026-11-10）：单局三条采样被算成三局 ⇒ 闸形同虚设。
+		const r = evaluatePromotion(
+			card({ profitPerDayPerRun: [100, 100, 100], sourceSessionIds: ["s1"] }),
+		);
+		expect(r.promoted).toBe(false);
+		expect(r.runs).toBe(1);
+	});
+
 	it("MIN_VERIFIED_RUNS 就是 SPEC 的 2", () => {
 		expect(MIN_VERIFIED_RUNS).toBe(2);
 	});
@@ -243,7 +275,8 @@ describe("strategies: selectStrategies(注入前的 guardrail)", () => {
 		params: {},
 		profitPerDayPerRun: [MIN_STRATEGY_PROFIT_PER_DAY + 1, MIN_STRATEGY_PROFIT_PER_DAY + 2],
 		evidence: ["e"],
-		sourceSessionIds: ["s1"],
+		// 一局一个读数：两个读数 ⇒ 两个独立局（真机发现 2026-11-10）。
+		sourceSessionIds: ["s1", "s2"],
 		createdAt: NOW,
 		enabled,
 	});
@@ -302,5 +335,18 @@ describe("strategies: the identity vocabulary belongs to the code", () => {
 		expect(strategyId("build_bus_route", { cargo: "LVST", townA: 1, from: "A" })).toBe(
 			strategyId("build_bus_route", { cargo: "LVST", townB: 9, to: "B" }),
 		);
+	});
+
+	it("record_strategy 的描述把词表里的每个动作都写出来（模型得知道能写什么）", async () => {
+		// 真机发现（2026-11-10）：货运 F3 加了 build_freight_route，但描述里没写
+		// ⇒ 模型把货运模式记成 build_bus_route ⇒ 同一个想法被拆成两张卡。
+		const { createReflectionTools } = await import("../../src/evolution/reflect-tools.js");
+		const tool = createReflectionTools({ lessons: [], strategies: [], rejections: [] }, { sessionId: "s", seed: 1, now: 0 })
+			.find((t) => t.name === "record_strategy")!;
+		const schema = tool.parameters as { properties?: Record<string, { description?: string }> };
+		const desc = `${tool.description} ${schema.properties?.action?.description ?? ""}`;
+		for (const action of STRATEGY_ACTIONS) {
+			expect(desc).toContain(action);
+		}
 	});
 });
