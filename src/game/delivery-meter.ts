@@ -4,7 +4,7 @@
  *
  * 职责：把周期性收到的 `ServerCompanyEconomy.deliveredCargo`（`cur_economy`
  *   的当季计数器，u16，每季重置）积分为"本次 session 从开始到现在运出多少货"。
- * 禁止：任何 IO、任何策略判断。纯累加，输入是 (gameDay, delivered) 序列。
+ * 禁止：任何 IO、任何策略判断。纯累加，输入是 (季度序号, delivered) 序列。
  *
  * 为什么需要它（SPEC §10.65）：该字段**每季度归零**，所以"运行结束那一刻的读
  * 数"实际测的是**随机一段部分季度**的交付量 —— 恰好跨过季界的运行会记 0（建成
@@ -15,10 +15,11 @@
  * 诚实边界：抽到缺失读数只损失分辨率（计数器在季内单调），不算不完整；但**漏掉
  * 整季**会丢失该季的货物，故计入 `gaps` 并使 `complete=false`，让调用方可以拒绝
  * 把不完整的读数当完整读数用。
+ *
+ * 季度序号（quarter index）是**引擎日历**的季度（1/4/7/10 月 1 日为界，见
+ * `src/game/calendar.ts`）—— 不用"天数 / 90"，因为日历年里的季度是 90–92 天，
+ * 只有**边界**是确定的。
  */
-
-/** One quarter is three 30-day months in this project's game-day convention. */
-export const QUARTER_DAYS = 90;
 
 export interface DeliveryMeterStats {
 	/** Readings that carried a usable number. */
@@ -36,7 +37,11 @@ export interface DeliveryMeterStats {
 }
 
 export interface DeliveryMeter {
-	observe(gameDay: number, delivered: number | null | undefined): void;
+	/**
+	 * 记一次读数。`quarterIndex` 是引擎日历的季度序号（单调递增，见
+	 * `src/game/calendar.ts`）—— 季度变了就是计数器归零了。
+	 */
+	observe(quarterIndex: number, delivered: number | null | undefined): void;
 	/** Cumulative deliveries, or null while no usable reading has arrived. */
 	total(): number | null;
 	/** Per-quarter totals in order (the last entry is still open). */
@@ -44,7 +49,7 @@ export interface DeliveryMeter {
 	stats(): DeliveryMeterStats;
 }
 
-export function createDeliveryMeter(quarterDays = QUARTER_DAYS): DeliveryMeter {
+export function createDeliveryMeter(): DeliveryMeter {
 	let started = false;
 	let lastValue = 0;
 	let quarterIdx = 0;
@@ -62,7 +67,7 @@ export function createDeliveryMeter(quarterDays = QUARTER_DAYS): DeliveryMeter {
 	};
 
 	return {
-		observe(gameDay, delivered) {
+		observe(quarter, delivered) {
 			if (delivered === null || delivered === undefined || !Number.isFinite(delivered)) {
 				missing++;
 				return;
@@ -71,16 +76,15 @@ export function createDeliveryMeter(quarterDays = QUARTER_DAYS): DeliveryMeter {
 			if (!started) {
 				started = true;
 				lastValue = value;
-				quarterIdx = Math.floor(gameDay / quarterDays);
+				quarterIdx = quarter;
 				samples++;
 				return;
 			}
-			const q = Math.floor(gameDay / quarterDays);
-			if (q > quarterIdx) {
+			if (quarter > quarterIdx) {
 				finalize();
 				changes++;
-				if (q - quarterIdx > 1) gaps++;
-				quarterIdx = q;
+				if (quarter - quarterIdx > 1) gaps++;
+				quarterIdx = quarter;
 				lastValue = value;
 			} else if (value < lastValue) {
 				// Same quarter but the counter went backwards: the server restarted

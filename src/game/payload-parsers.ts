@@ -4,50 +4,12 @@
  *
  * 职责: 把 server packet payload (byte layout 见 SPEC §2 / network_admin.cpp)
  *   解码为类型化对象。
- * 事实来源: network_admin.cpp `Send*` handlers 的字段顺序; OpenTTD 日历算法
- *   (raw date = days since 0000-01-01, proleptic Gregorian, verified by live
- *   capture: `-t 1950` -> raw 712223 = 1950-01-01).
+ * 事实来源: network_admin.cpp `Send*` handlers 的字段顺序。
  * 禁止: IO; 抛异常吞协议错 (defensive: 截断 payload 返回部分结果)。
+ * 注意: **日历换算不在这里**（那是 `src/game/calendar.ts` 的唯一职责）。
  */
 
 import { ByteReader } from "./admin-protocol.js";
-
-export interface YearMonthDay {
-	year: number;
-	/** 1-based */
-	month: number;
-	/** 1-based */
-	day: number;
-}
-
-function isLeapYear(y: number): boolean {
-	return y % 4 === 0 && (y % 100 !== 0 || y % 400 === 0);
-}
-
-/**
- * OpenTTD raw date -> {year, month, day}.
- * Raw date 0 = 0000-01-01 (proleptic Gregorian with leap year 0).
- * Algorithm mirrors OpenTTD's CalendarConvertDateToYMD.
- */
-export function convertDateToYmd(raw: number): YearMonthDay {
-	let days = raw;
-	let year = 0;
-	for (;;) {
-		const len = isLeapYear(year) ? 366 : 365;
-		if (days < len) break;
-		days -= len;
-		year++;
-	}
-	const mdays = [31, isLeapYear(year) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31] as const;
-	let month = 0;
-	for (;;) {
-		const len = mdays[month]!;
-		if (days < len) break;
-		days -= len;
-		month++;
-	}
-	return { year, month: month + 1, day: days + 1 };
-}
 
 export interface ParsedCompanyEconomy {
 	id: number;
@@ -106,24 +68,4 @@ export function parseCompanyEconomy(payload: Uint8Array): ParsedCompanyEconomy {
 		// truncated — keep what we parsed
 	}
 	return out;
-}
-
-/** Normalize to a GameDate-friendly shape from raw. */
-export function rawDateToParts(raw: number): { year: number; month: number; day: number } {
-	return convertDateToYmd(raw);
-}
-
-/**
- * OpenTTD raw date -> this project's 360-day game day.
- *
- * The admin `Date` subscription is MONTHLY (admin-client DEFAULT_SUBSCRIBE), so
- * the world clock moves in 30-day steps; the GS, by contrast, reports its raw
- * date every 200 ticks (~3 game days). The episode horizon must use the finer
- * source, otherwise a "300 game day" episode can only be cut to the nearest month
- * (measured: a 40-day horizon recorded 60). All arithmetic stays in the same
- * 360-day convention the rest of the harness uses.
- */
-export function gameDayFromRawDate(raw: number): number {
-	const { year, month, day } = convertDateToYmd(raw);
-	return (year - 1950) * 360 + (month - 1) * 30 + (day - 1);
 }

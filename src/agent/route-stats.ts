@@ -8,6 +8,8 @@
  *   缺数据时返回 null 而不是 0（0 会被读成"这条线不赚钱"，是编造事实）。
  */
 
+import { dayOfYear as calendarDayOfYear } from "../game/calendar.js";
+
 /** GS 上报的一条线路经济读数（原始事实）。 */
 export interface RouteStats {
 	job: number;
@@ -74,9 +76,6 @@ export interface RouteStats {
 	vehiclesIds?: number[];
 }
 
-/** OpenTTD 一年 365 天（闰年不做特殊处理，误差 ≤0.3%，如实标注不假装精确）。 */
-const DAYS_PER_YEAR = 365;
-
 /**
  * 报"每日收益"需要的最少样本天数。
  * 年份刚开局时 year-to-date 只有几天，除以 1 会得到 3650/day 这种**由 1 天样本
@@ -84,22 +83,27 @@ const DAYS_PER_YEAR = 365;
  */
 const MIN_INCOME_DAYS = 30;
 
-/** 年内第几天（0..364），与 incomePerDay 用同一约定。 */
+/**
+ * 年内第几天（1..365/366）。
+ *
+ * 旧的实现是 `gameDate % 365`：那**不是**年内第几天（历法漂移，闰年会偏），
+ * 而且分母的年与分子的年**不同步** —— 车辆 YTD 利润在经济年边界归零，而分母
+ * 继续累加。现在按引擎的日历算（`src/game/calendar.ts`），分子分母同属一年。
+ */
 export function dayOfYear(gameDate: number): number {
-	const d = Math.trunc(gameDate);
-	return ((d % DAYS_PER_YEAR) + DAYS_PER_YEAR) % DAYS_PER_YEAR;
+	return calendarDayOfYear(gameDate);
 }
 
 /**
  * 当年累计利润 → 每日收益。
- * `gameDate % 365` = 年内第几天；分母用 max(1, day) 避免年初除零。
+ * 分母是**当年已经过的天数**（年内第几天）；分母用 max(1, day) 避免年初除零。
  * **负利润是事实（亏损线路），照实为负**——首次实现曾把"-1 读不到"与
  * "亏钱"一起归为 null，那是把两种完全不同的世界状态混为一谈（测试第一次就
  * 抓住了）。"未知"只由 **没有车辆** 决定，见 formatRouteStats。
  */
 export function incomePerDay(profit: number, gameDate: number): number | null {
 	if (!Number.isFinite(profit)) return null;
-	const day = ((Math.trunc(gameDate) % DAYS_PER_YEAR) + DAYS_PER_YEAR) % DAYS_PER_YEAR;
+	const day = calendarDayOfYear(gameDate);
 	return profit / Math.max(1, day);
 }
 

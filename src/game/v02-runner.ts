@@ -18,7 +18,7 @@ import { OpenTTDProcessManager } from "../game/process-manager.js";
 import { AdminClient } from "../game/admin-client.js";
 import { WorldState } from "../game/world-state.js";
 import { createEpisode } from "../agent/episode.js";
-import { gameDayFromRawDate } from "../game/payload-parsers.js";
+import { gameDayFromRaw, gameDayFromYmd } from "./calendar.js";
 import { AdminUpdateType, ALL_COMPANIES } from "../game/admin-protocol.js";
 import {
 	deploySquirrelPacks,
@@ -230,10 +230,10 @@ export async function runV02(cfg: Config, opts: V02Options = {}): Promise<number
 		// 因此这里显式自带时钟，并把它定义清楚：**运营**多少游戏日（不是建线耗时）。
 		const t0 = Date.now();
 		const dayNow = (): number => {
-			if (gsRawDate !== null) return gameDayFromRawDate(gsRawDate);
+			if (gsRawDate !== null) return gameDayFromRaw(gsRawDate);
 			const d = world.snapshot().date;
 			if (!d) return 0;
-			return (d.year - 1950) * 360 + (d.month - 1) * 30 + (d.day - 1);
+			return gameDayFromYmd(d.year, d.month, d.day);
 		};
 		const runDays = opts.gameDays && opts.gameDays > 0 ? opts.gameDays : 90;
 		let runStartDay: number | null = null;
@@ -571,11 +571,11 @@ export async function runV02(cfg: Config, opts: V02Options = {}): Promise<number
 	// measurement, wall clock is only the safety cap.
 	const gameDayNow = (): number => {
 		// GS raw date first: the admin Date subscription is MONTHLY, so the world
-		// date alone can only cut the episode to the nearest 30 game days.
-		if (gsRawDate !== null) return gameDayFromRawDate(gsRawDate);
+		// date alone can only cut the episode to the nearest month.
+		if (gsRawDate !== null) return gameDayFromRaw(gsRawDate);
 		const d = world.snapshot().date;
 		if (!d) return 0;
-		return (d.year - 1950) * 360 + (d.month - 1) * 30 + (d.day - 1);
+		return gameDayFromYmd(d.year, d.month, d.day);
 	};
 	const episode = createEpisode({
 		horizonDays: opts.gameDays ?? null,

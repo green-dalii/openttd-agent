@@ -10,6 +10,7 @@ import type { TelemetrySnapshot } from "./telemetry.js";
 import type { SessionTotals } from "./session-store.js";
 import type { AgentDeps } from "./types.js";
 import type { Config } from "../config.js";
+import { gameDayFromYmd } from "../game/calendar.js";
 
 export function sleep(ms: number): Promise<void> {
 	return new Promise((r) => setTimeout(r, ms));
@@ -79,7 +80,7 @@ export function describeNotable(
 export function gameDaysSinceStart(deps: AgentDeps): number {
 	const d = deps.state.snapshot().date;
 	if (!d) return 0;
-	return (d.year - 1950) * 360 + (d.month - 1) * 30 + (d.day - 1);
+	return gameDayFromYmd(d.year, d.month, d.day);
 }
 
 /** Comparable numbers for the next decision's delta. */
