@@ -19,7 +19,7 @@ import type { WorldState } from "../game/world-state.js";
 import type { RouteLedger } from "./route-ledger.js";
 import { createExecutorProgress, type ExecutorProgressReport } from "./executor-progress.js";
 import { decodeExecutorPhase, type ExecutorErrorMessage } from "../game/executor-status.js";
-import { gameDayFromRawDate, convertDateToYmd } from "../game/payload-parsers.js";
+import { gameDayFromRaw, gameDayFromYmd, rawToYmd } from "../game/calendar.js";
 import type { WebServer } from "../web/server.js";
 import type { RouteStats } from "./route-stats.js";
 import {
@@ -202,13 +202,14 @@ export function makeSignalHub(refs: SignalHubRefs): SignalHub {
 	let executorError: (ExecutorErrorMessage & { at: number }) | null = null;
 	const executorProgress = createExecutorProgress();
 	/**
-	 * Simulated day for progress maths. Same 360-day-year convention as the
-	 * episode clock; only differences matter here, so the epoch is irrelevant.
+	 * Simulated day for progress maths. The game's calendar is the engine's
+	 * calendar (see `src/game/calendar.ts`); only differences matter here, so
+	 * the epoch is irrelevant.
 	 */
 	const gameDayNow = (): number => {
 		const d = refs.world.snapshot().date;
 		if (!d) return 0;
-		return (d.year - 1950) * 360 + (d.month - 1) * 30 + (d.day - 1);
+		return gameDayFromYmd(d.year, d.month, d.day);
 	};
 	let reachedDone = false;
 	let prevStats: { vehicles: number; stations: number } | null = null;
@@ -272,7 +273,7 @@ export function makeSignalHub(refs: SignalHubRefs): SignalHub {
 									seq: 0,
 									kind: "date",
 									ts: Date.now(),
-									payload: { raw: p.date, ...convertDateToYmd(p.date), source: "gs" },
+									payload: { raw: p.date, ...rawToYmd(p.date), source: "gs" },
 								} as unknown as GameEvent);
 							} catch (e) {
 								console.warn(`[agent] GS game clock update failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -714,7 +715,7 @@ export function makeSignalHub(refs: SignalHubRefs): SignalHub {
 		getGsCount: () => gsStates,
 		getGsErrors: () => gsErrors,
 		getExecutorProgress: () => executorProgress.report(gameDayNow()),
-		getGameDay: () => (gsRawDate !== null ? gameDayFromRawDate(gsRawDate) : null),
+		getGameDay: () => (gsRawDate !== null ? gameDayFromRaw(gsRawDate) : null),
 		getWorldClock: () => ({
 			rawDate: gsRawDate,
 			lastAdvancedAtMs: lastDateAdvancedAtMs,

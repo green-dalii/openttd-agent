@@ -7,7 +7,8 @@
  */
 
 import { AdminPacketType, ByteReader } from "./admin-protocol.js";
-import { convertDateToYmd, parseCompanyEconomy } from "./payload-parsers.js";
+import { rawToYmd } from "./calendar.js";
+import { parseCompanyEconomy } from "./payload-parsers.js";
 import type { GameEvent } from "../types.js";
 
 export interface RawServerPacket {
@@ -65,7 +66,7 @@ export function handleServerPacket(pkt: RawServerPacket, seq: number, now: numbe
 function dateEvent(pkt: RawServerPacket, seq: number, now: number): GameEvent {
 	const r = new ByteReader(pkt.payload);
 	const raw = r.uint32();
-	const { year, month, day } = convertDateToYmd(raw);
+	const { year, month, day } = rawToYmd(raw);
 	return { seq, kind: "date", ts: now, payload: { raw, year, month, day } };
 }
 

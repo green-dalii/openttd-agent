@@ -11,7 +11,7 @@
 
 import type { CompanyEconomy, CompanySnapshot, CompanyStats, GameDate, GameEvent } from "../types.js";
 import { createDeliveryMeter } from "./delivery-meter.js";
-import { convertDateToYmd } from "./payload-parsers.js";
+import { quarterIndex, rawToYmd } from "./calendar.js";
 
 /**
  * 有限数 → number，缺/非数 → **null**（"未上报"），不是 0。
@@ -26,12 +26,15 @@ function numOrNull(v: unknown): number | null {
 }
 
 /**
- * Game day in the project's 360-day-year convention. Absolute year is fine -
- * the meter only compares differences and quarter boundaries.
+ * 季度序号（引擎口径）：交付计量器用它认季度边界。
+ *
+ * 旧的实现按"游戏日 / 90"推季度，那依赖一个**虚构的 360 天年**（旧日历把日历日期
+ * 投影到 360 天年上）。现在季度边界来自引擎的日历（1/4/7/10 月 1 日），与引擎
+ * 在 calendar 模式下的季度**一致**。
  */
-function gameDayOf(date: GameDate | null): number {
+function quarterOf(date: GameDate | null): number {
 	if (!date) return 0;
-	return date.year * 360 + (date.month - 1) * 30 + (date.day - 1);
+	return quarterIndex(date.raw);
 }
 
 function emptyDelivery(): CumulativeRunDelivery {
@@ -455,7 +458,7 @@ export class WorldState {
 				// what identifies the quarter; each company keeps its own meter.
 				const meter = this.meters.get(p.id) ?? createDeliveryMeter();
 				this.meters.set(p.id, meter);
-				meter.observe(gameDayOf(this.date), p.deliveredCargo);
+				meter.observe(quarterOf(this.date), p.deliveredCargo);
 				const st = meter.stats();
 				c.deliveredRun = {
 					total: meter.total(),
@@ -560,7 +563,7 @@ export class WorldState {
 		if (this.date && raw < this.date.raw) return;
 		this.date = ymd
 			? { raw, year: ymd.year, month: ymd.month, day: ymd.day }
-			: { raw, ...convertDateToYmd(raw) };
+			: { raw, ...rawToYmd(raw) };
 	}
 
 	/**

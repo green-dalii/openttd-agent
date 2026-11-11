@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { incomePerDay, formatRouteStats, joinRoutesWithLedger, routeWireFacts, fleetDecomposition } from "../../src/agent/route-stats.js";
+import { dayOfYear, ymdToRaw } from "../../src/game/calendar.js";
+
+/**
+ * `gameDate` 是引擎的 raw date（距 0000-01-01 的日历天数）。下面几个日期是按
+ * **年内第几天**挑的：day 1（1 月 1 日）、day 20、day 200、day 364。
+ */
+const day1 = ymdToRaw(1950, 1, 1);
+const day20 = ymdToRaw(1950, 1, 20);
+const day200 = ymdToRaw(1950, 7, 19);
+const day364 = ymdToRaw(1950, 12, 30);
 
 /**
  * NEXT-2 N2-1：线路经济（纯函数部分）。
@@ -9,28 +19,29 @@ import { incomePerDay, formatRouteStats, joinRoutesWithLedger, routeWireFacts, f
  * GS 嵌套表/算术怪癖已经浪费过一整轮）。
  */
 describe("incomePerDay —— 当年累计利润 → 每日收益", () => {
-	it("年内第 N 天：利润 / N（+1 避免除零）", () => {
-		// OpenTTD 日期 0 = 第 1 年 1 月 1 日；day-of-year = date % 365
-		expect(incomePerDay(1000, 364)).toBeCloseTo(1000 / 364, 6);
-		expect(incomePerDay(3650, 0)).toBe(3650); // 年中第 0 天按 1 天算
+	it("年内第 N 天：利润 / N（分母是引擎日历的年内天数）", () => {
+		expect(dayOfYear(day364)).toBe(364);
+		expect(incomePerDay(1000, day364)).toBeCloseTo(1000 / 364, 6);
+		expect(dayOfYear(day1)).toBe(1);
+		expect(incomePerDay(3650, day1)).toBe(3650); // 年初第 1 天按 1 天算
 	});
 
 	it("负利润（亏钱线路）如实为负——不许取绝对值掩盖", () => {
-		expect(incomePerDay(-730, 364)).toBeLessThan(0);
+		expect(incomePerDay(-730, day364)).toBeLessThan(0);
 	});
 
 	it("非数输入 → null（哨兵/NaN 不许混进派生量）", () => {
-		expect(incomePerDay(Number.NaN, 200)).toBeNull();
+		expect(incomePerDay(Number.NaN, day200)).toBeNull();
 	});
 
 	it("没有车辆 → income 不可知，不编造 0（0 会被读成'这条线不赚钱'）", () => {
-		const line = formatRouteStats({ job: 9, vehicles: 0, profit: 0, waiting: 3, gameDate: 200 });
+		const line = formatRouteStats({ job: 9, vehicles: 0, profit: 0, waiting: 3, gameDate: day200 });
 		expect(line).toContain("no vehicles"); // 原因必须写对，不能拿"年份太新"搪塞
 		expect(line).not.toContain("income 0/day");
 	});
 
 	it("年初样本不足（<30 天）→ 不给每日速率：1 天样本不能当年化", () => {
-		const line = formatRouteStats({ job: 9, vehicles: 6, profit: 3650, waiting: 3, gameDate: 365 });
+		const line = formatRouteStats({ job: 9, vehicles: 6, profit: 3650, waiting: 3, gameDate: day20 });
 		expect(line).not.toMatch(/income 3650\/day/);
 		expect(line).toMatch(/not meaningful yet/);
 		expect(line).toContain("3650"); // 原始事实仍然照实给出
@@ -38,7 +49,7 @@ describe("incomePerDay —— 当年累计利润 → 每日收益", () => {
 });
 
 describe("formatRouteStats —— 注入/工具文本只陈述事实", () => {
-	const stats = { job: 101, vehicles: 2, profit: 5000, waiting: 7, gameDate: 364 };
+	const stats = { job: 101, vehicles: 2, profit: 5000, waiting: 7, gameDate: day364 };
 
 	it("包含 job/车辆数/等待/每日收益", () => {
 		const s = formatRouteStats(stats);
@@ -96,17 +107,18 @@ describe("routeWireFacts（仪表盘线路事实）", () => {
 	const ledger = [{ order: { job: 100, fromTown: 4, toTown: 20 } }];
 
 	it("把 GS 读数与账本两端城镇合到一起", () => {
-		const r = routeWireFacts([{ job: 100, vehicles: 6, profit: 3650, waiting: 12, gameDate: 200 }], ledger)[0]!;
+		const r = routeWireFacts([{ job: 100, vehicles: 6, profit: 3650, waiting: 12, gameDate: day200 }], ledger)[0]!;
 		expect(r.job).toBe(100);
 		expect(r.vehicles).toBe(6);
 		expect(r.waiting).toBe(12);
 		expect(r.townA).toBe(4);
 		expect(r.townB).toBe(20);
+		expect(dayOfYear(day200)).toBe(200);
 		expect(r.incomePerDay).toBeCloseTo(3650 / 200, 6);
 	});
 
 	it("**没有车** → 收益不可测（null，不是 0）", () => {
-		const r = routeWireFacts([{ job: 100, vehicles: 0, profit: 0, waiting: 0, gameDate: 200 }], ledger)[0]!;
+		const r = routeWireFacts([{ job: 100, vehicles: 0, profit: 0, waiting: 0, gameDate: day200 }], ledger)[0]!;
 		expect(r.incomePerDay).toBeNull();
 	});
 
@@ -116,7 +128,7 @@ describe("routeWireFacts（仪表盘线路事实）", () => {
 	});
 
 	it("账本不知道的 job → 只给读数，**不编造**两端城镇", () => {
-		const r = routeWireFacts([{ job: 999, vehicles: 3, profit: 0, waiting: 0, gameDate: 200 }], ledger)[0]!;
+		const r = routeWireFacts([{ job: 999, vehicles: 3, profit: 0, waiting: 0, gameDate: day200 }], ledger)[0]!;
 		expect(r.townA).toBeUndefined();
 		expect(r.townB).toBeUndefined();
 		expect(r.vehicles).toBe(3);

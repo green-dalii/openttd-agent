@@ -10,11 +10,10 @@
 ## [Unreleased]
 ### Fixed
 - **The benchmark matrix could not use a real provider, and it could also do nothing at all.** Every cell is its own
-  data directory (memory must not cross cells) while the key lives outside the repository, so a cell had no
-  credentials and failed; `--credentials` now copies the file into each cell (0600, never printed, checked before the
-  first cell runs). Separately, the script's "do not run on import" check compared paths as strings - under a
-  symlinked path it **exited silently having done nothing**; it now compares real paths, and a test fails if it goes
-  quiet.
+  data directory while the key lives outside the repository, so a cell had no credentials and failed; `--credentials`
+  now copies the file into each cell (0600, never printed, checked before the first cell runs). Separately, the
+  script's "do not run on import" check compared paths as strings - under a symlinked path it **exited silently
+  having done nothing**; it now compares real paths, and a test fails if it goes quiet.
 - **A run that stopped at its budget no longer exits 1.** A run that ends because the token cap, the cost cap, the
   horizon or the wall clock ran out - or because the construction did not finish - has produced its data, so it is a
   **result**, not a failure: the exit code is now 0. Real failures (the game script never came up, the game crashed,
@@ -22,7 +21,14 @@
 - **The language switch did not translate everything, and it did not translate it back.** Three silent faults: a
   sentence written across two lines kept its line breaks in the DOM, so the lookup key never matched; a sentence
   broken up by an inline `<code>` was never translated at all; and switching back to English left the page mixed,
-  because the original text was remembered on the **parent** element and restoring it rewrote the parent's whole text.
+  because the original text was remembered on the **parent** element.
+- **The harness was counting days on a calendar of its own.** The game day came from a **fictional 360-day year**
+  (31 January and 1 February mapped to the same index), so a "250 game day" run was really about 256 **calendar**
+  days, and the copy lived in six places. The clock is now the **engine's calendar** in one module: the game day is
+  the calendar day, quarter boundaries are the engine's quarters (1/4/7/10 January), and a route's "income per day"
+  divides by the day of the year the engine reports. The reading this exposed - that the promotion gate's
+  `income / 365` is a year-to-date net cash flow and not a per-game-day profit - is written down in SPEC §10.55 /
+  §10.76, and it is the plan's first item.
 - **A pair could have compared the wrong two runs.** The repeat index was counted over the rows that
   **had a reading**, so a run with no reading for one metric shifted its partner. The cells are now
   the **runs**, and a cell missing a reading on one side is dropped whole.
@@ -43,12 +49,6 @@
   engine carries. Real machine (seed 4242): the model planned to link "a producer industry to a consumer industry".
 - **The freight numbers reach the screen (2).** The Compare page draws the **cargo / passenger split** of the
   deliveries, and the server hands over the measure wording with it.
-
-### Docs
-- **The profit reading no longer claims to be something it is not.** The promotion gate read
-  `income / 365` as "profit per game day", but the admin `income` is the **net cash flow of the current
-  year** (our games run in calendar mode: the year is the calendar year, and it resets on 1 January); the
-  measurement definitions are now written down (SPEC §10.55 / §10.76) and the correction is the plan's first item.
 
 ### Added
 - **The full map is now one question away.** The observation carries a **sample** of the industries
