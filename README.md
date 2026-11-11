@@ -232,6 +232,12 @@ Commands, directory layout and the commit checklist live in
 [`CONTRIBUTING.md`](CONTRIBUTING.md); rules for changing the system live in
 [`AGENTS.md`](AGENTS.md).
 
+A finished run's profit reading can be recomputed from its own archive:
+
+```bash
+pnpm exec tsx scripts/recompute-profit.ts /path/to/dataDir/sessions/<session-id>
+```
+
 ## License
 
 MIT — see [`LICENSE`](LICENSE). Third-party notices: [`NOTICE`](NOTICE). OpenTTD itself

@@ -13,6 +13,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync, append
 // 存档文件名规则只有一处实现（`savegameName`）：这里复用它，避免两套命名分叉。
 import { savegameName } from "./runner-helpers.js";
 import { appendMetric } from "../evolution/store.js";
+import { stringifyJson } from "../util/json.js";
 import { classifyOutcome, describeOutcome } from "../evolution/outcome.js";
 import { buildCausalTimeline, type TimelineRow } from "./causal-timeline.js";
 import path from "node:path";
@@ -91,6 +92,18 @@ export interface SessionMeta {
 		constructionDone?: boolean;
 		/** Company income at finalize (N2-4); absent when the packet never arrived. */
 		income?: number;
+		/**
+		 * 本局的净现金流（Issue #104 P0b）：`money − loan`，即自公司创建以来的净现金流
+		 * （含基建/购车/利息；跨 1 月 1 日成立）。absent = 没测到（不是 0）。
+		 */
+		netCashFlow?: number;
+		/** 是否**真的**与引擎自报的整年值核对过（跨过年边界且对得上）。 */
+		netCashFlowVerified?: boolean;
+		/**
+		 * 净现金流的每游戏日速率：**净现金流 ÷ 这一局实际经过的游戏日**。
+		 * absent = 缺读数或分母不是正数（不折零）。
+		 */
+		profitPerDay?: number;
 		/** Cargo + passengers delivered (N2-4b) - the least confounded outcome. */
 		delivered?: number;
 		/**
@@ -348,7 +361,11 @@ function readJsonlSafe<T>(file: string, limit?: number): T[] {
 function appendJsonl(file: string, rec: unknown): void {
 	try {
 		mkdirSync(path.dirname(file), { recursive: true });
-		appendFileSync(file, `${JSON.stringify(rec)}\n`, "utf8");
+		// **BigInt-safe**（`src/util/json.ts`）：引擎的 money/loan/income 是 u64
+		// （内存里是 BigInt）⇒ 原生 `JSON.stringify` 会抛 "Do not know how to
+		// serialize a BigInt" ⇒ 事件被**静默丢弃**（2026-11-11 发现：每一条
+		// `company_economy` 都没进 `events.jsonl`，于是"读数序列落盘"根本无从谈起）。
+		appendFileSync(file, `${stringifyJson(rec)}\n`, "utf8");
 	} catch {
 		/* audit/event persistence must never break the run */
 	}

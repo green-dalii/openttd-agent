@@ -86,9 +86,12 @@ const FACTS = {
 		toolFailures: 0,
 		constructionDone: true,
 		durationMs: 60000,
-		// The strategy gate is a **profit rate** (2026-11-01): without this reading a
-		// sample cannot be judged, so the pool must stay empty. Tests that exercise
-		// promotion therefore need a measured income.
+		// The strategy gate is a **profit rate** (Issue #104 P0b): the reading is
+		// now this run's net cash flow per elapsed game day (not `income / 365`).
+		// Without it a sample cannot be judged, so the pool must stay empty.
+		netCashFlow: 365 * 40,
+		profitPerDay: 40,
+		simulatedDays: 365,
 		income: 365 * 40,
 	},
 	evidence: ["1950-01: built bus route, ok"],

@@ -55,11 +55,20 @@ export interface ReflectionFacts {
 		constructionDone: boolean | null;
 		durationMs: number;
 		/**
-		 * Profit rate for this run (money per year at the end), or null when the
-		 * game never reported one. The strategy gate is expressed per game day, so
-		 * the orchestrator converts it; reflection itself only sees the fact.
+		 * The engine's raw reading: **当年迄今净现金流**（SPEC §10.55）—— 年边界
+		 * 归零，含基建/购车/利息。保留是为了不丢原始读数；**它不是**本局的收益。
 		 */
 		income?: number | null;
+		/**
+		 * 本局的净现金流（`money − loan`，Issue #104 P0b）：自公司创建以来的净现金流，
+		 * 跨 1 月 1 日成立。null = 没测到（不是 0）。
+		 */
+		netCashFlow?: number | null;
+		/**
+		 * 本局的净现金流速率：**净现金流 ÷ 这一局实际经过的游戏日**（分母与分子同源）。
+		 * null = 缺读数或分母不是正数（不折零）。
+		 */
+		profitPerDay?: number | null;
 	};
 	/** Action outcomes / notable events, already reduced to factual statements. */
 	evidence: string[];
