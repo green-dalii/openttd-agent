@@ -14,7 +14,7 @@ describe("projectScore（模型可见的成绩事实）", () => {
 	it("给出的 delivered 就是累计读数，速率按已历游戏日算", () => {
 		const s = projectScore({
 			deliveredTotal: 300,
-			gameDay: 100,
+			elapsedGameDays: 100,
 			horizonDays: 300,
 			scoredFromGameDay: null,
 			windowOpened: true,
@@ -28,7 +28,7 @@ describe("projectScore（模型可见的成绩事实）", () => {
 	it("没有交付读数 → delivered 为 null（不是 0）", () => {
 		const s = projectScore({
 			deliveredTotal: null,
-			gameDay: 10,
+			elapsedGameDays: 10,
 			horizonDays: 300,
 			scoredFromGameDay: null,
 			windowOpened: true,
@@ -40,7 +40,7 @@ describe("projectScore（模型可见的成绩事实）", () => {
 	it("还没过一天 → 每游戏日速率未知（null），不是 0 也不是 Infinity", () => {
 		const s = projectScore({
 			deliveredTotal: 0,
-			gameDay: 0,
+			elapsedGameDays: 0,
 			horizonDays: 300,
 			scoredFromGameDay: null,
 			windowOpened: true,
@@ -52,7 +52,7 @@ describe("projectScore（模型可见的成绩事实）", () => {
 	it("计分窗口未开启 → windowOpened=false，窗口起点仍然是一个事实", () => {
 		const s = projectScore({
 			deliveredTotal: 0,
-			gameDay: 12,
+			elapsedGameDays: 12,
 			horizonDays: 300,
 			scoredFromGameDay: 30,
 			windowOpened: false,
@@ -64,7 +64,7 @@ describe("projectScore（模型可见的成绩事实）", () => {
 	it("horizon 未设 → null（不是 0 天）", () => {
 		const s = projectScore({
 			deliveredTotal: 10,
-			gameDay: 10,
+			elapsedGameDays: 10,
 			horizonDays: null,
 			scoredFromGameDay: null,
 			windowOpened: true,

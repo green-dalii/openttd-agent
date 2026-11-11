@@ -217,6 +217,12 @@ pnpm run test:live     # 带 @live 的真机集成测试（需 OpenTTD + 可写 
 命令、目录结构与提交清单见 [`CONTRIBUTING.md`](CONTRIBUTING.md)；
 改系统的规范见 [`AGENTS.md`](AGENTS.md)。
 
+一局跑完的收益读数可以从它自己的归档里**离线重算**：
+
+```bash
+pnpm exec tsx scripts/recompute-profit.ts /path/to/dataDir/sessions/<session-id>
+```
+
 ## 许可
 
 MIT —— 见 [`LICENSE`](LICENSE)。第三方声明见 [`NOTICE`](NOTICE)。OpenTTD 本体为

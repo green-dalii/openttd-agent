@@ -54,6 +54,15 @@ export interface SessionMetaLike {
 		/** Company income (N2-4); absent when the packet never arrived. */
 		income?: number;
 		/**
+		 * 本局的净现金流（Issue #104 P0b）：`money − loan`，即自公司创建以来的净现金流。
+		 * absent = 没测到（不是 0）。
+		 */
+		netCashFlow?: number;
+		/** 是否**真的**与引擎自报的整年值核对过（跨过年边界且对得上）。 */
+		netCashFlowVerified?: boolean;
+		/** 净现金流的每游戏日速率（净现金流 ÷ 这一局经过的游戏日）。 */
+		profitPerDay?: number;
+		/**
 		 * Cargo/passengers delivered (N2-4b); absent when never reported.
 		 *
 		 * RAW reading: `cur_economy.delivered_cargo`, which OpenTTD resets every
@@ -117,8 +126,22 @@ export interface GameMetric {
 	 * Company income (N2-4). null when the run never reported one - a missing
 	 * reading is NOT a zero: money is dominated by spending (building costs
 	 * money), so income is the metric that says whether the lines earn anything.
+	 *
+	 * 口径（Issue #104 P0b 澄清）：它是**当年迄今净现金流**（SPEC §10.55），年边界
+	 * 归零 ⇒ 局跨过年时它只覆盖最后一年。**它不是本局的收益**（那是 `netCashFlow`）。
 	 */
 	income: number | null;
+	/**
+	 * 本局的净现金流（Issue #104 P0b）：`money − loan` = 自公司创建以来的净现金流。
+	 * null = 没测到（不是 0）。
+	 */
+	netCashFlow: number | null;
+	/** 是否**真的**与引擎自报的整年值核对过；null = 旧行没记。 */
+	netCashFlowVerified: boolean | null;
+	/**
+	 * 净现金流的每游戏日速率（净现金流 ÷ 这一局经过的游戏日）。null = 没测到。
+	 */
+	profitPerDay: number | null;
 	/**
 	 * Cargo + passengers delivered (N2-4b). The admin packet's `income` is NET of
 	 * expenses, so during construction it is always negative and inherits money's
@@ -472,6 +495,9 @@ export function toGameMetric(
 			o && o.income !== undefined && o.income !== null && Number.isFinite(Number(o.income))
 				? Number(o.income)
 				: null,
+		netCashFlow: numOrNull(o && o.netCashFlow),
+		netCashFlowVerified: o && typeof o.netCashFlowVerified === "boolean" ? o.netCashFlowVerified : null,
+		profitPerDay: numOrNull(o && o.profitPerDay),
 		vehicles: num(o && o.vehicles),
 		stations: num(o && o.stations),
 		decisions: num(t && t.decisions),

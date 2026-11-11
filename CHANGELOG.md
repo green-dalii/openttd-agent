@@ -29,6 +29,16 @@
   divides by the day of the year the engine reports. The reading this exposed - that the promotion gate's
   `income / 365` is a year-to-date net cash flow and not a per-game-day profit - is written down in SPEC §10.55 /
   §10.76, and it is the plan's first item.
+- **The profit reading was the wrong quantity, and the readings were never written down.** The promotion gate read
+  `income / 365`, but the engine's `income` is the **current year's** net cash flow (it resets on 1 January) and 365
+  is a year length, not the length of the run - so the number was never "this run's profit per game day". The run's
+  profit is now the **net cash flow** (`money - loan`, which the engine keeps continuous across the year boundary)
+  over the **game days the run actually took**, and the model sees the same denominator it is scored on. The
+  readings are **written down** now as well: the archive used to drop every economy event (BigInt payloads hit
+  `JSON.stringify` and the error was swallowed), so a finished run could not be re-read offline - the Run page
+  shows the net cash flow, its per-game-day rate, and whether it reconciled with the engine's own yearly reading.
+  A real run crossing 1 January (seed 4242, 381 days) reconciles exactly, and `scripts/recompute-profit.ts`
+  recomputes the same number from the archive alone.
 - **A pair could have compared the wrong two runs.** The repeat index was counted over the rows that
   **had a reading**, so a run with no reading for one metric shifted its partner. The cells are now
   the **runs**, and a cell missing a reading on one side is dropped whole.
@@ -94,20 +104,18 @@ shape.** The engine does not record which vehicle delivered what where, so a per
   amount is reported separately rather than dropped. The ledger had one shape ("two towns"), so a freight line could
   only enter it as `null/null` - and those sentences are injected into the model's context. Passenger and freight
   routes are now **two explicit record kinds**, the de-duplication key includes the kind and the two ends, and the
-  injected sentence says what the line really is, including how much it delivered and that the figure is derived. Real
-  machine (seed 4242, a coal line 28 -> 53): 160 tonnes attributed to that line, the fact reads `kind: freight,
-  industries 28 -> 53, COAL, delivered 80`, and no fact has a null end any more.
+  injected sentence says what the line really is, including how much it delivered and that the figure is derived.
+  Real machine (seed 4242, a coal line 28 -> 53): 160 tonnes attributed to that line, and no fact has a null end.
 - **The paired comparison now answers on every axis.** It used to compute exactly one metric - cargo
 + passengers delivered per game day - so the efficiency axis (delivered per 1M tokens) and the
 stability axis (share of tool calls that failed) had **no paired interval at all**. That is how "the
 efficiency axis looks separable" could sit in a plan for a whole benchmark round without ever being
 a verdict. The comparison is now a function of the axis; the registry of comparable metrics owns the
-wording (what is counted, in what unit, which way is better) so the report and the page cannot drift
-apart; the benchmark report and the Compare page list **every** axis with its verdict, its n and its
-interval. Growth stays out of it on purpose - its metric is a slope across runs, not a per-run
-number - and a pair with a missing reading on one side is dropped rather than counted as a zero
-difference. The verdict word states a **direction**, which on the efficiency axis is the *worse* one
-- so the server now also says **which model came out better**.
+wording (what is counted, in what unit, which way is better) so report and page cannot drift apart;
+the report and the Compare page list **every** axis with its verdict, its n and its interval. Growth
+stays out on purpose (its metric is a slope across runs) and a pair with a missing reading on one side
+is dropped, not counted as a zero difference. The verdict states a **direction**, which on the
+efficiency axis is the *worse* one - so the server also says **which model came out better**.
 - **Freight deliveries are measured now, and a freight line can be built.** The game script reports
 what *this company* delivered, per cargo, with the engine's own cargo monitor (one axis, accumulated
 on our side because the monitor hands out the delta and resets, every gap reported - a total with a
@@ -115,45 +123,36 @@ gap is a **lower bound**), and the model can now order a **freight line**:
 `build_freight_route(cargo, from_industry, to_industry)` - the model picks the cargo and the two
 industries, the scaffold finds the station sites by the engine's own rules, lays the road, builds
 the depot, buys and refits the truck and starts it. Real machine (seed 4242): coal mine 28 -> power
-station 53, **5 tonnes delivered**. Two engine rules are baked in, and the first one corrected an
-earlier conclusion: a station **not accepting** a cargo does not stop the industry from handing it
-over (that is the station's *rating*), but a vehicle **cannot unload** at a station that does not
-accept the cargo - so the loading site only has to cover the producer, while the unloading site must
-accept the cargo. A refused command now reaches the model (it used to only reach the log, so the
-model would repeat the same impossible order).
-- **The model can now ask the game a question and get the answer.** The observation surface is a
-  **periodic sample**: it says what the world looks like right now, never what *its own vehicle* is
-  doing, how much it carries or what it earned. Two read-only tools close that gap: `inspect_vehicle`
-  (name, location, type, engine, age, speed, load, profit this year) and `inspect_town` (name,
-  population, houses, location, growth rate). The channel is the admin port's gameScript **with an
-  answer**: the client injects an id, the GS replies `{kind:"answer", id, ok, data}`, and the two are
-  matched by id; when there is no answer the tool says it could not ask.
-
+station 53, **5 tonnes delivered**. Two engine rules are baked in, and the first corrected an earlier
+conclusion: a station **not accepting** a cargo does not stop the industry from handing it over (that
+is the station's *rating*), but a vehicle **cannot unload** where the cargo is not accepted - so the
+loading site only has to cover the producer while the unloading site must accept the cargo. A refused
+command now reaches the model (it used to only reach the log, so the model repeated the same order).
+- **The model can now ask the game a question and get the answer.** The observation surface is a **periodic sample**: it says what the world looks like right now,
+  never what *its own vehicle* is doing, how much it carries or what it earned. Two read-only tools close that gap: `inspect_vehicle` (name, location, type, engine,
+  age, speed, load, profit this year) and `inspect_town` (name, population, houses, location, growth rate). The channel is the admin port's gameScript **with an
+  answer**: the client injects an id, the GS replies `{kind:"answer", id, ok, data}`, and the two are matched by id; when there is no answer the tool says it could not
+  ask.
 - **A decision now has a result on the world's side.** "The executor says it built the line" is not a
   result; "the first vehicle reached the station" is. The join is the **vehicle id**: the executor's route
   statistics report the line's `vehiclesIds`, the pushed events report the vehicle, and the two together
   make "the route decision 3 ordered had its first vehicle arrive on 1950-03-01" a fact that can be
-  booked - it lands in the route ledger and, from there, in the cross-run memory. An event about a
-  vehicle we do not know is **not attributed** (attribution must not be guessed).
+  booked - it lands in the route ledger and, from there, in the cross-run memory. An event about a vehicle
+  we do not know is **not attributed** (attribution must not be guessed).
 
-- **The model can finally see what the game pushes at it.** The engine pushes events to the
-GameScript (a vehicle was lost, the first vehicle reached a station, an industry opened) - and our
-Bridge GS **drained them and threw them away**: only the admin-port event was handled, so a model
-could never see "my bus arrived" unless it happened to look at exactly the right moment. The GS now
-maps the engine's event types onto a **closed vocabulary** (the seven kinds are listed in SPEC
-§10.78), the world state keeps them in order (bounded to 50), and the projection carries them - so
-`observe()` and every decision context show what happened. Real machine (real model, seed 4242): the
-first vehicle reaching each station arrived twice. Two Squirrel traps came with it (MEMORY D95): a
-**class member must be declared** before it is assigned, and **reading a missing key throws**.
+- **The model can finally see what the game pushes at it.** The engine pushes events to the GameScript (a vehicle was lost, the first vehicle reached a station, an
+  industry opened) - and our Bridge GS **drained them and threw them away**: only the admin-port event was handled, so a model could never see "my bus arrived" unless
+  it happened to look at exactly the right moment. The GS now maps the engine's event types onto a **closed vocabulary** (the seven kinds are listed in SPEC §10.78),
+  the world state keeps them in order (bounded to 50), and the projection carries them - so `observe()` and every decision context show what happened. Real machine
+  (real model, seed 4242): the first vehicle reaching each station arrived twice. Two Squirrel traps came with it (MEMORY D95): a **class member must be declared**
+  before it is assigned, and **reading a missing key throws**.
 
 ### Fixed
-- **The cargo monitor was never missing - our own accumulator was broken.** On 2026-11-01 this project
-  concluded that OpenTTD 15.3's Squirrel API has no cargo monitor; that conclusion was **wrong**. The API
-  exists (`script_cargomonitor.hpp` carries `@api game`); the empty split was **our** bug: the accumulator
-  wrote into a Squirrel table with a key that did not exist yet, Squirrel tables are strict - the write
-  threw, the facts collector died, and the empty result was read as "the API returns null". What the
-  engine really does not expose stays unmeasured: **per station / per route**. The research:
-  `docs/PER-LINE-DELIVERY-FEASIBILITY.md` - **do not change the engine**.
+- **The cargo monitor was never missing - our own accumulator was broken.** On 2026-11-01 this project concluded that OpenTTD 15.3's Squirrel API has no cargo
+  monitor; that conclusion was **wrong**. The API exists (`script_cargomonitor.hpp` carries `@api game`); the empty split was **our** bug: the accumulator wrote into a
+  Squirrel table with a key that did not exist yet, Squirrel tables are strict - the write threw, the facts collector died, and the empty result was read as "the API
+  returns null". What the engine really does not expose stays unmeasured: **per station / per route**. The research: `docs/PER-LINE-DELIVERY-FEASIBILITY.md` - **do not
+  change the engine**.
 
 ### Added
 - **A comparison only compares one question.** Runs that answered a **different** question - a

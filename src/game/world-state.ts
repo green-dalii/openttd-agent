@@ -11,6 +11,7 @@
 
 import type { CompanyEconomy, CompanySnapshot, CompanyStats, GameDate, GameEvent } from "../types.js";
 import { createDeliveryMeter } from "./delivery-meter.js";
+import { createProfitMeter, type ProfitMeter, type ProfitReading } from "./profit-meter.js";
 import { quarterIndex, rawToYmd } from "./calendar.js";
 
 /**
@@ -67,6 +68,14 @@ export interface CompanyState {
 	 * that made two A/B rounds disagree in direction.
 	 */
 	deliveredRun: CumulativeRunDelivery;
+	/**
+	 * 本局的收益读数（Issue #104 P0b）：净现金流 + 逐年的分段 + 与引擎自报的对账。
+	 *
+	 * null = 没测到（这一局一条经济读数都没有）。**不是 0**。
+	 * 口径：净现金流 = `money − loan`（引擎创建公司时二者相等 ⇒ 这就是自创建以来的
+	 * 净现金流，含基建/购车/利息，跨年成立；SPEC §10.55 / §10.76）。
+	 */
+	profit: ProfitReading | null;
 }
 
 /** Cumulative cargo plus how trustworthy the accumulation is. */
@@ -381,6 +390,11 @@ export class WorldState {
 	 * accumulate into each other's counters.
 	 */
 	private meters = new Map<number, ReturnType<typeof createDeliveryMeter>>();
+	/**
+	 * One profit meter per company id (Issue #104 P0b). Instance state, like the
+	 * delivery meters: two WorldState instances must not share a company ledger.
+	 */
+	private profitMeters = new Map<number, ProfitMeter>();
 	private recent: GameEvent[] = [];
 	private towns: TownInfo[] = [];
 	private townsTotal: number | null = null;
@@ -434,6 +448,7 @@ export class WorldState {
 						lastEconomyAt: null,
 						history: [],
 						deliveredRun: emptyDelivery(),
+						profit: null,
 					});
 				}
 				break;
@@ -447,6 +462,7 @@ export class WorldState {
 					lastEconomyAt: this.companies.get(p.id)?.lastEconomyAt ?? null,
 					history: this.companies.get(p.id)?.history ?? [],
 					deliveredRun: this.companies.get(p.id)?.deliveredRun ?? emptyDelivery(),
+					profit: this.companies.get(p.id)?.profit ?? null,
 				});
 				break;
 			}
@@ -468,6 +484,15 @@ export class WorldState {
 					complete: st.complete,
 				};
 				c.lastEconomyAt = ev.ts;
+				// 收益读数（Issue #104 P0b）：把这条经济读数喂进积分器。
+				// 没有日期就不喂（分段需要日期；净现金流是 `money − loan` 的绝对值，
+				// 不依赖首条读数 ⇒ 跳过早期读数不会把净额读错）。
+				if (this.date) {
+					const pm = this.profitMeters.get(p.id) ?? createProfitMeter();
+					this.profitMeters.set(p.id, pm);
+					pm.observe({ rawDate: this.date.raw, money: p.money, loan: p.loan, income: p.income });
+					c.profit = pm.reading();
+				}
 				// Money is signed (SPEC §10.6); keep it numeric for the chart.
 				c.history = [
 					...c.history,
@@ -501,7 +526,7 @@ export class WorldState {
 	private upsertCompany(id: number): CompanyState {
 		let c = this.companies.get(id);
 		if (!c) {
-			c = { info: null, economy: null, stats: null, lastEconomyAt: null, history: [], deliveredRun: emptyDelivery() };
+			c = { info: null, economy: null, stats: null, lastEconomyAt: null, history: [], deliveredRun: emptyDelivery(), profit: null };
 			this.companies.set(id, c);
 		}
 		return c;

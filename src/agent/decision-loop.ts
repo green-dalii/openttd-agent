@@ -119,14 +119,18 @@ export interface DecisionLoop {
  * The delivered figure comes from the world state's cumulative counter - the
  * SAME number the metric row records (`deliveredRun`, SPEC §10.65), so the model
  * and the scorer never disagree about what the run scored.
+ *
+ * 分母必须是**这一局已经历的游戏日**（episode 的 `simulatedDays`，与度量行同源），
+ * 不是绝对游戏日（Issue #104 P0b：旧实现传的是绝对日，于是模型看到的速率与指标
+ * 记下来的速率不是同一个数）。
  */
-function scoreFactOf(ctx: DecisionLoopCtx, gameDay: number): ScoreFact {
+function scoreFactOf(ctx: DecisionLoopCtx, elapsedGameDays: number | null): ScoreFact {
 	const snap = ctx.deps.state.snapshot();
 	const company = snap.companies.get(0) ?? [...snap.companies.values()][0];
 	const win = ctx.measurementWindow();
 	return projectScore({
 		deliveredTotal: company?.deliveredRun?.total ?? null,
-		gameDay,
+		elapsedGameDays,
 		horizonDays: ctx.opts.episode?.plan.horizonDays ?? null,
 		scoredFromGameDay: win.scoredFromGameDay,
 		windowOpened: win.windowOpened,
@@ -332,7 +336,7 @@ export function createDecisionLoop(ctx: DecisionLoopCtx): DecisionLoop {
 					executor: ctx.executorFact(),
 					// The agent's own score (S1): read at decision time, so the
 					// number is the same one the metric will record.
-					score: scoreFactOf(ctx, ctx.gameDay()),
+					score: scoreFactOf(ctx, epState?.simulatedDays ?? null),
 					// D3a/S4: phases are joined back to the actions that caused them.
 					jobActions: Object.fromEntries(ctx.routeActions().map((r) => [r.job, r.command])),
 				});

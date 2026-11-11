@@ -18,8 +18,8 @@ export interface ScoreFact {
 	delivered: number | null;
 	/** delivered / elapsedGameDays（两者任一未知则 null）。 */
 	deliveredPerGameDay: number | null;
-	/** 本局已经历的游戏日。 */
-	elapsedGameDays: number;
+	/** 本局已经历的游戏日（null = 未知）。 */
+	elapsedGameDays: number | null;
 	/** 本局 horizon（未设则 null）。 */
 	horizonDays: number | null;
 	/** 计分窗口开启的那一天（null = 整局都是窗口）。 */
@@ -32,8 +32,14 @@ export interface ScoreFact {
 export interface ScoreInputs {
 	/** 本局累计交付读数（null = 尚未测到）。 */
 	deliveredTotal: number | null;
-	/** 当前游戏日（本局已历）。 */
-	gameDay: number;
+	/**
+	 * 本局**已经历**的游戏日（null = 未知）。
+	 *
+	 * 必须是"这一局经过的天数"，不是绝对游戏日（距 1950-01-01）：度量行记的是
+	 * 经过的天数，两边分母不同源时，模型看到的速率与被记下来的速率不是同一个数
+	 * （Issue #104 P0b）。
+	 */
+	elapsedGameDays: number | null;
 	/** 本局 horizon（null = 未设）。 */
 	horizonDays: number | null;
 	/** 计分窗口开启的游戏日（null = 整局都是窗口）。 */
@@ -52,13 +58,14 @@ function round4(v: number): number {
  *
  * 语义（契约 §2.1）：
  * - `delivered` 就是度量口径的累计交付（同一个数）。
- * - `deliveredPerGameDay` 在分母为 0 或分子未知时是 `null`（**不是 0**）。
+ * - `deliveredPerGameDay` 在分母为 0、分子未知或分母未知时是 `null`（**不是 0**）。
  * - `scoredFromGameDay` / `windowOpened` 只陈述计分窗口，不评价。
  */
 export function projectScore(i: ScoreInputs): ScoreFact {
-	const elapsedGameDays = Number.isFinite(i.gameDay) ? Math.max(0, i.gameDay) : 0;
+	const elapsedGameDays =
+		typeof i.elapsedGameDays === "number" && Number.isFinite(i.elapsedGameDays) ? Math.max(0, i.elapsedGameDays) : null;
 	const delivered = typeof i.deliveredTotal === "number" && Number.isFinite(i.deliveredTotal) ? i.deliveredTotal : null;
-	const perDay = delivered !== null && elapsedGameDays > 0 ? round4(delivered / elapsedGameDays) : null;
+	const perDay = delivered !== null && elapsedGameDays !== null && elapsedGameDays > 0 ? round4(delivered / elapsedGameDays) : null;
 	return {
 		delivered,
 		deliveredPerGameDay: perDay,
@@ -75,7 +82,7 @@ export function formatScoreFact(s: ScoreFact): string {
 	return (
 		`delivered=${s.delivered ?? "not measured"}` +
 		` perGameDay=${s.deliveredPerGameDay ?? "unknown"}` +
-		` elapsedGameDays=${s.elapsedGameDays}` +
+		` elapsedGameDays=${s.elapsedGameDays ?? "not measured"}` +
 		` horizon=${s.horizonDays ?? "none"}` +
 		` scoredFromDay=${s.scoredFromGameDay ?? "run start"}` +
 		` window=${s.windowOpened ? "open" : "not open"}`

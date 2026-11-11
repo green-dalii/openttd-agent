@@ -16,6 +16,7 @@ import type { Model } from "@earendil-works/pi-ai";
 import { runReflection } from "../evolution/reflection-run.js";
 import { buildStageSummary } from "./session-store.js";
 import { totalsFromTelemetry, formatGameDate } from "./runner-helpers.js";
+import { profitPerGameDay } from "../game/profit-meter.js";
 import type { WorldState } from "../game/world-state.js";
 import type { SessionStore } from "./session-store.js";
 import { projectManifest, type RunManifest } from "./manifest.js";
@@ -181,6 +182,14 @@ export async function runFinalizeAndReflect(args: FinalizeAndReflectArgs): Promi
 			// so "did the lines earn" needs income, and a missing reading stays
 			// missing rather than becoming 0.
 			income: c0?.economy && Number.isFinite(Number(c0.economy.income)) ? Number(c0.economy.income) : undefined,
+			// Issue #104 P0b: `income` 是**当年迄今净现金流**（年边界归零），
+			// 不是"这一局的收益"。本局的收益读数是**净现金流** `money − loan`
+			// （引擎创建公司时二者相等 ⇒ 自创建以来的净现金流，跨 1 月 1 日成立），
+			// 速率的分母是**这一局实际经过的游戏日**（`simulatedDays`）。
+			netCashFlow: c0?.profit?.netCashFlow ?? undefined,
+			// 是否**真的**与引擎自报的整年值核对过（跨过年边界且对得上）。
+			netCashFlowVerified: c0?.profit?.reconciled ?? undefined,
+			profitPerDay: profitPerGameDay(c0?.profit?.netCashFlow ?? null, args.episode.simulatedDays) ?? undefined,
 			// N2-4b: the least confounded outcome - cargo actually moved. `income`
 			// is net of expenses, so every construction run is negative by
 			// construction; delivered cargo is not.
@@ -272,9 +281,14 @@ export async function runFinalizeAndReflect(args: FinalizeAndReflectArgs): Promi
 						toolCalls: finalTelemetry.totals.toolCalls,
 						toolFailures: finalTelemetry.totals.toolFailures,
 						constructionDone: reachedDone,
-						// The game's own yearly profit. Strategy promotion is gated on a
-						// **measured** profit rate (2026-11-01), so the fact has to reach the
-						// reflection layer that stamps it. Missing stays null.
+						// The run's **measured** profit rate (Issue #104 P0b). The old
+						// reading was `income / 365`: `income` is the *current year's*
+						// net cash flow (SPEC §10.55) and 365 is a year length, so it
+						// was neither a per-game-day profit nor this run's profit.
+						// Now: net cash flow over the run / the days this run took.
+						netCashFlow: c0?.profit?.netCashFlow ?? null,
+						profitPerDay: profitPerGameDay(c0?.profit?.netCashFlow ?? null, args.episode.simulatedDays),
+						// The game's own yearly profit (raw reading, keeps its meaning).
 						income: c0?.economy && Number.isFinite(Number(c0.economy.income)) ? Number(c0.economy.income) : null,
 						durationMs: Math.max(0, Date.now() - Number(session.current().startedAt || Date.now())),
 					},

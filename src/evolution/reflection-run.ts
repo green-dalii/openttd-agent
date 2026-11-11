@@ -224,11 +224,16 @@ export async function runReflection(opts: RunReflectionOptions): Promise<Reflect
 	 *
 	 * Why here and not in the tool: a tool call cannot know how the run ended, and
 	 * asking the model for the number made the promotion gate read a self-report.
-	 * `income` is the game's own yearly profit; per-game-day is the unit the gate
-	 * and the scorecard already use elsewhere.
+	 *
+	 * 口径（Issue #104 P0b 修正）：读数是 `opts.facts.summary.profitPerDay` ——
+	 * **本局净现金流 ÷ 这一局实际经过的游戏日**。旧实现是 `income / 365`：
+	 * `income` 是**当年迄今净现金流**（跨年归零、含基建/购车/利息），365 是整年
+	 * 长度 ⇒ 那个数既不是"每游戏日利润"，也不是"这一局的利润"（SPEC §10.76）。
+	 * 缺读数 ⇒ null（采样不盖章），**不是 0**。
 	 */
-	const income = Number(opts.facts.summary.income);
-	const profitPerDay = Number.isFinite(income) ? income / 365 : null;
+	const profitPerDay = typeof opts.facts.summary.profitPerDay === "number" && Number.isFinite(opts.facts.summary.profitPerDay)
+		? opts.facts.summary.profitPerDay
+		: null;
 	const samples = profitPerDay === null
 		? sink.strategies
 		: sink.strategies.map((s) => ({ ...s, profitPerDay }));

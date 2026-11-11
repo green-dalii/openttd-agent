@@ -102,6 +102,7 @@ describe("auditState（审计侧世界快照）", () => {
 						lastEconomyAt: null,
 						history: [],
 						deliveredRun: { total: null, missing: 0, quarterChanges: 0, gaps: 0, complete: false },
+						profit: null,
 					},
 				],
 			]),
