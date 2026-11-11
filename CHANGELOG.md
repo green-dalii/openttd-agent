@@ -8,6 +8,16 @@
 > 踩过的坑的复盘（→ `MEMORY.md`；此处只写"改了什么"，不写"我为什么犯错"）。
 
 ## [Unreleased]
+
+### Added
+
+- **The model can now do the economics of a freight line before it spends.** `estimate_route` takes a cargo and two
+  industries and answers with the engine's own numbers: the price per cargo unit over that distance
+  (`GSCargo.GetCargoIncome`), and per truck its capacity, price and running cost (`GSEngine.GetCapacity/GetPrice/
+  GetRunningCost`). Every figure carries its direction - revenue is an **upper** bound (a full load on every trip,
+  the fastest possible transit), cost is a **lower** bound (age, interest, stations and the depot are not in it) -
+  and the tool does **not** say whether the line pays off: that judgement is the model's. The extra fields are fetched
+  on demand, so the periodic observation payload does not grow.
 ### Fixed
 - **The benchmark matrix could not use a real provider, and it could also do nothing at all.** Every cell is its own
   data directory while the key lives outside the repository, so a cell had no credentials and failed; `--credentials`
@@ -376,8 +386,6 @@ command now reaches the model (it used to only reach the log, so the model repea
   `decisions>=2`、`tokens>0`、audit 含带 trigger 的 decision 与 action_result、
   trigger 不全为 `start`、dashboard telemetry 非零、WS 推送 `telemetry`
   ——**这层测试此前缺失，正是"没接线"能溜过去的原因**
-- `decision-context`(12) / `scheduler`(11) / `supervisor`(12) / `stage-view`(9) 单测
-- `web-assets` 增强：同时校验 `const elX = $("id")` 这类**别名**（此前漏检）
 
 ### Added（真实画面：小地图快照）
 - `src/game/minimap.ts`：`captureMinimap()` 请求 `screenshot minimap` 并**轮询 mtime** 确认落盘后归档
@@ -475,10 +483,6 @@ command now reaches the model (it used to only reach the log, so the model repea
 - **静态资源没有缓存校验**（无 `Cache-Control` / `ETag`），导致"刷新"可能继续跑旧 JS —— 修好的 bug 看起来没修好。现为 `no-cache` + `ETag`（未变返回 304）。
 - **全新安装默认落在 Custom 端点**（`resolveLlmSource` 对空配置返回 `custom`）， 于是首次打开 Providers 是一个禁用的、要求填写 baseUrl 的自定义表单。 空配置现返回 `catalog`——内置目录才是入口。
 
-### Added（测试缺口）
-
-- `test/unit/providers-save.test.ts`：**保存链路**的真实组件测试——"点 Save 发了什么请求"、"发不出去时用户是否被告知"。此前后端与纯逻辑都被测过，**缺的正是两者之间那一段**：断言一个谓词 ≠ 断言一次体验。
-
 ### Fixed（用户 e2e 发现的两个问题）
 
 - **Token Usage 图只有一种颜色，没有按 token 种类堆叠**。根因：uPlot 的
@@ -514,14 +518,6 @@ command now reaches the model (it used to only reach the log, so the model repea
 - **阶段总结数字全是 0**：agent 模式只同步了 `events`，从未把遥测写进 session totals， 于是"1 decisions, 1 tool calls, 0 tokens"这类假数据会长期存在 → 新增 `totalsFromTelemetry()` 作为唯一映射点
 - `live.js` 使用未导出的 `U.pickColor`（现金曲线会直接崩）→ 由门禁测试捕获并修复
 - `paintSparks` 把所有迷你线画成同一条数据 → 改为按 tile 对齐
-
-### Tests
-- `web-assets.test.ts` 强化：除语法/引用外，新增 **`$("id")` 必须在同页存在**、
-  **只允许使用 `window.UI`/`window.Charts` 真正导出的符号**、**前端不得持久化/回显密钥**
-- `charts.test.ts`（8）：`node:vm` 沙箱加载（证明加载期不碰 DOM），覆盖刻度/定义域/
-  比例尺/环图弧段/数字压缩与**退化输入不产生 NaN**
-- `web-api.test.ts` 新增 checkpoint WS 帧与 snapshot backlog 用例
-- `dashboard-core.test.ts` 新增「阶段总结必须反映真实遥测」回归用例
 
 ### Fixed（浏览器实测发现，CDP 逐条验证）
 - **协议层符号错误**：`money/loan/income/companyValue` 是 **int64**（OpenTTD `Money`），却按 `uint64` 读 → 亏损公司显示 `£18446744073.71B`。新增 `ByteReader.int64()`，与 `SPEC.md` §10.6 一致；真机已验证显示 `-£6.0k`

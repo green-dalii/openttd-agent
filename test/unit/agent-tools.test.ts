@@ -766,3 +766,123 @@ describe("P1-2 工具契约：set_route_cargo / set_route_engine", () => {
 		expect((r as { details: { summary: string } }).details.summary).toContain("bought before");
 	});
 });
+
+/**
+ * Issue #105：`estimate_route` 的货运经济学。
+ *
+ * 契约要点：
+ *   - 收入是**上界**、成本是**下界**，摘要里必须写出来（模型据此权衡）；
+ *   - 工具**不下结论**（不说"这条线赚钱"）；
+ *   - 引擎读不到运价 ⇒ 具名说明原因，不返回空成功；
+ *   - 客运货（PASS）没有货运收入（引擎的客运付费不是这个函数）⇒ 不编。
+ */
+describe("estimate_route —— 货运经济学（Issue #105）", () => {
+	const industries = [
+		{ id: 16, name: "Coal Mine", x: 100, y: 100 },
+		{ id: 52, name: "Power Station", x: 160, y: 140 },
+	];
+	const stateWith = fakeState({
+		industrySites: industries,
+		companies: new Map([[0, { id: 0, economy: { money: 100_000n, loan: 0n, income: 0n } } as never]]),
+	});
+
+	function depsWithAnswer(answer: Record<string, unknown> | null): {
+		deps: AgentDeps;
+		sent: string[];
+	} {
+		const sent: string[] = [];
+		const deps = {
+			sink: {
+				rcon: () => undefined,
+				gameScript: (j: string) => sent.push(j),
+				gameScriptAwait: async (j: string) => {
+					sent.push(j);
+					return answer;
+				},
+			},
+			state: { snapshot: () => stateWith.snapshot() },
+		} as unknown as AgentDeps;
+		return { deps, sent };
+	}
+
+	const COAL_ANSWER = {
+		ok: true,
+		data: {
+			cargo: "COAL",
+			income_per_unit: 71,
+			engines: [
+				{ id: 123, name: "Balogh Coal Truck", speed: 48, cargo: "COAL", capacity: 20, price: 4429, running_cost: 421 },
+				{ id: 116, name: "MPS Regal Bus", speed: 56, cargo: "PASS", capacity: 31, price: 4921, running_cost: 426 },
+			],
+		},
+	};
+
+	it("货运线：问引擎要运价，并给出收入（上界）与成本（下界）", async () => {
+		const { deps, sent } = depsWithAnswer(COAL_ANSWER);
+		const tool = createTools(deps).find((t) => t.name === "estimate_route")!;
+		const res = await tool.execute("t", {
+			from_industry: 16,
+			to_industry: 52,
+			cargo: "COAL",
+		});
+		const text = textOf(res);
+		// 问了引擎（而且带上了距离）。
+		expect(sent).toHaveLength(1);
+		expect(JSON.parse(sent[0]!)).toMatchObject({ cmd: "route_economics", cargo: "COAL", distance: 100 });
+		// 摘要里有：每单位运价、载量、收入上界、成本下界、方向标签。
+		expect(text).toContain("COAL");
+		expect(text).toMatch(/71/);
+		expect(text).toMatch(/Balogh Coal Truck/);
+		expect(text).toMatch(/UPPER bound/);
+		expect(text).toMatch(/LOWER bound/);
+		// 不下结论。
+		expect(text.toLowerCase()).not.toMatch(/profitable|will make money|worth building/);
+	});
+
+	it("只列出能拉这个货的车型（引擎的属性），不替模型选", async () => {
+		const { deps } = depsWithAnswer(COAL_ANSWER);
+		const tool = createTools(deps).find((t) => t.name === "estimate_route")!;
+		const res = await tool.execute("t", { from_industry: 16, to_industry: 52, cargo: "COAL" });
+		const details = (res as { details?: { data?: { freight?: { engines?: { name: string }[] } } } }).details;
+		const names = details?.data?.freight?.engines?.map((e) => e.name) ?? [];
+		expect(names).toEqual(["Balogh Coal Truck"]);
+	});
+
+	it("引擎没给出运价：摘要说明原因，不返回空成功", async () => {
+		const { deps } = depsWithAnswer({ ok: true, data: { income_per_unit: null, engines: [] } });
+		const tool = createTools(deps).find((t) => t.name === "estimate_route")!;
+		const res = await tool.execute("t", { from_industry: 16, to_industry: 52, cargo: "COAL" });
+		const text = textOf(res);
+		expect(text).toMatch(/no cargo rate|rate/i);
+		expect(text).toContain("COAL");
+	});
+
+	it("没有 GS 通道：具名说明（不是空成功）", async () => {
+		const deps = {
+			sink: { rcon: () => undefined, gameScript: () => undefined },
+			state: { snapshot: () => stateWith.snapshot() },
+		} as unknown as AgentDeps;
+		const tool = createTools(deps).find((t) => t.name === "estimate_route")!;
+		const res = await tool.execute("t", { from_industry: 16, to_industry: 52, cargo: "COAL" });
+		expect(textOf(res)).toMatch(/not available/i);
+	});
+
+	it("只给一半端点：具名拒绝（不猜另一半）", async () => {
+		const { deps } = depsWithAnswer(COAL_ANSWER);
+		const tool = createTools(deps).find((t) => t.name === "estimate_route")!;
+		const res = await tool.execute("t", { from_industry: 16, cargo: "COAL" });
+		expect(textOf(res)).toMatch(/BOTH/i);
+	});
+
+	it("客运线：仍然给距离与造价（不引入货运字段）", async () => {
+		const { deps, sent } = depsWithAnswer(null);
+		const d = { ...deps, state: fakeState({ towns: [
+					{ id: 1, name: "A", x: 0, y: 0, population: 100 },
+					{ id: 2, name: "B", x: 10, y: 0, population: 200 },
+				] }) } as unknown as AgentDeps;
+		const tool = createTools(d).find((t) => t.name === "estimate_route")!;
+		const res = await tool.execute("t", { from: 1, to: 2 });
+		expect(textOf(res)).toMatch(/10 straight tiles/);
+		expect(sent).toHaveLength(0);
+	});
+});
