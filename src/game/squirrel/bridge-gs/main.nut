@@ -2469,6 +2469,67 @@ class BridgeV1 extends GSController {
         };
     }
 
+    // 车型目录（**按需**，Issue #105）：载量 / 价格 / 运行成本。
+    //
+    // 为什么单独一份：周期载荷不许变大（观测面的规矩）⇒ 周期里只带
+    // id/name/speed/cargo，**经济学字段只在模型问的时候给**。
+    //
+    // API 依据（OpenTTD 15.3 源码，`script_engine.hpp`）：`GetCapacity` /
+    // `GetPrice` / `GetRunningCost` / `GetMaxSpeed` 都是 `@api ai game` ⇒
+    // 游戏脚本可调（真机探针已实测，见 SPEC §10.127）。
+    function EngineCatalog() {
+        local rows = [];
+        try {
+            local el = GSEngineList(GSVehicle.VT_ROAD);
+            el.Valuate(GSEngine.IsBuildable);
+            el.KeepValue(1);
+            foreach (eid, _ in el) {
+                // 车型带**它能拉什么货**（`GSEngine.GetCargoType`）："哪辆车拉煤"
+                // 是引擎的属性，不是从名字里猜的。
+                local ecargo = null;
+                try {
+                    local ct = GSEngine.GetCargoType(eid);
+                    if (ct != null && GSCargo.IsValidCargo(ct)) {
+                        local lb = GSCargo.GetCargoLabel(ct);
+                        if (lb != null) ecargo = lb;
+                    }
+                } catch (e) { ecargo = null; }
+                // 经济学三件套。读不到就报 null（**不编一个数**）。
+                local cap = null;
+                local price = null;
+                local run = null;
+                try { cap = GSEngine.GetCapacity(eid); } catch (e) { cap = null; }
+                try { price = GSEngine.GetPrice(eid); } catch (e) { price = null; }
+                try { run = GSEngine.GetRunningCost(eid); } catch (e) { run = null; }
+                rows.append({ id = eid, name = GSEngine.GetName(eid),
+                              speed = GSEngine.GetMaxSpeed(eid), cargo = ecargo,
+                              capacity = cap, price = price, running_cost = run });
+            }
+        } catch (e) { rows = []; }
+        return rows;
+    }
+
+    // 每单位货的运价（引擎自己的函数，Issue #105）。
+    //
+    // `GSCargo.GetCargoIncome(cargo, distance, days_in_transit)`（`script_cargo.hpp`）：
+    // 这趟货运 `distance` 格、在途 `days` 天，引擎付多少钱（**每单位**）。
+    // 距离是**曼哈顿格数**，且引擎按起点/终点的曼哈顿距离**封顶**
+    // （`CargoPacket::GetDistance`）⇒ 直线距离就是最多能拿到的距离。
+    // 时间因子随在途变长而下降（上限 255）⇒ 用**最快在途**算出来的是上界。
+    function CargoIncome(cargo_label, distance, days) {
+        if (cargo_label == null || cargo_label == "") return null;
+        for (local c = 0; c < 64; c++) {
+            if (!GSCargo.IsValidCargo(c)) continue;
+            local lb = GSCargo.GetCargoLabel(c);
+            if (lb == null || lb != cargo_label) continue;
+            // **客运不算**：引擎的客运付费不是 `GetTransportedGoodsIncome`
+            // （源码：那个函数只用于货物）⇒ 拿它当客运收入就是编一个数。
+            if (!GSCargo.IsFreight(c)) return null;
+            return GSCargo.GetCargoIncome(c, distance, days);
+        }
+        return null;
+    }
+
     function CollectFacts() {
         local all_industries = GSIndustryList();
         // 产业位置与名字（**全部**产业）：模型要选线路就得知道"在哪儿"。
@@ -2716,27 +2777,15 @@ class BridgeV1 extends GSController {
                 local f = this._facts;
                 // P1-2 动作面：可选车型目录（agent 要能看见选项才可能学选择）。
                 // 只用实测存在的 API：GSEngineList(VT_ROAD)/IsBuildable/GetName/GetMaxSpeed。
+                // 周期载荷**只带 id/name/speed/cargo**（经济学字段按需给，见
+                // `EngineCatalog()` 与 Issue #105：载荷不许变大）。
                 local engines = [];
-                try {
-                    local el = GSEngineList(GSVehicle.VT_ROAD);
-                    el.Valuate(GSEngine.IsBuildable);
-                    el.KeepValue(1);
-                    foreach (eid, _ in el) {
-                        // 车型带**它能拉什么货**（`GSEngine.GetCargoType`）："哪辆车拉煤"
-                        // 是引擎的属性，不是从名字里猜的（真机探针：Balogh Coal Truck
-                        // ⇒ COAL，Talbott Livestock Van ⇒ LVST）。
-                        local ecargo = null;
-                        try {
-                            local ct = GSEngine.GetCargoType(eid);
-                            if (ct != null && GSCargo.IsValidCargo(ct)) {
-                                local lb = GSCargo.GetCargoLabel(ct);
-                                if (lb != null) ecargo = lb;
-                            }
-                        } catch (e) { ecargo = null; }
-                        engines.append({ id = eid, name = GSEngine.GetName(eid), speed = GSEngine.GetMaxSpeed(eid),
-                                         cargo = ecargo });
-                    }
-                } catch (e) { engines = []; }
+                local catalog = this.EngineCatalog();
+                // 变量名不要用 `e`（`catch (e)` 在同一个函数里也用它 ⇒ 静态守卫会判成
+                // "先用后声明"；这是 Squirrel 的作用域规则，不是风格问题）。
+                foreach (eng in catalog) {
+                    engines.append({ id = eng.id, name = eng.name, speed = eng.speed, cargo = eng.cargo });
+                }
                 // **贷款上限**（2026-11-02，Issue #13）：模型看得见自己的 `loan`，却看不见
                 // "还能借多少"；而**利息率脚本 API 根本没有**（引擎不暴露 ⇒ 那是"没测到"，
                 // 不能猜）。上限只能在**公司模式**里读（`COMPANY_SELF` 在全局脚本里无效），
@@ -3169,6 +3218,27 @@ class BridgeV1 extends GSController {
             GSAdmin.Send({ kind = "answer", id = ans_id, ok = true,
                            data = { industries = scan.industries,
                                     total = scan.industries.len() } });
+        } else if (cmd == "route_economics") {
+            // 线路经济（Issue #105）：**按需**读引擎的事实 + 引擎自己的运价函数。
+            //
+            // 为什么不在周期载荷里：观测面的载荷不许变大（`EngineCatalog()` 的
+            // 经济学字段只在这里给）⇒ 稳态流量不变（SPEC §10.127）。
+            local ans_id = -1;
+            if (obj.rawin("id")) ans_id = obj["id"];
+            local income = null;
+            local cargo_label = "";
+            if (obj.rawin("cargo") && obj.rawin("distance")) {
+                cargo_label = obj["cargo"];
+                local dist = obj["distance"];
+                // 最快在途（1 天）⇒ 引擎的**时间因子取上限** ⇒ 每单位运价是上界。
+                local days = obj.rawin("days") ? obj["days"] : 1;
+                try { income = this.CargoIncome(cargo_label, dist, days); }
+                catch (e) { income = null; }
+            }
+            GSAdmin.Send({ kind = "answer", id = ans_id, ok = true,
+                           data = { income_per_unit = income,
+                                    cargo = cargo_label,
+                                    engines = this.EngineCatalog() } });
         } else if (cmd == "list_cargo") {
             // 按需**全量**货种读数：含**没有产量**的货种（观测面的 `cargo_totals`
             // 只报有产量的 ⇒ 分不清"没有产量"与"没测到"，D60）。

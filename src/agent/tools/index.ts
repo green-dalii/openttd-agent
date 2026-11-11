@@ -14,7 +14,7 @@ import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { ActionResult, AgentDeps } from "../types.js";
 import { worldFacts } from "../world-facts.js";
 import { formatRouteStats } from "../route-stats.js";
-import { estimateRoute } from "../estimate.js";
+import { estimateRoute, estimateFreightEconomics, type EngineEconomics, type FreightEconomics, type RouteEstimate } from "../estimate.js";
 
 /** Executor AI's company id on a fresh map (first company = 0). */
 export const DEFAULT_COMPANY = 0;
@@ -600,8 +600,20 @@ const InspectRouteSchema = Type.Object({
 });
 
 const EstimateRouteSchema = Type.Object({
-	from: Type.Integer({ description: "from town id" }),
-	to: Type.Integer({ description: "to town id" }),
+	from: Type.Optional(Type.Integer({ description: "from town id (bus line)" })),
+	to: Type.Optional(Type.Integer({ description: "to town id (bus line)" })),
+	from_industry: Type.Optional(
+		Type.Integer({ description: "producer industry id (freight line)" }),
+	),
+	to_industry: Type.Optional(
+		Type.Integer({ description: "consumer industry id (freight line)" }),
+	),
+	cargo: Type.Optional(
+		Type.String({
+			description:
+				"cargo label to price, e.g. COAL (freight lines only; the engine's own rate for that cargo)",
+		}),
+	),
 });
 
 /** `estimate_route` — facts about a candidate line BEFORE spending anything.
@@ -611,47 +623,204 @@ const EstimateRouteSchema = Type.Object({
  * only population, so "take the two biggest" was the only strategy it could form,
  * and it picked a pair 104 straight-tiles apart that construction could not finish.
  * Distance and cost are world facts; which pair to build is still the agent's call.
+ *
+ * 货运线（Issue #105）：给了 `cargo` + 两个产业时，工具额外问引擎要**它自己的**
+ * 每单位运价（`GSCargo.GetCargoIncome`）与车型经济（载量/价格/运行成本），
+ * 把收入与成本连同**方向标签**一起给出。
+ * **工具不下结论**：收入是上界、成本是下界，盈亏由模型自己权衡
+ * （docs/RL-HARNESS-SCOPE-AUDIT.md J3）。
  */
 function estimateRouteTool(deps: AgentDeps): AgentTool<typeof EstimateRouteSchema, ActionResult> {
 	return {
 		name: "estimate_route",
 		label: "Estimate Route",
 		description:
-			"Estimate a candidate bus line between two towns WITHOUT building: straight-line " +
-			"tile distance and a road-only cost lower bound vs the company balance. " +
-			"Call before build_bus_route to compare candidate pairs.",
+			"Estimate a candidate line WITHOUT building: straight-line tile distance, a road-only " +
+			"cost lower bound vs the company balance, and — for a freight line (cargo + two " +
+			"industries) — the engine's own cargo rate and each truck's capacity, price and running " +
+			"cost. Every number carries its direction: revenue is an UPPER bound, cost a LOWER bound. " +
+			"Call before build_bus_route / build_freight_route to compare candidates.",
 		parameters: EstimateRouteSchema,
 		execute: async (_id, params) => {
 			const snap = deps.state.snapshot();
 			const towns = snap.towns ?? [];
-			const from = towns.find((t) => t.id === params.from);
-			const to = towns.find((t) => t.id === params.to);
-			if (!from || !to) {
-				return toResult({
-					ok: false,
-					summary: `unknown town id(s): ${!from ? params.from : ""}${!from && !to ? ", " : ""}${!to ? params.to : ""}. Call observe() for valid ids.`,
-					data: { from: params.from, to: params.to, known: towns.map((t) => t.id) },
-				});
+			const industries = snap.industrySites ?? [];
+
+			// 两种线：客运（两个城镇）或货运（两个产业 + 货种）。
+			// 端点必须给全：只给一半 ⇒ 具名拒绝（不猜另一半）。
+			const freight =
+				params.from_industry !== undefined ||
+				params.to_industry !== undefined ||
+				params.cargo !== undefined;
+			let from: { id: number; x: number; y: number } | undefined;
+			let to: { id: number; x: number; y: number } | undefined;
+			if (freight) {
+				if (params.from_industry === undefined || params.to_industry === undefined) {
+					return toResult({
+						ok: false,
+						summary:
+							"a freight line needs BOTH from_industry and to_industry (and a cargo label). " +
+							"Call observe() for the industry ids.",
+						data: { freight: true },
+					});
+				}
+				const a = industries.find((i) => i.id === params.from_industry);
+				const b = industries.find((i) => i.id === params.to_industry);
+				if (!a || !b) {
+					return toResult({
+						ok: false,
+						summary:
+							`unknown industry id(s): ${!a ? params.from_industry : ""}` +
+							`${!a && !b ? ", " : ""}${!b ? params.to_industry : ""}. ` +
+							"Call observe() for valid ids.",
+						data: {
+							from_industry: params.from_industry,
+							to_industry: params.to_industry,
+							known: industries.map((i) => i.id),
+						},
+					});
+				}
+				from = { id: a.id, x: a.x, y: a.y };
+				to = { id: b.id, x: b.x, y: b.y };
+			} else {
+				if (params.from === undefined || params.to === undefined) {
+					return toResult({
+						ok: false,
+						summary:
+							"give both `from` and `to` town ids (bus line), or `from_industry` + " +
+							"`to_industry` + `cargo` (freight line).",
+						data: { freight: false },
+					});
+				}
+				const a = towns.find((t) => t.id === params.from);
+				const b = towns.find((t) => t.id === params.to);
+				if (!a || !b) {
+					return toResult({
+						ok: false,
+						summary:
+							`unknown town id(s): ${!a ? params.from : ""}${!a && !b ? ", " : ""}${!b ? params.to : ""}. Call observe() for valid ids.`,
+						data: { from: params.from, to: params.to, known: towns.map((t) => t.id) },
+					});
+				}
+				from = a;
+				to = b;
 			}
 			const c0 = snap.companies.get(DEFAULT_COMPANY);
 			const balance = c0?.economy ? Number(c0.economy.money) : null;
 			const est = estimateRoute(from, to, balance);
+
+			// 货运线：问引擎要**它自己的**运价与车型经济（按需，Issue #105）。
+			// 拿不到 ⇒ **具名拒绝**（空成功 = 撒谎）。
+			let freightData: FreightEconomics | null = null;
+			let freightError: string | null = null;
+			if (freight && params.cargo) {
+				const answer = await deps.sink.gameScriptAwait?.(
+					JSON.stringify({
+						cmd: "route_economics",
+						cargo: params.cargo,
+						distance: est.straightTiles,
+						days: 1,
+					}),
+					INSPECT_TIMEOUT_MS,
+				);
+				if (answer === undefined) {
+					freightError =
+						"the game's economy channel is not available in this run, so no cargo rate was read";
+				} else if (answer === null) {
+					freightError = `the game did not answer within ${INSPECT_TIMEOUT_MS} ms, so no cargo rate was read`;
+				} else if (answer.ok !== true) {
+					freightError = `the game could not price that cargo: ${String(answer.reason ?? "unknown reason")}`;
+				} else {
+					const data = (answer.data ?? {}) as Record<string, unknown>;
+					const income = typeof data.income_per_unit === "number" ? data.income_per_unit : null;
+					const rows = Array.isArray(data.engines) ? (data.engines as unknown[]) : [];
+					const engines: EngineEconomics[] = rows
+						.map((r) => r as Record<string, unknown>)
+						.filter((r) => typeof r.id === "number")
+						.map((r) => ({
+							id: Number(r.id),
+							name: typeof r.name === "string" ? r.name : "",
+							speed: typeof r.speed === "number" ? r.speed : 0,
+							capacity: typeof r.capacity === "number" ? r.capacity : 0,
+							price: typeof r.price === "number" ? r.price : 0,
+							runningCostPerYear:
+								typeof r.running_cost === "number" ? r.running_cost : 0,
+							cargo: typeof r.cargo === "string" && r.cargo !== "" ? r.cargo : null,
+						}));
+					if (income === null) {
+						freightError = `the game did not report a rate for cargo "${params.cargo}"`;
+					} else {
+						// 只留**能拉这个货**的车型（引擎自己的属性）⇒ 逐个算，不替模型选。
+						const able = engines.filter((e) => e.cargo === params.cargo);
+						freightData = estimateFreightEconomics({
+							cargo: params.cargo,
+							distanceTiles: est.straightTiles,
+							incomePerUnit: income,
+							engines: able.length > 0 ? able : engines,
+							roadCostLowerBound: est.roadCostLowerBound,
+						});
+					}
+				}
+			}
+
+			const data: Record<string, unknown> = { ...est };
+			if (freightData) data.freight = freightData;
 			return toResult({
 				ok: true,
 				// Facts in the summary (toResult sends ONLY the summary - MEMORY A7).
 				// No preference is stated: the agent weighs these numbers itself.
-				summary:
-					`towns ${est.fromTown}->${est.toTown}: ${est.straightTiles} straight tiles ` +
-					`(real road is longer); road-only cost >= £${est.roadCostLowerBound} ` +
-					"(stations/depot/vehicles extra); balance £" +
-					(balance === null ? "?" : String(balance)) +
-					(est.roadCostShareOfBalance === null
-						? ""
-						: `; road alone = ${(est.roadCostShareOfBalance * 100).toFixed(0)}% of balance`),
-				data: est,
+				summary: freight
+					? formatFreightEstimate(est, freightData, freightError, balance)
+					: formatTownEstimate(est, balance),
+				data,
 			});
 		},
 	};
+}
+
+/** 客运线的估价摘要（事实，不含建议）。 */
+function formatTownEstimate(est: RouteEstimate, balance: number | null): string {
+	return (
+		`towns ${est.fromTown}->${est.toTown}: ${est.straightTiles} straight tiles ` +
+		`(real road is longer); road-only cost >= £${est.roadCostLowerBound} ` +
+		"(stations/depot/vehicles extra); balance £" +
+		(balance === null ? "?" : String(balance)) +
+		(est.roadCostShareOfBalance === null
+			? ""
+			: `; road alone = ${(est.roadCostShareOfBalance * 100).toFixed(0)}% of balance`)
+	);
+}
+
+/** 货运线的估价摘要：运价 + 每个能拉这个货的车型的收入/成本 + 方向。 */
+function formatFreightEstimate(
+	est: RouteEstimate,
+	freight: FreightEconomics | null,
+	error: string | null,
+	balance: number | null,
+): string {
+	if (!freight) {
+		return (
+			`industries ${est.fromTown}->${est.toTown}: ${est.straightTiles} straight tiles; ` +
+			`road-only cost >= £${est.roadCostLowerBound} (stations/depot/vehicles extra); ` +
+			`balance £${balance === null ? "?" : String(balance)}. ` +
+			`no cargo rate: ${error ?? "not requested"}`
+		);
+	}
+	const rows = freight.engines
+		.map(
+			(e) =>
+				`${e.name}: cap ${e.capacity} unit(s), £${e.price}, run £${e.runningCostPerYear}/yr, ` +
+				`~${e.transitDays}d one way; revenue <= £${Math.round(e.revenuePerTripUpperBound)}/trip ` +
+				`(<= £${Math.round(e.revenuePerDayUpperBound)}/day), cost >= £${e.operatingCostPerDayLowerBound.toFixed(2)}/day, ` +
+				`build >= £${e.capexLowerBound}`,
+		)
+		.join(" | ");
+	return (
+		`${freight.cargo} over ${freight.distanceTiles} straight tiles: the engine pays ` +
+		`<= £${freight.incomePerUnit} per unit (fastest transit; a slower trip earns less). ` +
+		`Road-only cost >= £${est.roadCostLowerBound}. ${rows}. ` +
+		`Revenue is an UPPER bound (full load), cost a LOWER bound (age, interest, stations, depot extra).`
+	);
 }
 
 /**

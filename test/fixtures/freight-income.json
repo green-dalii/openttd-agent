@@ -1,0 +1,146 @@
+{
+	"cargo": "COAL",
+	"readings": [
+		{
+			"distance": 50,
+			"days": 1,
+			"income": 35
+		},
+		{
+			"distance": 50,
+			"days": 5,
+			"income": 35
+		},
+		{
+			"distance": 100,
+			"days": 1,
+			"income": 71
+		},
+		{
+			"distance": 100,
+			"days": 5,
+			"income": 71
+		},
+		{
+			"distance": 200,
+			"days": 1,
+			"income": 143
+		},
+		{
+			"distance": 200,
+			"days": 5,
+			"income": 143
+		},
+		{
+			"distance": 400,
+			"days": 1,
+			"income": 287
+		},
+		{
+			"distance": 400,
+			"days": 5,
+			"income": 287
+		}
+	],
+	"engineTable": [
+		{
+			"capacity": 12,
+			"cargo": "VALU",
+			"id": 153,
+			"name": "Balogh Armoured Truck",
+			"price": 5947,
+			"running_cost": 421,
+			"speed": 48
+		},
+		{
+			"capacity": 15,
+			"cargo": "STEL",
+			"id": 150,
+			"name": "Balogh Steel Truck",
+			"price": 4593,
+			"running_cost": 421,
+			"speed": 48
+		},
+		{
+			"capacity": 22,
+			"cargo": "IORE",
+			"id": 147,
+			"name": "MPS Iron Ore Truck",
+			"price": 4962,
+			"running_cost": 421,
+			"speed": 48
+		},
+		{
+			"capacity": 20,
+			"cargo": "WOOD",
+			"id": 144,
+			"name": "Witcombe Wood Truck",
+			"price": 4839,
+			"running_cost": 421,
+			"speed": 48
+		},
+		{
+			"capacity": 20,
+			"cargo": "GRAI",
+			"id": 141,
+			"name": "Hereford Grain Truck",
+			"price": 4675,
+			"running_cost": 421,
+			"speed": 48
+		},
+		{
+			"capacity": 14,
+			"cargo": "GOOD",
+			"id": 138,
+			"name": "Balogh Goods Truck",
+			"price": 4388,
+			"running_cost": 421,
+			"speed": 48
+		},
+		{
+			"capacity": 14,
+			"cargo": "LVST",
+			"id": 135,
+			"name": "Talbott Livestock Van",
+			"price": 4306,
+			"running_cost": 421,
+			"speed": 48
+		},
+		{
+			"capacity": 21,
+			"cargo": "OIL_",
+			"id": 132,
+			"name": "Witcombe Oil Tanker",
+			"price": 4511,
+			"running_cost": 421,
+			"speed": 48
+		},
+		{
+			"capacity": 22,
+			"cargo": "MAIL",
+			"id": 126,
+			"name": "MPS Mail Truck",
+			"price": 4716,
+			"running_cost": 421,
+			"speed": 48
+		},
+		{
+			"capacity": 20,
+			"cargo": "COAL",
+			"id": 123,
+			"name": "Balogh Coal Truck",
+			"price": 4429,
+			"running_cost": 421,
+			"speed": 48
+		},
+		{
+			"capacity": 31,
+			"cargo": "PASS",
+			"id": 116,
+			"name": "MPS Regal Bus",
+			"price": 4921,
+			"running_cost": 426,
+			"speed": 56
+		}
+	]
+}
