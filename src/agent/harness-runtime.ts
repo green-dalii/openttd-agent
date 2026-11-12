@@ -126,7 +126,7 @@ export async function createHarnessRuntime(opts: HarnessRuntimeOptions): Promise
 			tools: harnessTools,
 			activeToolNames: opts.tools.map((t) => t.name),
 			// Verified: the harness ignores per-tool `executionMode`; ordering comes
-			// from here. Writes must stay FIFO (SPEC §10.39.1).
+			// from here. Writes must stay FIFO (SPEC §10.39).
 			toolExecution: "sequential",
 			// HARD REQUIREMENT (docs/HARNESS-MIGRATION.md §6): only one context
 			// trimming mechanism may run. Our pruning lives in `transform_context`,

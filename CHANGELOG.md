@@ -11,6 +11,14 @@
 
 ### Added
 
+- **A probe can now answer whether the same savegame gives the same run.** `scripts/determinism-probe.ts` saves a map,
+  copies the savegame, starts two dedicated servers from it (`-g <savegame>`) and sends the same command to both, then
+  compares the money trajectories. **Two loads of the same savegame produced identical money levels** - the engine
+  side is reproducible, so a counterfactual fork is possible. It also pinned down two things: a script's own state
+  does **not** travel in a savegame (neither the game script nor the executor has a `Save()` method, so the game
+  script restarts from scratch after a load - both fork arms must start from the savegame), and the comparison must be
+  made on the **levels** the money passed through, not on a per-day value (the readings arrive separately, so a
+  payment can land on either side of a day boundary).
 - **The model can now do the economics of a freight line before it spends.** `estimate_route` takes a cargo and two
   industries and answers with the engine's own numbers: the price per cargo unit over that distance
   (`GSCargo.GetCargoIncome`), and per truck its capacity, price and running cost (`GSEngine.GetCapacity/GetPrice/
@@ -67,9 +75,6 @@
   see neither: the GS now reports a **cargo catalogue** (which cargo is freight, which industries produce it, which
   **accept** it - the engine's own answer), the **position and name of every industry**, and the cargo each road
   engine carries. Real machine (seed 4242): the model planned to link "a producer industry to a consumer industry".
-- **The freight numbers reach the screen (2).** The Compare page draws the **cargo / passenger split** of the
-  deliveries, and the server hands over the measure wording with it.
-
 ### Added
 - **The full map is now one question away.** The observation carries a **sample** of the industries
   (the top producers) and only the cargo types that had production - which keeps the payload

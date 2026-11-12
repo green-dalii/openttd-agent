@@ -133,7 +133,7 @@ function num(v: string | undefined): number | null {
  * The STAGE of a phase string — the only thing that should gate "is this news?".
  *
  * Why stages and not strings, not counters, not identities: measured over three
- * rounds (SPEC §10.34/§10.35/§10.35.1), every variant of comparing phase strings
+ * rounds (SPEC §10.34/§10.35), every variant of comparing phase strings
  * eventually woke the model on noise, because the phase string mixes
  *
  *   state   - stage, segment, tiles remaining          -> real news

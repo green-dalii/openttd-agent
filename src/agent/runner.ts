@@ -6,7 +6,7 @@
  *   v0.2 已验证的引导步骤（deploy packs / attach GS / start_ai）+ Bash 命令通道。
  *   provider 可插拔：默认 faux（脚本化，离线可复现地证明接线），可选真实 provider。
  * 事实来源: SPEC §4.2（决策循环）、§10.10-§10.15（引导与施工事实）。
- * 禁止: 在信号回调里做 async 收尾（§10.9）；阻塞等待施工（异步轮询）。
+ * 禁止: 在信号回调里做 async 收尾（§10.6）；阻塞等待施工（异步轮询）。
  */
 
 import { OpenTTDProcessManager } from "../game/process-manager.js";
