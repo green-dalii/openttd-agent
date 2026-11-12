@@ -86,7 +86,7 @@ export const RouteStatsEventSchema = Type.Object({
 	gameDate: Type.Integer(),
 });
 
-/** GS 错误事件（"发送 ≠ 接受"的观测闭环，SPEC §10.39.1）。 */
+/** GS 错误事件（"发送 ≠ 接受"的观测闭环，SPEC §10.39）。 */
 export const GsErrEventSchema = Type.Object({
 	kind: Type.Literal("err"),
 	cmd: Type.Optional(Type.String()),

@@ -128,7 +128,7 @@ describe("createAgent", () => {
  * R1 — 与 pi-agent-core 的协同（ADR 见 SPEC §10.74）。
  *
  * 三条都是"库已提供、而我们没用"的机制，其中第一条是**领域不变量**：
- *  - `executionMode`：游戏按 FIFO 应用命令（SPEC §10.39.1），两个变更命令并发执行
+ *  - `executionMode`：游戏按 FIFO 应用命令（SPEC §10.39），两个变更命令并发执行
  *    会让台账记录顺序 ≠ 实际应用顺序，归因链断掉；
  *  - 每决策工具预算：实测有一局做出 193 次工具调用 / 17.5 次每决策（正常 2–3）；
  *  - `sessionId`：provider 提示缓存（每决策 15–56k tokens）。

@@ -324,7 +324,7 @@ export class AdminClient {
 	/** Graceful teardown: destroy socket + disable reconnect.
 	 *
 	 * NOTE: we deliberately do NOT send AdminQuit. Empirically (OpenTTD 15.0,
-	 * SPEC §10.7/§10.8) sending AdminQuit then destroying triggers an abort in
+	 * SPEC §10.8) sending AdminQuit then destroying triggers an abort in
 	 * the server's ServerNetworkAdminSocketHandler::OTTD_CloseConnection path
 	 * (use-after-free in the admin receive loop). The server detects the TCP EOF
 	 * from socket destroy and cleans up cleanly. */

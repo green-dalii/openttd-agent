@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { OpenTTDProcessManager } from "../../src/game/process-manager.js";
 import { ConfigError } from "../../src/config.js";
 import type { Config } from "../../src/config.js";
+import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -175,6 +176,63 @@ describe("OpenTTDProcessManager lifecycle", () => {
 			expect(mgr.isRunning()).toBe(false);
 			expect(exitCode).toBe(3);
 			expect(mgr.getLogTail().join("\n")).toContain("hello-server");
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+});
+
+describe("OpenTTDProcessManager extraArgs（Issue #106 确定性探针）", () => {
+	it("把 extraArgs 原样追加到命令行末尾（`-g <savegame>` 从存档开局）", async () => {
+		// 背景：#106 要证明"同一存档读两次 ⇒ 同一资金轨迹"。OpenTTD 从存档开局
+		// 的开关是引擎自己的 CLI 选项（`-g`）⇒ 脚手架**不该重写**命令行，
+		// 只需要能把额外参数透传出去。
+		// 这个测试用"假二进制"把自己收到的参数写进文件 ⇒ 断言参数真的到位。
+		const dir = await mkdtemp(join(tmpdir(), "ottd-pm-extra-"));
+		try {
+			const argsFile = join(dir, "args.txt");
+			const fake = join(dir, "fakebin.sh");
+			await writeFile(fake, `#!/bin/sh\necho "$@" > ${JSON.stringify(argsFile)}\nexit 0\n`, { mode: 0o755 });
+			await writeFile(join(dir, "openttd.cfg"), "[network]\nserver_port = 3979\n", "utf8");
+			await writeFile(join(dir, "secrets.cfg"), "[network]\nadmin_password = \n", "utf8");
+
+			const mgr = new OpenTTDProcessManager({ ...baseCfg(dir), openttdBinary: fake });
+			await mgr.ensureSandboxConfig();
+			await mgr.start({ extraArgs: ["-g", "/tmp/probe.sav"] });
+
+			const deadline = Date.now() + 10_000;
+			while (!existsSync(argsFile) && Date.now() < deadline) {
+				await new Promise((res) => setTimeout(res, 25));
+			}
+			const args = await readFile(argsFile, "utf8");
+			expect(args).toContain("-g /tmp/probe.sav");
+			// 原有参数不能被挤掉。
+			expect(args).toContain("-D 127.0.0.1:3979");
+			expect(args).toContain("-G 42");
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("不传 extraArgs 时命令行里没有 -g（别把存档开关写死）", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "ottd-pm-noextra-"));
+		try {
+			const argsFile = join(dir, "args.txt");
+			const fake = join(dir, "fakebin.sh");
+			await writeFile(fake, `#!/bin/sh\necho "$@" > ${JSON.stringify(argsFile)}\nexit 0\n`, { mode: 0o755 });
+			await writeFile(join(dir, "openttd.cfg"), "[network]\nserver_port = 3979\n", "utf8");
+			await writeFile(join(dir, "secrets.cfg"), "[network]\nadmin_password = \n", "utf8");
+
+			const mgr = new OpenTTDProcessManager({ ...baseCfg(dir), openttdBinary: fake });
+			await mgr.ensureSandboxConfig();
+			await mgr.start();
+
+			const deadline = Date.now() + 10_000;
+			while (!existsSync(argsFile) && Date.now() < deadline) {
+				await new Promise((res) => setTimeout(res, 25));
+			}
+			const args = await readFile(argsFile, "utf8");
+			expect(args).not.toContain("-g");
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}
