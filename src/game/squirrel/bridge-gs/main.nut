@@ -3493,9 +3493,41 @@ class BridgeV1 extends GSController {
             local ans_id = -1;
             if (obj.rawin("id")) ans_id = obj["id"];
             local scan = this.ScanCargo();
+            // **货种过滤**（可选）：工具的承诺必须兑现 —— 模型问"只要煤的产业"，
+            // 拿到的就得是煤的产业，不是全图（拿了全图还说筛过了 = 对世界说假话）。
+            // 过滤键是**货种标签**（模型看得懂的那一个）。
+            // "这个标签不存在"与"这个货种没有产业"是**两件事** ⇒ 分开报（缺失 ≠ 0）。
+            local wanted = null;
+            if (obj.rawin("cargo")) {
+                local w = obj["cargo"];
+                if (w != null && ("" + w) != "") wanted = "" + w;
+            }
+            local rows = scan.industries;
+            local cargoKnown = null;   // null = 没问过滤（不是"不知道"）
+            local labels = [];
+            if (wanted != null) {
+                cargoKnown = false;
+                foreach (r in scan.readings) {
+                    if (r.label == wanted) { cargoKnown = true; break; }
+                }
+                if (cargoKnown) {
+                    local filtered = [];
+                    foreach (r in scan.industries) {
+                        if (r.cargo == wanted) filtered.append(r);
+                    }
+                    rows = filtered;
+                } else {
+                    // 标签不存在 ⇒ 回一份**可用标签**让模型自己改（而不是报 0 个产业）。
+                    rows = [];
+                    foreach (r in scan.readings) labels.append(r.label);
+                }
+            }
             GSAdmin.Send({ kind = "answer", id = ans_id, ok = true,
-                           data = { industries = scan.industries,
-                                    total = scan.industries.len() } });
+                           data = { industries = rows,
+                                    total = rows.len(),
+                                    cargo = wanted,
+                                    cargoKnown = cargoKnown,
+                                    cargoLabels = labels } });
         } else if (cmd == "route_economics") {
             // 线路经济（Issue #105）：**按需**读引擎的事实 + 引擎自己的运价函数。
             //

@@ -283,13 +283,7 @@ unloading site must accept it. A refused command now reaches the model.
   measure is an empty dashed slot, never a zero-length bar: "not measured" and "measured: 0" must not look the same. The picker moved to the top of the page, so asking for a comparison is one
   click away instead of a scroll down.
 
-- **The metric ledger no longer loses runs to a session-id collision.** Two runs started in the
-  same second on the same seed - two models side by side, or a re-run - used to get the *same*
-  session id, and the ledger keeps "newest wins per id", so one of them disappeared without a
-  trace. In the first benchmark matrix that silently swallowed three of six runs: the Compare
-  page showed "1 model(s)" and said nothing about losing data. Session ids now carry a short
-  random suffix, and the ledger *reports* the collisions, so the Compare page says out loud
-  which runs were dropped and that they are in none of the numbers below.
+- **The metric ledger no longer loses runs to a session-id collision.** Two runs started in the same second on the same seed used to get the *same* session id, and the ledger keeps "newest wins per id", so one of them disappeared without a trace - in the first benchmark matrix that silently swallowed three of six runs (the Compare page showed "1 model(s)"). Session ids now carry a short random suffix, and the ledger *reports* the collisions, so the Compare page says out loud which runs were dropped and that they are in none of the numbers below.
 
 - **The cargo facts are there from the first heartbeat now.** The Bridge GS recomputed its
   industry / cargo / delivery facts every 1000 ticks, so the first thousand ticks of every game
@@ -351,6 +345,7 @@ unloading site must accept it. A refused command now reaches the model.
   the tool description still listed only the older actions, so a real run recorded its freight
   patterns as `build_bus_route` - the same idea split into two cards. The description is now
   generated from the vocabulary, and a test fails if it drifts.
+- **`get_industries` really filters by cargo now.** The tool promised a cargo filter and the game script ignored it, so the model asked for "only COAL" and got the whole map - a promise the world did not keep. The filter runs on the game side, and a cargo label that does not exist in this game is reported as "no such cargo" (with the labels that do exist), not as "0 industries".
 - **Several readings that disagreed with themselves**: deltas folded unread readings to zero ("no change" where nothing
   had been measured), fleet counts disagreed (route table vs company stats), a partial game-script failure was silent
   (one bad API call could kill a whole reply), and runs that were stopped could look like failures - pause attribution,

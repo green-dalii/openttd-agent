@@ -1043,12 +1043,14 @@ export function getIndustriesTool(deps: AgentDeps): AgentTool<typeof GetIndustri
 		description:
 			"Get the FULL list of industries on the map: id, cargo, name, last month's production and transport, and stock. " +
 			"observe() only carries a sample (the top producers by production); this returns every industry, " +
-			"which also tells 'no production' from 'not measured'. Read-only.",
+			"which also tells 'no production' from 'not measured'. " +
+			"Pass cargo (e.g. 'COAL') to get only the industries that produce that cargo. Read-only.",
 		executionMode: "sequential",
 		parameters: GetIndustriesSchema,
 		execute: async (_id, params) => {
 			const cmd: Record<string, unknown> = { cmd: "list_industries" };
-			if (typeof params.cargo === "string" && params.cargo !== "") cmd.cargo = params.cargo;
+			const wanted = typeof params.cargo === "string" && params.cargo !== "" ? params.cargo : null;
+			if (wanted !== null) cmd.cargo = wanted;
 			const answer = await deps.sink.gameScriptAwait?.(JSON.stringify(cmd), INSPECT_TIMEOUT_MS);
 			if (answer === undefined) {
 				return toResult({
@@ -1071,9 +1073,28 @@ export function getIndustriesTool(deps: AgentDeps): AgentTool<typeof GetIndustri
 			}
 			const data = (answer.data ?? {}) as Record<string, unknown>;
 			const rows = Array.isArray(data.industries) ? (data.industries as unknown[]) : [];
+			// **摘要必须与实际给出去的东西一致**：
+			//   · 过滤时说的是"这个货种的产业"，不是"全图"；
+			//   · 标签不存在 ≠ "0 个产业" ⇒ 说"没有这个货种"（缺失 ≠ 0，D60）。
+			const cargoKnown = data.cargoKnown;
+			let summary: string;
+			if (wanted === null) {
+				summary = `${rows.length} industries on the map (full list): ${JSON.stringify(data)}`;
+			} else if (cargoKnown === false) {
+				const labels = Array.isArray(data.cargoLabels) ? (data.cargoLabels as string[]) : [];
+				summary =
+					`the game has no cargo labelled '${wanted}'` +
+					(labels.length > 0 ? ` (available: ${labels.join(", ")})` : "") +
+					`; no industries were listed`;
+			} else if (cargoKnown === true) {
+				summary = `${rows.length} industries produce ${wanted}: ${JSON.stringify(data)}`;
+			} else {
+				// 游戏没确认标签（老 GS）⇒ 不替它下结论，只报**给了模型的**那份。
+				summary = `${rows.length} industries listed for ${wanted}: ${JSON.stringify(data)}`;
+			}
 			return toResult({
 				ok: true,
-				summary: `${rows.length} industries on the map (full list): ${JSON.stringify(data)}`,
+				summary,
 				data,
 			});
 		},

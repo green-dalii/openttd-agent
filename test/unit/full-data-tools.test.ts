@@ -6,10 +6,16 @@
  *   ③ 工具**只读**（不改变世界），且**观测面的载荷不涨**（取样仍在前端）。
  */
 
+import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { getCargoTool, getIndustriesTool } from "../../src/agent/tools/index.js";
 import { ACTION_EFFECTS } from "../../src/agent/tools/catalog.js";
 import type { AgentDeps } from "../../src/agent/types.js";
+
+const nut = readFileSync(
+	new URL("../../src/game/squirrel/bridge-gs/main.nut", import.meta.url),
+	"utf8",
+);
 
 function deps(gameScriptAwait?: (json: string, timeoutMs?: number) => Promise<unknown>): AgentDeps {
 	return {
@@ -64,6 +70,62 @@ describe("按需全量：get_industries", () => {
 	it("没有回答通道时明说不可用", async () => {
 		const text = await run(getIndustriesTool(deps()));
 		expect(text).toContain("not available in this run");
+	});
+});
+
+describe("按需全量：get_industries 的**货种过滤**（工具的承诺必须兑现）", () => {
+	it("过滤请求会**发给游戏**（不是在服务端偷偷丢掉参数）", async () => {
+		const gameScriptAwait = vi.fn().mockResolvedValue({
+			kind: "answer",
+			id: 1,
+			ok: true,
+			data: { total: 1, cargo: "COAL", cargoKnown: true, industries: [{ id: 28, cargo: "COAL", name: "Mine" }] },
+		});
+		await run(getIndustriesTool(deps(gameScriptAwait as never)), { cargo: "COAL" });
+		const sent = String(gameScriptAwait.mock.calls[0]![0]);
+		expect(sent).toContain('"cmd":"list_industries"');
+		expect(sent).toContain('"cargo":"COAL"');
+	});
+
+	it("过滤后的**摘要说的是这个货种**，不是「全图」", async () => {
+		const gameScriptAwait = vi.fn().mockResolvedValue({
+			kind: "answer",
+			id: 1,
+			ok: true,
+			data: {
+				total: 2,
+				cargo: "COAL",
+				cargoKnown: true,
+				industries: [
+					{ id: 28, cargo: "COAL", name: "Lonningbury Coal Mine" },
+					{ id: 53, cargo: "COAL", name: "Lafinghill Power Station" },
+				],
+			},
+		});
+		const text = await run(getIndustriesTool(deps(gameScriptAwait as never)), { cargo: "COAL" });
+		expect(text).toContain("COAL");
+		expect(text).toContain("2");
+		// 说成「全图」就是**假话**（这是过滤后的子集）。
+		expect(text).not.toContain("on the map");
+	});
+
+	it("游戏里**没有这个货种标签** ⇒ 明说没有这个货种，不说「0 个产业」", async () => {
+		const gameScriptAwait = vi.fn().mockResolvedValue({
+			kind: "answer",
+			id: 1,
+			ok: true,
+			data: { total: 0, cargo: "COALL", cargoKnown: false, cargoLabels: ["COAL", "PASS"], industries: [] },
+		});
+		const text = await run(getIndustriesTool(deps(gameScriptAwait as never)), { cargo: "COALL" });
+		expect(text).toMatch(/no cargo/i);
+		expect(text).not.toMatch(/0 industries/i);
+	});
+
+	it("GS 侧真的按货种过滤（静态守卫：命令不能**声明过滤却不执行**）", () => {
+		const handler = nut.slice(nut.indexOf('cmd == "list_industries"'));
+		const body = handler.slice(0, handler.indexOf('} else if'));
+		expect(body).toContain('obj.rawin("cargo")');
+		expect(body).toContain("cargoKnown");
 	});
 });
 
