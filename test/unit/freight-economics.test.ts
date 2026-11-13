@@ -33,7 +33,7 @@ interface IncomeFixture {
 	readings: IncomeReading[];
 }
 
-/** 真机探针的读数（Issue #105，SPEC §10.127）。 */
+/** 真机探针的读数（Issue #105，SPEC §10.126）。 */
 const FIXTURE = JSON.parse(
 	readFileSync(new URL("../fixtures/freight-income.json", import.meta.url), "utf8"),
 ) as IncomeFixture;
@@ -139,7 +139,7 @@ describe("收入 = 载量 × 每单位运价（满载 ⇒ 上界）", () => {
 	});
 });
 
-describe("在途天数：速度 → 每天走过的格数（SPEC §10.127 的推导）", () => {
+describe("在途天数：速度 → 每天走过的格数（SPEC §10.126 的推导）", () => {
 	it("格/天 = 速度 × 0.43359375", () => {
 		// 80 km-ish/h ⇒ 34.6875 格/天 ⇒ 120 格要 4 天。
 		expect(transitDaysFor(120, 80)).toBe(4);

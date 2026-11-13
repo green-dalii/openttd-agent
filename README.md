@@ -72,7 +72,7 @@ Two facts worth remembering before reading the code (details in `SPEC.md` §10):
 | Observation | Admin Port events + Game-Script rich state (towns, economy, route economics) |
 | Decision loop | Snapshot → model → tools → queued commands → events back; deadline and decision caps enforced |
 | Typed GS channel | Contract-checked events (`gs-events.ts`) instead of string parsing |
-| Route economics | Per-route vehicles, passengers waiting, year-to-date profit, surfaced to the model |
+| Route economics | Per-route vehicles, waiting cargo and passengers, year-to-date profit, surfaced to the model |
 | Memory | Deterministic route facts + reflective lessons, persisted across runs; `--no-memory` for the control arm |
 | Dashboard | Live run view, provider catalogue, session history, evolution view |
 | Experiment harness | One command runs an A/B matrix and refuses to conclude when the arms are not comparable |
@@ -206,17 +206,20 @@ What the verdict will and will not say:
 
 Stated plainly, because a harness is only useful if its edges are legible:
 
-- **No profitable policy exists yet** on the default map and loan settings: every
-  measured run ends with the company losing money, while cargo *does* move. Whether to
-  change the objective (throughput instead of profit) or the scenario is an open
-  question, tracked in `ROADMAP.md`.
+- **A freight line can be built, refit and reported live while it delivers nothing.** The vehicles
+  reach the loading station and the coal piles up there, but nothing is ever loaded (Issue #113).
+  The diagnosis is available on demand (`diagnose_route`); the engine-side condition that refuses
+  the load is still being located.
+- **No profitable policy has been shown yet.** The profit reading is now the run's own net cash
+  flow (`money - loan`) over the game days the run actually took, but a freight line that really
+  delivers is still missing, so the promotion gate has no positive reading to judge.
 - **Short runs are dominated by construction timing.** In a 500 s run about 70 % of
   runs deliver nothing at all — usually because the line finished too late to matter.
 - **Simulation speed cannot be raised** on a dedicated server: OpenTTD exposes no such
   setting or console command (`SPEC.md` §10.59). Longer episodes cost wall-clock
   linearly, which is why the harness reports statistical power instead of just results.
-- **The dashboard is frozen** by decision: bug fixes only, no new features, until the
-  research loop is sound.
+- **New dashboard features are frozen** by decision (bug fixes only) until the research loop is
+  sound; the four questions — Run / Compare / History / Configure — are settled.
 - **One real-machine experiment at a time.** `pnpm run gate` asserts free ports, so it
   cannot run while an experiment is live — this is documented rather than worked around.
 

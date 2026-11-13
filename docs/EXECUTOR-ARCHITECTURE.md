@@ -31,7 +31,7 @@
 
 ## 1. 关键发现：那条约束**根本不存在**
 
-`SPEC.md` L355 其实**已经预警过**这件事，但那个 spike 从未做：
+`SPEC.md` L355 其实**已经预警过**这件事；那个 spike 后来**做了**（2026-09-12 真机实测，见 §4 阶段一）：
 
 > 若 spike 证实 GS 可对 agent 公司施工且与 Executor AI 无冲突
 > → **架构可简化为 GS-only（省一个组件）**
@@ -116,7 +116,7 @@ observe · build_bus_route · add_vehicles · set_pause
 > 执行结果：P1-1a/P1-1b，事实见 `SPEC.md` §10.107–§10.109；未完成项见 `ROADMAP.md` 阶段 D6。
 
 ### 阶段一：**可行性 spike**（小，必须先做）
-`SPEC.md` L355 要求但从未做的那一步。
+`SPEC.md` L355 要求的那一步（**已做**，结论见本节末尾）。
 
 - 在现有 Bridge GS 里临时加一个 `GSCompanyMode(0)` 作用域，尝试：
   1. `GSRoad.BuildRoad(t1, t2)`
@@ -164,7 +164,7 @@ observe · build_bus_route · add_vehicles · set_pause
    结果什么都没收到。改到周期性发送里（已知能到达 agent）才有结果。
    → 写任何 GS 侧探针都必须**先证明通道是通的**。
 
-### 阶段 1b（买车/订单/启动）：**代码已写，尚未跑到**
+### 阶段 1b（买车/订单/启动）：**已跑通**（SPEC §10.109–§10.110）
 
 **已定位的一个真实原因**：`GSEngineList` **需要一个载具类型参数**。
 我最初写 `GSEngineList()` → 报 "wrong number of parameters"。

@@ -1,11 +1,13 @@
-# Dashboard 全面 CoDesign（待审核）
+# Dashboard 全面 CoDesign（已落地：B1–B6）
 
 > **这份文档回答一个问题**：后端已经变成"可配置的评测 harness"，Dashboard 还是不是它的界面？
 > 结论：**不是**。后端新增的 8 个旋钮、bench 流程、manifest、10 类结果成因，页面上
 > 要么没有入口，要么只显示了一部分；而页面自己又在 4 个地方复制了"运行配置"的真值。
 > 本文从**第一性原理**出发重新定义四个问题，给出目标信息架构与分步实施顺序。
-> 状态：**方案，待所有者审核**。运行配置那一条的详细诊断在
-> `docs/SELECTION-STATE-CODESIGN.md`（已批准，S1 待执行）。边界声明见 `AGENTS.md` §9。
+> 状态：**已落地**——B1–B6 全部合并，Run / Compare / History / Configure 四页在线
+> （`docs/DASHBOARD-AUDIT-2026-10-31.md` 记录了验收证据）。运行配置那一条的详细诊断在
+> `docs/SELECTION-STATE-CODESIGN.md`（B1/S2 已落地为 `src/agent/selection.ts`）。
+> 边界声明见 `AGENTS.md` §9。
 
 ---
 
