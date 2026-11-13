@@ -116,9 +116,11 @@ describe("the preview and the manifest agree", () => {
 		// **互不可比**（Compare 按组分开，明写出来）。
 		// 2026-11-11: d89a898b6d575e4a → 3032dab88550d2ef（Issue #105：`estimate_route`
 		// 多了货运分支——**工具的描述与 schema 属于脚手架指纹** ⇒ 改工具就是换脚手架）。
+		// 2026-11-12: 3032dab88550d2ef → d51169a91e2464e1（Issue #113：工具表多了
+		// `diagnose_route`——同样是"改工具就是换脚手架"）。
 		// ⇒ 这一版之后的所有局与之前的所有局**互不可比**（观测面指纹没变：
 		// `observationShapeHash` 仍是 103aabed827a8def ⇒ 观测面不变，只是多了个问价工具）。
-		expect(preview.scaffoldHash).toBe("3032dab88550d2ef");
+		expect(preview.scaffoldHash).toBe("d51169a91e2464e1");
 	});
 
 	it("keeps the cost-known fact honest (a live-only model has no price table)", () => {

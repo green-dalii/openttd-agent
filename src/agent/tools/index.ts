@@ -14,6 +14,7 @@ import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { ActionResult, AgentDeps } from "../types.js";
 import { worldFacts } from "../world-facts.js";
 import { formatRouteStats } from "../route-stats.js";
+import { diagnoseRoutes, type RouteDiagRoute } from "../route-diagnosis.js";
 import { estimateRoute, estimateFreightEconomics, type EngineEconomics, type FreightEconomics, type RouteEstimate } from "../estimate.js";
 
 /** Executor AI's company id on a fresh map (first company = 0). */
@@ -124,6 +125,13 @@ const GetCargoSchema = Type.Object({});
 
 const InspectTownSchema = Type.Object({
 	town: Type.Number({ description: "The town id (from observe())" }),
+});
+
+/** `diagnose_route` — 问游戏"这条线为什么不跑"（Issue #113）。 */
+const DiagnoseRouteSchema = Type.Object({
+	job: Type.Optional(
+		Type.Number({ description: "The route job id (from observe() / inspect_route); omit for every route" }),
+	),
 });
 
 /** `build_bus_route` — ask the Bridge GS to plan+place a bus route blueprint. */
@@ -941,6 +949,88 @@ export function inspectVehicleTool(deps: AgentDeps): AgentTool<typeof InspectVeh
 }
 
 /**
+ * `diagnose_route` — ask the game **why a route is not moving** (Issue #113).
+ *
+ * Why this exists: a freight line can be built, refit and "live" while cargo
+ * waits at the loading station and **nothing is ever delivered** (real machine,
+ * seed 4242). The periodic readings only say "N vehicles are waiting for M" -
+ * they cannot say **where the vehicle is stuck**, so the model had to guess.
+ *
+ * Read-only, on demand (the periodic payload never grows). The **facts** come
+ * from the game; the **named reason** is computed here, server-side, from a
+ * closed vocabulary - the model never has to infer it.
+ */
+export function diagnoseRouteTool(deps: AgentDeps): AgentTool<typeof DiagnoseRouteSchema, ActionResult> {
+	return {
+		name: "diagnose_route",
+		label: "Diagnose Route",
+		description:
+			"Ask the game why a route is not moving: where its vehicles are, how long they have been " +
+			"stuck, what orders they have, whether they actually carry this line's cargo, and how much " +
+			"cargo waits at each end. The answer names the reason (e.g. the vehicle has not moved, it " +
+			"was never refitted to this cargo, its orders are not station orders, nothing is waiting). " +
+			"Use it when observe() or inspect_route shows a route with waiting cargo but no deliveries. " +
+			"Read-only.",
+		executionMode: "sequential",
+		parameters: DiagnoseRouteSchema,
+		execute: async (_id, params) => {
+			const cmd: Record<string, unknown> = { cmd: "route_diag" };
+			if (typeof params.job === "number") cmd.job = params.job;
+			const answer = await deps.sink.gameScriptAwait?.(JSON.stringify(cmd), INSPECT_TIMEOUT_MS);
+			if (answer === undefined) {
+				return toResult({
+					ok: false,
+					summary:
+						"diagnose_route is not available in this run (no answer channel); no route was diagnosed",
+					data: { available: false },
+				});
+			}
+			if (answer === null) {
+				return toResult({
+					ok: false,
+					summary: `no answer from the game within ${INSPECT_TIMEOUT_MS} ms; no route was diagnosed`,
+					data: { available: false },
+				});
+			}
+			if (answer.ok !== true) {
+				return toResult({
+					ok: false,
+					summary: `the game could not diagnose the route: ${String(answer.reason ?? "unknown reason")}`,
+					data: answer,
+				});
+			}
+			const data = (answer.data ?? {}) as Record<string, unknown>;
+			// 诊断命令自己的错误（某条线读不出来）**必须带出来**：静默丢掉 ⇒
+			// 模型看到"没有诊断结果"而不是"这一条读不出来"。
+			const diagErrors = Array.isArray(data.errors) ? (data.errors as string[]) : [];
+			const rows = Array.isArray(data.routes) ? (data.routes as unknown[]) : [];
+			const facts = rows
+				.map((r) => r as RouteDiagRoute)
+				.filter((r) => typeof r.job === "number")
+				.filter((r) => typeof params.job !== "number" || r.job === params.job);
+			if (facts.length === 0) {
+				return toResult({
+					ok: false,
+					summary:
+						params.job === undefined
+							? "the game reports no route yet, so there is nothing to diagnose"
+							: `the game reports no route with job ${params.job}, so there is nothing to diagnose`,
+					data: { available: true, routes: [] },
+				});
+			}
+			const diagnoses = diagnoseRoutes(facts);
+			return toResult({
+				ok: true,
+				summary:
+					diagnoses.map((d) => `route ${d.job}: ${d.reason} - ${d.detail}`).join("; ") +
+					(diagErrors.length > 0 ? ` (the game could not read: ${diagErrors.join("; ")})` : ""),
+				data: { available: true, diagnoses, facts, errors: diagErrors },
+			});
+		},
+	};
+}
+
+/**
  * `get_industries` — the **full** industry list, on demand.
  *
  * 观测面只带产量前 12 个（取样）；这里给全图，且与取样**同一个扫描**
@@ -1092,6 +1182,7 @@ export function createTools(deps: AgentDeps): AgentTool<TSchema, ActionResult>[]
 		observeTool(deps),
 		inspectVehicleTool(deps),
 		inspectTownTool(deps),
+		diagnoseRouteTool(deps),
 		getIndustriesTool(deps),
 		getCargoTool(deps),
 		estimateRouteTool(deps),

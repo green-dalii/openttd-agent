@@ -57,6 +57,8 @@ describe("createAgent", () => {
 			"observe",
 			"inspect_vehicle",
 			"inspect_town",
+			// Issue #113：线路诊断（问游戏"这条线为什么不跑"，答案带具名原因；只读）。
+			"diagnose_route",
 			// "数据按需全量"：观测面只带取样，要全量就问一次（只读）。
 			"get_industries",
 			"get_cargo",

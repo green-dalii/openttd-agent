@@ -208,6 +208,10 @@ class ExecCore {
                 retired = false, applied = this._fleetApplied,
                 stA = (this._slotA.bp == null ? -1 : this._slotA.bp[0]),
                 stB = (this._slotB.bp == null ? -1 : this._slotB.bp[0]),
+                // 两端的**门前格**（road tile）：诊断"路通不通"与"车停在哪"要用它。
+                // 少了这两个字段 ⇒ 诊断永远只能说"没测到"（Issue #113）。
+                endA = (this._slotA.bp == null ? null : this._slotA.bp[1]),
+                endB = (this._slotB.bp == null ? null : this._slotB.bp[1]),
                 cargo = this._routeCargo, engine = this._routeEngine,
                 lineCargo = (this._freight ? this._cargo : this._gs.PaxCargoId()),
             };
@@ -1343,6 +1347,11 @@ class ExecCore {
             vehicles = this._fleetOwned,
             lead = this._vehicle,
             depot = (this._slotD.bp == null ? -1 : this._slotD.bp[0]),
+            // 两端的**门前格**（road tile）：车站本身占两块地 —— 标牌格与
+            // 路旁格。**路旁格才是车停的地方**，也才是"路通不通"能查的格。
+            // 只记标牌格 ⇒ "路不连通"这个诊断永远是假的（Issue #113）。
+            endA = (this._slotA.bp == null ? null : this._slotA.bp[1]),
+            endB = (this._slotB.bp == null ? null : this._slotB.bp[1]),
             retired = (prev != null && prev.retired == true),
             applied = this._fleetApplied,
             // 这条线**天生运的货**（货运 F3）：货运线路建起来就改装到该货种；
@@ -1350,6 +1359,39 @@ class ExecCore {
             // 的**改装生效值**）是两件事：前者是这条线的性质，后者是后来的指令。
             lineCargo = (this._freight ? this._cargo : this._gs.PaxCargoId()),
         };
+    }
+
+    /* 执行器的**原始**状态（诊断用）：当前 job、两端的站址与门前格、
+     * 登记表里有没有这条线。读不到读数时，这是"为什么读不到"的底牌。 */
+    function RouteRawState(job) {
+        // 变量名**别用 r**：D44 的静态守卫按名字收集表键 ⇒ 同名会让别处的
+        // `r.amount = ...` 被误判成"这张表没有 amount 键"（守卫本身是哑的教训）。
+        local raw = {};
+        raw.rawset("job", this._job);
+        raw.rawset("slotA", (this._slotA.bp == null ? null : this._slotA.bp[0]));
+        raw.rawset("slotFrontA", (this._slotA.bp == null ? null : this._slotA.bp[1]));
+        raw.rawset("slotB", (this._slotB.bp == null ? null : this._slotB.bp[0]));
+        raw.rawset("slotFrontB", (this._slotB.bp == null ? null : this._slotB.bp[1]));
+        raw.rawset("depot", (this._slotD.bp == null ? null : this._slotD.bp[0]));
+        raw.rawset("hasRecord", this._routes.rawin(job));
+        raw.rawset("recordEndA", (this._routes.rawin(job) && this._routes[job].rawin("endA") ? this._routes[job].endA : null));
+        raw.rawset("recordEndB", (this._routes.rawin(job) && this._routes[job].rawin("endB") ? this._routes[job].endB : null));
+        return raw;
+    }
+
+    /* 该线路两端的**门前格**（road tile）；没登记 = null。 */
+    function RouteEndRoadTiles(job) {
+        if (job == this._job) {
+            return { a = (this._slotA.bp == null ? null : this._slotA.bp[1]),
+                     b = (this._slotB.bp == null ? null : this._slotB.bp[1]) };
+        }
+        if (this._routes.rawin(job)) {
+            // 变量名别用 `r`（D44 的静态守卫按名字收集表键 ⇒ 同名会误判别处）。
+            local rec = this._routes[job];
+            return { a = (rec.rawin("endA") ? rec.endA : null),
+                     b = (rec.rawin("endB") ? rec.endB : null) };
+        }
+        return null;
     }
 
     /* 该线路的目标车队规模（set_route_vehicles 的生效值；未登记 = null）。 */
@@ -1645,6 +1687,12 @@ class BridgeV1 extends GSController {
     // attributed exactly. Attribution is by station orders (GSVehicleList_Station
     // + GetOwner), NOT by guessing from positions.
     _routes = null;
+    // 诊断：每辆车**上一次的位置**与**上一次移动的 tick** ⇒ "车多久没动了"可测
+    // （周期读数看不见这件事 ⇒ MEMORY D121）。**字段必须和用它的方法在同一个类里**：
+    // Squirrel 的类成员是固定的 ⇒ 在别的类里写 `this._x = ...` 会抛
+    // "the index 'x' does not exist"（D44）。
+    _lastVehTiles = null;
+    _lastVehTick = null;
     _last_stats = 0;
     // AB-4a 探针状态（NEXT-4：GS 能否自己建完并**运营**一条线路）。
     // null = 未启动；表 = 进行中。生命周期是有意的一等状态：
@@ -1903,6 +1951,236 @@ class BridgeV1 extends GSController {
         } catch (e) {
             GSAdmin.Send({ kind = "err", cmd = "route_stats", detail = { reason = "" + e } });
         }
+    }
+
+    /* ===================================================================
+     * 线路诊断（**按需**）：一条线**为什么不跑**。
+     *
+     * 为什么必须有（Issue #113，2026-11-11 真机）：线建成了、车改装了、
+     * 货在装货站等着、整局**交付 0**。周期读数只报"几辆车在等多少"⇒
+     * **看不出车卡在哪、订单对不对** ⇒ 这种线是"静默死线"，模型只能瞎猜。
+     *
+     * 只读、只按需（周期载荷不变，SPEC §10.127）：诊断走 answer 通道。
+     * 事实自己读，**不替模型下结论**：报的是"车在哪、订单是什么、货在等"。
+     * =================================================================== */
+    function RouteDiag(obj) {
+        local ans_id = -1;
+        if (obj.rawin("id")) ans_id = obj["id"];
+        local job = obj.rawin("job") ? obj["job"] : -1;
+        local routes = [];
+        local errors = [];
+        if (this._routes != null) {
+            foreach (job_str, rec in this._routes) {
+                local j = job_str.tointeger();
+                if (job >= 0 && j != job) continue;
+                // 一条线诊断失败**不许拖垮整份答案**：写下它自己的错误，其余照常
+                // （不静默，也不因为一条坏线就说"没有路线"）。
+                try {
+                    routes.append(this.RouteDiagOne(j, rec));
+                } catch (err) {
+                    errors.append("job " + j + ": " + "" + err);
+                }
+            }
+        }
+        GSAdmin.Send({ kind = "answer", id = ans_id, ok = true, data = { routes = routes, errors = errors } });
+    }
+
+    /* 一条线的诊断事实。 */
+    function RouteDiagOne(job, rec) {
+        local out = {};
+        out.rawset("job", job);
+        local cargo = -1;
+        if (this._core != null) cargo = this._core.RouteLineCargo(job);
+        if (cargo == null || cargo < 0) {
+            if (rec.rawin("lineCargo")) cargo = rec["lineCargo"];
+        }
+        local label = "";
+        if (cargo != null && cargo >= 0) label = GSCargo.GetCargoLabel(cargo);
+        out.rawset("cargo", label);
+        local tA = rec.rawget("tA");
+        local tB = rec.rawget("tB");
+        // 门前格（road tile）：车**停**的地方，也是"路通不通"能查的格。
+        local roadA = null;
+        local roadB = null;
+        if (this._core != null) {
+            local rt = this._core.RouteEndRoadTiles(job);
+            if (rt != null) {
+                roadA = rt.a;
+                roadB = rt.b;
+            }
+        }
+        local stA = (tA == null ? -1 : this.StationNear(tA, 6));
+        local stB = (tB == null ? -1 : this.StationNear(tB, 6));
+        local ends = [];
+        ends.append(this.RouteDiagEnd("load", tA, cargo, roadA, stB));
+        ends.append(this.RouteDiagEnd("unload", tB, cargo, roadB, stA));
+        out.rawset("ends", ends);
+        // **"路通不通"这件事本 API 答不了**：`GSRoad.AreRoadTilesConnected` 只回答
+        // "这两块**相邻**的格子连着吗"（引擎实现第一句就是 `DistanceManhattan != 1 ⇒ false`）
+        // ⇒ 拿它问"两站之间通不通"永远得到 false ⇒ 那是**假读数**，比没有更坏。
+        // ⇒ 只有相邻时才有意义，否则写 null（没测到）。
+        out.rawset("roadConnected", this.RoadConnected(roadA, roadB));
+        // 执行器那边的**原始**状态（站址/门前格/当前 job）：诊断自己的读数
+        // 解释不了"为什么读不到"时，这就是底牌。
+        if (this._core != null) {
+            local raw = this._core.RouteRawState(job);
+            if (raw != null) out.rawset("core", raw);
+        }
+        local fleet = [];
+        if (this._core != null) {
+            local ids = this._core.RouteVehicles(job);
+            if (ids != null) {
+                foreach (vid in ids) fleet.append(this.RouteDiagVehicle(vid, cargo));
+            }
+        }
+        out.rawset("vehicles", fleet);
+        return out;
+    }
+
+    /* 一端：登记瓦片、**真的在那儿的车站**、在等的货。
+     *
+     * 为什么"登记瓦片"与"真车站"分开报：站址可能因为建站失败而**换过**
+     * （Issue #113 的真机：第一次建站 ERR_PRECONDITION ⇒ 换候选点）⇒
+     * 登记的瓦片与真的车站**可能不是同一个** ⇒ 只报一个会把"线建在哪"说错。
+     */
+    function RouteDiagEnd(role, tile, cargo, roadTile, viaStation) {
+        local e = {};
+        e.rawset("role", role);
+        e.rawset("tile", (tile == null ? -1 : tile));
+        e.rawset("roadTile", (roadTile == null ? -1 : roadTile));
+        local st = -1;
+        if (tile != null && tile >= 0) st = this.StationNear(tile, 6);
+        e.rawset("station", st);
+        local waiting = -1;
+        if (st != null && st >= 0 && GSStation.IsValidStation(st) && cargo != null && cargo >= 0) {
+            waiting = GSStation.GetCargoWaiting(st, cargo);
+        }
+        e.rawset("waiting", waiting);
+        // **经由另一端运走的货**（引擎的流向）：车在装货站只装"下一跳是它下一站"
+        // 的货（`StationCargoList::Load` 按 next hop 取包）⇒ 这两个数对不上，
+        // 就说明"货在等"与"这条线能运走它"是两件事。
+        local waitingVia = -1;
+        if (st != null && st >= 0 && GSStation.IsValidStation(st) && cargo != null && cargo >= 0 &&
+            viaStation != null && viaStation >= 0 && GSStation.IsValidStation(viaStation)) {
+            waitingVia = GSStation.GetCargoWaitingVia(st, viaStation, cargo);
+        }
+        e.rawset("waitingVia", waitingVia);
+        // 引擎的货包按**下一跳**分类：这一端在等三种货 —— 经由另一端（这条线要的）、
+        // 经由自己（回到自己）、**没有下一跳**（引擎兜底：谁路过谁都能装）。
+        // 三个数一起看，才知道货**卡在哪一类**。
+        local viaSelf = -1;
+        local viaNone = -1;
+        if (st != null && st >= 0 && GSStation.IsValidStation(st) && cargo != null && cargo >= 0) {
+            viaSelf = GSStation.GetCargoWaitingVia(st, st, cargo);
+            viaNone = GSStation.GetCargoWaitingVia(st, -1, cargo);
+        }
+        e.rawset("waitingViaSelf", viaSelf);
+        e.rawset("waitingViaNone", viaNone);
+        return e;
+    }
+
+    /* 两端之间**路是否连通**。
+     *
+     * ⚠️ 这个 API 只对**相邻**的两格有意义（引擎：`DistanceManhattan != 1 ⇒ false`）
+     * ⇒ 两站之间隔着几十格时它**必然**返回 false ⇒ 那是假读数。
+     * ⇒ 相邻时给引擎的答案，不相邻时写 null（**没测到**，不是"不通"）。
+     */
+    function RoadConnected(tA, tB) {
+        if (tA == null || tB == null || tA < 0 || tB < 0) return null;
+        if (GSMap.DistanceManhattan(tA, tB) != 1) return null;
+        try { return GSRoad.AreRoadTilesConnected(tA, tB); } catch (err) { return null; }
+    }
+
+    /* 这辆车**动过吗**（与上一次诊断比位置）。
+     *
+     * 为什么要有："车卡住了"必须**可测**。周期读数只报"几辆车在等多少"，
+     * 看不见车在不在动（MEMORY D121）。GS 自己记上一次的位置 ⇒ 纯事实。
+     */
+    function VehicleIdleTicks(vid) {
+        // **两张表都要先初始化**：Squirrel 里 `null.rawin(...)` 直接抛异常 ⇒
+        // 诊断命令会**整条失败**（模型看到"没有路线"，而不是"诊断不了"）。
+        if (this._lastVehTiles == null) this._lastVehTiles = {};
+        if (this._lastVehTick == null) this._lastVehTick = {};
+        local tile = GSVehicle.GetLocation(vid);
+        local now = GSController.GetTick();
+        local prev = this._lastVehTiles.rawin(vid) ? this._lastVehTiles[vid] : null;
+        local last = this._lastVehTick.rawin(vid) ? this._lastVehTick[vid] : null;
+        // **必须用表的 rawset 方法**：`t[k] = v` 在键不存在时抛"the index 'k' does not
+        // exist"（D44 的老教训）⇒ 动态键（车 id）只能用 `table.rawset(k, v)` 写
+        // （Squirrel 里 rawset 是**方法**，没有同名全局函数 ⇒ 写成 rawset(t,k,v) 会炸）。
+        if (prev == null) {
+            // 第一次见这辆车：只记位置 ⇒ 这次**没测到**它多久没动（不是"0"）。
+            this._lastVehTiles.rawset(vid, tile);
+            this._lastVehTick.rawset(vid, now);
+            return null;
+        }
+        if (prev != tile) {
+            this._lastVehTiles.rawset(vid, tile);
+            this._lastVehTick.rawset(vid, now);
+            return 0;
+        }
+        return (last == null ? null : now - last);
+    }
+
+    /* 一辆车：状态、位置、订单、载量。
+     *
+     * 订单是**逐条**报的：订单**存在**不等于订单**去的是这条线的站**
+     * （"有两条订单但都不是车站"这种死线，光看订单数看不出来）。
+     */
+    function RouteDiagVehicle(vid, cargo) {
+        local v = {};
+        v.rawset("id", vid);
+        if (!GSVehicle.IsValidVehicle(vid)) {
+            v.rawset("valid", false);
+            return v;
+        }
+        v.rawset("valid", true);
+        v.rawset("state", GSVehicle.GetState(vid));
+        v.rawset("tile", GSVehicle.GetLocation(vid));
+        // 速度：0 = 停着（装货中 / 卡住）⇒ 区分"在站上装货"与"停 elsewhere"。
+        v.rawset("speed", GSVehicle.GetCurrentSpeed(vid));
+        // "它多久没动了"（游戏 tick）：GS 记上一次的位置 ⇒ **车不动**是能测的，
+        // 不能靠感觉（周期读数看不见这件事 ⇒ MEMORY D121）。
+        v.rawset("idleTicks", this.VehicleIdleTicks(vid));
+        local loaded = -1;
+        local capacity = -1;
+        local refitCapacity = -1;
+        if (cargo != null && cargo >= 0) {
+            loaded = GSVehicle.GetCargoLoad(vid, cargo);
+            // **两个**容量是一对：
+            //   capacity       = 车**此刻**的货种是这个时的载量（货种不对 ⇒ 0）
+            //   refitCapacity  = 改成这个货种**能**有多少（引擎行不行）
+            // capacity=0 而 refitCapacity>0 ⇒ **车没被改成这个货**（改装没生效）。
+            capacity = GSVehicle.GetCapacity(vid, cargo);
+            refitCapacity = GSVehicle.GetRefitCapacity(vid, cargo);
+        }
+        v.rawset("loaded", loaded);
+        v.rawset("capacity", capacity);
+        v.rawset("refitCapacity", refitCapacity);
+        local orders = [];
+        local oc = -1;
+        try { oc = GSOrder.GetOrderCount(vid); } catch (err) { oc = -1; }
+        v.rawset("orderCount", oc);
+        if (oc > 0) {
+            for (local i = 0; i < oc; i++) {
+                local o = {};
+                o.rawset("index", i);
+                local dest = -1;
+                local isStation = false;
+                local flags = 0;
+                try {
+                    dest = GSOrder.GetOrderDestination(vid, i);
+                    isStation = GSOrder.IsGotoStationOrder(vid, i);
+                    flags = GSOrder.GetOrderFlags(vid, i);
+                } catch (err2) { dest = -2; }
+                o.rawset("tile", dest);
+                o.rawset("isStation", isStation);
+                o.rawset("flags", flags);
+                orders.append(o);
+            }
+        }
+        v.rawset("orders", orders);
+        return v;
     }
 
     /* ===================================================================
@@ -3248,6 +3526,10 @@ class BridgeV1 extends GSController {
             GSAdmin.Send({ kind = "answer", id = ans_id, ok = true,
                            data = { readings = scan.readings,
                                     total = scan.readings.len() } });
+        } else if (cmd == "route_diag") {
+            // 线路诊断（Issue #113）：**按需**问一条线为什么不跑。
+            // 只读、只按需 ⇒ 周期载荷不变。
+            this.RouteDiag(obj);
         } else if (cmd == "probe_route_cm") {
             // AB-4a: build AND run a route with the GS alone (NEXT-4 acceptance).
             this.StartProbeRoute();
