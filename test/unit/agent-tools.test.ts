@@ -432,6 +432,8 @@ describe("createTools", () => {
 			// Issue #13：L2 查询（问一个具体的问题，答案进工具结果）
 			"inspect_vehicle",
 			"inspect_town",
+			// Issue #113：线路诊断（问游戏"这条线为什么不跑"，答案带具名原因；只读）。
+			"diagnose_route",
 			// "数据按需全量"：观测面只带取样，要全量就问一次（只读）。
 			"get_industries",
 			"get_cargo",
@@ -884,5 +886,87 @@ describe("estimate_route —— 货运经济学（Issue #105）", () => {
 		const res = await tool.execute("t", { from: 1, to: 2 });
 		expect(textOf(res)).toMatch(/10 straight tiles/);
 		expect(sent).toHaveLength(0);
+	});
+});
+
+describe("diagnose_route —— 线路诊断（Issue #113）", () => {
+	function depsWithAnswer(answer: Record<string, unknown> | null): {
+		deps: AgentDeps;
+		sent: string[];
+	} {
+		const sent: string[] = [];
+		const deps = {
+			sink: {
+				rcon: () => undefined,
+				gameScript: (j: string) => sent.push(j),
+				gameScriptAwait: async (j: string) => {
+					sent.push(j);
+					return answer;
+				},
+			},
+		} as unknown as AgentDeps;
+		return { deps, sent };
+	}
+
+	const ROUTE = {
+		ok: true,
+		data: {
+			routes: [
+				{
+					job: 1000,
+					cargo: "COAL",
+					ends: [
+						{ role: "load", tile: 60815, roadTile: 60816, station: 0, waiting: 303, waitingVia: 0 },
+						{ role: "unload", tile: 39473, roadTile: 39474, station: 1, waiting: 0, waitingVia: 0 },
+					],
+					roadConnected: null,
+					vehicles: [
+						{
+							id: 8,
+							valid: true,
+							state: 0,
+							tile: 60815,
+							speed: 0,
+							idleTicks: 5000,
+							loaded: 0,
+							capacity: 20,
+							refitCapacity: 20,
+							orderCount: 2,
+							orders: [
+								{ index: 0, tile: 60815, isStation: true, flags: 1 },
+								{ index: 1, tile: 39473, isStation: true, flags: 1 },
+							],
+						},
+					],
+				},
+			],
+		},
+	};
+
+	it("问游戏要诊断，并把**具名原因**放进摘要（模型不用自己猜）", async () => {
+		const { deps, sent } = depsWithAnswer(ROUTE);
+		const tool = createTools(deps).find((t) => t.name === "diagnose_route")!;
+		const res = await tool.execute("t", { job: 1000 });
+		expect(sent).toHaveLength(1);
+		expect(JSON.parse(sent[0]!)).toMatchObject({ cmd: "route_diag", job: 1000 });
+		const text = textOf(res);
+		expect(text).toContain("vehicle_not_moving");
+		expect(text).toContain("1000");
+		// 事实也在结果里（页面/审计能看）。
+		expect(JSON.stringify(res)).toContain("idleTicks");
+	});
+
+	it("游戏没回答 ⇒ 具名说『没诊断』，不假装诊断过了", async () => {
+		const { deps } = depsWithAnswer(null);
+		const tool = createTools(deps).find((t) => t.name === "diagnose_route")!;
+		const res = await tool.execute("t", {});
+		expect(textOf(res)).toMatch(/no answer/);
+	});
+
+	it("游戏没有这条线 ⇒ 说『没有可诊断的线』，不编原因", async () => {
+		const { deps } = depsWithAnswer({ ok: true, data: { routes: [] } });
+		const tool = createTools(deps).find((t) => t.name === "diagnose_route")!;
+		const res = await tool.execute("t", {});
+		expect(textOf(res)).toMatch(/nothing to diagnose/);
 	});
 });

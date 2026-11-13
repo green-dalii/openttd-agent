@@ -1150,13 +1150,11 @@ compaction 冲突）在 `docs/HARNESS-MIGRATION.md` §3（带坐标），此处�
   上下文与 `observe()` 同源同序；上下文补 `loan`。`game_observation` **从不进 LLM**。真机：`observe()`
   580→479 字符（-17.4%），prompt 2653→2673（+0.8%，即新增 `loan`）。
 
-**D3a 相位接回动作**
+**D3 相位接回动作 + run manifest + 结果分类**
 - 类型化 exec 事件只有 `note`+`job`（**没有 `raw`**，那是已退役协议），hub 曾用 `p.raw` 拼相位串 ⇒
   模型收到的每条相位是 `undefined`；`composePhaseText` 修复。相位事实带 `job`，并经 **GS ack**（job id
   由 GS 分配）接回订下它的 `action`；连接是 **run 级**（施工跨决策窗口）。真机 payload：
   `{"phase":"stB_ok",...,"job":100,"action":"build_bus_route"}`。
-
-**D3b run manifest + 结果分类**
 - 度量行 `manifest = {servedModel, thinkingLevel, toolBudget, scaffoldHash}`：`servedModel` 取 provider
   实际作答（`responseModel ?? model`）；`scaffoldHash` = sha256(系统提示词 + 工具集[name/description/schema]，
   按顺序) 前 16 位。`classifyOutcome`（派生不存盘）：优先级 人为停止 > 环境事件 > 结果读数，缺失 →
@@ -1295,4 +1293,6 @@ compaction 冲突）在 `docs/HARNESS-MIGRATION.md` §3（带坐标），此处�
  - 事实：**F4 的数字现在**到了屏幕上**（货运 F4 / A6）：① Run 页的线路表多一列 **Delivered**（该线运了多少，**推导值**；归不出来写 “not attributable” + 原因；没读数写 “—”）且货运线的两端显示为**产业**（`industry 28 → 53`）；② Compare 页的能力轴画出**货物/客运拆分**（`Cargo delivered` / `Passengers delivered`，**服务端口径** `splitMeasure` 一并给出）—— 服务端早就算好了（`buildScorecard` 的 `ability.cargoDelivered` / `passengersDelivered`），缺的只是**接线**。真机（seed 4242）：线路表 = `#1000 | industry 28 → 53 | COAL | 120 | 4 | 95 | £8 | £2.57k`（与公司口径的 “OUR DELIVERIES 120” 一致），Compare 的 Result 列 = “Cargo delivered 140 / Passengers delivered 0”。
 - 事实（2026-11-11 落地，Issue #105）：**收入侧事实已接进 `estimate_route`**：GS 的 `route_economics` 命令按需读 `GSCargo.GetCargoIncome` 与
   `GSEngine.GetCapacity/GetPrice/GetRunningCost`（两个类都是 `@api ai game` ⇒ 游戏脚本可调，真机探针已实测）⇒ 模型在花钱前拿到**每单位运价**与**逐车型的载量/价格/运行成本**；**周期载荷不变**（经济学字段只在按需查询里给）。方向标签（引擎事实）：**距离不是下界**（引擎按**曼哈顿距离**付费且**封顶在起终点曼哈顿距离** ⇒ 直线距离就是最多能拿到的距离）；**运价 ∝ 距离 × 时间因子**，时间因子随在途变长而下降（上限 255）⇒ 用**最快在途**算的每单位运价是**上界**；**收入 = 载量 × 运价** ⇒ 满载假设下仍是**上界**；**运行成本按经济年给出**且随车龄上涨 ⇒ 每天成本是**下界**（利息/折旧/站/车库没算）⇒ **盈亏符号不由工具决定**（收入上界 + 成本下界），工具**不下结论**。速度→在途天数的换算（源码推导）：格/天 = 速度 × **0.43359375**（`GetAdvanceSpeed` = spd×3/4、一步 256 距离单位、74 tick/天、显示速度 = 内部速度/2）。**客运不给收入**（引擎的客运付费不是 `GetTransportedGoodsIncome` ⇒ 拿它当客运收入就是编数）。真机（seed 4242）：煤 50/100/200/400 格 ⇒ 每单位 £35/£71/£143/£287（**与距离成正比** ⇒ 更长的距离不会降低收入估计）；模型在真实决策里拿到「177 格、每单位 ≤£127、满载一趟 ≤£2540、每天 ≤£141、成本 ≥£1.15/天、建造 ≥£58,768」且**两个方向标签都在**。
+- 事实（2026-11-12，Issue #113）：**"线建成了"不等于"线在跑"，而周期读数看不见这件事**。真机（seed 4242，COAL 46→53）实测：线**建成了**（相位全绿）、车**装对了货**（引擎按货物类别分类 ⇒ admin 口径 `truck:2`；`GetCapacity(v,COAL)` = 20）、车**带着两条车站订单**、车**到了装货站**（引擎的 `station_first_vehicle`）⇒ 但**装走 0 吨**，整局**交付 0**，装货站的煤从 0 涨到 290。**已排除的解释**：不是"货没有下一跳"（`GetCargoWaitingVia(装货站, -1, COAL)` = 290 ⇒ 货包在"无下一跳"那一桶 ⇒ 引擎的兜底允许任何车装它）⇒ 装不上的**引擎侧条件仍未定位**。⇒ 新增**按需诊断**（GS `route_diag`：车在哪/速度/多久没动/订单/装不装得了/两端在等多少/货的下一跳分布；模型工具 `diagnose_route`；**具名原因由服务端算**，封闭词表 + 单测）⇒ 诊断的四个陷阱：**车站占两块地**（标牌格 + 路旁格）；**`AreRoadTilesConnected` 只答"相邻两格连不连"**（拿它问"两站通不通"永远 false ⇒ 假读数比没有更坏）；**执行器的完工记录会覆盖施工期记录** ⇒ 必须读同一个记录；**Squirrel 的 `t[k] = v` 对不存在的键会抛异常** ⇒ 动态键（车 id）只能用 `rawset`。
+
 - 依据：`src/game/squirrel/bridge-gs/main.nut`（`own_delivered`）、`src/agent/route-ledger.ts`、`src/agent/route-facts.ts`、`src/evolution/scorecard.ts`、`src/evolution/bench-stats.ts`；教训 `MEMORY.md` D97/D98。

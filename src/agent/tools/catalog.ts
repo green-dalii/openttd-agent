@@ -78,6 +78,8 @@ export const ACTION_EFFECTS: Record<string, ActionEffect> = {
 	// L2 查询（Issue #13）：**只读**——问游戏一个问题，答案进工具结果，世界不变。
 	inspect_vehicle: "read",
 	inspect_town: "read",
+	// 线路诊断（Issue #113）：**只读** —— 问游戏"这条线为什么不跑"，答案带具名原因。
+	diagnose_route: "read",
 	// 按需全量（"数据按需全量"）：只读 —— 把**全量**产业/货种读数取回来，
 	// 观测面仍然只带取样（载荷不涨）。
 	get_industries: "read",

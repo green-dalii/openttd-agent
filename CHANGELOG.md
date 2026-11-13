@@ -12,20 +12,20 @@
 ### Added
 
 - **A probe can now answer whether the same savegame gives the same run.** `scripts/determinism-probe.ts` saves a map,
-  copies the savegame, starts two dedicated servers from it (`-g <savegame>`) and sends the same command to both, then
-  compares the money trajectories. **Two loads of the same savegame produced identical money levels** - the engine
-  side is reproducible, so a counterfactual fork is possible. It also pinned down two things: a script's own state
-  does **not** travel in a savegame (neither the game script nor the executor has a `Save()` method, so the game
-  script restarts from scratch after a load - both fork arms must start from the savegame), and the comparison must be
-  made on the **levels** the money passed through, not on a per-day value (the readings arrive separately, so a
-  payment can land on either side of a day boundary).
+  copies the savegame, starts two servers from it (`-g <savegame>`), sends the same command to both and compares the
+  money trajectories: **two loads of the same savegame produced identical money levels**, so a counterfactual fork is
+  possible. It also pinned down that a script's own state does **not** travel in a savegame, so both fork arms must
+  start from the savegame.
 - **The model can now do the economics of a freight line before it spends.** `estimate_route` takes a cargo and two
   industries and answers with the engine's own numbers: the price per cargo unit over that distance
-  (`GSCargo.GetCargoIncome`), and per truck its capacity, price and running cost (`GSEngine.GetCapacity/GetPrice/
-  GetRunningCost`). Every figure carries its direction - revenue is an **upper** bound (a full load on every trip,
-  the fastest possible transit), cost is a **lower** bound (age, interest, stations and the depot are not in it) -
-  and the tool does **not** say whether the line pays off: that judgement is the model's. The extra fields are fetched
-  on demand, so the periodic observation payload does not grow.
+  (`GSCargo.GetCargoIncome`), and per truck its capacity, price and running cost
+  (`GSEngine.GetCapacity/GetPrice/GetRunningCost`). Every figure carries its direction - revenue is an **upper**
+  bound, cost a **lower** bound - and the tool does **not** say whether the line pays off.
+- **A freight line can be built, refit and "live" while nothing is ever delivered - and now the model can ask why.**
+  The engine reported 290 units of coal waiting at the loading station and the whole run delivered nothing (real
+  machine, seed 4242) - the line was built, refit and reported as live, yet nothing ever moved. The model now has a
+  read-only `diagnose_route` tool that asks the game where the vehicles are, what orders they have and how much waits
+  at each end, and the server turns those facts into a named reason.
 ### Fixed
 - **The benchmark matrix could not use a real provider, and it could also do nothing at all.** Every cell is its own
   data directory while the key lives outside the repository, so a cell had no credentials and failed; `--credentials`
