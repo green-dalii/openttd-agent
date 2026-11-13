@@ -26,56 +26,7 @@
   machine, seed 4242) - the line was built, refit and reported as live, yet nothing ever moved. The model now has a
   read-only `diagnose_route` tool that asks the game where the vehicles are, what orders they have and how much waits
   at each end, and the server turns those facts into a named reason.
-### Fixed
-- **The benchmark matrix could not use a real provider, and it could also do nothing at all.** Every cell is its own
-  data directory while the key lives outside the repository, so a cell had no credentials and failed; `--credentials`
-  now copies the file into each cell (0600, never printed, checked before the first cell runs). Separately, the
-  script's "do not run on import" check compared paths as strings - under a symlinked path it **exited silently
-  having done nothing**; it now compares real paths, and a test fails if it goes quiet.
-- **A run that stopped at its budget no longer exits 1.** A run that ends because the token cap, the cost cap, the
-  horizon or the wall clock ran out - or because the construction did not finish - has produced its data, so it is a
-  **result**, not a failure: the exit code is now 0. Real failures (the game script never came up, the game crashed,
-  the runner threw) still exit 1. The run's *result* is in the manifest's outcome.
-- **The language switch did not translate everything, and it did not translate it back.** Three silent faults: a
-  sentence written across two lines kept its line breaks in the DOM, so the lookup key never matched; a sentence
-  broken up by an inline `<code>` was never translated at all; and switching back to English left the page mixed,
-  because the original text was remembered on the **parent** element.
-- **The harness was counting days on a calendar of its own.** The game day came from a **fictional 360-day year**
-  (31 January and 1 February mapped to the same index), so a "250 game day" run was really about 256 **calendar**
-  days, and the copy lived in six places. The clock is now the **engine's calendar** in one module: the game day is
-  the calendar day, quarter boundaries are the engine's quarters (1/4/7/10 January), and a route's "income per day"
-  divides by the day of the year the engine reports. The reading this exposed - that the promotion gate's
-  `income / 365` is a year-to-date net cash flow and not a per-game-day profit - is written down in SPEC §10.55 /
-  §10.76, and it is the plan's first item.
-- **The profit reading was the wrong quantity, and the readings were never written down.** The promotion gate read
-  `income / 365`, but the engine's `income` is the **current year's** net cash flow (it resets on 1 January) and 365
-  is a year length, not the length of the run - so the number was never "this run's profit per game day". The run's
-  profit is now the **net cash flow** (`money - loan`, which the engine keeps continuous across the year boundary)
-  over the **game days the run actually took**, and the model sees the same denominator it is scored on. The
-  readings are **written down** now as well: the archive used to drop every economy event (BigInt payloads hit
-  `JSON.stringify` and the error was swallowed), so a finished run could not be re-read offline - the Run page
-  shows the net cash flow, its per-game-day rate, and whether it reconciled with the engine's own yearly reading.
-  A real run crossing 1 January (seed 4242, 381 days) reconciles exactly, and `scripts/recompute-profit.ts`
-  recomputes the same number from the archive alone.
-- **A pair could have compared the wrong two runs.** The repeat index was counted over the rows that
-  **had a reading**, so a run with no reading for one metric shifted its partner. The cells are now
-  the **runs**, and a cell missing a reading on one side is dropped whole.
-- **"Not applicable" was reported as zero.** The game script encodes a missing reading as JSON `null`
-  (so the payload shape never changes), but two readers went through `Number(value)` - and
-  `Number(null)` is `0` - so "this industry does not accept this cargo" became "stockpile: 0 tonnes".
-  Every raw counter now asks "missing?" before "non-negative?".
-- **The decision context swallowed two facts it had already been given.** The financing facts and
-  the pushed events were passed into the decision context and then dropped. The readings were in
-  the projection all along, so the observation fingerprint does not move.
-- **The navigation now reaches every page.** A page URL was a hand-written table in the server's
-  memory, so a page added after the server started was unreachable ("not found"). The routes are now
-  **derived from the files** in `public/pages/`.
 
-- **The model can finally see the freight world.** A freight line is "which mine, which plant", and the model could
-  see neither: the GS now reports a **cargo catalogue** (which cargo is freight, which industries produce it, which
-  **accept** it - the engine's own answer), the **position and name of every industry**, and the cargo each road
-  engine carries. Real machine (seed 4242): the model planned to link "a producer industry to a consumer industry".
-### Added
 - **The full map is now one question away.** The observation carries a **sample** of the industries
   (the top producers) and only the cargo types that had production - which keeps the payload
   small, but leaves the model unable to tell "no production" from "not measured". Two read-only
@@ -111,16 +62,16 @@
   on the Result axis, with the server's own wording of what the split measures.
 - **A freight line now says how much it delivered, and it enters the decision ledger in its own
 shape.** The engine does not record which vehicle delivered what where, so a per-line delivery figure has always been
-  a *derived* number - and there was nothing to derive it from: the game script reported the cargo totals but dropped
-  the destination, and the route table did not say which industries a line served. The script now also reports the
-  delivery **per (cargo, receiving industry)** and the **two industry ids of every freight line**, and the harness
-  attributes each delivery to the one line that serves that cargo at that industry. When several of our lines share it
-  the delivery is **not split** - it is reported as unattributable with the reason; when no line of ours serves it the
-  amount is reported separately rather than dropped. The ledger had one shape ("two towns"), so a freight line could
-  only enter it as `null/null` - and those sentences are injected into the model's context. Passenger and freight
-  routes are now **two explicit record kinds**, the de-duplication key includes the kind and the two ends, and the
-  injected sentence says what the line really is, including how much it delivered and that the figure is derived.
-  Real machine (seed 4242, a coal line 28 -> 53): 160 tonnes attributed to that line, and no fact has a null end.
+  a *derived* number - and there was nothing to derive it from: the script reported the cargo totals but dropped the
+  destination, and the route table did not say which industries a line served. The script now also reports the delivery
+  **per (cargo, receiving industry)** and the **two industry ids of every freight line**, and the harness attributes
+  each delivery to the one line that serves that cargo at that industry. When several of our lines share it the
+  delivery is **not split** - it is reported as unattributable with the reason; when no line of ours serves it the amount
+  is reported separately rather than dropped. The ledger had one shape ("two towns"), so a freight line could only enter
+  it as `null/null` - and those sentences are injected into the model's context. Passenger and freight routes are now
+  **two explicit record kinds**, the de-duplication key includes the kind and the two ends, and the injected sentence
+  says what the line really is, including how much it delivered and that the figure is derived. Real machine (seed
+  4242, a coal line 28 -> 53): 160 tonnes attributed to that line, and no fact has a null end.
 - **The paired comparison now answers on every axis.** It used to compute exactly one metric - cargo
 + passengers delivered per game day - so the efficiency axis (delivered per 1M tokens) and the
 stability axis (share of tool calls that failed) had **no paired interval at all**. That is how "the
@@ -136,13 +87,11 @@ what *this company* delivered, per cargo, with the engine's own cargo monitor (o
 on our side because the monitor hands out the delta and resets, every gap reported - a total with a
 gap is a **lower bound**), and the model can now order a **freight line**:
 `build_freight_route(cargo, from_industry, to_industry)` - the model picks the cargo and the two
-industries, the scaffold finds the station sites by the engine's own rules, lays the road, builds
-the depot, buys and refits the truck and starts it. Real machine (seed 4242): coal mine 28 -> power
-station 53, **5 tonnes delivered**. Two engine rules are baked in, and the first corrected an earlier
-conclusion: a station **not accepting** a cargo does not stop the industry from handing it over (that
-is the station's *rating*), but a vehicle **cannot unload** where the cargo is not accepted - so the
-loading site only has to cover the producer while the unloading site must accept the cargo. A refused
-command now reaches the model (it used to only reach the log, so the model repeated the same order).
+industries; the scaffold finds the station sites by the engine's own rules, lays the road, builds the
+depot, buys and refits the truck and starts it. Real machine (seed 4242): coal mine 28 -> power
+station 53, **5 tonnes delivered**. A station that does not accept a cargo still receives it from the
+industry (that is its *rating*), but a vehicle **cannot unload** where the cargo is not accepted, so the
+unloading site must accept it. A refused command now reaches the model.
 - **The model can now ask the game a question and get the answer.** The observation surface is a **periodic sample**: it says what the world looks like right now,
   never what *its own vehicle* is doing, how much it carries or what it earned. Two read-only tools close that gap: `inspect_vehicle` (name, location, type, engine,
   age, speed, load, profit this year) and `inspect_town` (name, population, houses, location, growth rate). The channel is the admin port's gameScript **with an
@@ -162,14 +111,6 @@ command now reaches the model (it used to only reach the log, so the model repea
   (real model, seed 4242): the first vehicle reaching each station arrived twice. Two Squirrel traps came with it (MEMORY D95): a **class member must be declared**
   before it is assigned, and **reading a missing key throws**.
 
-### Fixed
-- **The cargo monitor was never missing - our own accumulator was broken.** On 2026-11-01 this project concluded that OpenTTD 15.3's Squirrel API has no cargo
-  monitor; that conclusion was **wrong**. The API exists (`script_cargomonitor.hpp` carries `@api game`); the empty split was **our** bug: the accumulator wrote into a
-  Squirrel table with a key that did not exist yet, Squirrel tables are strict - the write threw, the facts collector died, and the empty result was read as "the API
-  returns null". What the engine really does not expose stays unmeasured: **per station / per route**. The research: `docs/PER-LINE-DELIVERY-FEASIBILITY.md` - **do not
-  change the engine**.
-
-### Added
 - **A comparison only compares one question.** Runs that answered a **different** question - a
   different scaffold, a different observation surface, a different slice of the world - are no longer
   mixed into one table. The server groups the metric rows by the manifest's own fields (scaffold +
@@ -199,7 +140,6 @@ command now reaches the model (it used to only reach the log, so the model repea
 
 - **A comparison can start from the comparison.** The Compare page could only look at runs that already existed: picking the models, the worlds and the caps and then *starting that plan* was impossible. The plan is now computed **server-side** (the page estimates nothing): how many runs it would start, which caps apply, whether the spend is measurable, which model each cell uses - with the same field names the manifest uses, so plan and finished run compare field by field. Launching runs the cells **one after another** (one process, one game port); a failed cell is recorded and the rest still run. The refusals happen before anything starts: a cost cap on a model without a price table, an unknown model, or a plan that collides with a running game.
 
-
 - **The configuration page is now called what it does.** The page that used to live at `/providers` answers "how is this run configured?", so it is now at `/configure`; the old URL redirects (and the older `/llm` alias still resolves).
 - **The score now says what it actually counts.** The delivery counter the harness reads is
   OpenTTD's *per-cargo-type* array summed up - and OpenTTD keeps passengers in that same array, so
@@ -210,7 +150,6 @@ command now reaches the model (it used to only reach the log, so the model repea
 - **The dashboard speaks two languages now.** A switch in the header flips the whole interface between English and Chinese, and the choice is remembered. The English text stays where it always was (the translation table is keyed by it, the gettext way), so there is no second copy to keep in sync, and a guard test fails the build when a translation no longer matches its source. Raw evidence stays raw (the JSON in the agent steps is not translated) and so does the server's own vocabulary.
 
 - **A run can now explain itself.** The run's detail shows the **full manifest**: the same world (seed + game version), the same scaffold (scaffold / payload-shape hashes), and whether the run was capped (token / cost limit). When the provider answered with a different model than the one requested - a substituting gateway - that is flagged instead of hidden. Hashes are shown short, copied in full.
-
 
 - **The runs can be grouped** by model, seed or backend. The keys come from the ledger, because "which model" has two sources - requested and served - and a guessing page would disagree.
 
@@ -248,7 +187,69 @@ command now reaches the model (it used to only reach the log, so the model repea
 - **Dashboard**: manifest comparison rows (backend / scaffold / payload), a "Wire" health KPI, industry & cargo panel, towns panel, minimap, chart zoom/pan, run control from the page, per-session archive with savegame location.
 
 - **`capabilities()`**: the agent can ask which actions exist before trying them.
+
 ### Fixed
+- **The documentation had drifted away from the code.** Several pointers aimed at things that do not
+  exist: a SPEC section number that was never created (referenced from the source, the game script and
+  two tests), an index table with leftover counts that broke the table, a probe command quoted with flags
+  the script does not accept, and three documents still marked "to be reviewed" after they had been
+  implemented. The roadmap now carries only unfinished work, the lesson index covers every lesson, and
+  the volatile environment facts (binary, ports, credentials, gate) have a single home.
+- **The benchmark matrix could not use a real provider, and it could also do nothing at all.** Every cell is its own
+  data directory while the key lives outside the repository, so a cell had no credentials and failed; `--credentials`
+  now copies the file into each cell (0600, never printed, checked before the first cell runs). Separately, the
+  script's "do not run on import" check compared paths as strings - under a symlinked path it **exited silently
+  having done nothing**; it now compares real paths, and a test fails if it goes quiet.
+- **A run that stopped at its budget no longer exits 1.** A run that ends because the token cap, the cost cap, the
+  horizon or the wall clock ran out - or because the construction did not finish - has produced its data, so it is a
+  **result**, not a failure: the exit code is now 0. Real failures (the game script never came up, the game crashed,
+  the runner threw) still exit 1. The run's *result* is in the manifest's outcome.
+- **The language switch did not translate everything, and it did not translate it back.** Three silent faults: a
+  sentence written across two lines kept its line breaks in the DOM (the lookup key never matched); a sentence
+  broken up by an inline `<code>` was never translated at all; and switching back to English left the page mixed,
+  because the original text was remembered on the **parent** element.
+- **The harness was counting days on a calendar of its own.** The game day came from a **fictional 360-day year**
+  (31 January and 1 February mapped to the same index), so a "250 game day" run was really about 256 **calendar**
+  days, and the copy lived in six places. The clock is now the **engine's calendar** in one module: the game day is
+  the calendar day, quarter boundaries are the engine's quarters (1/4/7/10 January), and a route's "income per day"
+  divides by the day of the year the engine reports. The reading this exposed - that the promotion gate's
+  `income / 365` is a year-to-date net cash flow and not a per-game-day profit - is written down in SPEC §10.55 /
+  §10.76.
+- **The profit reading was the wrong quantity, and the readings were never written down.** The promotion gate read
+  `income / 365`, but the engine's `income` is the **current year's** net cash flow (it resets on 1 January) and 365
+  is a year length, not the length of the run - so the number was never "this run's profit per game day". The run's
+  profit is now the **net cash flow** (`money - loan`, which the engine keeps continuous across the year boundary)
+  over the **game days the run actually took**, and the model sees the same denominator it is scored on. The
+  readings are **written down** now as well: the archive used to drop every economy event (BigInt payloads hit
+  `JSON.stringify` and the error was swallowed), so a finished run could not be re-read offline - the Run page
+  shows the net cash flow, its per-game-day rate, and whether it reconciled with the engine's own yearly reading.
+  A real run crossing 1 January (seed 4242, 381 days) reconciles exactly, and `scripts/recompute-profit.ts`
+  recomputes the same number from the archive alone.
+- **A pair could have compared the wrong two runs.** The repeat index was counted over the rows that
+  **had a reading**, so a run with no reading for one metric shifted its partner. The cells are now
+  the **runs**, and a cell missing a reading on one side is dropped whole.
+- **"Not applicable" was reported as zero.** The game script encodes a missing reading as JSON `null`
+  (so the payload shape never changes), but two readers went through `Number(value)` - and
+  `Number(null)` is `0` - so "this industry does not accept this cargo" became "stockpile: 0 tonnes".
+  Every raw counter now asks "missing?" before "non-negative?".
+- **The decision context swallowed two facts it had already been given.** The financing facts and
+  the pushed events were passed into the decision context and then dropped. The readings were in
+  the projection all along, so the observation fingerprint does not move.
+- **The navigation now reaches every page.** A page URL was a hand-written table in the server's
+  memory, so a page added after the server started was unreachable ("not found"). The routes are now
+  **derived from the files** in `public/pages/`.
+
+- **The model can finally see the freight world.** A freight line is "which mine, which plant", and the model could
+  see neither: the GS now reports a **cargo catalogue** (which cargo is freight, which industries produce it, which
+  **accept** it - the engine's own answer), the **position and name of every industry**, and the cargo each road
+  engine carries. Real machine (seed 4242): the model planned to link "a producer industry to a consumer industry".
+
+- **The cargo monitor was never missing - our own accumulator was broken.** On 2026-11-01 this project concluded that OpenTTD 15.3's Squirrel API has no cargo
+  monitor; that conclusion was **wrong**. The API exists (`script_cargomonitor.hpp` carries `@api game`); the empty split was **our** bug: the accumulator wrote into a
+  Squirrel table with a key that did not exist yet, Squirrel tables are strict - the write threw, the facts collector died, and the empty result was read as "the API
+  returns null". What the engine really does not expose stays unmeasured: **per station / per route**. The research: `docs/PER-LINE-DELIVERY-FEASIBILITY.md` - **do not
+  change the engine**.
+
 - **Compare now says when the runs did not answer the same question.** The manifest recorded two fingerprints but nothing compared them; runs whose payload shape differs now print the distinct hashes. The observation surface stays out of `scaffoldHash` on purpose: it depends on the world (unknowable before a run, and it would make the hash seed-dependent) and belongs to `payloadShapeHash` - which today is only recorded on the harness backend, so the check is silent rather than wrong for default-backend runs (follow-up tracked in ROADMAP).
 
 - **A strategy card's identity belongs to the code now, not to the model's wording.** The id used to be a hash of a free-text action plus *every* parameter, so a different town id or a rephrased sentence became a new card - which made "verified in 2 games" structurally unreachable. Identity is now the action name (a closed vocabulary that mirrors the tool catalogue) plus three whitelisted parameters; an unknown action is rejected with the list in the error. Its value is a **measured profit rate per game day** (`income / 365`, stamped from the run's own record), not a number the model reports about itself; cards without that reading stay unpromotable rather than being treated as zero.
@@ -289,7 +290,6 @@ command now reaches the model (it used to only reach the log, so the model repea
   page showed "1 model(s)" and said nothing about losing data. Session ids now carry a short
   random suffix, and the ledger *reports* the collisions, so the Compare page says out loud
   which runs were dropped and that they are in none of the numbers below.
-
 
 - **The cargo facts are there from the first heartbeat now.** The Bridge GS recomputed its
   industry / cargo / delivery facts every 1000 ticks, so the first thousand ticks of every game
@@ -351,14 +351,13 @@ command now reaches the model (it used to only reach the log, so the model repea
   the tool description still listed only the older actions, so a real run recorded its freight
   patterns as `build_bus_route` - the same idea split into two cards. The description is now
   generated from the vocabulary, and a test fails if it drifts.
-- **Several readings that disagreed with themselves**: deltas folded unread readings to zero
-  ("no change" where nothing had been measured), fleet counts disagreed (route table vs company
-  stats), the world clock came from a `Monthly` channel and could be stale for a whole month, a
-  partial game-script failure was silent (one bad API call could kill a whole reply), and runs that
-  were stopped could look like failures (pause attribution, world-frozen runs and unfinished
-  horizons are now named and excluded from comparisons).
+- **Several readings that disagreed with themselves**: deltas folded unread readings to zero ("no change" where nothing
+  had been measured), fleet counts disagreed (route table vs company stats), a partial game-script failure was silent
+  (one bad API call could kill a whole reply), and runs that were stopped could look like failures - pause attribution,
+  world-frozen runs and unfinished horizons are now named and excluded from comparisons.
 
 - **Charts flickered and grew** (per-frame `devicePixelRatio` multiplication; width→height feedback loop) - fixed and guarded by a time-series smoke check at dpr=2. `--serve` also kept a stale `llm.json`, so Start after saving a provider still said "not configured", and **`test:live` was red on main** (it picked `events.jsonl` as the newest session) and left OpenTTD running when it failed, which disabled 13 preflight tests.
+
 ## [0.6.0] - 2026-09-11
 
 > **本轮的主要工作是"把实现拉回 SPEC"**，而不是加功能。审计真机 Session 日志发现，

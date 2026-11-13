@@ -1960,7 +1960,7 @@ class BridgeV1 extends GSController {
      * 货在装货站等着、整局**交付 0**。周期读数只报"几辆车在等多少"⇒
      * **看不出车卡在哪、订单对不对** ⇒ 这种线是"静默死线"，模型只能瞎猜。
      *
-     * 只读、只按需（周期载荷不变，SPEC §10.127）：诊断走 answer 通道。
+     * 只读、只按需（周期载荷不变，SPEC §10.126）：诊断走 answer 通道。
      * 事实自己读，**不替模型下结论**：报的是"车在哪、订单是什么、货在等"。
      * =================================================================== */
     function RouteDiag(obj) {
@@ -2754,7 +2754,7 @@ class BridgeV1 extends GSController {
     //
     // API 依据（OpenTTD 15.3 源码，`script_engine.hpp`）：`GetCapacity` /
     // `GetPrice` / `GetRunningCost` / `GetMaxSpeed` 都是 `@api ai game` ⇒
-    // 游戏脚本可调（真机探针已实测，见 SPEC §10.127）。
+    // 游戏脚本可调（真机探针已实测，见 SPEC §10.126）。
     function EngineCatalog() {
         local rows = [];
         try {
@@ -3500,7 +3500,7 @@ class BridgeV1 extends GSController {
             // 线路经济（Issue #105）：**按需**读引擎的事实 + 引擎自己的运价函数。
             //
             // 为什么不在周期载荷里：观测面的载荷不许变大（`EngineCatalog()` 的
-            // 经济学字段只在这里给）⇒ 稳态流量不变（SPEC §10.127）。
+            // 经济学字段只在这里给）⇒ 稳态流量不变（SPEC §10.126）。
             local ans_id = -1;
             if (obj.rawin("id")) ans_id = obj["id"];
             local income = null;

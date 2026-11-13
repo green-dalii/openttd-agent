@@ -13,7 +13,8 @@
 ## 1. 环境与前置
 
 - Node >= 22.19，pnpm。
-- OpenTTD 15.0（本机 Steam 路径见 `SPEC.md` §D0 环境事实表）。
+- OpenTTD 15.x（本机 Steam 路径见 `src/config.ts` 的 `DEFAULT_BINARY`；易变的环境事实汇总在
+  `MEMORY.md` §0.4）。
 - 游戏一律用**隔离 data dir**（`-c <dir>/openttd.cfg`），禁止读写
   `~/Documents/OpenTTD`（AGENTS 铁律 3）。
 - LLM 凭据：`<dataDir>/credentials.json` + `llm.json`（Providers 页或手写）。
@@ -58,12 +59,15 @@ src/
   types.ts                  # 共享类型 (单一事实源)
   config.ts                 # env 配置 (手动校验)
   util/json.ts              # BigInt-safe JSON (economy u64 金额)
+  util/money-levels.ts     # 资金档位（判据要用"事件驱动"的量，不是逐日采样）
   game/
     admin-protocol.ts       # Admin Port 字节编解码 (帧/枚举/reader/writer)
     payload-parsers.ts      # payload → 类型化对象 (含日历算法)
     observer.ts             # 原始包 → 规范化 GameEvent
     admin-client.ts         # AdminClient (connect/join/sub/poll/rcon/gs)
     world-state.ts          # 内存权威状态 (公司/日期/economy/事件缓冲)
+    calendar.ts             # **唯一时间模型** (引擎日历; 换算只此一处)
+    profit-meter.ts         # 本局净现金流读数 (money − loan) + 分年对账
     runner.ts               # 长驻观测循环 (--watch 模式)
     gs-events.ts            # GS→harness 事件契约 (typebox, Phase A)
     executor-status.ts      # 执行器相位语义 (stage/描述; detail 重建)
@@ -83,6 +87,8 @@ src/
     loop-control.ts         # 决策循环纯判据 (deadline/cap/wait)
     runner-helpers.ts       # 纯工具
     route-ledger.ts         # 决策→结果账本 (credit assignment)
+    route-diagnosis.ts      # 线路"为什么不跑"的具名原因 (GS 只报事实, 原因在此算)
+    selection.ts            # 运行配置的唯一真值 + 唯一解析器
     estimate.ts             # 路线造价下界 (事实, 不表态)
     loop.ts                 # 单次决策编排 (observe→LLM→plan)
     decision-context.ts     # 因果窗口数据结构 (tracker)

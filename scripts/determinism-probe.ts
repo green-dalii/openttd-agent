@@ -16,7 +16,9 @@
  *     [--checkpoint-day 60] [--window-days 30] [--command build_bus_route] [--seed 4242]
  *
  * 事实来源: Issue #106；SPEC §10.113（机制已核实：`-g savegame` + 控制台 `save`
- * + GS 状态随存档存取）。
+ *   ⇒ **引擎侧**同存档可复现；但**脚本自身的状态不随存档存取**（GS 与 ExecutorV1
+ *   都没有 `Save()`/`Load()`）⇒ 读档后 GS 从零重启 ⇒ 正式 fork 的两臂都必须
+ *   从存档起步，不能一臂续跑、一臂读档）。
  */
 import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";

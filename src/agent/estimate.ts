@@ -82,7 +82,7 @@ export function estimateRoute(
  * 禁止: 下结论（"这条线赚钱/不赚钱"）。收入与成本的方向相反，谁也替模型判断
  *   盈亏——那是策略，属模型（docs/RL-HARNESS-SCOPE-AUDIT.md J3）。
  *
- * 方向是怎么定的（引擎事实，见 SPEC §10.127）：
+ * 方向是怎么定的（引擎事实，见 SPEC §10.126）：
  *   - **距离**：引擎按**曼哈顿距离**付运费，且**封顶在起点与终点的曼哈顿距离**
  *     （`CargoPacket::GetDistance` 的注释与实现）⇒ 直线距离就是引擎付的最大距离，
  *     不是下界。
@@ -97,7 +97,7 @@ export function estimateRoute(
 /**
  * 引擎的速度单位（km-ish/h）换算成"每天走过的曼哈顿格数"。
  *
- * 推导（OpenTTD 15.3 源码，SPEC §10.127）：
+ * 推导（OpenTTD 15.3 源码，SPEC §10.126）：
  *   - `GSEngine.GetMaxSpeed` 返回 `Engine::GetDisplayMaxSpeed()`（显示单位）；
  *   - 公路车的显示速度 = 内部速度 / 2 ⇒ 内部速度 = 2 × 显示速度；
  *   - 每 tick 的位移进度 = `GetAdvanceSpeed(spd)` = spd × 3/4（距离单位）；
