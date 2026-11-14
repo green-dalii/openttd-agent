@@ -66,6 +66,8 @@ window.I18nTerms = {
 	"metric.ability.deliveredPerGameDay.unit": "每游戏日",
 	"metric.ability.cargoDeliveredPerGameDay.label": "货物交付量",
 	"metric.ability.cargoDeliveredPerGameDay.unit": "每游戏日",
+	"metric.ability.operatingProfitPerGameDay.label": "运营利润（运货收入 − 运行成本）",
+	"metric.ability.operatingProfitPerGameDay.unit": "每游戏日",
 	"metric.ability.stations.label": "车站数",
 	"metric.ability.stations.unit": "局末",
 	"metric.ability.vehicles.label": "车辆数",

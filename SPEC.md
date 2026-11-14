@@ -571,6 +571,7 @@ JSON + GSSign 标牌邮箱）、`OpenTTDLab`（受控 Squirrel AI + admin port�
 - 事实（2026-11-11 修正落地）：**harness 的时钟 = 引擎的日历**（`src/game/calendar.ts` 是**唯一出处**）：六处**虚构的 360 天年**投影
   （`payload-parsers`/`signal-hub`/`runner-helpers`/`v02-runner`/`world-state`）全换成引擎日历换算；季度边界改用引擎日历季度（1/4/7/10 月 1 日）；
   线路"每日收益"的分母改成**引擎日历的年内第几天**（分子是车辆 YTD 利润 ⇒ 分子分母同属一年）；守卫 `test/unit/calendar-guard.test.ts`。
+- 事实（2026-11-13 Phase D）：**公司级运营利润是第三个量**（`src/game/operating-profit.ts`）：只有"运货收入 − 运行成本"，**不含**基建/购车/利息 ⇒ 与 admin `income`（§10.55 净现金流）**不可互换**。引擎的 `GSVehicle.GetProfitThisYear` 是**当年迄今**（1 月 1 日清零）⇒ 服务端把它接成**本局连续**值：首条读数只建基线（从存档起步的车不算本局）、跨年只挪参照点（**读数掉下去不是亏损**）、车消失 = 卖车（**冻结在账上，不清零**）；中途卖车或跨年没采到 ⇒ 累计值是**下界**（`complete=false`）。GS 按需 `company_fleet`（answer 通道，**周期载荷不变**）。
 
 ### 10.77 R2b 实施结果：反思改走 Agent + 记录工具（2026-09-18/19）
 **仍为真**：反思复用**同一个 `Agent`** + 记录型工具（`src/evolution/reflect-tools.ts`），带 `validateLesson()`；入口 `runReflection({streamFn, model, dataDir, facts, now})`。

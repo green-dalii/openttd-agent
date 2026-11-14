@@ -41,6 +41,7 @@ import type { Model } from "@earendil-works/pi-ai";
 type AgentOptionsStreamFn = AgentOptions["streamFn"];
 import { DecisionScheduler } from "./scheduler.js";
 import { buildStageView } from "./stage-view.js";
+import { createOperatingProfitLedger } from "../game/operating-profit.js";
 import { captureMinimap, MINIMAP_REL_PATH } from "../game/minimap.js";
 import type { ActionResult, AgentDeps } from "./types.js";
 import type { Models } from "@earendil-works/pi-ai";
@@ -967,6 +968,34 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 		}
 	}, 700);
 
+	// 公司级**运营利润**（Phase D）：**按需**问 GS 要车队读数（周期载荷不变，
+	// SPEC §10.126）⇒ 累计在 TS 侧（跨年、卖车都要连续 ⇒ `operating-profit.ts`）。
+	// 采样节奏：每 ~20 秒墙钟一次（≈几个游戏日）—— 目的有两个：① 跨年时把
+	// 上一年的尾巴**采到**（不然累计值是下界）；② 车被卖掉时把它最后读到的
+	// 利润**冻住**（卖车不得清零）。第一条读数是**基线**（本局开始时车已经
+	// 赚了多少不算本局的）。
+	const operatingProfitLedger = createOperatingProfitLedger();
+	const sampleFleet = async (): Promise<void> => {
+		try {
+			const answer = await client?.gameScriptAwait?.(JSON.stringify({ cmd: "company_fleet", company: 0 }), 5000);
+			if (!answer || answer.ok !== true) return;
+			const data = (answer.data ?? {}) as { date?: unknown; vehicles?: unknown };
+			if (typeof data.date !== "number" || !Array.isArray(data.vehicles)) return;
+			const vehicles = data.vehicles.filter(
+				(v): v is { id: number; profit: number } =>
+					typeof v?.id === "number" && typeof v?.profit === "number",
+			);
+			operatingProfitLedger.observe({ rawDate: data.date, vehicles });
+		} catch {
+			/* 通道坏了：没采到就不是 0（缺失不折零） */
+		}
+	};
+	await sampleFleet();
+	const fleetTimer = setInterval(() => {
+		if (stopRequested) return;
+		void sampleFleet();
+	}, 20_000);
+
 	// --- decision loop (continuous, not once) ---
 	// v0.5.0 and earlier ran exactly one decision (`maxTurns ?? 1`), so the model
 	// built a line and was never consulted again — income decayed with nobody
@@ -1118,6 +1147,7 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 	if (closeBrain) await closeBrain();
 
 	clearInterval(obs);
+	clearInterval(fleetTimer);
 	clearInterval(heartbeatTimer);
 	process.off("uncaughtException", onCrash);
 	process.off("unhandledRejection", onCrash);
@@ -1141,6 +1171,11 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 		// 货运 F4（A5）：逐线路的**推导**交付量 ⇒ 写进事实（History 能说
 		// “这条决策运了多少货”）。
 		getFreightAttribution: () => hub.getFreightAttribution(),
+		// 公司级运营利润（Phase D）：最后再采一次（把收尾那一段也算进去）。
+		getOperatingProfit: async () => {
+			await sampleFleet();
+			return operatingProfitLedger.reading();
+		},
 		gsErrors: hub.getGsErrors(),
 		toolBudgetBlocks: getBudgetBlocks(),
 		// 局是在**暂停中**结束的吗（agent 自己按的）？这是 outcome 的独立事实，
