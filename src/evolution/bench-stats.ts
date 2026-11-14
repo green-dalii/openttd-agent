@@ -137,6 +137,21 @@ export const PAIRED_METRICS: PairedMetric[] = [
 		value: cargoPerGameDay,
 	},
 	{
+		/**
+		 * 公司级**运营利润**（Phase D）：只有“运货收入 − 运行成本”，**不含**基建/购车/
+		 * 利息 ⇒ 与主轴的交付量**不是同一个量**（交付量不说赚不赚钱）。
+		 * 为什么单列一条：晋升闸问的是“这条线赚不赚钱”，那是运营利润。
+		 * 没测到（旧局 / 没采到车队读数）⇒ null（"没测到"），不是 0。
+		 */
+		id: "ability.operatingProfitPerGameDay",
+		axis: "ability",
+		axisLabel: "Result",
+		label: "operating profit",
+		unit: "per game day",
+		betterWhen: "higher",
+		value: (m) => finite(m.operatingProfitPerDay),
+	},
+	{
 		id: "efficiency.deliveredPerMillionTokens",
 		axis: "efficiency",
 		axisLabel: "Efficiency",

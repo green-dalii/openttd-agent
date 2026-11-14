@@ -11,6 +11,12 @@
 
 ### Added
 
+- **The company now has an operating profit of its own.** The engine reports each vehicle's profit "so far this
+  year", so the number drops when the year turns and a sold vehicle takes its history with it. The harness now
+  keeps its own ledger: the first reading is only a baseline, later readings add the difference, a sold vehicle's
+  profit stays on the books, and a year turn moves the reference point instead of clearing the total. It is
+  **operating profit** (freight revenue minus running cost) - not the net cash flow, which also contains building,
+  vehicles and interest - and it says when it is only a **lower bound**. Compare gained an operating-profit axis.
 - **A probe can now answer whether the same savegame gives the same run.** `scripts/determinism-probe.ts` saves a map,
   copies the savegame, starts two servers from it (`-g <savegame>`), sends the same command to both and compares the
   money trajectories: **two loads of the same savegame produced identical money levels**, so a counterfactual fork is

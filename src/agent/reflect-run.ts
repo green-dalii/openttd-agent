@@ -17,6 +17,7 @@ import { runReflection } from "../evolution/reflection-run.js";
 import { buildStageSummary } from "./session-store.js";
 import { totalsFromTelemetry, formatGameDate } from "./runner-helpers.js";
 import { profitPerGameDay } from "../game/profit-meter.js";
+import { operatingProfitPerGameDay, type OperatingProfitReading } from "../game/operating-profit.js";
 import type { WorldState } from "../game/world-state.js";
 import type { SessionStore } from "./session-store.js";
 import { projectManifest, type RunManifest } from "./manifest.js";
@@ -57,6 +58,14 @@ export interface FinalizeAndReflectArgs {
 	 * （旧调用方）行为不变。
 	 */
 	getFreightAttribution?: () => FreightAttributionResult;
+	/**
+	 * 公司级**运营利润**读数（Phase D）。
+	 *
+	 * 与 `netCashFlow` 是**两个量**：净现金流含基建/购车/利息；运营利润只有
+	 * “运货收入 − 运行成本”。晋升闸问的是“这条线赚不赚钱”，那是运营利润。
+	 * 给了就写进事实与度量行；没给（旧调用方）行为不变。
+	 */
+	getOperatingProfit?: () => Promise<OperatingProfitReading>;
 	/** Assigned arm, recorded in the metric so it is never inferred (N2-5 fix). */
 	arm: "treatment" | "control";
 	/**
@@ -133,12 +142,15 @@ export async function runFinalizeAndReflect(args: FinalizeAndReflectArgs): Promi
 		routeLedger,
 		getRouteStats,
 		getFreightAttribution,
+		getOperatingProfit,
 		arm,
 		freezeStats,
 		reflectLlm,
 	} = args;
 	const snap = world.snapshot();
 	const c0 = snap.companies.get(0);
+	// 公司级运营利润读数（Phase D）：问一次拿**最终**读数（账本在 runner 里）。
+	const operatingProfit = getOperatingProfit ? await getOperatingProfit() : null;
 	console.log(
 		`[agent] RESULT: constructionDone=${reachedDone} phase="${executorPhase}" vehicles=${c0?.stats?.vehicles ?? "?"} stations=${c0?.stats?.stations ?? "?"} money=${c0?.economy ? c0.economy.money.toString() : "?"}`,
 	);
@@ -190,6 +202,16 @@ export async function runFinalizeAndReflect(args: FinalizeAndReflectArgs): Promi
 			// 是否**真的**与引擎自报的整年值核对过（跨过年边界且对得上）。
 			netCashFlowVerified: c0?.profit?.reconciled ?? undefined,
 			profitPerDay: profitPerGameDay(c0?.profit?.netCashFlow ?? null, args.episode.simulatedDays) ?? undefined,
+			// 公司级**运营利润**（Phase D）：与净现金流是**两个量**（不含基建/购车/
+			// 利息）。没测到就不写（不是 0）；不完整时明说“是下界”。
+			...(operatingProfit ? { operatingProfit: operatingProfit.operatingProfit ?? undefined } : {}),
+			...(operatingProfit
+				? {
+						operatingProfitPerDay:
+							operatingProfitPerGameDay(operatingProfit.operatingProfit, args.episode.simulatedDays) ?? undefined,
+						operatingProfitComplete: operatingProfit.complete,
+					}
+				: {}),
 			// N2-4b: the least confounded outcome - cargo actually moved. `income`
 			// is net of expenses, so every construction run is negative by
 			// construction; delivered cargo is not.
@@ -288,6 +310,13 @@ export async function runFinalizeAndReflect(args: FinalizeAndReflectArgs): Promi
 						// Now: net cash flow over the run / the days this run took.
 						netCashFlow: c0?.profit?.netCashFlow ?? null,
 						profitPerDay: profitPerGameDay(c0?.profit?.netCashFlow ?? null, args.episode.simulatedDays),
+						// 公司级运营利润（Phase D）：与净现金流是两个量（缺失不折零）。
+						operatingProfit: operatingProfit?.operatingProfit ?? null,
+						operatingProfitPerDay: operatingProfitPerGameDay(
+							operatingProfit?.operatingProfit ?? null,
+							args.episode.simulatedDays,
+						),
+						operatingProfitComplete: operatingProfit?.complete ?? null,
 						// The game's own yearly profit (raw reading, keeps its meaning).
 						income: c0?.economy && Number.isFinite(Number(c0.economy.income)) ? Number(c0.economy.income) : null,
 						durationMs: Math.max(0, Date.now() - Number(session.current().startedAt || Date.now())),

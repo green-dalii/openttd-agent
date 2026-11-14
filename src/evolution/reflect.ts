@@ -69,6 +69,21 @@ export interface ReflectionFacts {
 		 * null = 缺读数或分母不是正数（不折零）。
 		 */
 		profitPerDay?: number | null;
+		/**
+		 * 公司级**运营利润**（本局累计、跨年连续、卖车不丢）：只有“运货收入 − 运行成本”，
+		 * **不含**基建/购车/利息 ⇒ 与 `netCashFlow` 是**两个量**，不可互换。
+		 * null = 没测到（不是 0）。
+		 */
+		operatingProfit?: number | null;
+		/**
+		 * 运营利润的每游戏日速率（分母与净现金流读数同源）。null = 缺读数或分母不是正数。
+		 */
+		operatingProfitPerDay?: number | null;
+		/**
+		 * 运营利润的累计值是否**完整**：false = 中途有车被卖掉或跨过年界没采到 ⇒
+		 * 该值是**下界**。null = 没测到。
+		 */
+		operatingProfitComplete?: boolean | null;
 	};
 	/** Action outcomes / notable events, already reduced to factual statements. */
 	evidence: string[];

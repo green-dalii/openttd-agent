@@ -2180,6 +2180,28 @@ class BridgeV1 extends GSController {
             }
         }
         v.rawset("orders", orders);
+        // **当前订单**（Issue #113 的决定性事实）：引擎只在
+        // “当前订单是去这个车站” 时才让车在货车站装货
+        // （`roadveh_cmd.cpp`：`current_order.GetDestination() == st->index`
+        // 才 `BeginLoading()`，否则车**开过站不停**）。
+        // ⇒ “车带着正确的订单” 与 “车此刻的**当前**订单就是这座站” 是**两件事**：
+        // 前者订单表看得出来，后者只有当前订单看得出来。
+        // ⇒ 读不到就写 null（**没测到**），不写 0（“没有当前订单”是另一个说法）。
+        local curIdx = null;
+        local curTile = null;
+        local curIsStation = null;
+        local pos = -1;
+        try {
+            pos = GSOrder.ResolveOrderPosition(vid, GSOrder.ORDER_CURRENT);
+            if (pos != null && pos >= 0 && pos < oc) {
+                curIdx = pos;
+                curTile = GSOrder.GetOrderDestination(vid, pos);
+                curIsStation = GSOrder.IsGotoStationOrder(vid, pos);
+            }
+        } catch (err3) { curIdx = null; }
+        v.rawset("currentOrder", curIdx);
+        v.rawset("currentOrderTile", curTile);
+        v.rawset("currentOrderIsStation", curIsStation);
         return v;
     }
 
@@ -3486,6 +3508,35 @@ class BridgeV1 extends GSController {
                 growth_rate = GSTown.GetGrowthRate(id),
             };
             GSAdmin.Send({ kind = "answer", id = ans_id, ok = true, data = data });
+        } else if (cmd == "company_fleet") {
+            // 公司车队与**运营利润**的原始读数（Phase D）。
+            //
+            // 为什么**按需**而不是周期载荷：周期载荷不许变大（SPEC §10.126）⇒
+            // 这个读数走 answer 通道，harness 按需问。
+            //
+            // GS 只报**事实**（每辆车**当年迄今**的运营利润）：**累计**由服务端算
+            // （`src/game/operating-profit.ts`）—— 跨年、卖车都要连续 ⇒ 算术在 TS 侧
+            // （Squirrel 的表键与算术怪癖已经浪费过一轮，SPEC §10.45）。
+            // 引擎口径：`profit_this_year` = 路线利润（运货收入 + 中转分成）− **运行成本**
+            // ⇒ **不含**基建/购车/利息 ⇒ 与 admin 的 `income`（净现金流）**不是同一个量**。
+            local ans_id = -1;
+            if (obj.rawin("id")) ans_id = obj["id"];
+            local exec = 0;
+            if (obj.rawin("company")) exec = obj["company"];
+            local rows = [];
+            try {
+                foreach (v, _ in GSVehicleList()) {
+                    if (GSVehicle.GetOwner(v) != exec) continue;
+                    local p = GSVehicle.GetProfitThisYear(v);
+                    if (p == null) p = -1;   // 读不到就是 -1（没测到），不是 0
+                    rows.append({ id = v, profit = p });
+                }
+            } catch (e) {
+                GSAdmin.Send({ kind = "answer", id = ans_id, ok = false, reason = "vehicle list failed: " + "" + e });
+                return;
+            }
+            GSAdmin.Send({ kind = "answer", id = ans_id, ok = true,
+                           data = { date = GSDate.GetCurrentDate(), vehicles = rows } });
         } else if (cmd == "list_industries") {
             // 按需**全量**产业（"数据按需全量"）：观测面只带产量前 12 个
             // （载荷不能无限长），模型想要全图时**问一次**。

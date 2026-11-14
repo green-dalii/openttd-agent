@@ -63,6 +63,16 @@ export interface SessionMetaLike {
 		/** 净现金流的每游戏日速率（净现金流 ÷ 这一局经过的游戏日）。 */
 		profitPerDay?: number;
 		/**
+		 * 公司级**运营利润**（本局累计、跨年连续、卖车不丢）：只有“运货收入 − 运行成本”，
+		 * **不含**基建/购车/利息 ⇒ 与 `netCashFlow` 是**两个量**。
+		 * absent = 没测到（不是 0）。
+		 */
+		operatingProfit?: number;
+		/** 运营利润的每游戏日速率；absent = 缺读数或分母不是正数。 */
+		operatingProfitPerDay?: number;
+		/** 累计值是否完整（false = 下界）；absent = 没测到。 */
+		operatingProfitComplete?: boolean;
+		/**
 		 * Cargo/passengers delivered (N2-4b); absent when never reported.
 		 *
 		 * RAW reading: `cur_economy.delivered_cargo`, which OpenTTD resets every
@@ -142,6 +152,16 @@ export interface GameMetric {
 	 * 净现金流的每游戏日速率（净现金流 ÷ 这一局经过的游戏日）。null = 没测到。
 	 */
 	profitPerDay: number | null;
+	/**
+	 * 公司级**运营利润**（本局累计、跨年连续、卖车不丢）：只有“运货收入 − 运行成本”，
+	 * **不含**基建/购车/利息 ⇒ 与 `netCashFlow` 是**两个量**，不可互换。
+	 * null = 没测到（不是 0）。
+	 */
+	operatingProfit: number | null;
+	/** 运营利润的每游戏日速率；null = 没测到。 */
+	operatingProfitPerDay: number | null;
+	/** 累计值是否完整（false = 下界）；null = 没测到（旧行没记）。 */
+	operatingProfitComplete: boolean | null;
 	/**
 	 * Cargo + passengers delivered (N2-4b). The admin packet's `income` is NET of
 	 * expenses, so during construction it is always negative and inherits money's
@@ -498,6 +518,10 @@ export function toGameMetric(
 		netCashFlow: numOrNull(o && o.netCashFlow),
 		netCashFlowVerified: o && typeof o.netCashFlowVerified === "boolean" ? o.netCashFlowVerified : null,
 		profitPerDay: numOrNull(o && o.profitPerDay),
+		operatingProfit: numOrNull(o && o.operatingProfit),
+		operatingProfitPerDay: numOrNull(o && o.operatingProfitPerDay),
+		operatingProfitComplete:
+			o && typeof o.operatingProfitComplete === "boolean" ? o.operatingProfitComplete : null,
 		vehicles: num(o && o.vehicles),
 		stations: num(o && o.stations),
 		decisions: num(t && t.decisions),
