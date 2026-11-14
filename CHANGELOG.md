@@ -11,16 +11,14 @@
 
 ### Added
 
-- **The company now has an operating profit of its own.** The engine reports each vehicle's profit "so far this
-  year", so the number drops when the year turns and a sold vehicle takes its history with it. The harness now
-  keeps its own ledger: the first reading is only a baseline, later readings add the difference, a sold vehicle's
+- **The company now has an operating profit of its own.** The engine reports each vehicle's profit "so far this year", so the number drops when the year turns and a sold vehicle takes its history with it. The harness now keeps its own ledger: the first reading is only a baseline, later readings add the difference, a sold vehicle's
   profit stays on the books, and a year turn moves the reference point instead of clearing the total. It is
   **operating profit** (freight revenue minus running cost) - not the net cash flow, which also contains building,
   vehicles and interest - and it says when it is only a **lower bound**. Compare gained an operating-profit axis.
-- **A probe can now answer whether the same savegame gives the same run.** `scripts/determinism-probe.ts` saves a map,
-  copies it, starts two servers from it (`-g <savegame>`), sends the same command to both and compares the money
-  trajectories: **two loads produced identical money levels**, so a counterfactual fork is possible. A script's own
-  state does **not** travel in a savegame, so both fork arms must start from it.
+- **A probe can now answer whether the same savegame gives the same run.** `scripts/determinism-probe.ts` copies a map,
+  starts two servers from it (`-g <savegame>`), sends the same command to both and compares the money trajectories:
+  **two loads produced identical money levels**, so a counterfactual fork is possible. A script's own state does **not**
+  travel in a savegame, so both fork arms must start from it.
 - **The model can now do the economics of a freight line before it spends.** `estimate_route` takes a cargo and two
   industries and answers with the engine's numbers: price per cargo unit over that distance (`GSCargo.GetCargoIncome`),
   and per truck its capacity, price and running cost (`GSEngine.GetCapacity/GetPrice/GetRunningCost`). Every figure
@@ -38,17 +36,15 @@
   small, but leaves the model unable to tell "no production" from "not measured". Two read-only
   tools (`get_industries`, `get_cargo`) now fetch the whole thing on demand, and the Run page's
   industry table has an **expand all** button. Sample and full list come from **one scan**.
-- **The server's own vocabulary is now translated too - by id.** The outcome classes, the
-  problem codes, the delivery measures and the knob values are the **server's** wording, and the
-  server keeps exactly one canonical wording of them. The front end now looks them up **by id**
-  (`outcome.token_cap`, `problem.no_credential`) and falls back to the server's text when it has
-  no translation. A test checks the table's coverage against the server's own lists.
-- **The Chinese interface now covers the text the scripts render too.** The hints, empty states,
-  legends and labels the pages draw at runtime - about 440 more strings - are translated.
-- **The language switch stopped working for anything rendered after the page loaded.** The
-  translation of newly rendered text was scheduled on `requestAnimationFrame`, which only runs
-  while the page is painted - so in a background tab the observer never fired again and
-  everything drawn afterwards stayed English, with nothing in the console.
+- **The server's own vocabulary is now translated too - by id.** The outcome classes, the problem codes, the delivery
+  measures and the knob values are the **server's** wording, and the server keeps exactly one canonical wording of
+  them. The front end now looks them up **by id** (`outcome.token_cap`, `problem.no_credential`) and falls back to the
+  server's text when it has no translation. A test checks the table's coverage against the server's own lists.
+- **The Chinese interface now covers the text the scripts render too.** The hints, empty states, legends and labels
+  the pages draw at runtime - about 440 more strings - are translated.
+- **The language switch stopped working for anything rendered after the page loaded.** The translation of newly
+  rendered text was scheduled on `requestAnimationFrame`, which only runs while the page is painted - so in a
+  background tab the observer never fired again and everything drawn afterwards stayed English, silently.
 - **The interface now picks up the language before the first paint.** The framework starts in a
   microtask, so it rendered before the language runtime had initialised - everything it drew looked
   up in the default language. The runtime now initialises on the framework's start.
@@ -221,29 +217,32 @@ unloading site must accept it. A refused command now reaches the model.
   divides by the day of the year the engine reports. The reading this exposed - that the promotion gate's
   `income / 365` is a year-to-date net cash flow and not a per-game-day profit - is written down in SPEC §10.55 /
   §10.76.
-- **The profit reading was the wrong quantity, and the readings were never written down.** The promotion gate read
-  `income / 365`, but the engine's `income` is the **current year's** net cash flow (it resets on 1 January) and 365
-  is a year length, not the length of the run - so the number was never "this run's profit per game day". The run's
-  profit is now the **net cash flow** (`money - loan`, which the engine keeps continuous across the year boundary)
-  over the **game days the run actually took**, and the model sees the same denominator it is scored on. The
-  readings are **written down** now as well: the archive used to drop every economy event (BigInt payloads hit
-  `JSON.stringify` and the error was swallowed), so a finished run could not be re-read offline - the Run page
-  shows the net cash flow, its per-game-day rate, and whether it reconciled with the engine's own yearly reading.
-  A real run crossing 1 January (seed 4242, 381 days) reconciles exactly, and `scripts/recompute-profit.ts`
-  recomputes the same number from the archive alone.
-- **A pair could have compared the wrong two runs.** The repeat index was counted over the rows that
-  **had a reading**, so a run with no reading for one metric shifted its partner. The cells are now
-  the **runs**, and a cell missing a reading on one side is dropped whole.
-- **"Not applicable" was reported as zero.** The game script encodes a missing reading as JSON `null`
-  (so the payload shape never changes), but two readers went through `Number(value)` - and
-  `Number(null)` is `0` - so "this industry does not accept this cargo" became "stockpile: 0 tonnes".
-  Every raw counter now asks "missing?" before "non-negative?".
-- **The decision context swallowed two facts it had already been given.** The financing facts and
-  the pushed events were passed into the decision context and then dropped. The readings were in
-  the projection all along, so the observation fingerprint does not move.
-- **The navigation now reaches every page.** A page URL was a hand-written table in the server's
-  memory, so a page added after the server started was unreachable ("not found"). The routes are now
-  **derived from the files** in `public/pages/`.
+- **The profit reading was the wrong quantity, the readings were never written down, and the gate was reading the
+  wrong one.** The gate read `income / 365`, but the engine's `income` is the **current year's** net cash flow (it
+  resets on 1 January) and 365 is a year length, not the run's length - so it was never "this run's profit per game
+  day". It is now the **net cash flow** (`money - loan`, continuous across the year boundary) over the **game days
+  the run actually took**, and the model sees the same denominator it is scored on. But the gate asks "does this
+  strategy pay", and net cash flow answers "did the company overspend": while a run is building it is negative by
+  construction, so the gate could never open for a strategy that includes building. A real run (MiniMax-M3.1-Flash,
+  seed 11, 151 days) measured the gap - net cash flow **-1499.28/game day** against operating profit **+14.13/game
+  day**, the 1513/day difference being exactly the construction and the vehicles. The gate now reads **operating
+  profit**; both measures stay on the card and both are shown on the page (net cash flow is the company's health,
+  operating profit the strategy's quality - showing only one would make the page do the very substitution that broke
+  the gate), and a card with no operating-profit reading is **not determinable**, not zero. The readings are
+  **written down** too: the archive used to drop every economy event (BigInt payloads hit `JSON.stringify` and the
+  error was swallowed), so a finished run could not be re-read offline - the Run page shows the net cash flow, its
+  per-game-day rate, and whether it reconciled with the engine's own yearly reading. A real run crossing 1 January
+  (seed 4242, 381 days) reconciles exactly, and `scripts/recompute-profit.ts` recomputes it from the archive alone.
+- **A pair could have compared the wrong two runs.** The repeat index was counted over the rows that **had a
+  reading**, so a run with no reading for one metric shifted its partner. The cells are now the **runs**.
+- **"Not applicable" was reported as zero.** The game script encodes a missing reading as JSON `null` (so the
+  payload shape never changes), but two readers went through `Number(value)` - and `Number(null)` is `0` - so "this
+  industry does not accept this cargo" became "stockpile: 0 tonnes". Every raw counter now asks "missing?" first.
+- **The decision context swallowed two facts it had already been given.** The financing facts and the pushed events
+  were passed into the decision context and then dropped. The readings were in the projection all along.
+- **The navigation now reaches every page.** A page URL was a hand-written table in the server's memory, so a page
+  added after the server started was unreachable ("not found"). The routes are now **derived from the files** in
+  `public/pages/`.
 
 - **The model can finally see the freight world.** A freight line is "which mine, which plant", and the model could
   see neither: the GS now reports a **cargo catalogue** (which cargo is freight, which industries produce it, which

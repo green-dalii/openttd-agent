@@ -27,7 +27,7 @@
 | [`DASHBOARD-CODESIGN.md`](DASHBOARD-CODESIGN.md) | **整个 Dashboard 是否还是后端的界面**（已落地：B1–B6） | 四问（配置/观察/比较/复现）、能力对照表、十条发现、目标信息架构、B1–B6 顺序 | 运行配置的专项诊断（→ `SELECTION-STATE-CODESIGN.md`）；页面视觉规范（→ `DASHBOARD-UI.md`） |
 | [`SELECTION-STATE-CODESIGN.md`](SELECTION-STATE-CODESIGN.md) | **运行配置的「选择」与「真值」如何统一**（已落地：B1/S2，`src/agent/selection.ts`） | 四份副本的诊断、唯一解析器方案、页面 draft/saved 分离、实施顺序 | 已实现的契约（→ `DASHBOARD-API.md`）；页面视觉规范（→ `DASHBOARD-UI.md`） |
 | [`HARNESS-MIGRATION.md`](HARNESS-MIGRATION.md) | **迁到 pi-agent-core `AgentHarness` 的方案**（做哪些、不做哪些、每步验收与回滚） | 阻抗不匹配与解法、已核实的库事实（带坐标）、风险表 | 脚手架契约（→ `SCAFFOLD-CONTRACT.md`）；进度（→ `ROADMAP.md`） |
-| [`archive/`](archive/) | **历史快照**（已落地或已被取代的评估/审计/开发日记） | 当时的证据与结论 | 任何现状判断——文件顶部有冻结横幅。当前：`MEMORY-DETAIL.md`（A–F 完整叙述）、`MEMORY-D52-D60.md` 与 `MEMORY-D61-D71.md`（D52–D71 长文）、`CHANGELOG-DEV-DIARY.md`（0.6.0 后的逐 PR 日记）、`DATA-CHANNELS-EVALUATION.md`、`HARNESS-AUDIT-2026-09-26.md` |
+| [`archive/`](archive/) | **历史快照**（已落地或已被取代的评估/审计/开发日记） | 当时的证据与结论 | 任何现状判断——文件顶部有冻结横幅。当前：`MEMORY-DETAIL.md`（A–F 完整叙述）、`MEMORY-D52-D60.md`、`MEMORY-D61-D71.md` 与 `MEMORY-D72-D89.md`（D52–D89 长文）、`CHANGELOG-DEV-DIARY.md`（0.6.0 后的逐 PR 日记）、`DATA-CHANNELS-EVALUATION.md`、`HARNESS-AUDIT-2026-09-26.md` |
 
 ## 2. 规则（执行清单）
 

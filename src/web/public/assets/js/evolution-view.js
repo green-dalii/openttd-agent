@@ -149,15 +149,31 @@ window.EvolutionView = (function () {
           .slice()
           .sort((a, b) => ((b.promotion && b.promotion.value) || 0) - ((a.promotion && a.promotion.value) || 0))
           .map((c) => {
-            const p = c.promotion || { promoted: false, value: 0, runs: 0, reason: "" };
+            // The fallback must NOT carry `value: 0`: a missing promotion block
+            // means "not measured", and 0 would render as a real measurement.
+            const p = c.promotion || { promoted: false, runs: 0, reason: "" };
             const params = Object.entries(c.params || {})
               .map(([k, v]) => `${k}=${v}`)
               .join(", ");
+            // Two measures, both shown (2026-11-14, 方案 C):
+            //   - **operating profit/day** is what the gate reads (strategy quality);
+            //   - **net cash flow/day** is company health (it contains building,
+            //     vehicles and interest, so it is negative while a run builds).
+            // Showing only one would make the page do the very substitution that
+            // made the gate unopenable. A missing reading shows "—", never 0.
+            // A **missing** reading must read "—", not "£0": "no measurement" and
+            // "measured zero" are different facts (D60).
+            const hasOperating = typeof p.value === "number" && Number.isFinite(p.value);
+            const operating = hasOperating ? U.fmtMoney(p.value) : "—";            const cash = p.netCashFlowPerDay;
+            const netCashFlowValue =
+              cash === null || cash === undefined || !Number.isFinite(Number(cash)) ? "—" : U.fmtMoney(cash);
             return {
               id: c.id,
               label: params ? `${c.action} (${params})` : String(c.action),
               runs: U.fmtInt(p.runs),
               value: U.fmtMoney(p.value),
+              operatingValue: operating,
+              netCashFlowValue,
               // Two independent gates; the page must not collapse them into one
               // "enabled" bit, or a reviewer cannot tell which is missing.
               promoted: Boolean(p.promoted),

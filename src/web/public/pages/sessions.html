@@ -478,8 +478,11 @@
       </div>
       <p class="dim">
         <strong>Both</strong> gates must pass: the evidence gate
-        (measured profit above threshold, in ≥ 2 games) and human confirmation.
-        The profit reading comes from each run's record — never from the model's own claim.
+        (measured <strong>operating profit</strong> above threshold, in ≥ 2 games) and human confirmation.
+        The reading comes from each run's record — never from the model's own claim.
+        Operating profit is the gate's measure because it asks "does this strategy pay";
+        net cash flow (shown next to it) is the company's health and contains building,
+        vehicles and interest.
         The engine only advises — nothing takes effect until you tick it.
       </p>
       <ol class="mem-library">
@@ -488,7 +491,7 @@
             <span class="mem-kind" x-text="s.injectable ? 'live' : s.promoted ? 'confirmed?' : 'candidate'"></span>
             <span class="mem-body">
               <span x-text="s.label"></span>
-              <span class="dim" x-text="s.runs + ' game(s) · avg ' + s.value + ' profit/game day'"></span>
+              <span class="dim" x-text="s.runs + ' game(s) · operating ' + s.operatingValue + '/game day (gate) · net cash flow ' + s.netCashFlowValue + '/game day'"></span>
               <span class="dim" x-show="s.reason" x-text="s.reason"></span>
             </span>
             <label class="mem-toggle">

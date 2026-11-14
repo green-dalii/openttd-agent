@@ -65,6 +65,9 @@ function card(over: Partial<StrategyCard> = {}): StrategyCard {
 		action: over.action ?? "build_bus_route",
 		params,
 		profitPerDayPerRun: [MIN_STRATEGY_PROFIT_PER_DAY + 10, MIN_STRATEGY_PROFIT_PER_DAY + 20],
+		// The gate reads **operating profit** (2026-11-14): net cash flow contains
+		// building/vehicles, so it is negative by construction while a run builds.
+		operatingProfitPerDayPerRun: [MIN_STRATEGY_PROFIT_PER_DAY + 10, MIN_STRATEGY_PROFIT_PER_DAY + 20],
 		evidence: ["money +18000"],
 		// 一局一个读数：两个读数 ⇒ 两个独立局（真机发现 2026-11-10）。
 		sourceSessionIds: ["s1", "s2"],
@@ -91,6 +94,8 @@ const FACTS = {
 		// Without it a sample cannot be judged, so the pool must stay empty.
 		netCashFlow: 365 * 40,
 		profitPerDay: 40,
+		// The gate's measure (2026-11-14): operating profit per game day.
+		operatingProfitPerDay: 40,
 		simulatedDays: 365,
 		income: 365 * 40,
 	},
@@ -254,7 +259,13 @@ describe("reflection-run: runReflection(局终反思编排)", () => {
 	it("未通过门槛的候选不得被注入(池子本身不可注入)", () => {
 		// The pool holds candidates; injection must still require the gate. Without
 		// this, a single game's sample would be teachable advice.
-		const candidate: StrategyCard = { ...card(), enabled: true, profitPerDayPerRun: [999999] };
+		// 两个口径都只留**一个**读数 ⇒ 只算一局 ⇒ 过不了"已验证局≥2"（闸读运营利润）。
+		const candidate: StrategyCard = {
+			...card(),
+			enabled: true,
+			profitPerDayPerRun: [999999],
+			operatingProfitPerDayPerRun: [999999],
+		};
 		const mem = { lessons: [], strategies: selectStrategies([candidate]), lines: [] };
 		expect(mem.strategies).toEqual([]);
 	});

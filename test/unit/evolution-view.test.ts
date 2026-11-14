@@ -37,6 +37,10 @@ interface EvModel {
 		enabled: boolean;
 		injectable: boolean;
 		reason: string;
+		/** The gate's measure: operating profit per game day. */
+		operatingValue: string;
+		/** Company health: net cash flow per game day ("—" when not measured). */
+		netCashFlowValue: string;
 	}[];
 	injectableCount(): number;
 	empty(): boolean;
@@ -287,6 +291,46 @@ describe("evolution-view: 策略候选池", () => {
 	it("容忍空/垃圾 strategies", () => {
 		expect(withData({ strategies: [] }).strategyRows()).toEqual([]);
 		expect(withData({ strategies: "nope" }).strategyRows()).toEqual([]);
+	});
+
+	// 方案 C（2026-11-14）：两个口径**都**要显示 ——
+	// 运营利润（闸的度量，策略质量）与净现金流（公司健康）。
+	// 只显示一个，看板就会开始替读者做那个我们刚发现的错误换算。
+	it("两个口径都显示：运营利润（闸的度量）与净现金流（公司健康）", () => {
+		const m = withData({
+			strategies: [
+				strategy({
+					promotion: {
+						promoted: true,
+						value: 17.07,
+						runs: 2,
+						netCashFlowPerDay: -1499.28,
+						reason: "+17.1 operating profit/game day across 2 games",
+					},
+				}),
+			],
+		});
+		const row = m.strategyRows()[0]!;
+		expect(row.operatingValue).toContain("17");
+		// The stub's formatter has no thousands separator; assert the magnitude.
+		expect(row.netCashFlowValue).toContain("1499");
+	});
+
+	it("净现金流没测到时显示「—」（没测到 ≠ 0）", () => {
+		const m = withData({
+			strategies: [
+				strategy({
+					promotion: { promoted: true, value: 17.07, runs: 2, netCashFlowPerDay: null, reason: "" },
+				}),
+			],
+		});
+		expect(m.strategyRows()[0]!.netCashFlowValue).toBe("—");
+	});
+
+	it("没有 promotion 字段时两个口径都不编数", () => {
+		const row = withData({ strategies: [{ id: "x", action: "a", params: {}, enabled: true }] }).strategyRows()[0]!;
+		expect(row.operatingValue).toBe("—");
+		expect(row.netCashFlowValue).toBe("—");
 	});
 });
 

@@ -74,14 +74,38 @@ export interface StrategyCard {
 	action: string;
 	params: Record<string, number | string>;
 	/**
-	 * One **measured profit rate** per verified game (per game day).
+	 * One **measured profit rate** per verified game (per game day) — **net cash
+	 * flow** (company health: revenue minus building, vehicles and interest).
 	 *
-	 * Stamped by code from the run's record (`income / 365`), never by the model.
+	 * Stamped by code from the run's record, never by the model.
 	 * Cards written before 2026-11-01 carry `valuePerRun` (the model's own money
 	 * claim) instead and are therefore **not** promotable: no profit reading is
 	 * "not measured", not "measured 0".
 	 */
 	profitPerDayPerRun?: number[];
+	/**
+	 * One **measured operating-profit rate** per verified game (per game day).
+	 *
+	 * Operating profit = freight revenue minus running cost; it excludes building,
+	 * vehicles and interest. This is the measure the **promotion gate uses**
+	 * (2026-11-14): the gate asks "does this strategy pay", and net cash flow
+	 * answers a different question — while a run is still building, net cash flow
+	 * is negative by construction, so the gate could never open for any strategy
+	 * that includes building (real run: net -1499.28/day vs operating +14.13/day).
+	 *
+	 * Absent = "not measured" (cards written before this measure existed), never 0.
+	 */
+	operatingProfitPerDayPerRun?: number[];
+	/**
+	 * The games `operatingProfitPerDayPerRun` belongs to (same order).
+	 *
+	 * Why a second session list: the two measures are read from the same run but
+	 * a run may have only one of them (operating profit not measured) ⇒ the two
+	 * arrays can cover **different** games ⇒ pairing them by index against
+	 * `sourceSessionIds` would silently attribute a reading to the wrong game.
+	 * Absent = no operating reading at all.
+	 */
+	operatingProfitSessionIds?: string[];
 	/** Legacy field (pre-2026-11-01 pools). Read for display only; never gates. */
 	valuePerRun?: number[];
 	evidence: string[];

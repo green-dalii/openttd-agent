@@ -430,8 +430,10 @@ window.I18nMessages = {
     "environment variables always win over both files.": "环境变量永远优先于这两个文件。",
     "every": "每一条",
     "Both": "两道",
-    "gates must pass: the evidence gate (measured profit above threshold, in ≥ 2 games) and human confirmation. The profit reading comes from each run's record — never from the model's own claim. The engine only advises — nothing takes effect until you tick it.":
-      "闸都要过：证据闸（实测利润高于阈值，且至少 2 局都测到）和人工确认。利润读数来自每一局自己的记录 —— 绝不采信模型自己的说法。引擎只给建议 —— 你不打勾，什么都不会生效。",
+    "gates must pass: the evidence gate (measured": "闸都要过：证据闸（实测",
+    "operating profit": "运营利润",
+    "above threshold, in ≥ 2 games) and human confirmation. The reading comes from each run's record — never from the model's own claim. Operating profit is the gate's measure because it asks \"does this strategy pay\"; net cash flow (shown next to it) is the company's health and contains building, vehicles and interest. The engine only advises — nothing takes effect until you tick it.":
+      "高于阈值，且至少 2 局都测到）和人工确认。读数来自每一局自己的记录 —— 绝不采信模型自己的说法。闸用运营利润，因为它问的是「这条策略赚不赚钱」；旁边的净现金流是公司的健康度，它含基建、购车与利息。引擎只给建议 —— 你不打勾，什么都不会生效。",
     "{0} summaries recorded": "已记录 {0} 条总结",
     "{0} images captured": "已截 {0} 张图",
     "{0} runs recorded": "已记录 {0} 局",
