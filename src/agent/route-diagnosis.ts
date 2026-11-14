@@ -66,6 +66,30 @@ export interface RouteDiagEnd {
 	waitingViaNone?: number;
 	/** 这端的货里，有多少是**下一跳就是自己**的（-1 = 没测到）。 */
 	waitingViaSelf?: number;
+	/**
+	 * 这一端**收不收**这个货（引擎按 catchment 算；>= 8 = 收）。
+	 * null = 没测到。
+	 *
+	 * 为什么关键：卸货时引擎先看车站**是否收货**（`station_cmd.cpp`：
+	 * `GoodsEntry::State::Acceptance`）⇒ 不收货就把货**留在车上**
+	 * ⇒ “车到了卸货站却没卸”与“货没送到”是两件事。
+	 */
+	acceptanceAroundTile?: number | null;
+	/**
+	 * 这一端对这个货的**车站评分**（-1 = 引擎没给评分：车站还没收过这个货）。
+	 *
+	 * 为什么关键：产业把货交给车站看的是**评分**（`CanMoveGoodsToStation`：
+	 * 评分 0 才拒收）⇒ 装货侧评分 0 = 产业不再交货（车等不到货）。
+	 */
+	cargoRating?: number | null;
+	/** 站牌格有几条相邻的路（0 = 车根本开不上去）。null = 没测到。 */
+	stationNeighbourRoads?: number | null;
+	/** 引擎自己说的**入口格**（车从这边开过来才会停）；-1 = 没测到。 */
+	engineFrontTile?: number;
+	/** 站牌格是不是公路车站（false = 不是 ⇒ 车不会停）。null = 没测到。 */
+	stationIsRoadStation?: boolean | null;
+	/** 是不是**穿行式**停靠点（停靠规则完全不同）。null = 没测到。 */
+	stationIsDriveThrough?: boolean | null;
 }
 
 /** 一条线的全部事实。 */
@@ -110,6 +134,18 @@ export const ROUTE_DIAGNOSIS_REASONS = [
 	"vehicle_not_moving",
 	/** 装货端没有货在等 ⇒ 没东西可运（不是故障）。 */
 	"no_cargo_waiting",
+	/**
+	 * 卸货端**不收**这个货（收货额度 < 8）⇒ 引擎把货**留在车上**
+	 * ⇒ 车到了卸货站也卸不下来 ⇒ 这条线永远不产生交付。
+	 */
+	"unloading_end_does_not_accept_cargo",
+	/**
+	 * 装货端的**车站评分是 0** ⇒ 产业不再往这个站交货
+	 * （引擎：`CanMoveGoodsToStation` 评分 0 才拒收）⇒ 车等不到货。
+	 */
+	"loading_end_rating_zero",
+	/** 站牌格**没有相邻的路** ⇒ 车开不上去 ⇒ 它永远不会在站上停。 */
+	"stop_has_no_road_connection",
 	/** 没发现原因（事实不足以判定故障）。 */
 	"no_fault_found",
 ] as const;
@@ -213,6 +249,49 @@ export function diagnoseRoute(route: RouteDiagRoute): RouteDiagnosis {
 				job,
 				reason: "engine_cannot_carry_cargo",
 				detail: `vehicle ${v.id} on route ${job} cannot carry ${cargo} at all (its engine does not take it)`,
+			};
+		}
+	}
+
+	// 车站本身能不能收货/交货（**引擎按 catchment 算的事实**）。
+	//
+	// 顺序：先看**卸货端收不收**（不收 ⇒ 车到了也卸不下来 ⇒ 永远没有交付），
+	// 再看**装货端评分**（评分为 0 ⇒ 产业不再交货 ⇒ 车等不到货）。
+	const unloadEnd = endOf(route, "unload");
+	const unloadAcceptance = isNum(unloadEnd?.acceptanceAroundTile) ? unloadEnd.acceptanceAroundTile : null;
+	if (unloadAcceptance !== null && unloadAcceptance < 8) {
+		return {
+			job,
+			reason: "unloading_end_does_not_accept_cargo",
+			detail:
+				`the unloading end of route ${job} accepts ${unloadAcceptance} unit(s) of ${cargo} (the game ` +
+				"needs 8): it does not accept this cargo, so the game keeps the load on the vehicle and nothing " +
+				"is ever delivered",
+		};
+	}
+	const loadRating = isNum(loadEnd?.cargoRating) ? loadEnd.cargoRating : null;
+	// 评分 0 = 车站“满了”（引擎：`CanMoveGoodsToStation` 评分 0 才拒收）
+	// ⇒ 产业不再交货。评分 -1 = 引擎**没给评分**（这个站还没收过这种货）
+	// ⇒ 那是“没测到”，不是“产业不交货”。
+	if (loadRating === 0) {
+		return {
+			job,
+			reason: "loading_end_rating_zero",
+			detail:
+				`the loading end of route ${job} has a station rating of ${loadRating} for ${cargo}: the industry ` +
+				"will not hand over any more cargo to it, so the vehicles have nothing to pick up",
+		};
+	}
+	// 站牌格没有相邻的路 ⇒ 车开不上去（它永远不会在站上停）。
+	for (const e of route.ends ?? []) {
+		if (!isNum(e.stationNeighbourRoads)) continue;
+		if (e.stationNeighbourRoads <= 0) {
+			return {
+				job,
+				reason: "stop_has_no_road_connection",
+				detail:
+					`the ${e.role} end of route ${job} has no road next to its station tile: vehicles cannot ` +
+					"drive onto it, so they never stop there",
 			};
 		}
 	}

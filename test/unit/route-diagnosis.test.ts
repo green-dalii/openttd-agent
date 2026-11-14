@@ -226,3 +226,48 @@ describe("线路诊断：词表是封闭的", () => {
 		expect(out[1]?.reason).toBe("no_vehicles");
 	});
 });
+
+/**
+ * 车站侧的事实（2026-11-14 真机加的读数）：引擎按 **catchment** 算车站收不收这个货，
+ * 按 **评分** 算产业还交不交货 ⇒ 这两个数直接决定“车能不能装/能不能卸”。
+ */
+describe("线路诊断：车站侧的事实（收货额度 / 评分 / 路）", () => {
+	const withEnds = (load: Record<string, unknown>, unload: Record<string, unknown>): RouteDiagRoute => {
+		const r = route();
+		r.ends = [
+			{ role: "load", tile: 60815, station: 0, waiting: 303, ...load },
+			{ role: "unload", tile: 39473, station: 1, waiting: 0, ...unload },
+		];
+		return r;
+	};
+
+	it("卸货端不收这个货 ⇒ unloading_end_does_not_accept_cargo（车到了也卸不下来）", () => {
+		const r = withEnds({ acceptanceAroundTile: 0, cargoRating: 54 }, { acceptanceAroundTile: 0 });
+		expect(diagnoseRoute(r).reason).toBe("unloading_end_does_not_accept_cargo");
+	});
+
+	it("卸货端收货额度够（>= 8）⇒ 不说那个原因", () => {
+		const r = withEnds({ acceptanceAroundTile: 0, cargoRating: 54 }, { acceptanceAroundTile: 16 });
+		expect(diagnoseRoute(r).reason).not.toBe("unloading_end_does_not_accept_cargo");
+	});
+
+	it("装货端评分为 0 ⇒ loading_end_rating_zero（产业不再交货）", () => {
+		const r = withEnds({ cargoRating: 0 }, { acceptanceAroundTile: 16 });
+		expect(diagnoseRoute(r).reason).toBe("loading_end_rating_zero");
+	});
+
+	it("装货端评分是 -1（引擎没给评分）⇒ 不说“产业不再交货”", () => {
+		const r = withEnds({ cargoRating: -1 }, { acceptanceAroundTile: 16 });
+		expect(diagnoseRoute(r).reason).not.toBe("loading_end_rating_zero");
+	});
+
+	it("站牌格没有相邻的路 ⇒ stop_has_no_road_connection（车开不上去）", () => {
+		const r = withEnds({ stationNeighbourRoads: 0 }, { stationNeighbourRoads: 1 });
+		expect(diagnoseRoute(r).reason).toBe("stop_has_no_road_connection");
+	});
+
+	it("收货额度没测到（null）⇒ 不能说“不收货”", () => {
+		const r = withEnds({ acceptanceAroundTile: null }, { acceptanceAroundTile: null });
+		expect(diagnoseRoute(r).reason).not.toBe("unloading_end_does_not_accept_cargo");
+	});
+});

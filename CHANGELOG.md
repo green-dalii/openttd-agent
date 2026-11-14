@@ -18,20 +18,20 @@
   **operating profit** (freight revenue minus running cost) - not the net cash flow, which also contains building,
   vehicles and interest - and it says when it is only a **lower bound**. Compare gained an operating-profit axis.
 - **A probe can now answer whether the same savegame gives the same run.** `scripts/determinism-probe.ts` saves a map,
-  copies the savegame, starts two servers from it (`-g <savegame>`), sends the same command to both and compares the
-  money trajectories: **two loads of the same savegame produced identical money levels**, so a counterfactual fork is
-  possible. It also pinned down that a script's own state does **not** travel in a savegame, so both fork arms must
-  start from the savegame.
+  copies it, starts two servers from it (`-g <savegame>`), sends the same command to both and compares the money
+  trajectories: **two loads produced identical money levels**, so a counterfactual fork is possible. A script's own
+  state does **not** travel in a savegame, so both fork arms must start from it.
 - **The model can now do the economics of a freight line before it spends.** `estimate_route` takes a cargo and two
-  industries and answers with the engine's own numbers: the price per cargo unit over that distance
-  (`GSCargo.GetCargoIncome`), and per truck its capacity, price and running cost
-  (`GSEngine.GetCapacity/GetPrice/GetRunningCost`). Every figure carries its direction - revenue is an **upper**
-  bound, cost a **lower** bound - and the tool does **not** say whether the line pays off.
-- **A freight line can be built, refit and "live" while nothing is ever delivered - and now the model can ask why.**
-  The engine reported 290 units of coal waiting at the loading station and the whole run delivered nothing (real
-  machine, seed 4242) - the line was built, refit and reported as live, yet nothing ever moved. The model now has a
-  read-only `diagnose_route` tool that asks the game where the vehicles are, what orders they have and how much waits
-  at each end, and the server turns those facts into a named reason.
+  industries and answers with the engine's numbers: price per cargo unit over that distance (`GSCargo.GetCargoIncome`),
+  and per truck its capacity, price and running cost (`GSEngine.GetCapacity/GetPrice/GetRunningCost`). Every figure
+  carries its direction - revenue is an **upper** bound, cost a **lower** bound - and the tool does **not** say
+  whether the line pays off.
+- **A freight line that looked dead is not dead - and the model can now ask why.** 290 units of coal waited at the
+  loading station and the run delivered nothing (real machine, seed 4242). It is not broken: the vehicles stop, load
+  20 tons, unload, and the cargo monitor records `own_by_industry = [{COAL, 53, 10}]` - the run was too short for a
+  **round trip** (177 tiles each way), the first visit preceding the mine's first production. The read-only
+  `diagnose_route` tool reports where the vehicles are and what waits at each end; the server names a reason from the
+  engine's own criteria (unloading end accepts this cargo, loading end's rating zero, stop reachable by road).
 
 - **The full map is now one question away.** The observation carries a **sample** of the industries
   (the top producers) and only the cargo types that had production - which keeps the payload

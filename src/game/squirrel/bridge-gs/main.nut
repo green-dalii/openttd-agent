@@ -2076,6 +2076,63 @@ class BridgeV1 extends GSController {
         }
         e.rawset("waitingViaSelf", viaSelf);
         e.rawset("waitingViaNone", viaNone);
+        // **引擎自己怎么看这个停靠点**（Issue #113 的决定性事实）。
+        //
+        // 为什么需要：车“开过站不停”有三种可能（引擎判据不同）：
+        //   ① 站牌格**没有路** ⇒ 车根本开不上去；
+        //   ② 停靠点是**穿行式**（drive-through）⇒ 停靠规则完全不同；
+        //   ③ **入口方向**与车来的方向相反 ⇒ 车开过去也不会停
+        //      （引擎的 `entrance_dir` = 从 front tile 指向站牌格的方向）。
+        // 这三条都是**事实**，由引擎回答；具名原因由服务端算（不在 GS 里下判断）。
+        local isRoad = null;
+        local isStationTile = null;
+        local isDriveThrough = null;
+        local hasRoadType = null;
+        local neighbourRoads = null;
+        local engineFront = null;
+        try {
+            if (tile != null && tile >= 0 && GSMap.IsValidTile(tile)) {
+                isRoad = GSRoad.IsRoadTile(tile);
+                isStationTile = GSRoad.IsRoadStationTile(tile);
+                isDriveThrough = GSRoad.IsDriveThroughRoadStationTile(tile);
+                hasRoadType = GSRoad.HasRoadType(tile, GSRoad.ROADTYPE_ROAD);
+                neighbourRoads = GSRoad.GetNeighbourRoadCount(tile);
+                // 引擎自己的**入口格**（bay stop 的停靠方向）：车要从这个方向
+                // 开过来才会停 ⇒ 入口方向与车来的方向相反 ⇒ 车只会开过去。
+                engineFront = GSRoad.GetRoadStationFrontTile(tile);
+            }
+        } catch (errStop) {
+            isRoad = null;
+        }
+        e.rawset("stationIsRoad", isRoad);
+        e.rawset("stationIsRoadStation", isStationTile);
+        e.rawset("stationIsDriveThrough", isDriveThrough);
+        e.rawset("stationHasRoadType", hasRoadType);
+        e.rawset("stationNeighbourRoads", neighbourRoads);
+        e.rawset("engineFrontTile", (engineFront == null ? -1 : engineFront));
+        // **这一端收不收这个货**（引擎按 catchment 算）。
+        //
+        // 为什么关键：卸货时引擎先看车站**是否收货**
+        // （`station_cmd.cpp`：`GoodsEntry::State::Acceptance`，未收货就把货**留在车上**）
+        // ⇒ “车到了卸货站却没卸” 与 “货没送到” 是两件事。
+        // 收货额度来自**产业的近期产量**（`Industry::GetAcceptance`）⇒ 会随时间波动 ⇒
+        // 建站时够（>= 8）不代表卸货时还够 ⇒ 这两个读数必须**随时间**看。
+        local acceptAround = null;
+        local rating = null;
+        try {
+            if (tile != null && tile >= 0 && GSMap.IsValidTile(tile) && cargo != null && cargo >= 0) {
+                local rad = GSStation.GetCoverageRadius(GSStation.STATION_TRUCK_STOP);
+                if (rad <= 0) rad = 3;
+                acceptAround = GSTile.GetCargoAcceptance(tile, cargo, 1, 1, rad);
+            }
+            if (st != null && st >= 0 && GSStation.IsValidStation(st) && cargo != null && cargo >= 0) {
+                rating = GSStation.GetCargoRating(st, cargo);
+            }
+        } catch (errAcc) {
+            acceptAround = null;
+        }
+        e.rawset("acceptanceAroundTile", acceptAround);
+        e.rawset("cargoRating", rating);
         return e;
     }
 
