@@ -9,6 +9,16 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **The per-decision tool budget was cutting off the agent's actions.** The budget allowed 12 tool calls per
+  decision, chosen to cap a measured runaway - but a controlled experiment (2 arms x 2 seeds, same model, same
+  250-day horizon, all four runs reaching the horizon) showed it cut the model's **actions**, not its idling: the
+  blocked calls were `build_freight_route`, `build_bus_route` and `set_route_vehicles`. With 24 calls per decision
+  the blocked calls fell from 11 and 6 to 3 and 1, deliveries per game day rose from 2.19/0.86 to 5.14/1.75,
+  operating profit per game day rose from +4.57/+5.06 to **+48.27/+25.49**, and the tokens per delivered unit
+  **halved** - while the tokens per run did not rise. The default is now 24 (still a knob, still in the manifest).
+
 ### Added
 
 - **The company now has an operating profit of its own.** The engine reports each vehicle's profit "so far this year", so the number drops when the year turns and a sold vehicle takes its history with it. The harness now keeps its own ledger: the first reading is only a baseline, later readings add the difference, a sold vehicle's
@@ -31,11 +41,10 @@
   `diagnose_route` tool reports where the vehicles are and what waits at each end; the server names a reason from the
   engine's own criteria (unloading end accepts this cargo, loading end's rating zero, stop reachable by road).
 
-- **The full map is now one question away.** The observation carries a **sample** of the industries
-  (the top producers) and only the cargo types that had production - which keeps the payload
-  small, but leaves the model unable to tell "no production" from "not measured". Two read-only
-  tools (`get_industries`, `get_cargo`) now fetch the whole thing on demand, and the Run page's
-  industry table has an **expand all** button. Sample and full list come from **one scan**.
+- **The full map is now one question away.** The observation carries a **sample** of the industries (the top producers)
+and only the cargo types that had production - which keeps the payload small, but leaves the model unable to tell "no
+production" from "not measured". Two read-only tools (`get_industries`, `get_cargo`) now fetch the whole thing on
+demand, and the Run page's industry table has an **expand all** button. Sample and full list come from **one scan**.
 - **The server's own vocabulary is now translated too - by id.** The outcome classes, the problem codes, the delivery
   measures and the knob values are the **server's** wording, and the server keeps exactly one canonical wording of
   them. The front end now looks them up **by id** (`outcome.token_cap`, `problem.no_credential`) and falls back to the
@@ -52,10 +61,9 @@
   sentence in the four pages (Run / Compare / History / Configure) has a Chinese translation -
   324 of them, where before 226 silently fell back to English. The pages also had Chinese text
   hard-coded in the markup, so the **English** interface showed half-Chinese captions.
-- **The freight axis has a paired comparison.** A benchmark comparison now also reports **cargo
-  delivered per game day** (the game script's cargo monitor, cargo half only - a different measure
-  from the main axis, never added to it). Passengers are not in it: the monitor does not count them.
-  A run with no cargo reading is **not measured**, not zero.
+- **The freight axis has a paired comparison.** A benchmark comparison now also reports **cargo delivered per game day**
+(the game script's cargo monitor, cargo half only - a different measure from the main axis, never added to it).
+Passengers are not in it: the monitor does not count them. A run with no cargo reading is **not measured**, not zero.
 - **The freight numbers reach the screen.** The server had been computing them for a while: the scorecard splits cargo
   from passengers, and the attribution knows what each freight line delivered - but neither was drawn anywhere. The
   Run page's route table now has a **Delivered** column (how much that line delivered; a delivery that cannot be
@@ -99,12 +107,11 @@ unloading site must accept it. A refused command now reaches the model.
   age, speed, load, profit this year) and `inspect_town` (name, population, houses, location, growth rate). The channel is the admin port's gameScript **with an
   answer**: the client injects an id, the GS replies `{kind:"answer", id, ok, data}`, and the two are matched by id; when there is no answer the tool says it could not
   ask.
-- **A decision now has a result on the world's side.** "The executor says it built the line" is not a
-  result; "the first vehicle reached the station" is. The join is the **vehicle id**: the executor's route
-  statistics report the line's `vehiclesIds`, the pushed events report the vehicle, and the two together
-  make "the route decision 3 ordered had its first vehicle arrive on 1950-03-01" a fact that can be
-  booked - it lands in the route ledger and, from there, in the cross-run memory. An event about a vehicle
-  we do not know is **not attributed** (attribution must not be guessed).
+- **A decision now has a result on the world's side.** "The executor says it built the line" is not a result; "the first
+vehicle reached the station" is. The join is the **vehicle id**: the executor's route statistics report the line's
+`vehiclesIds`, the pushed events report the vehicle, and the two together make "the route decision 3 ordered had its
+first vehicle arrive on 1950-03-01" a fact that can be booked - it lands in the route ledger and, from there, in the
+cross-run memory. An event about a vehicle we do not know is **not attributed** (attribution must not be guessed).
 
 - **The model can finally see what the game pushes at it.** The engine pushes events to the GameScript (a vehicle was lost, the first vehicle reached a station, an
   industry opened) - and our Bridge GS **drained them and threw them away**: only the admin-port event was handled, so a model could never see "my bus arrived" unless
@@ -113,11 +120,10 @@ unloading site must accept it. A refused command now reaches the model.
   (real model, seed 4242): the first vehicle reaching each station arrived twice. Two Squirrel traps came with it (MEMORY D95): a **class member must be declared**
   before it is assigned, and **reading a missing key throws**.
 
-- **A comparison only compares one question.** Runs that answered a **different** question - a
-  different scaffold, a different observation surface, a different slice of the world - are no longer
-  mixed into one table. The server groups the metric rows by the manifest's own fields (scaffold +
-  observation shape + observation policy), the page offers the groups, and the numbers below belong to
-  **one** group; the other groups are counted, not dropped.
+- **A comparison only compares one question.** Runs that answered a **different** question - a different scaffold, a
+different observation surface, a different slice of the world - are no longer mixed into one table. The server groups
+the metric rows by the manifest's own fields (scaffold + observation shape + observation policy), the page offers the
+groups, and the numbers below belong to **one** group; the other groups are counted, not dropped.
 
 - **The model can finally see its financing, and it knows why its balance moves.** The company facts
   already carried the loan, but not how much more could be borrowed - and the **interest rate is not
@@ -125,20 +131,18 @@ unloading site must accept it. A refused command now reaches the model.
   now reads the company's loan ceiling (it has to enter company mode to do it) and reports it, so the
   projection carries `financing { loanCeiling, loanInterval }` (real machine: 300000 / 10000).
 
-- **The model can finally see every town, and the dashboard knows which slice it saw.** The Bridge GS
-  reported the ten biggest towns only, so every other town reached the model as a bare number (`#14 ->
-  #2`) - it could not even name the place it was routing to. The GS now reports **every** town with its
-  name (real machine: all 26 towns, with names, in `observe()`). And because "all 26 towns" and "the ten
-  biggest" are **different questions** even when the facts have the same shape, the GS now **states its
-  own policy** (`towns=all;industries=top12`) and that statement lands in the manifest - so Compare can
-  say "these runs did not answer the same question" instead of quietly comparing them.
+- **The model can finally see every town, and the dashboard knows which slice it saw.** The Bridge GS reported the ten
+biggest towns only, so every other town reached the model as a bare number (`#14 -> #2`) - it could not even name the
+place it was routing to. The GS now reports **every** town with its name (real machine: all 26 towns, with names, in
+`observe()`). And because "all 26 towns" and "the ten biggest" are **different questions** even when the facts have the
+same shape, the GS now **states its own policy** (`towns=all;industries=top12`) and that statement lands in the manifest
+- so Compare can say "these runs did not answer the same question" instead of quietly comparing them.
 
-- **The observation surface now has a fingerprint of its own.** Two runs could share a scaffold and
-  still have seen different worlds - and nothing said so. The payload fingerprint cannot answer it
-  across runs (it contains the world, so it differs on every seed - it would cry wolf), so there is
-  now a third fingerprint: the **structure** of the world facts the model sees (which facts, which
-  types; values and array lengths ignored). It depends on the code only ⇒ it can be computed
-  **before** a run, both backends record it, and the preview promises it.
+- **The observation surface now has a fingerprint of its own.** Two runs could share a scaffold and still have seen
+different worlds - and nothing said so. The payload fingerprint cannot answer it across runs (it contains the world, so
+it differs on every seed - it would cry wolf), so there is now a third fingerprint: the **structure** of the world facts
+the model sees (which facts, which types; values and array lengths ignored). It depends on the code only ⇒ it can be
+computed **before** a run, both backends record it, and the preview promises it.
 
 - **A comparison can start from the comparison.** The Compare page could only look at runs that already existed: picking the models, the worlds and the caps and then *starting that plan* was impossible. The plan is now computed **server-side** (the page estimates nothing): how many runs it would start, which caps apply, whether the spend is measurable, which model each cell uses - with the same field names the manifest uses, so plan and finished run compare field by field. Launching runs the cells **one after another** (one process, one game port); a failed cell is recorded and the rest still run. The refusals happen before anything starts: a cost cap on a model without a price table, an unknown model, or a plan that collides with a running game.
 
@@ -191,12 +195,11 @@ unloading site must accept it. A refused command now reaches the model.
 - **`capabilities()`**: the agent can ask which actions exist before trying them.
 
 ### Fixed
-- **The documentation had drifted away from the code.** Several pointers aimed at things that do not
-  exist: a SPEC section number that was never created (referenced from the source, the game script and
-  two tests), an index table with leftover counts that broke the table, a probe command quoted with flags
-  the script does not accept, and three documents still marked "to be reviewed" after they had been
-  implemented. The roadmap now carries only unfinished work, the lesson index covers every lesson, and
-  the volatile environment facts (binary, ports, credentials, gate) have a single home.
+- **The documentation had drifted away from the code.** Several pointers aimed at things that do not exist: a SPEC
+section number that was never created (referenced from the source, the game script and two tests), an index table with
+leftover counts that broke the table, a probe command quoted with flags the script does not accept, and three documents
+still marked "to be reviewed" after they had been implemented. The roadmap now carries only unfinished work, the lesson
+index covers every lesson, and the volatile environment facts (binary, ports, credentials, gate) have a single home.
 - **The benchmark matrix could not use a real provider, and it could also do nothing at all.** Every cell is its own
   data directory while the key lives outside the repository, so a cell had no credentials and failed; `--credentials`
   now copies the file into each cell (0600, never printed, checked before the first cell runs). Separately, the
@@ -210,13 +213,12 @@ unloading site must accept it. A refused command now reaches the model.
   sentence written across two lines kept its line breaks in the DOM (the lookup key never matched); a sentence
   broken up by an inline `<code>` was never translated at all; and switching back to English left the page mixed,
   because the original text was remembered on the **parent** element.
-- **The harness was counting days on a calendar of its own.** The game day came from a **fictional 360-day year**
-  (31 January and 1 February mapped to the same index), so a "250 game day" run was really about 256 **calendar**
-  days, and the copy lived in six places. The clock is now the **engine's calendar** in one module: the game day is
-  the calendar day, quarter boundaries are the engine's quarters (1/4/7/10 January), and a route's "income per day"
-  divides by the day of the year the engine reports. The reading this exposed - that the promotion gate's
-  `income / 365` is a year-to-date net cash flow and not a per-game-day profit - is written down in SPEC §10.55 /
-  §10.76.
+- **The harness was counting days on a calendar of its own.** The game day came from a **fictional 360-day year** (31
+January and 1 February mapped to the same index), so a "250 game day" run was really about 256 **calendar** days, and
+the copy lived in six places. The clock is now the **engine's calendar** in one module: the game day is the calendar
+day, quarter boundaries are the engine's quarters (1/4/7/10 January), and a route's "income per day" divides by the day
+of the year the engine reports. The reading this exposed - that the promotion gate's `income / 365` is a year-to-date
+net cash flow and not a per-game-day profit - is written down in SPEC §10.55 / §10.76.
 - **The profit reading was the wrong quantity, the readings were never written down, and the gate was reading the
   wrong one.** The gate read `income / 365`, but the engine's `income` is the **current year's** net cash flow (it
   resets on 1 January) and 365 is a year length, not the run's length - so it was never "this run's profit per game
@@ -264,13 +266,12 @@ unloading site must accept it. A refused command now reaches the model.
   touched: the server now answers with a `needs` marker ("no model selected yet") instead of a
   problem, Start is disabled with the reason beside it, and the file paths moved into a folded note.
 
-- **History answers "which run matters" before it shows a single field.** The page is now three bands:
-  four conclusion KPIs from the ledger (comparable runs, delivered per game day, tokens per decision,
-  spend), a compact run list whose rows carry the ledger's own outcome class, and - for the selected
-  run - a conclusion head (outcome, delivered, game days, cash, fleet, tokens, failures) with the
-  evidence folded behind it (outcome, manifest, token breakdown, staged summaries, event log). A page
-  that used to be ~9,800px of equally-weighted tables is ~2,900px of conclusions, and the same numbers
-  stop appearing twice: the header keeps run counts, the strip keeps the measured rates.
+- **History answers "which run matters" before it shows a single field.** The page is now three bands: four conclusion
+KPIs from the ledger (comparable runs, delivered per game day, tokens per decision, spend), a compact run list whose
+rows carry the ledger's own outcome class, and - for the selected run - a conclusion head (outcome, delivered, game
+days, cash, fleet, tokens, failures) with the evidence folded behind it (outcome, manifest, token breakdown, staged
+summaries, event log). A page that used to be ~9,800px of equally-weighted tables is ~2,900px of conclusions, and the
+same numbers stop appearing twice: the header keeps run counts, the strip keeps the measured rates.
 - **A training chart that is flat at 0 is now a sentence.** A 900x300 plot with one line on the floor carries no information and reads as a rendering failure; when every comparable run delivered 0 the page says so instead of drawing it.
 - **Dropped ledger rows are disclosed on History too.** The ledger keeps the newest row per session id;
   on pre-2026-10-31 data that silently halved the sample. `/api/evolution` now returns the collisions
@@ -290,12 +291,11 @@ unloading site must accept it. A refused command now reaches the model.
 
 - **The metric ledger no longer loses runs to a session-id collision.** Two runs started in the same second on the same seed used to get the *same* session id, and the ledger keeps "newest wins per id", so one of them disappeared without a trace - in the first benchmark matrix that silently swallowed three of six runs (the Compare page showed "1 model(s)"). Session ids now carry a short random suffix, and the ledger *reports* the collisions, so the Compare page says out loud which runs were dropped and that they are in none of the numbers below.
 
-- **The cargo facts are there from the first heartbeat now.** The Bridge GS recomputed its
-  industry / cargo / delivery facts every 1000 ticks, so the first thousand ticks of every game
-  reported no cargo at all - and the first thing an agent does is look at the world. The GS now
-  computes them on its first heartbeat, so the very first observation already answers "what is
-  produced here, and has any of it moved". Verified on a real machine: the first `observe()` of a
-  fresh game now carries the cargo totals and the industries.
+- **The cargo facts are there from the first heartbeat now.** The Bridge GS recomputed its industry / cargo / delivery
+facts every 1000 ticks, so the first thousand ticks of every game reported no cargo at all - and the first thing an
+agent does is look at the world. The GS now computes them on its first heartbeat, so the very first observation already
+answers "what is produced here, and has any of it moved". Verified on a real machine: the first `observe()` of a fresh
+game now carries the cargo totals and the industries.
 
 - **The training panel had been reading an endpoint that never existed.** It asked for `/api/metrics` while the ledger has always lived under `/api/evolution` - so the panel showed "no metrics ledger yet" while the ledger was full of runs. A false empty state is worse than no panel: it says your runs were never recorded.
 
@@ -306,11 +306,10 @@ unloading site must accept it. A refused command now reaches the model.
 
 - **The timeline did not survive the start of a run.** The runner re-attaches its own session hooks when a run starts, which **replaced** the server's hooks with a narrower copy - so the feature worked on an idle dashboard and vanished the moment a run began. The hooks are now built in one place, and a guard keeps them there.
 
-- **A cost cap the model cannot enforce is now a bad request, not a conflict.** Setting a cost cap
-  on a model without a price table could never fire, so it was refused before the game started —
-  but the refusal was reported as "409 conflict", which told the user their request collided with
-  a running game. It is now `400` with the structured reason `unpriced_with_cost_cap`, and the
-  preview refuses it too (a preview must not promise a run that cannot start).
+- **A cost cap the model cannot enforce is now a bad request, not a conflict.** Setting a cost cap on a model without a
+price table could never fire, so it was refused before the game started — but the refusal was reported as "409
+conflict", which told the user their request collided with a running game. It is now `400` with the structured reason
+`unpriced_with_cost_cap`, and the preview refuses it too (a preview must not promise a run that cannot start).
 
 - **The run knobs form renders.** Alpine's `x-for` has to sit on a `<template>`; on a plain element
   the loop variable is not in scope for that element's own directives, so the whole form rendered
@@ -319,37 +318,32 @@ unloading site must accept it. A refused command now reaches the model.
 
 - **The preview follows the form.** It was fetched once on load, so the panel kept showing the values of the previous knobs while claiming to describe the next run.
 
-- **One resolver for the run configuration.** The view, the save path, the startup gate and the
-  runner now derive the selection from the same function, so they cannot answer differently. The
-  gate in particular stopped rejecting models the runner could run: it built its brain without the
-  persisted model overlay, so a model the Providers page had listed was reported as "unknown model"
-  and no run could start. The view also reports the model's own api/context/limits instead of the
-  values the settings file happened to carry.
+- **One resolver for the run configuration.** The view, the save path, the startup gate and the runner now derive the
+selection from the same function, so they cannot answer differently. The gate in particular stopped rejecting models the
+runner could run: it built its brain without the persisted model overlay, so a model the Providers page had listed was
+reported as "unknown model" and no run could start. The view also reports the model's own api/context/limits instead of
+the values the settings file happened to carry.
 
-- **A saved run configuration is now the one that runs.** `GET /api/llm` re-reads `llm.json` on
-  every call instead of re-merging a snapshot taken at process start, so a save is visible without a
-  restart; the `POST` response is the post-save view; a catalog save stores the model's own
-  `api`/`contextWindow`/`maxTokens` instead of inheriting the previous selection's; and an unknown
-  model is rejected with `400 {error, problems[]}` without touching the file. Restoring a persisted
-  live-model overlay no longer requires a credential, so a model the page listed stays selectable
-  after a restart.
+- **A saved run configuration is now the one that runs.** `GET /api/llm` re-reads `llm.json` on every call instead of
+re-merging a snapshot taken at process start, so a save is visible without a restart; the `POST` response is the
+post-save view; a catalog save stores the model's own `api`/`contextWindow`/`maxTokens` instead of inheriting the
+previous selection's; and an unknown model is rejected with `400 {error, problems[]}` without touching the file.
+Restoring a persisted live-model overlay no longer requires a credential, so a model the page listed stays selectable
+after a restart.
 
-- **The model list never refreshed.** The list on the Providers page came from the
-  **bundled pi-ai snapshot** (generated 2026-09-04), and pi-ai's `refresh()` skips static providers, so
-  a model released later could neither be listed **nor chosen**. The page now has "Refresh from
-  provider", which asks the provider's own `/models` endpoint, shows where the list came from, and
-  reports failures with the exact URLs and statuses — including "no credential, so the refresh was
-  skipped", which pi-ai does silently. Models that only the provider knows are marked "live · price
-  unknown", and they are persisted so the agent process can run them.
-- **The promotion gate counted samples, not games, and the model was never told the freight action
-  exists.** A run can record the same pattern several times; each recording appended a profit
-  reading to the card, and the gate read the number of readings as the number of **verified games**
-  - so one lucky run could promote a pattern on its own, and the "verified in 2 independent games"
-  rule was not enforced. A card now carries one reading per game and the gate counts distinct
-  games. Separately, `build_freight_route` joined the pattern vocabulary with the freight work but
-  the tool description still listed only the older actions, so a real run recorded its freight
-  patterns as `build_bus_route` - the same idea split into two cards. The description is now
-  generated from the vocabulary, and a test fails if it drifts.
+- **The model list never refreshed.** The list on the Providers page came from the **bundled pi-ai snapshot** (generated
+2026-09-04), and pi-ai's `refresh()` skips static providers, so a model released later could neither be listed **nor
+chosen**. The page now has "Refresh from provider", which asks the provider's own `/models` endpoint, shows where the
+list came from, and reports failures with the exact URLs and statuses — including "no credential, so the refresh was
+skipped", which pi-ai does silently. Models that only the provider knows are marked "live · price unknown", and they are
+persisted so the agent process can run them.
+- **The promotion gate counted samples, not games, and the model was never told the freight action exists.** A run can
+record the same pattern several times; each recording appended a profit reading to the card, and the gate read the
+number of readings as the number of **verified games** - so one lucky run could promote a pattern on its own, and the
+"verified in 2 independent games" rule was not enforced. A card now carries one reading per game and the gate counts
+distinct games. Separately, `build_freight_route` joined the pattern vocabulary with the freight work but the tool
+description still listed only the older actions, so a real run recorded its freight patterns as `build_bus_route` - the
+same idea split into two cards. The description is now generated from the vocabulary, and a test fails if it drifts.
 - **`get_industries` really filters by cargo now.** The tool promised a cargo filter and the game script ignored it, so the model asked for "only COAL" and got the whole map - a promise the world did not keep. The filter runs on the game side, and a cargo label that does not exist in this game is reported as "no such cargo" (with the labels that do exist), not as "0 industries".
 - **Several readings that disagreed with themselves**: deltas folded unread readings to zero ("no change" where nothing
   had been measured), fleet counts disagreed (route table vs company stats), a partial game-script failure was silent

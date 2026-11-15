@@ -202,7 +202,7 @@ JSON + GSSign 标牌邮箱）、`OpenTTDLab`（受控 Squirrel AI + admin port�
 | `set_pause` | 暂停/恢复游戏 | **是** |
 
 未实现的（`train`/`orders`）属于路线图，不在契约里；`reflection` **已实现**（§10.77–§10.78）。
-工具预算：`DEFAULT_MAX_TOOL_CALLS_PER_DECISION = 12`；执行顺序 `executionMode:"sequential"`（§10.75）。
+工具预算：`DEFAULT_MAX_TOOL_CALLS_PER_DECISION = 24`（2026-11-15 由 12 改，见 §10.75）；执行顺序 `executionMode:"sequential"`（§10.75）。
 
 动作统一是**异步 + 可观测**：发出即返回 ack + job_id；executor 阶段事件经 GS→Admin→Runner 回灌；失败返回结构化 error code + 理由，供 LLM 反思。
 
@@ -549,7 +549,13 @@ JSON + GSSign 标牌邮箱）、`OpenTTDLab`（受控 Squirrel AI + admin port�
 **ADR** → `docs/AGENT-LOOP-AND-CONTROL.md`（与 pi-agent-core 的协同设计；本节决策摘要已迁到那里）。
 
 ### 10.75 R1 实施结果：执行顺序 / 工具预算 / 缓存与**披露路径**（2026-09-18）
-**仍为真**（披露路径必须有）：`metricStat` / `formatMetricStat` / `degradationStats`；所有 verdict 行**先**打印通道健康，**再**打印收益。执行顺序 `executionMode:"sequential"`，工具预算 `DEFAULT_MAX_TOOL_CALLS_PER_DECISION = 12`。
+**仍为真**（披露路径必须有）：`metricStat` / `formatMetricStat` / `degradationStats`；所有 verdict 行**先**打印通道健康，**再**打印收益。执行顺序 `executionMode:"sequential"`。
+- 事实（2026-11-15，E1 真机实验，**工具预算 12 → 24**）：预算 12 是**绑定约束**，且它砍掉的是模型的**动作**、不是它的探索。预登记实验（`ROADMAP.md`「E1 预登记」）：2 臂（每决策 12 vs 24 次工具调用）× 2 seed，同模型（minimax-cn/MiniMax-M3.1-Flash）、同 250 游戏日视界、`--scenario freeform`，**4/4 格跑满视界**。读数（拦截 / 交付每游戏日 / 货运 / 运营利润每游戏日 / 每交付 token）：12 臂 = 11·2.19·44·+4.57·1645 与 6·0.86·80·+5.06·4390；**24 臂 = 3·5.14·799·+48.27·737 与 1·1.75·40·+25.49·1831**。每个读数、每个格同向（2/2）；被拦的调用是 `build_freight_route` / `build_bus_route` / `set_route_vehicles` ⇒ **模型想动手时被砍**。总 token/局没涨（905k/1036k vs 1215k/824k），每单位交付的 token **降了一半**。⇒ 默认改为 `DEFAULT_MAX_TOOL_CALLS_PER_DECISION = 24`（仍是一个进 manifest 的旋钮，`--tool-budget N` / `LLM_TOOL_BUDGET` 可覆盖）。⇒ **附带**：运营利润阈值 16.67/日在 12 臂**两局都没过**、在 24 臂**两局都过了** ⇒ **阈值可达**——此前"闸永远打不开"的担心里有一部分其实是**被截断的 agent** 造成的。
+- 事实（2026-11-15，**读数的坑**，同时纠正了 E1 预登记自己）：`delivered`（admin 的
+  `deliveredCargo`）是**当季计数**（§10.55）⇒ **跨局结构上不可比**（实测一局 518、一局 0，
+  而两局 `deliveredRun` 都为正）；整局累计是 **`deliveredRun`**（跨季度积分），**分数卡的能力轴
+  一直用它** ⇒ 预登记的主读数写错了**字段**（不是判据变了）：按 `delivered` 判是 RULE 2、
+  按 `deliveredRun` 判是 RULE 1。教训 `MEMORY.md` D126。
 依据：`src/evolution/metrics.ts`、`src/agent/decision-loop.ts`；教训 `MEMORY.md` D28。
 
 ### 10.76 R2 实施结果：经验 = 带实测读数的观察（2026-09-18）

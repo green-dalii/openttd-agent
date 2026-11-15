@@ -54,7 +54,10 @@ describe("ToolBudget", () => {
 	});
 
 	it("defaults to the measured budget", () => {
-		expect(DEFAULT_MAX_TOOL_CALLS_PER_DECISION).toBe(12);
+		// 24 since 2026-11-14 (E1): 12 cut off the model's actions, not its
+		// exploration. The number itself is pinned here so a change has to be
+		// deliberate.
+		expect(DEFAULT_MAX_TOOL_CALLS_PER_DECISION).toBe(24);
 		const b = new ToolBudget();
 		for (let i = 0; i < DEFAULT_MAX_TOOL_CALLS_PER_DECISION; i++) expect(b.admit()).toBeUndefined();
 		expect(b.admit()).toBe(budgetRefusal(DEFAULT_MAX_TOOL_CALLS_PER_DECISION));

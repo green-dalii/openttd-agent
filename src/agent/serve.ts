@@ -49,6 +49,7 @@ import { harnessEnabled } from "./harness-runtime.js";
 import { assertCostCapEnforceable, costCapProblem } from "./run-budget.js";
 import type { ResolvedSelection } from "./selection.js";
 import { ProblemError, type Problem } from "./problems.js";
+import { DEFAULT_TOOL_BUDGET } from "./scaffold-knobs.js";
 
 /**
  * "No model is selected yet" — a state, not a validation failure.
@@ -134,7 +135,7 @@ export function runKnobDefaults(cfg: Config, opts: ServeOptions): RunKnobDefault
 		scenario: opts.runOptions?.scenario ?? "freeform",
 		memoryArm: opts.runOptions?.injectMemory === false ? "control" : "treatment",
 		thinkingLevel: cfg.llm.scaffold?.thinkingLevel ?? "off",
-		toolBudget: cfg.llm.scaffold?.toolBudget ?? 12,
+		toolBudget: cfg.llm.scaffold?.toolBudget ?? DEFAULT_TOOL_BUDGET,
 		tokenLimit: cfg.llm.limits?.tokens ?? null,
 		costLimit: cfg.llm.limits?.cost ?? null,
 		backend: harnessEnabled(process.env) ? "harness" : "agent",

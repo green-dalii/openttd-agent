@@ -282,7 +282,7 @@ Usage:
   --llm-api A        agent: streaming API (openai-completions|anthropic-messages)
   --llm-provider P   agent: provider id (pi-ai catalog, e.g. openai)
   --thinking L       agent: thinking level off|minimal|low|medium|high|xhigh|max (default off)
-  --tool-budget N    agent: tool calls allowed per decision (default 12)
+  --tool-budget N    agent: tool calls allowed per decision (default 24)
   --llm-token-limit N  agent: stop the run once total tokens reach N (default none)
   --llm-cost-limit C   agent: stop the run once spend reaches C (default none;
                        requires a model with a price table)

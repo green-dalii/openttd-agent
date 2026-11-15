@@ -28,10 +28,10 @@ export interface DecisionAgent {
  *
  * `extractPlan` scans backwards for the newest assistant text that parses, so
  * the window only has to be larger than one decision's turns. 60 covers the
- * tool-budget ceiling (12 calls ≈ 24 messages) with room to spare; a larger
+ * tool-budget ceiling (24 calls ≈ 48 messages) with room to spare; a larger
  * window would only cost JSON reads, never correctness.
  */
-export const LANE_PLAN_WINDOW = 60;
+export const LANE_PLAN_WINDOW = 80;
 
 /** Adapt a bare `Agent` (legacy path). */
 export function agentDecisionAgent(agent: Agent): DecisionAgent {

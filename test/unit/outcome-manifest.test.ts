@@ -157,8 +157,8 @@ describe("旋钮解析（D4/S6）", () => {
 		expect(() => resolveScaffoldKnobs({ LLM_THINKING: "ultra" })).toThrow(/LLM_THINKING/);
 	});
 
-	it("工具预算从配置解析，缺省 12；必须为正整数", () => {
-		expect(resolveScaffoldKnobs({}).toolBudget).toBe(12);
+	it("工具预算从配置解析，缺省 24（E1 实测值）；必须为正整数", () => {
+		expect(resolveScaffoldKnobs({}).toolBudget).toBe(24);
 		expect(resolveScaffoldKnobs({ LLM_TOOL_BUDGET: "20" }).toolBudget).toBe(20);
 		expect(() => resolveScaffoldKnobs({ LLM_TOOL_BUDGET: "0" })).toThrow(/LLM_TOOL_BUDGET/);
 		expect(() => resolveScaffoldKnobs({ LLM_TOOL_BUDGET: "abc" })).toThrow(/LLM_TOOL_BUDGET/);
