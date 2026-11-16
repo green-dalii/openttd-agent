@@ -292,3 +292,58 @@ describe("基准报告：配对判定按轴写出来", () => {
 		expect(md).toMatch(/no paired comparison/i);
 	});
 });
+
+/**
+ * 归一化轴（ROADMAP 待办 #4）：能力轴的"真根"。
+ *
+ * 主张：能力轴量的是**总量**，而总量的方差由"建了几条线"主导 ⇒ 矩阵判不出来。
+ * 归一化把数量除掉，并且**不许**把"没建线"记成 0（那会把"不可比"说成"产出为零"）。
+ */
+describe("归一化轴（每条线 / 每辆车）", () => {
+	it("注册表里有这四条轴（每线/每车的交付与运营利润）", () => {
+		const ids = PAIRED_METRICS.map((m) => m.id);
+		expect(ids).toContain("ability.deliveredPerLine");
+		expect(ids).toContain("ability.operatingProfitPerLine");
+		expect(ids).toContain("ability.deliveredPerVehicle");
+		expect(ids).toContain("ability.operatingProfitPerVehicle");
+	});
+
+	it("分数卡给出归一化读数（mean/median），缺读数的局不拉低均值", () => {
+		const rows = [
+			row({ seed: 11, lines: 4, deliveredRun: 800, operatingProfit: 400, vehicles: 8 }),
+			// 老局：没记 lines ⇒ 每线读数不可判定（不是 0）
+			row({ seed: 22, deliveredRun: 400, operatingProfit: 200, vehicles: 4 }),
+		];
+		const card = buildScorecard(rows);
+		const ability = card.models[0]!.ability;
+		expect(ability.normalized.lines).toBe(4); // 只有一局有线路数
+		expect(ability.normalized.deliveredPerLine.mean).toBe(200); // 800/4，不是 (800+400)/2
+		expect(ability.normalized.deliveredPerLine.median).toBe(200);
+		expect(ability.normalized.operatingProfitPerLine.mean).toBe(100);
+		expect(ability.normalized.deliveredPerVehicle.mean).toBe(100); // 800/8 与 400/4 都是 100
+	});
+
+	it("一条线都没建的局在每线轴上不可比（不参与配对，不是 0）", () => {
+		const rows = [1, 2, 3].flatMap((seed) => [
+			row({ llmModel: "a", seed, lines: 4, deliveredRun: 800, operatingProfit: 400, vehicles: 8 }),
+			row({ llmModel: "b", seed, lines: 0, deliveredRun: 0, operatingProfit: 0, vehicles: 0 }),
+		]);
+		const cmp = pairedComparison(rows, "a", "b", "ability.deliveredPerLine");
+		// b 的三局都没有每线读数 ⇒ 没有可用配对 ⇒ 不可判定（而不是"a 赢了"）
+		expect(cmp.pairs).toHaveLength(0);
+		expect(cmp.verdict).toBe("not determinable");
+		expect(cmp.message).toMatch(/no usable pair/i);
+	});
+
+	it("归一化轴能判定时给出方向与区间（读数齐的两臂）", () => {
+		const rows = [1, 2, 3].flatMap((seed) => [
+			row({ llmModel: "a", seed, lines: 4, deliveredRun: 800, operatingProfit: 400, vehicles: 8 }),
+			row({ llmModel: "b", seed, lines: 4, deliveredRun: 400, operatingProfit: 200, vehicles: 8 }),
+		]);
+		const cmp = pairedComparison(rows, "a", "b", "ability.deliveredPerLine");
+		expect(cmp.pairs).toHaveLength(3);
+		expect(cmp.verdict).toBe("a_higher");
+		expect(cmp.betterModel).toBe("a");
+		expect(cmp.diffCi95).not.toBeNull();
+	});
+});

@@ -168,6 +168,13 @@ export interface SessionMeta {
 		worldFrozenMs?: number;
 		/** Tool calls refused by the per-decision budget (R1; absent = not reported). */
 		toolBudgetBlocks?: number;
+		/**
+		 * 线路数（GS 登记的线路：模型下单、GS 接受的那几条）。
+		 *
+		 * 归一化读数的**分母**（ROADMAP 待办 #4）：能力轴的总量方差由"建了几条线"
+		 * 主导。0 是真的读数（模型什么都没建）；缺席 = 没测到。
+		 */
+		lines?: number;
 		/** Oracle probe (M3-1): fleet size requested downward, and what was observed. */
 		shrinkRequested?: number | null;
 		fleetObservedAfterShrink?: number | null;

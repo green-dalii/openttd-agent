@@ -1284,3 +1284,12 @@ compaction 冲突）在 `docs/HARNESS-MIGRATION.md` §3（带坐标），此处�
 - 事实（2026-11-12，Issue #113）：**"线建成了"不等于"线在跑"，而周期读数看不见这件事**。真机（seed 4242，COAL 46→53）实测：线**建成了**（相位全绿）、车**装对了货**（引擎按货物类别分类 ⇒ admin 口径 `truck:2`；`GetCapacity(v,COAL)` = 20）、车**带着两条车站订单**、车**到了装货站**（引擎的 `station_first_vehicle`）⇒ 但**装走 0 吨**，整局**交付 0**，装货站的煤从 0 涨到 290。**已排除的解释**：不是"货没有下一跳"（`GetCargoWaitingVia(装货站, -1, COAL)` = 290 ⇒ 货包在"无下一跳"那一桶 ⇒ 引擎的兜底允许任何车装它）⇒ 装不上的**引擎侧条件**在 2026-11-14 **定位并解决**：这条线**能交付**（真机 seed 4242、COAL 46→53：车在装货站**停进站、装满 20 吨**（装货站等待量同步下降），到卸货站**卸货**，cargo monitor 报出 `own_by_industry = [{COAL, 53, 10}]` ⇒ **交付真的发生了**）。之前"整局交付 0"的真因是**时机**：① 引擎按**订单表**跑（`[A,B]` 循环 ⇒ 第一次到装货站时站上**还没有煤** ⇒ 空车去卸货站、白跑一趟）；② 单程 177 格 ⇒ 一轮往返要上百个游戏日 ⇒ 400 日的局常常只够**装上**、来不及**送到**。诊断面因此补了四个**引擎事实**（仍走按需 `route_diag`，周期载荷不变）：**收货额度**（`GSTile.GetCargoAcceptance`，>= 8 才收 ⇒ 卸货端不收 ⇒ 引擎把货**留在车上**）、**车站评分**（装货端评分 0 ⇒ 产业不再交货）、**站牌格相邻的路数**、**引擎自己的入口格**（车从这边开过来才会停）⇒ 服务端具名原因新增 `unloading_end_does_not_accept_cargo` / `loading_end_rating_zero` / `stop_has_no_road_connection`（封闭词表 + 单测）。⇒ 新增**按需诊断**（GS `route_diag`：车在哪/速度/多久没动/订单/装不装得了/两端在等多少/货的下一跳分布；模型工具 `diagnose_route`；**具名原因由服务端算**，封闭词表 + 单测）⇒ 诊断的四个陷阱：**车站占两块地**（标牌格 + 路旁格）；**`AreRoadTilesConnected` 只答"相邻两格连不连"**（拿它问"两站通不通"永远 false ⇒ 假读数比没有更坏）；**执行器的完工记录会覆盖施工期记录** ⇒ 必须读同一个记录；**Squirrel 的 `t[k] = v` 对不存在的键会抛异常** ⇒ 动态键（车 id）只能用 `rawset`。
 
 - 依据：`src/game/squirrel/bridge-gs/main.nut`（`own_delivered`）、`src/agent/route-ledger.ts`、`src/agent/route-facts.ts`、`src/evolution/scorecard.ts`、`src/evolution/bench-stats.ts`；教训 `MEMORY.md` D97/D98。
+- 事实（2026-11-15，**能力轴的归一化口径**）：能力轴量的是**总量**（`deliveredRun / 游戏日`），
+  而总量 = 数量 × 单位产出 ⇒ 方差由"建没建线/建了几条"主导（**建造策略**的方差，不是模型
+  能力的方差）⇒ 矩阵的能力轴 `not determinable`。新增**归一化读数**（`src/evolution/normalized.ts`）：
+  **每条线**与**每辆车**的交付量与运营利润。口径：分子用**公司级**读数（`deliveredRun` 整局
+  累计、`operatingProfit`），分母是**干净的计数**（GS 登记的线路数 `lines`、车辆数）；
+  **缺读数 ⇒ null**（不可判定，不是 0）；**"一条线都没建" ⇒ 该局在这条轴上不可比**（不参与
+  配对），不是"每线产出 0"。度量行新增 `lines`（0 是真的读数；缺席 = 没测到 ⇒ 老局不可用）。
+  新的可配对轴：`ability.deliveredPerLine` / `ability.operatingProfitPerLine` /
+  `ability.deliveredPerVehicle` / `ability.operatingProfitPerVehicle`。

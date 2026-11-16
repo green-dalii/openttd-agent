@@ -91,6 +91,13 @@ export interface SessionMetaLike {
 		gsErrors?: number;
 		/** Per-decision tool-budget refusals (R1): >0 means the run hit its ceiling. */
 		toolBudgetBlocks?: number;
+		/**
+		 * 线路数（GS 登记的线路：模型下单、GS 接受的那几条）。
+		 *
+		 * 归一化读数的**分母**（ROADMAP 待办 #4）。0 是真的读数（模型什么都没建）；
+		 * 缺席 = 没测到（老局没记这个字段）⇒ 归一化时是"不可判定"，不是 0。
+		 */
+		lines?: number;
 		/** Simulated days covered (G1, SPEC §10.68). */
 		simulatedDays?: number;
 		/** Episode horizon in simulated days (null = none). */
@@ -184,6 +191,14 @@ export interface GameMetric {
 	deliveredByCargo: { label: string; amount: number }[] | null;
 	/** False when whole quarters went unseen; null when not reported. */
 	deliveredRunComplete: boolean | null;
+	/**
+	 * 线路数（GS 登记的线路：模型下单、GS 接受的那几条）。
+	 *
+	 * 归一化的**分母**（ROADMAP 待办 #4）：能力轴量的是总量，而总量的方差由
+	 * "建了几条线"主导（那是建造策略的方差，不是模型能力的方差）。
+	 * 0 是**真的读数**（模型什么都没建）；null = 没测到（老局没记这个字段）。
+	 */
+	lines?: number | null;
 	/** GS error replies during the run; null when not reported (legacy rows). */
 	gsErrors: number | null;
 	/** Tool calls refused by the per-decision budget; null when not reported. */
@@ -497,6 +512,8 @@ export function toGameMetric(
 				: null,
 		gsErrors: num(o && o.gsErrors),
 		toolBudgetBlocks: num(o && o.toolBudgetBlocks),
+		// 线路数（归一化的分母）：0 是真的读数（什么都没建），null = 没测到。
+		lines: numOrNull(o && o.lines),
 		// 暂停收场（SPEC §10.101）：只记 true（"确实是被暂停结束的"），
 		// undefined = 不是这个原因（不写 false，避免"没记录"与"没发生"混同）。
 		blockedByPause: o && o.blockedByPause === true ? true : undefined,

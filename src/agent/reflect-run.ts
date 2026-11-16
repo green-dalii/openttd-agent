@@ -249,6 +249,9 @@ export async function runFinalizeAndReflect(args: FinalizeAndReflectArgs): Promi
 					? true
 					: undefined,
 			toolBudgetBlocks: args.toolBudgetBlocks,
+			// 线路数（归一化的分母）：GS 登记的线路 = 模型下单、GS 接受的那几条。
+			// 0 是真的读数（模型什么都没建）⇒ 归一化时它变成"不可比"，不是 0。
+			lines: args.getRouteStats().length,
 			scenario: args.scenario,
 			scenarioReason: args.scenarioReason ?? null,
 			deliveredAtReady: args.deliveredAtReady ?? null,

@@ -9,6 +9,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- **The benchmark can now answer "how much does one line deliver".** The result axis measured a **total**, and a total's
+  spread is decided by how many lines a run built - a building strategy, not the model's ability, which is why the matrix
+  could not separate the two models. Four normalised axes are now measured and paired: delivered and operating profit
+  **per line** and **per vehicle**. A run that built no line is **not comparable** on the per-line axis (it answers a
+  different question), so it is left out there rather than counted as zero; a missing reading stays "not measured".
+
 ### Changed
 
 - **The per-decision tool budget was cutting off the agent's actions.** The budget allowed 12 tool calls per decision,
@@ -42,8 +50,7 @@
 - **The model can now do the economics of a freight line before it spends.** `estimate_route` takes a cargo and two
   industries and answers with the engine's numbers: price per cargo unit over that distance (`GSCargo.GetCargoIncome`),
   and per truck its capacity, price and running cost (`GSEngine.GetCapacity/GetPrice/GetRunningCost`). Every figure
-  carries its direction - revenue is an **upper** bound, cost a **lower** bound - and the tool does **not** say
-  whether the line pays off.
+carries its direction - revenue is an **upper** bound, cost a **lower** bound - and the tool does **not** say whether the line pays off.
 - **A freight line that looked dead is not dead - and the model can now ask why.** 290 units of coal waited at the
   loading station and the run delivered nothing (real machine, seed 4242). It is not broken: the vehicles stop, load
   20 tons, unload, and the cargo monitor records `own_by_industry = [{COAL, 53, 10}]` - the run was too short for a
@@ -52,9 +59,9 @@
   engine's own criteria (unloading end accepts this cargo, loading end's rating zero, stop reachable by road).
 
 - **The full map is now one question away.** The observation carries a **sample** of the industries (the top producers)
-and only the cargo types that had production - which keeps the payload small, but leaves the model unable to tell "no
-production" from "not measured". Two read-only tools (`get_industries`, `get_cargo`) now fetch the whole thing on
-demand, and the Run page's industry table has an **expand all** button. Sample and full list come from **one scan**.
+and only the cargo types that had production - small, but the model cannot tell "no production" from "not measured".
+Two read-only tools (`get_industries`, `get_cargo`) now fetch the whole thing on demand, and the Run page's industry
+table has an **expand all** button. Sample and full list come from **one scan**.
 - **The server's own vocabulary is now translated too - by id.** The outcome classes, the problem codes, the delivery
   measures and the knob values are the **server's** wording, and the server keeps exactly one canonical wording of
   them. The front end now looks them up **by id** (`outcome.token_cap`, `problem.no_credential`) and falls back to the
@@ -70,25 +77,23 @@ demand, and the Run page's industry table has an **expand all** button. Sample a
   hard-coded in the markup, so the **English** interface showed half-Chinese captions.
 - **The freight axis has a paired comparison.** A benchmark comparison now also reports **cargo delivered per game day**
 (the game script's cargo monitor, cargo half only - a different measure from the main axis, never added to it).
-Passengers are not in it: the monitor does not count them. A run with no cargo reading is **not measured**, not zero.
-- **The freight numbers reach the screen.** The server had been computing them for a while: the scorecard splits cargo
-  from passengers, and the attribution knows what each freight line delivered - but neither was drawn anywhere. The
-  Run page's route table now has a **Delivered** column (how much that line delivered; a delivery that cannot be
-  attributed to one line says so instead of showing a number, and a line with no reading shows a dash), a freight
-  route shows its two **industries** rather than two towns, and the Compare page draws the **cargo / passenger split**
-  on the Result axis, with the server's own wording of what the split measures.
-- **A freight line now says how much it delivered, and it enters the decision ledger in its own
-shape.** The engine does not record which vehicle delivered what where, so a per-line delivery figure has always been
-  a *derived* number - and there was nothing to derive it from: the script reported the cargo totals but dropped the
-  destination, and the route table did not say which industries a line served. The script now also reports the delivery
-  **per (cargo, receiving industry)** and the **two industry ids of every freight line**, and the harness attributes
-  each delivery to the one line that serves that cargo at that industry. When several of our lines share it the
-  delivery is **not split** - it is reported as unattributable with the reason; when no line of ours serves it the amount
-  is reported separately rather than dropped. The ledger had one shape ("two towns"), so a freight line could only enter
-  it as `null/null` - and those sentences are injected into the model's context. Passenger and freight routes are now
-  **two explicit record kinds**, the de-duplication key includes the kind and the two ends, and the injected sentence
-  says what the line really is, including how much it delivered and that the figure is derived. Real machine (seed
-  4242, a coal line 28 -> 53): 160 tonnes attributed to that line, and no fact has a null end.
+Passengers are not in it: the monitor does not count them, and a run with no cargo reading is **not measured**, not zero.
+- **The freight numbers reach the screen, and a freight line says how much it delivered.** The server had been computing
+  them for a while - the scorecard splits cargo from passengers, and the attribution knows what each freight line
+  delivered - but neither was drawn anywhere. The Run page's route table now has a **Delivered** column (how much that
+  line delivered; a delivery that cannot be attributed to one line says so instead of showing a number, and a line with
+  no reading shows a dash), a freight route shows its two **industries** rather than two towns, and the Compare page
+  draws the **cargo / passenger** split on the Result axis, with the server's own wording of what the split measures.
+  The per-line figure was always a **derived** number (the engine does not record which vehicle delivered what where),
+  and there was nothing to derive it from: the script reported cargo totals but dropped the destination, and the route
+  table did not say which industries a line served. The script now also reports the **per (cargo, receiving industry)**
+  and the **two industry ids of every freight line**, and the harness attributes each delivery to the one line that
+  serves that cargo at that industry; when several of our lines share it the delivery is **not split** but reported as
+  unattributable with the reason, and when no line of ours serves it, it is reported separately rather than dropped.
+  The decision ledger had one shape ("two towns"), so a freight line could arrive as `null/null` - and those sentences
+  are injected into the model's context: passenger and freight routes are now **two explicit record kinds**, and the
+  injected sentence says what the line really is, including how much it delivered and that the figure is derived. Real
+  machine (seed 4242, a coal line 28 -> 53): 160 tonnes attributed to that line, and no fact has a null end.
 - **The paired comparison now answers on every axis.** It used to compute exactly one metric - cargo
 + passengers delivered per game day - so the efficiency axis (delivered per 1M tokens) and the
 stability axis (share of tool calls that failed) had **no paired interval at all**. That is how "the
@@ -261,8 +266,8 @@ net cash flow and not a per-game-day profit - is written down in SPEC §10.55 / 
 - **The cargo monitor was never missing - our own accumulator was broken.** On 2026-11-01 this project concluded that OpenTTD 15.3's Squirrel API has no cargo
   monitor; that conclusion was **wrong**. The API exists (`script_cargomonitor.hpp` carries `@api game`); the empty split was **our** bug: the accumulator wrote into a
   Squirrel table with a key that did not exist yet, Squirrel tables are strict - the write threw, the facts collector died, and the empty result was read as "the API
-  returns null". What the engine really does not expose stays unmeasured: **per station / per route**. The research: `docs/PER-LINE-DELIVERY-FEASIBILITY.md` - **do not
-  change the engine**.
+  returns null". What the engine really does not expose stays unmeasured: **per station / per route**. The research:
+`docs/PER-LINE-DELIVERY-FEASIBILITY.md` - **do not change the engine**.
 
 - **Compare now says when the runs did not answer the same question.** The manifest recorded two fingerprints but nothing compared them; runs whose payload shape differs now print the distinct hashes. The observation surface stays out of `scaffoldHash` on purpose: it depends on the world (unknowable before a run, and it would make the hash seed-dependent) and belongs to `payloadShapeHash` - which today is only recorded on the harness backend, so the check is silent rather than wrong for default-backend runs (follow-up tracked in ROADMAP).
 
@@ -338,19 +343,14 @@ previous selection's; and an unknown model is rejected with `400 {error, problem
 Restoring a persisted live-model overlay no longer requires a credential, so a model the page listed stays selectable
 after a restart.
 
-- **The model list never refreshed.** The list on the Providers page came from the **bundled pi-ai snapshot** (generated
-2026-09-04), and pi-ai's `refresh()` skips static providers, so a model released later could neither be listed **nor
-chosen**. The page now has "Refresh from provider", which asks the provider's own `/models` endpoint, shows where the
-list came from, and reports failures with the exact URLs and statuses — including "no credential, so the refresh was
-skipped", which pi-ai does silently. Models that only the provider knows are marked "live · price unknown", and they are
-persisted so the agent process can run them.
-- **The promotion gate counted samples, not games, and the model was never told the freight action exists.** A run can
-record the same pattern several times; each recording appended a profit reading to the card, and the gate read the
-number of readings as the number of **verified games** - so one lucky run could promote a pattern on its own, and the
-"verified in 2 independent games" rule was not enforced. A card now carries one reading per game and the gate counts
-distinct games. Separately, `build_freight_route` joined the pattern vocabulary with the freight work but the tool
-description still listed only the older actions, so a real run recorded its freight patterns as `build_bus_route` - the
-same idea split into two cards. The description is now generated from the vocabulary, and a test fails if it drifts.
+- **The model list never refreshed, and the configuration had two truths.** The list on the Providers page came from the
+**bundled pi-ai snapshot** (generated 2026-09-04), and pi-ai's `refresh()` skips static providers, so a model released
+later could neither be listed **nor chosen**; the page now has "Refresh from provider", which asks the provider's own
+`/models` endpoint and reports failures with the exact URLs and statuses — including "no credential, so the refresh was
+skipped", which pi-ai does silently. Models that only the provider knows are marked "live · price unknown" and persisted.
+Separately, the view, the save path, the startup gate and the runner now derive the configuration from **one** resolver,
+so they cannot answer differently; the gate had been rejecting a run the runner could run, and the view now reports the
+model's own api/context/limits instead of whatever the settings file happened to carry.
 - **`get_industries` really filters by cargo now.** The tool promised a cargo filter and the game script ignored it, so the model asked for "only COAL" and got the whole map - a promise the world did not keep. The filter runs on the game side, and a cargo label that does not exist in this game is reported as "no such cargo" (with the labels that do exist), not as "0 industries".
 - **Several readings that disagreed with themselves**: deltas folded unread readings to zero ("no change" where nothing
   had been measured), fleet counts disagreed (route table vs company stats), a partial game-script failure was silent
