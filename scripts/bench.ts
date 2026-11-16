@@ -21,6 +21,7 @@ import { spawnSync } from "node:child_process";
 import { chmodSync, copyFileSync, existsSync, mkdirSync, openSync, realpathSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { cleanupGame } from "./lib/game-cleanup.js";
 import { planMatrix, type BenchWorld } from "../src/evolution/bench-plan.js";
 import { buildScorecard, type BenchConditions } from "../src/evolution/scorecard.js";
 import { renderReportMarkdown } from "../src/evolution/bench-report.js";
@@ -114,43 +115,6 @@ function parseArgs(argv: string[]): Args {
 }
 
 /** Kill only the game binaries this machine started for benchmarks. */
-/**
- * Kill the game processes **this matrix** started — and nobody else's.
- *
- * 为什么不能宽泛地 pkill（2026-11-16）：`pkill -f openttd` 会把**用户自己的实例**
- * 一起杀掉（MEMORY §0.4：用户的实例不得终止）。矩阵的游戏进程的命令行里带
- * `-D <dataDir>`（`src/game/process-manager.ts`）⇒ **按矩阵根目录过滤**就是精确的。
- *
- * 导出以便单测：过滤逻辑必须是纯的（"哪些 pid 该被杀"），不能靠真跑一遍来验。
- */
-export function gamePidsToKill(psOutput: string, matrixRoot: string): number[] {
-	const out: number[] = [];
-	for (const line of psOutput.split("\n")) {
-		const m = line.trim().match(/^(\d+)\s+(.*)$/);
-		if (!m) continue;
-		const pid = Number(m[1]);
-		const cmd = m[2] ?? "";
-		if (!cmd.includes("MacOS/openttd") && !/(^|\s)openttd(\s|$)/.test(cmd)) continue;
-		// 只杀数据目录在矩阵根目录下的那些 ⇒ 用户的实例（别的目录）不受影响。
-		if (!cmd.includes(matrixRoot)) continue;
-		out.push(pid);
-	}
-	return out;
-}
-
-/** Kill only the games this matrix started. */
-function cleanupGame(matrixRoot: string): void {
-	const ps = spawnSync("ps", ["-eo", "pid=,command="], { encoding: "utf8" });
-	const pids = gamePidsToKill(ps.stdout ?? "", matrixRoot);
-	for (const pid of pids) {
-		try {
-			process.kill(pid);
-		} catch {
-			/* already gone */
-		}
-	}
-	if (pids.length > 0) spawnSync("sleep", ["2"]);
-}
 
 /**
  * Copy the credentials file into one cell's data dir.

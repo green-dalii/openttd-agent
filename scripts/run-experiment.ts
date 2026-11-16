@@ -15,6 +15,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, openSync } from "node:fs";
 import { join } from "node:path";
+import { cleanupGame } from "./lib/game-cleanup.js";
 import { evolutionView } from "../src/evolution/web-view.js";
 import { degradationStats, deliveredOutcome, formatMetricStat, horizonIsComparable, MIN_COMPARABLE_HORIZON_DAYS , powerVerdict, learningCurve } from "../src/evolution/metrics.js";
 import { reflectionStats } from "../src/evolution/reflection-stats.js";
@@ -39,6 +40,7 @@ interface Args {
 	/** sequential 模式的局数（M5 预登记上限 10）。 */
 	sessions?: number;
 }
+
 
 function parseArgs(argv: string[]): Args {
 	const get = (flag: string): string | undefined => {
@@ -162,11 +164,11 @@ if (args.mode === "sequential") {
 	const sessions = Math.min(args.sessions ?? args.n, 10);
 	const seqCodes: number[] = [];
 	for (let i = 1; i <= sessions; i++) {
-		spawnSync("pkill", ["-f", "OpenTTD.app/Contents/MacOS/openttd"]);
+		cleanupGame(args.dir);
 		spawnSync("sleep", ["2"]);
 		seqCodes.push(runOne(`seq${i}`, args.dir, args.seed, args.seconds, args.gameDays, args.scenario, []));
 	}
-	spawnSync("pkill", ["-f", "OpenTTD.app/Contents/MacOS/openttd"]);
+	cleanupGame(args.dir);
 	const view = evolutionView(args.dir, "memory");
 	const ordered = [...view.metrics]
 		.filter((m) => Number.isFinite(Number(m.deliveredRun)) && m.blockedByPause !== true)
@@ -185,12 +187,12 @@ if (args.mode === "sequential") {
 
 for (let i = 1; i <= args.n; i++) {
 	// cleanup between runs: the game must die or the next one can't bind the port
-	spawnSync("pkill", ["-f", "OpenTTD.app/Contents/MacOS/openttd"]);
+	cleanupGame(args.dir);
 	spawnSync("sleep", ["2"]);
 	codes.control.push(
 		runOne(`ctl${i}`, args.dir, args.seed, args.seconds, args.gameDays, args.scenario, controlFlags(args.vary)),
 	);
-	spawnSync("pkill", ["-f", "OpenTTD.app/Contents/MacOS/openttd"]);
+	cleanupGame(args.dir);
 	spawnSync("sleep", ["2"]);
 	codes.treatment.push(
 		runOne(
@@ -204,7 +206,7 @@ for (let i = 1; i <= args.n; i++) {
 		),
 	);
 }
-spawnSync("pkill", ["-f", "OpenTTD.app/Contents/MacOS/openttd"]);
+cleanupGame(args.dir);
 
 const view = evolutionView(args.dir, args.vary);
 console.log("");

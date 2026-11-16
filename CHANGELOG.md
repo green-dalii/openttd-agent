@@ -28,6 +28,12 @@ showed it cut the model's **actions**, not its idling: the blocked calls were `b
 
 ### Fixed
 
+- **The agent is asked again after a slow decision.** The margin that keeps a question from starting too close to the end of the run was
+taken from the last decision's own cost in game days - and the world keeps moving while the model thinks. In the benchmark's prebuilt
+scenario the model's first decision used 28 tool calls, which ate more than 90 game days; the margin was then larger than the rest of the
+run, so the agent was **never asked again** and the game measured one decision plus an empty wait (two of the six benchmark cells had
+exactly one decision). The margin is now capped at a month: one slow decision can delay the question, not cancel the rest of the run.
+
 - **A freight line now says which cargo it carries.** The game script rewrote the route's record whenever the fleet changed, a route
 was retired or its cargo or engine was changed, and each rewrite wrote back only the few keys that change touched - so the rest were
 silently dropped. Among them the cargo the line carries: **a freight line had no cargo label at all**, which meant the per (cargo,
@@ -52,20 +58,18 @@ vehicles. After the fix a route's profit matches the company fleet reading to th
   profit stays on the books, and a year turn moves the reference point instead of clearing the total. It is
   **operating profit** (freight revenue minus running cost) - not the net cash flow, which also contains building,
   vehicles and interest - and it says when it is only a **lower bound**. Compare gained an operating-profit axis.
-- **A probe can now answer whether the same savegame gives the same run.** `scripts/determinism-probe.ts` copies a map,
-  starts two servers from it (`-g <savegame>`), sends the same command to both and compares the money trajectories:
-  **two loads produced identical money levels**, so a counterfactual fork is possible. A script's own state does **not**
-  travel in a savegame, so both fork arms must start from it.
+- **A probe can now answer whether the same savegame gives the same run.** `scripts/determinism-probe.ts` copies a map, starts two servers from
+it (`-g <savegame>`), sends the same command to both and compares the money trajectories: **two loads produced identical money levels**, so a
+counterfactual fork is possible. A script's own state does **not** travel in a savegame, so both fork arms must start from it.
 - **The model can now do the economics of a freight line before it spends.** `estimate_route` takes a cargo and two
   industries and answers with the engine's numbers: price per cargo unit over that distance (`GSCargo.GetCargoIncome`),
   and per truck its capacity, price and running cost (`GSEngine.GetCapacity/GetPrice/GetRunningCost`). Every figure
 carries its direction - revenue is an **upper** bound, cost a **lower** bound - and the tool does **not** say whether the line pays off.
-- **A freight line that looked dead is not dead - and the model can now ask why.** 290 units of coal waited at the
-  loading station and the run delivered nothing (real machine, seed 4242). It is not broken: the vehicles stop, load
-  20 tons, unload, and the cargo monitor records `own_by_industry = [{COAL, 53, 10}]` - the run was too short for a
-  **round trip** (177 tiles each way), the first visit preceding the mine's first production. The read-only
-  `diagnose_route` tool reports where the vehicles are and what waits at each end; the server names a reason from the
-  engine's own criteria (unloading end accepts this cargo, loading end's rating zero, stop reachable by road).
+- **A freight line that looked dead is not dead - and the model can now ask why.** 290 units of coal waited at the loading station and the
+run delivered nothing (real machine, seed 4242). It is not broken: the vehicles stop, load 20 tons, unload, and the cargo monitor records
+`own_by_industry = [{COAL, 53, 10}]` - the run was too short for a **round trip** (177 tiles each way), the first visit preceding the mine's
+first production. The read-only `diagnose_route` tool reports where the vehicles are and what waits at each end; the server names a reason
+from the engine's own criteria (unloading end accepts this cargo, loading end's rating zero, stop reachable by road).
 
 - **The full map is now one question away.** The observation carries a **sample** of the industries (the top producers)
 and only the cargo types that had production - small, but the model cannot tell "no production" from "not measured".
@@ -217,19 +221,16 @@ section number that was never created (referenced from the source, the game scri
 leftover counts that broke the table, a probe command quoted with flags the script does not accept, and three documents
 still marked "to be reviewed" after they had been implemented. The roadmap now carries only unfinished work, the lesson
 index covers every lesson, and the volatile environment facts (binary, ports, credentials, gate) have a single home.
-- **The benchmark matrix could not use a real provider, and it could also do nothing at all.** Every cell is its own
-  data directory while the key lives outside the repository, so a cell had no credentials and failed; `--credentials`
-  now copies the file into each cell (0600, never printed, checked before the first cell runs). Separately, the
-  script's "do not run on import" check compared paths as strings - under a symlinked path it **exited silently
-  having done nothing**; it now compares real paths, and a test fails if it goes quiet.
-- **A run that stopped at its budget no longer exits 1.** A run that ends because the token cap, the cost cap, the
-  horizon or the wall clock ran out - or because the construction did not finish - has produced its data, so it is a
-  **result**, not a failure: the exit code is now 0. Real failures (the game script never came up, the game crashed,
-  the runner threw) still exit 1. The run's *result* is in the manifest's outcome.
-- **The language switch did not translate everything, and it did not translate it back.** Three silent faults: a
-  sentence written across two lines kept its line breaks in the DOM (the lookup key never matched); a sentence
-  broken up by an inline `<code>` was never translated at all; and switching back to English left the page mixed,
-  because the original text was remembered on the **parent** element.
+- **The benchmark matrix could not use a real provider, and it could also do nothing at all.** Every cell is its own data directory while
+the key lives outside the repository, so a cell had no credentials and failed; `--credentials` now copies the file into each cell (0600,
+never printed, checked before the first cell runs). Separately, the script's "do not run on import" check compared paths as strings - under
+a symlinked path it **exited silently having done nothing**; it now compares real paths, and a test fails if it goes quiet.
+- **A run that stopped at its budget no longer exits 1.** A run that ends because the token cap, the cost cap, the horizon or the wall clock ran
+out - or because the construction did not finish - has produced its data, so it is a **result**, not a failure: the exit code is now 0. Real
+failures (the game script never came up, the game crashed, the runner threw) still exit 1. The run's *result* is in the manifest's outcome.
+- **The language switch did not translate everything, and it did not translate it back.** Three silent faults: a sentence written across two
+lines kept its line breaks in the DOM (the lookup key never matched); a sentence broken up by an inline `<code>` was never translated at
+all; and switching back to English left the page mixed, because the original text was remembered on the **parent** element.
 - **The harness was counting days on a calendar of its own.** The game day came from a **fictional 360-day year** (31
 January and 1 February mapped to the same index), so a "250 game day" run was really about 256 **calendar** days, and
 the copy lived in six places. The clock is now the **engine's calendar** in one module: the game day is the calendar

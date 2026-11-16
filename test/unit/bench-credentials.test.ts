@@ -19,11 +19,11 @@ import {
 	checkCredentials,
 	checkModelsCache,
 	checkLlmSettings,
-	gamePidsToKill,
 	installCredentials,
 	installLlmSettings,
 	installModelsCache,
 } from "../../scripts/bench.js";
+import { gamePidsToKill } from "../../scripts/lib/game-cleanup.js";
 
 function tmpDir(prefix: string): string {
 	return mkdtempSync(join(tmpdir(), prefix));
@@ -131,5 +131,22 @@ describe("矩阵每格的 provider 配置", () => {
 
 	it("缺文件时**跑前**报错（不是跑到一半才失败）", () => {
 		expect(() => checkLlmSettings("/nonexistent/llm.json")).toThrow(/not found/);
+	});
+});
+
+/**
+ * 连跑实验（E3）的清理**只杀它自己起的游戏**（2026-11-16）。
+ *
+ * 与矩阵同一件事：宽泛的 `pkill -f openttd` 会连**用户自己的实例**一起杀掉。
+ */
+describe("连跑实验的清理不会误伤用户的实例", () => {
+	const ps = [
+		"  71053 node /Users/greener/project/openttd-agent/node_modules/.pnpm/typescript",
+		"  81122 /Users/greener/Library/Application Support/Steam/steamapps/common/OpenTTD/OpenTTD.app/Contents/MacOS/openttd -D /tmp/pE3",
+		"  82233 /Users/greener/Library/Application Support/Steam/steamapps/common/OpenTTD/OpenTTD.app/Contents/MacOS/openttd -D /Users/greener/Documents/OpenTTD",
+	].join("\n");
+
+	it("只杀数据目录在实验目录下的游戏", () => {
+		expect(gamePidsToKill(ps, "/tmp/pE3")).toEqual([81122]);
 	});
 });
