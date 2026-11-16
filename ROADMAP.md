@@ -129,6 +129,7 @@
 | 项 | 设计 |
 |---|---|
 | 臂 | MiniMax-M3.1-Flash vs MiniMax-M2.5（与上一轮同两个模型） |
+| **前置修复** | 矩阵开跑前发现并修掉两个**静默测量缺陷**：① 逐线的车/利润按"站点扫描"算（翻倍 + 串线，MEMORY D127）；② 线路记录被**重建** ⇒ `lineCargo` 丢失 ⇒ **货运线没有 cargo 标签** ⇒ 逐线归因永远是 null（MEMORY D129）。矩阵还缺 provider 配置（每格没有 `llm.json` ⇒ 6 格 5 秒全败）⇒ bench 脚本新增 `--llm-settings`。**这三条都改了脚手架 ⇒ 旧矩阵的数据全部作废**（这正是必须重跑的原因） |
 | 格子 | 种子 11 / 22 / 33 × 1 局 = **6 格**（每格独立 data dir） |
 | 固定不变 | `--scenario prebuilt`（**同一种机会**）、250 游戏日、thinking=off、**toolBudget 24**（新默认，进 manifest） |
 | **主读数** | `ability.deliveredPerLine`（整局累计交付 ÷ 线路数） |
