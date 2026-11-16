@@ -105,9 +105,42 @@ function parseArgs(argv: string[]): Args {
 }
 
 /** Kill only the game binaries this machine started for benchmarks. */
-function cleanupGame(): void {
-	spawnSync("pkill", ["-f", "OpenTTD.app/Contents/MacOS/openttd"]);
-	spawnSync("sleep", ["2"]);
+/**
+ * Kill the game processes **this matrix** started — and nobody else's.
+ *
+ * 为什么不能宽泛地 pkill（2026-11-16）：`pkill -f openttd` 会把**用户自己的实例**
+ * 一起杀掉（MEMORY §0.4：用户的实例不得终止）。矩阵的游戏进程的命令行里带
+ * `-D <dataDir>`（`src/game/process-manager.ts`）⇒ **按矩阵根目录过滤**就是精确的。
+ *
+ * 导出以便单测：过滤逻辑必须是纯的（"哪些 pid 该被杀"），不能靠真跑一遍来验。
+ */
+export function gamePidsToKill(psOutput: string, matrixRoot: string): number[] {
+	const out: number[] = [];
+	for (const line of psOutput.split("\n")) {
+		const m = line.trim().match(/^(\d+)\s+(.*)$/);
+		if (!m) continue;
+		const pid = Number(m[1]);
+		const cmd = m[2] ?? "";
+		if (!cmd.includes("MacOS/openttd") && !/(^|\s)openttd(\s|$)/.test(cmd)) continue;
+		// 只杀数据目录在矩阵根目录下的那些 ⇒ 用户的实例（别的目录）不受影响。
+		if (!cmd.includes(matrixRoot)) continue;
+		out.push(pid);
+	}
+	return out;
+}
+
+/** Kill only the games this matrix started. */
+function cleanupGame(matrixRoot: string): void {
+	const ps = spawnSync("ps", ["-eo", "pid=,command="], { encoding: "utf8" });
+	const pids = gamePidsToKill(ps.stdout ?? "", matrixRoot);
+	for (const pid of pids) {
+		try {
+			process.kill(pid);
+		} catch {
+			/* already gone */
+		}
+	}
+	if (pids.length > 0) spawnSync("sleep", ["2"]);
 }
 
 /**
@@ -275,14 +308,14 @@ function main(argv: string[]): number {
 	// --- run the matrix (serial: one game instance at a time) ---
 	let failed = 0;
 	for (const cell of plan.cells) {
-		cleanupGame();
+		cleanupGame(args.root);
 		const code = runCell(cell, world, args.seconds, args.credentials, args.modelsCache);
 		if (code !== 0) {
 			failed++;
 			console.log(`!! ${cell.model} seed=${cell.seed} rep=${cell.repeat} rc=${code} (log: ${join(cell.dataDir, "run.log")})`);
 		}
 	}
-	cleanupGame();
+	cleanupGame(args.root);
 
 	// --- report ---
 	const conditions: BenchConditions = {

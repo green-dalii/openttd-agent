@@ -18,6 +18,7 @@ import { describe, expect, it } from "vitest";
 import {
 	checkCredentials,
 	checkModelsCache,
+	gamePidsToKill,
 	installCredentials,
 	installModelsCache,
 } from "../../scripts/bench.js";
@@ -79,5 +80,31 @@ describe("矩阵的每一格带着自己的 provider 状态", () => {
 	it("缺模型清单 ⇒ 跑矩阵之前就报出来", () => {
 		expect(() => checkModelsCache("/definitely/not/here/models-cache.json")).toThrow(/not found/);
 		expect(() => checkModelsCache(undefined)).not.toThrow();
+	});
+});
+
+/**
+ * 矩阵的清理**只杀矩阵自己起的游戏**（2026-11-16）。
+ *
+ * 为什么: `pkill -f openttd` 会把**用户自己的实例**一起杀掉（MEMORY §0.4）。
+ * 矩阵的游戏进程命令行里带 `-D <dataDir>` ⇒ 按矩阵根目录过滤就是精确的。
+ */
+describe("矩阵的游戏清理不会误伤用户的实例", () => {
+	const ps = [
+		"  71053 node /Users/greener/project/openttd-agent/node_modules/.pnpm/typescript",
+		"  81122 /Users/greener/Library/Application Support/Steam/steamapps/common/OpenTTD/OpenTTD.app/Contents/MacOS/openttd -D /tmp/pE2/MiniMax-M3.1-Flash/seed-11/rep-1",
+		"  82233 /Users/greener/Library/Application Support/Steam/steamapps/common/OpenTTD/OpenTTD.app/Contents/MacOS/openttd -D /Users/greener/Documents/OpenTTD",
+	].join("\n");
+
+	it("只杀数据目录在矩阵根目录下的游戏", () => {
+		expect(gamePidsToKill(ps, "/tmp/pE2")).toEqual([81122]);
+	});
+
+	it("用户的实例（别的数据目录）不被杀", () => {
+		expect(gamePidsToKill(ps, "/tmp/pE2")).not.toContain(82233);
+	});
+
+	it("没有矩阵进程时什么都不杀（不是 pkill 的『没有就报错』）", () => {
+		expect(gamePidsToKill("", "/tmp/pE2")).toEqual([]);
 	});
 });
