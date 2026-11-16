@@ -61,18 +61,26 @@ interface Args {
 	 * ⇒ 矩阵比较的仍然是同一个问题。
 	 */
 	modelsCache?: string;
+	/**
+	 * `<dataDir>/llm.json`（providerId / api / baseUrl / 凭据来源）。
+	 * 没有它，每格的闸会说"no provider/model configured"⇒ **矩阵一格都跑不起来**。
+	 */
+	llmSettings?: string;
 }
 
 const USAGE = `usage: tsx scripts/bench.ts --root <dir> --models a,b --seeds 11,22 [--repeats 3]
   [--game-days 300] [--scenario prebuilt|freeform] [--start-year 1950] [--map 256x256]
   [--seconds 900] [--effect 0.5 --cv 1] [--credentials <file>] [--models-cache <file>]
+  [--llm-settings <file>]
   [--dry-run]
 
   Every (model, seed, repeat) cell gets its own data dir under <root>, so memory
   never crosses cells. --effect/--cv pre-register the comparison: an
   under-powered matrix is refused before any run starts. --credentials copies a
   credentials file into every cell (the key must stay out of the repository);
-  --models-cache copies the provider's model list (same reason).`;
+  --models-cache copies the provider's model list (same reason). --llm-settings copies the
+  provider settings (llm.json) into every cell - without it a cell has no provider
+  configured and the whole matrix fails in seconds.`;
 
 function parseArgs(argv: string[]): Args {
 	const get = (flag: string): string | undefined => {
@@ -101,6 +109,7 @@ function parseArgs(argv: string[]): Args {
 		seconds: Number(get("--seconds") ?? 900),
 		...(get("--credentials") !== undefined ? { credentials: get("--credentials")! } : {}),
 		...(get("--models-cache") !== undefined ? { modelsCache: get("--models-cache")! } : {}),
+		...(get("--llm-settings") !== undefined ? { llmSettings: get("--llm-settings")! } : {}),
 	};
 }
 
@@ -156,6 +165,20 @@ export function installCredentials(source: string, cellDir: string): void {
 }
 
 /**
+ * Copy the **LLM settings file** (`llm.json`) into one cell's data dir.
+ *
+ * 为什么需要（2026-11-16）：每格的 provider 配置是 `<dataDir>/llm.json`
+ * （providerId / api / baseUrl / 凭据来源）。没有它，每格的闸会说
+ * "no provider/model configured" ⇒ **矩阵一格都跑不起来**（实测：6 格 5 秒全败）。
+ * 这个文件**可能带 key** ⇒ 权限 0600，且**只复制、不打印**。
+ */
+export function installLlmSettings(source: string, cellDir: string): void {
+	const target = join(cellDir, "llm.json");
+	copyFileSync(source, target);
+	chmodSync(target, 0o600);
+}
+
+/**
  * Copy the provider's model list into one cell's data dir.
  *
  * 为什么需要: 目录（catalog）provider 的模型清单在 `<dataDir>/models-cache.json`
@@ -165,6 +188,19 @@ export function installCredentials(source: string, cellDir: string): void {
  */
 export function installModelsCache(source: string, cellDir: string): void {
 	copyFileSync(source, join(cellDir, "models-cache.json"));
+}
+
+/**
+ * Check the LLM settings file **before** the matrix starts (same reason as the
+ * credentials: a cell that cannot start must fail before the first run, not
+ * half way through).
+ */
+export function checkLlmSettings(source: string | undefined): void {
+	if (!source) return;
+	const path = resolve(source);
+	if (!existsSync(path)) {
+		throw new Error(`llm settings file not found: ${path}`);
+	}
 }
 
 /**
@@ -196,10 +232,12 @@ function runCell(
 	seconds: number,
 	credentials?: string,
 	modelsCache?: string,
+	llmSettings?: string,
 ): number {
 	mkdirSync(cell.dataDir, { recursive: true });
 	if (credentials) installCredentials(credentials, cell.dataDir);
 	if (modelsCache) installModelsCache(modelsCache, cell.dataDir);
+	if (llmSettings) installLlmSettings(llmSettings, cell.dataDir);
 	const logPath = join(cell.dataDir, "run.log");
 	const fd = openSync(logPath, "a");
 	// The model is passed through the same env var the CLI already uses, so the
@@ -266,6 +304,7 @@ function main(argv: string[]): number {
 	try {
 		checkCredentials(args.credentials);
 		checkModelsCache(args.modelsCache);
+		checkLlmSettings(args.llmSettings);
 	} catch (e) {
 		console.error(`!! ${(e as Error).message}`);
 		return 1;
@@ -309,7 +348,7 @@ function main(argv: string[]): number {
 	let failed = 0;
 	for (const cell of plan.cells) {
 		cleanupGame(args.root);
-		const code = runCell(cell, world, args.seconds, args.credentials, args.modelsCache);
+		const code = runCell(cell, world, args.seconds, args.credentials, args.modelsCache, args.llmSettings);
 		if (code !== 0) {
 			failed++;
 			console.log(`!! ${cell.model} seed=${cell.seed} rep=${cell.repeat} rc=${code} (log: ${join(cell.dataDir, "run.log")})`);

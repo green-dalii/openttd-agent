@@ -19,23 +19,32 @@
 
 ### Changed
 
-- **The per-decision tool budget was cutting off the agent's actions.** The budget allowed 12 tool calls per decision,
-  chosen to cap a measured runaway - but a controlled experiment (2 arms x 2 seeds, same model, same 250-day horizon,
-  all four runs reaching it) showed it cut the model's **actions**, not its idling: the blocked calls were
-  `build_freight_route`, `build_bus_route` and `set_route_vehicles`. With 24 calls per decision the blocked calls fell
-  from 11 and 6 to 3 and 1, deliveries per game day rose from 2.19/0.86 to 5.14/1.75, operating profit per game day rose
-  from +4.57/+5.06 to **+48.27/+25.49**, and the tokens per delivered unit **halved** - while the tokens per run did not
-  rise. The default is now 24 (still a knob, still in the manifest).
+- **The per-decision tool budget was cutting off the agent's actions.** The budget allowed 12 tool calls per decision, chosen to cap
+a measured runaway - but a controlled experiment (2 arms x 2 seeds, same model, same 250-day horizon, all four runs reaching it)
+showed it cut the model's **actions**, not its idling: the blocked calls were `build_freight_route`, `build_bus_route` and
+`set_route_vehicles`. With 24 calls per decision the blocked calls fell from 11 and 6 to 3 and 1, deliveries per game day rose from
+2.19/0.86 to 5.14/1.75, operating profit per game day rose from +4.57/+5.06 to **+48.27/+25.49**, and the tokens per delivered unit
+**halved** - while the tokens per run did not rise. The default is now 24 (still a knob, still in the manifest).
 
 ### Fixed
 
-- **A route's own vehicles and profit are now counted on that route.** The game script counted the vehicles standing at
-  a route's two end stations - but that list holds the vehicles *serving* a station, so one route's fleet was counted
-  twice (10 vehicles reported as 20) and, at a shared station, another route's vehicles were counted as well (a route
-  that was never built reported 10 vehicles and 7076 profit belonging to someone else). The numbers reach the model's
-  context, so the model judged routes on untrue facts. They now come from the executor's registry - the route's own
-  fleet - and a route the registry does not know simply has no vehicles. After the fix a route's profit matches the
-  company fleet reading to the cent (-123 vs -41 x 3; -246 before).
+- **A freight line now says which cargo it carries.** The game script rewrote the route's record whenever the fleet changed, a route
+was retired or its cargo or engine was changed, and each rewrite wrote back only the few keys that change touched - so the rest were
+silently dropped. Among them the cargo the line carries: **a freight line had no cargo label at all**, which meant the per (cargo,
+receiving industry) attribution could never match it and the per-line delivery figure stayed empty on a real machine (six of eleven
+routes in one run). The records are now updated in place, and a guard keeps the table from being rewritten wholesale anywhere else.
+
+- **The benchmark matrix can run a real provider.** Every cell gets its own data directory, and the provider
+  configuration (`llm.json`) was not copied into it - so every cell stopped at the start-up gate with "no
+  provider/model configured" and the whole matrix failed in seconds. The matrix now copies the settings file into each
+  cell (read-only to the repository, 0600 because it may carry a key) and checks it before the first cell runs.
+
+- **A route's own vehicles and profit are now counted on that route.** The game script counted the vehicles standing at a route's
+two end stations - but that list holds the vehicles *serving* a station, so one route's fleet was counted twice (10 vehicles
+reported as 20) and, at a shared station, another route's vehicles were counted as well (a route that was never built reported 10
+vehicles and 7076 profit belonging to someone else). The numbers reach the model's context, so the model judged routes on untrue
+facts. They now come from the executor's registry - the route's own fleet - and a route the registry does not know simply has no
+vehicles. After the fix a route's profit matches the company fleet reading to the cent (-123 vs -41 x 3; -246 before).
 
 ### Added
 
@@ -71,29 +80,27 @@ table has an **expand all** button. Sample and full list come from **one scan**.
   are gone: the translation of newly rendered text was scheduled on `requestAnimationFrame`, which only runs while the
   page is painted (in a background tab everything drawn afterwards stayed English, silently), and the framework started
   in a microtask - before the language runtime had initialised - so the first paint was in the default language.
-- **The dashboard's Chinese interface is now complete for its static copy.** Every visible
-  sentence in the four pages (Run / Compare / History / Configure) has a Chinese translation -
-  324 of them, where before 226 silently fell back to English. The pages also had Chinese text
-  hard-coded in the markup, so the **English** interface showed half-Chinese captions.
+- **The dashboard's Chinese interface is now complete for its static copy.** Every visible sentence in the four pages (Run /
+Compare / History / Configure) has a Chinese translation - 324 of them, where before 226 silently fell back to English. The
+pages also had Chinese text hard-coded in the markup, so the **English** interface showed half-Chinese captions.
 - **The freight axis has a paired comparison.** A benchmark comparison now also reports **cargo delivered per game day**
 (the game script's cargo monitor, cargo half only - a different measure from the main axis, never added to it).
 Passengers are not in it: the monitor does not count them, and a run with no cargo reading is **not measured**, not zero.
-- **The freight numbers reach the screen, and a freight line says how much it delivered.** The server had been computing
-  them for a while - the scorecard splits cargo from passengers, and the attribution knows what each freight line
-  delivered - but neither was drawn anywhere. The Run page's route table now has a **Delivered** column (how much that
-  line delivered; a delivery that cannot be attributed to one line says so instead of showing a number, and a line with
-  no reading shows a dash), a freight route shows its two **industries** rather than two towns, and the Compare page
-  draws the **cargo / passenger** split on the Result axis, with the server's own wording of what the split measures.
-  The per-line figure was always a **derived** number (the engine does not record which vehicle delivered what where),
-  and there was nothing to derive it from: the script reported cargo totals but dropped the destination, and the route
-  table did not say which industries a line served. The script now also reports the **per (cargo, receiving industry)**
-  and the **two industry ids of every freight line**, and the harness attributes each delivery to the one line that
-  serves that cargo at that industry; when several of our lines share it the delivery is **not split** but reported as
-  unattributable with the reason, and when no line of ours serves it, it is reported separately rather than dropped.
-  The decision ledger had one shape ("two towns"), so a freight line could arrive as `null/null` - and those sentences
-  are injected into the model's context: passenger and freight routes are now **two explicit record kinds**, and the
-  injected sentence says what the line really is, including how much it delivered and that the figure is derived. Real
-  machine (seed 4242, a coal line 28 -> 53): 160 tonnes attributed to that line, and no fact has a null end.
+- **The freight numbers reach the screen, and a freight line says how much it delivered.** The server had been computing them
+for a while - the scorecard splits cargo from passengers, and the attribution knows what each freight line delivered - but
+neither was drawn anywhere. The Run page's route table now has a **Delivered** column (how much that line delivered; a
+delivery that cannot be attributed to one line says so instead of showing a number, and a line with no reading shows a dash),
+a freight route shows its two **industries** rather than two towns, and the Compare page draws the **cargo / passenger**
+split on the Result axis, with the server's own wording of what the split measures. The per-line figure was always a
+**derived** number (the engine does not record which vehicle delivered what where), and there was nothing to derive it from:
+the script reported cargo totals but dropped the destination, and the route table did not say which industries a line served.
+The script now also reports the **per (cargo, receiving industry)** and the **two industry ids of every freight line**, and
+the harness attributes each delivery to the one line that serves that cargo at that industry; when several of our lines share
+it the delivery is **not split** but reported as unattributable with the reason, and when no line of ours serves it, it is
+reported separately rather than dropped. The decision ledger had one shape ("two towns"), so a freight line could arrive as
+`null/null` - and those sentences are injected into the model's context: passenger and freight routes are now **two explicit
+record kinds**, and the injected sentence says what the line really is, including how much it delivered and that the figure
+is derived. Real machine (seed 4242, a coal line 28 -> 53): 160 tonnes attributed to that line, and no fact has a null end.
 - **The paired comparison now answers on every axis.** It used to compute exactly one metric - cargo
 + passengers delivered per game day - so the efficiency axis (delivered per 1M tokens) and the
 stability axis (share of tool calls that failed) had **no paired interval at all**. That is how "the
@@ -137,11 +144,10 @@ different observation surface, a different slice of the world - are no longer mi
 the metric rows by the manifest's own fields (scaffold + observation shape + observation policy), the page offers the
 groups, and the numbers below belong to **one** group; the other groups are counted, not dropped.
 
-- **The model can finally see its financing, and it knows why its balance moves.** The company facts
-  already carried the loan, but not how much more could be borrowed - and the **interest rate is not
-  exposed by the engine at all**, so that one stays "not measured" rather than a guess. The Bridge GS
-  now reads the company's loan ceiling (it has to enter company mode to do it) and reports it, so the
-  projection carries `financing { loanCeiling, loanInterval }` (real machine: 300000 / 10000).
+- **The model can finally see its financing, and it knows why its balance moves.** The company facts already carried the
+loan, but not how much more could be borrowed - and the **interest rate is not exposed by the engine at all**, so that one
+stays "not measured" rather than a guess. The Bridge GS now reads the company's loan ceiling (it has to enter company mode to
+do it) and reports it, so the projection carries `financing { loanCeiling, loanInterval }` (real machine: 300000 / 10000).
 
 - **The model can finally see every town, and the dashboard knows which slice it saw.** The Bridge GS reported the ten
 biggest towns only, so every other town reached the model as a bare number (`#14 -> #2`) - it could not even name the
@@ -159,11 +165,10 @@ computed **before** a run, both backends record it, and the preview promises it.
 - **A comparison can start from the comparison.** The Compare page could only look at runs that already existed: picking the models, the worlds and the caps and then *starting that plan* was impossible. The plan is now computed **server-side** (the page estimates nothing): how many runs it would start, which caps apply, whether the spend is measurable, which model each cell uses - with the same field names the manifest uses, so plan and finished run compare field by field. Launching runs the cells **one after another** (one process, one game port); a failed cell is recorded and the rest still run. The refusals happen before anything starts: a cost cap on a model without a price table, an unknown model, or a plan that collides with a running game.
 
 - **The configuration page is now called what it does.** The page that used to live at `/providers` answers "how is this run configured?", so it is now at `/configure`; the old URL redirects (and the older `/llm` alias still resolves).
-- **The score now says what it actually counts.** The delivery counter the harness reads is
-  OpenTTD's *per-cargo-type* array summed up - and OpenTTD keeps passengers in that same array, so
-  the number has always counted **cargo and passengers**, not tonnes of freight. The scorecard, the
-  benchmark report, the History page and the model-facing system prompt all said "cargo", which was
-  untrue. The wording now comes from one place on the server (`DELIVERED_MEASURE`), and the page copies it.
+- **The score now says what it actually counts.** The delivery counter the harness reads is OpenTTD's *per-cargo-type* array
+summed up - and OpenTTD keeps passengers in that same array, so the number has always counted **cargo and passengers**, not
+tonnes of freight. The scorecard, the benchmark report, the History page and the model-facing system prompt all said "cargo",
+which was untrue. The wording now comes from one place on the server (`DELIVERED_MEASURE`), and the page copies it.
 
 - **The dashboard speaks two languages now.** A switch in the header flips the whole interface between English and Chinese, and the choice is remembered. The English text stays where it always was (the translation table is keyed by it, the gettext way), so there is no second copy to keep in sync, and a guard test fails the build when a translation no longer matches its source. Raw evidence stays raw (the JSON in the agent steps is not translated) and so does the server's own vocabulary.
 
@@ -231,32 +236,30 @@ the copy lived in six places. The clock is now the **engine's calendar** in one 
 day, quarter boundaries are the engine's quarters (1/4/7/10 January), and a route's "income per day" divides by the day
 of the year the engine reports. The reading this exposed - that the promotion gate's `income / 365` is a year-to-date
 net cash flow and not a per-game-day profit - is written down in SPEC §10.55 / §10.76.
-- **The profit reading was the wrong quantity, the readings were never written down, and the gate was reading the
-  wrong one.** The gate read `income / 365`, but the engine's `income` is the **current year's** net cash flow (it
-  resets on 1 January) and 365 is a year length, not the run's length - so it was never "this run's profit per game
-  day". It is now the **net cash flow** (`money - loan`, continuous across the year boundary) over the **game days
-  the run actually took**, and the model sees the same denominator it is scored on. But the gate asks "does this
-  strategy pay", and net cash flow answers "did the company overspend": while a run is building it is negative by
-  construction, so the gate could never open for a strategy that includes building. A real run (MiniMax-M3.1-Flash,
-  seed 11, 151 days) measured the gap - net cash flow **-1499.28/game day** against operating profit **+14.13/game
-  day**, the 1513/day difference being exactly the construction and the vehicles. The gate now reads **operating
-  profit**; both measures stay on the card and both are shown on the page (net cash flow is the company's health,
-  operating profit the strategy's quality - showing only one would make the page do the very substitution that broke
-  the gate), and a card with no operating-profit reading is **not determinable**, not zero. The readings are
-  **written down** too: the archive used to drop every economy event (BigInt payloads hit `JSON.stringify` and the
-  error was swallowed), so a finished run could not be re-read offline - the Run page shows the net cash flow, its
-  per-game-day rate, and whether it reconciled with the engine's own yearly reading. A real run crossing 1 January
-  (seed 4242, 381 days) reconciles exactly, and `scripts/recompute-profit.ts` recomputes it from the archive alone.
-- **A pair could have compared the wrong two runs.** The repeat index was counted over the rows that **had a
-  reading**, so a run with no reading for one metric shifted its partner. The cells are now the **runs**.
-- **"Not applicable" was reported as zero.** The game script encodes a missing reading as JSON `null` (so the
-  payload shape never changes), but two readers went through `Number(value)` - and `Number(null)` is `0` - so "this
-  industry does not accept this cargo" became "stockpile: 0 tonnes". Every raw counter now asks "missing?" first.
+- **The profit reading was the wrong quantity, the readings were never written down, and the gate was reading the wrong
+one.** The gate read `income / 365`, but the engine's `income` is the **current year's** net cash flow (it resets on 1
+January) and 365 is a year length, not the run's length - so it was never "this run's profit per game day". It is now the
+**net cash flow** (`money - loan`, continuous across the year boundary) over the **game days the run actually took**, and the
+model sees the same denominator it is scored on. But the gate asks "does this strategy pay", and net cash flow answers "did
+the company overspend": while a run is building it is negative by construction, so the gate could never open for a strategy
+that includes building. A real run (MiniMax-M3.1-Flash, seed 11, 151 days) measured the gap - net cash flow **-1499.28/game
+day** against operating profit **+14.13/game day**, the 1513/day difference being exactly the construction and the vehicles.
+The gate now reads **operating profit**; both measures stay on the card and both are shown on the page (net cash flow is the
+company's health, operating profit the strategy's quality - showing only one would make the page do the very substitution
+that broke the gate), and a card with no operating-profit reading is **not determinable**, not zero. The readings are
+**written down** too: the archive used to drop every economy event (BigInt payloads hit `JSON.stringify` and the error was
+swallowed), so a finished run could not be re-read offline - the Run page shows the net cash flow, its per-game-day rate, and
+whether it reconciled with the engine's own yearly reading. A real run crossing 1 January (seed 4242, 381 days) reconciles
+exactly, and `scripts/recompute-profit.ts` recomputes it from the archive alone.
+- **A pair could have compared the wrong two runs, and "not applicable" was reported as zero.** The repeat index was counted over
+the rows that **had a reading**, so a run with no reading for one metric shifted its partner - the cells are now the **runs**.
+Separately, the game script encodes a missing reading as JSON `null` (so the payload shape never changes), but two readers went
+through `Number(value)` - and `Number(null)` is `0` - so "this industry does not accept this cargo" became "stockpile: 0 tonnes".
+Every raw counter now asks "missing?" first; world-frozen runs and unfinished horizons are named and excluded from comparisons.
 - **The decision context swallowed two facts it had already been given.** The financing facts and the pushed events
   were passed into the decision context and then dropped. The readings were in the projection all along.
-- **The navigation now reaches every page.** A page URL was a hand-written table in the server's memory, so a page
-  added after the server started was unreachable ("not found"). The routes are now **derived from the files** in
-  `public/pages/`.
+- **The navigation now reaches every page.** A page URL was a hand-written table in the server's memory, so a page added
+after the server started was unreachable ("not found"). The routes are now **derived from the files** in `public/pages/`.
 
 - **The model can finally see the freight world.** A freight line is "which mine, which plant", and the model could
   see neither: the GS now reports a **cargo catalogue** (which cargo is freight, which industries produce it, which
@@ -273,10 +276,9 @@ net cash flow and not a per-game-day profit - is written down in SPEC §10.55 / 
 
 - **A strategy card's identity belongs to the code now, not to the model's wording.** The id used to be a hash of a free-text action plus *every* parameter, so a different town id or a rephrased sentence became a new card - which made "verified in 2 games" structurally unreachable. Identity is now the action name (a closed vocabulary that mirrors the tool catalogue) plus three whitelisted parameters; an unknown action is rejected with the list in the error. Its value is a **measured profit rate per game day** (`income / 365`, stamped from the run's own record), not a number the model reports about itself; cards without that reading stay unpromotable rather than being treated as zero.
 
-- **The Configure page leads with what the next run would use**, and an empty selection is a state,
-  not an error. A fresh install used to show a red `unknown_provider` before a single field was
-  touched: the server now answers with a `needs` marker ("no model selected yet") instead of a
-  problem, Start is disabled with the reason beside it, and the file paths moved into a folded note.
+- **The Configure page leads with what the next run would use**, and an empty selection is a state, not an error. A fresh install
+used to show a red `unknown_provider` before a single field was touched: the server now answers with a `needs` marker ("no model
+selected yet") instead of a problem, Start is disabled with the reason beside it, and the file paths moved into a folded note.
 
 - **History answers "which run matters" before it shows a single field.** The page is now three bands: four conclusion
 KPIs from the ledger (comparable runs, delivered per game day, tokens per decision, spend), a compact run list whose
@@ -285,21 +287,19 @@ days, cash, fleet, tokens, failures) with the evidence folded behind it (outcome
 summaries, event log). A page that used to be ~9,800px of equally-weighted tables is ~2,900px of conclusions, and the
 same numbers stop appearing twice: the header keeps run counts, the strip keeps the measured rates.
 - **A training chart that is flat at 0 is now a sentence.** A 900x300 plot with one line on the floor carries no information and reads as a rendering failure; when every comparable run delivered 0 the page says so instead of drawing it.
-- **Dropped ledger rows are disclosed on History too.** The ledger keeps the newest row per session id;
-  on pre-2026-10-31 data that silently halved the sample. `/api/evolution` now returns the collisions
-  and the page prints how many rows are missing and which ids, so its "N comparable runs" cannot be
-  read as the whole ledger. When a colliding row belongs to a different run, the selected run's
-  delivered reading says "not measured" instead of borrowing a stranger's number.
+- **Dropped ledger rows are disclosed on History too.** The ledger keeps the newest row per session id; on pre-2026-10-31
+data that silently halved the sample. `/api/evolution` now returns the collisions and the page prints how many rows are
+missing and which ids, so its "N comparable runs" cannot be read as the whole ledger. When a colliding row belongs to a
+different run, the selected run's delivered reading says "not measured" instead of borrowing a stranger's number.
 - **Spend reads "unknown" rather than a partial sum** when any comparable run had no price table (the same rule the header already applied, now applied to the conclusion).
 
 - **The Run header stopped lying about elapsed time and the session id.** Both displayed fields the page never wrote, so they read "-" even mid-run; they now come from the server (the telemetry snapshot, or the supervisor's run record) and the elapsed time actually ticks.
 
-- **The Compare page has a chart now, and the model picker sits on top.** The four axes used to
-  be a table and nothing else. Each axis gets its own chart - one bar per model, scaled against
-  that axis' own maximum, because the axes have different units and a shared scale would
-  misrepresent them - while the table keeps the exact values. A reading the server did not
-  measure is an empty dashed slot, never a zero-length bar: "not measured" and "measured: 0" must not look the same. The picker moved to the top of the page, so asking for a comparison is one
-  click away instead of a scroll down.
+- **The Compare page has a chart now, and the model picker sits on top.** The four axes used to be a table and nothing else.
+Each axis gets its own chart - one bar per model, scaled against that axis' own maximum, because the axes have different
+units and a shared scale would misrepresent them - while the table keeps the exact values. A reading the server did not
+measure is an empty dashed slot, never a zero-length bar: "not measured" and "measured: 0" must not look the same. The picker
+moved to the top of the page, so asking for a comparison is one click away instead of a scroll down.
 
 - **The metric ledger no longer loses runs to a session-id collision.** Two runs started in the same second on the same seed used to get the *same* session id, and the ledger keeps "newest wins per id", so one of them disappeared without a trace - in the first benchmark matrix that silently swallowed three of six runs (the Compare page showed "1 model(s)"). Session ids now carry a short random suffix, and the ledger *reports* the collisions, so the Compare page says out loud which runs were dropped and that they are in none of the numbers below.
 
@@ -323,10 +323,9 @@ price table could never fire, so it was refused before the game started — but 
 conflict", which told the user their request collided with a running game. It is now `400` with the structured reason
 `unpriced_with_cost_cap`, and the preview refuses it too (a preview must not promise a run that cannot start).
 
-- **The run knobs form renders.** Alpine's `x-for` has to sit on a `<template>`; on a plain element
-  the loop variable is not in scope for that element's own directives, so the whole form rendered
-  empty while the page looked fine (the errors only appear in `console.warn`). The knob fields
-  also had two controls sharing one id, so `#knob-toolBudget` resolved to the hidden one.
+- **The run knobs form renders.** Alpine's `x-for` has to sit on a `<template>`; on a plain element the loop variable is not in
+scope for that element's own directives, so the whole form rendered empty while the page looked fine (the errors only appear in
+`console.warn`). The knob fields also had two controls sharing one id, so `#knob-toolBudget` resolved to the hidden one.
 
 - **The preview follows the form.** It was fetched once on load, so the panel kept showing the values of the previous knobs while claiming to describe the next run.
 

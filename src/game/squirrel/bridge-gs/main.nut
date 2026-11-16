@@ -1217,14 +1217,14 @@ class ExecCore {
             this._fleetApplied = applied;
             return;
         }
+        // **就地改字段，不要重建这张表**（2026-11-16）：重建会把表里**其它字段丢掉**
+        // ——之前这里只写回 5 个键，于是 `lineCargo`（⇒ 线路运的货）、`stA/stB`、
+        // `endA/endB`（⇒ 诊断用的两端格）每次车队变更后**都没了**。
+        // 后果不是"少几个字段"：货运线因此**没有 cargo 标签** ⇒ 逐 (货种, 收方产业)
+        // 的归因**永远归不出来** ⇒ F4 的逐线交付量一直是 null。
         local r = this._routes[job];
-        this._routes[job] <- {
-            vehicles = vehicles,
-            lead = r.lead,
-            depot = r.depot,
-            retired = (r.retired == true),
-            applied = applied,
-        };
+        r.vehicles = vehicles;
+        r.applied = applied;
     }
 
     function CheckAddVehicles() {
@@ -1323,13 +1323,8 @@ class ExecCore {
                 foreach (vid in r.vehicles) {
                     if (GSVehicle.IsValidVehicle(vid)) live2.append(vid);
                 }
-                this._routes[job] <- {
-                    vehicles = live2,
-                    lead = r.lead,
-                    depot = r.depot,
-                    retired = (r.retired == true),
-                    applied = (r.rawin("applied") ? r.applied : -1),
-                };
+                // 就地改（不重建）：理由同 SaveFleetTarget（重建会丢 lineCargo 等字段）。
+                r.vehicles = live2;
             }
         }
         if (sold > 0 || gone > 0 || (blocked > 0 && this._fleetSell.len() == 0)) {
@@ -1445,12 +1440,12 @@ class ExecCore {
                 queued++;
             }
         }
-        this._routes[job] <- {
-            vehicles = list,
-            lead = (job == this._job ? this._vehicle : this._routes[job].lead),
-            depot = (job == this._job ? (this._slotD.bp == null ? -1 : this._slotD.bp[0]) : this._routes[job].depot),
-            retired = true,
-        };
+        // 就地改（不重建）：重建会丢掉 lineCargo / endA / endB（2026-11-16）。
+        local rr = this._routes[job];
+        rr.vehicles = list;
+        rr.lead = (job == this._job ? this._vehicle : rr.lead);
+        rr.depot = (job == this._job ? (this._slotD.bp == null ? -1 : this._slotD.bp[0]) : rr.depot);
+        rr.retired = true;
         // table 集合：`in` 判断存在、`<-` 新建槽位（array 没有 rawin，用错就是运行时异常）
         if (!(job in this._retiredJobs)) this._retiredJobs[job] <- true;
         this.Ph("retire" + queued + "C" + this.CountOwnVehicles());
@@ -1535,14 +1530,9 @@ class ExecCore {
     /* 把一条线的「改装到的货物」写进登记表（当前 job 用活字段，旧 job 用登记表）。 */
     function SaveRouteCargo(job, cid) {
         if (job == this._job) { this._routeCargo = cid; return; }
+        // 就地改（不重建）：重建会丢掉 lineCargo / endA / endB（2026-11-16）。
         local r = this._routes[job];
-        this._routes[job] <- {
-            vehicles = r.vehicles, lead = r.lead, depot = r.depot,
-            retired = (r.retired == true),
-            applied = (r.rawin("applied") ? r.applied : -1),
-            stA = (r.rawin("stA") ? r.stA : -1), stB = (r.rawin("stB") ? r.stB : -1),
-            cargo = cid, engine = (r.rawin("engine") ? r.engine : -1),
-        };
+        r.cargo = cid;
     }
 
     /* 换车（P1-2）：把一条线的车队换成**指定车型**。
@@ -1596,13 +1586,15 @@ class ExecCore {
             this._routeEngine = engine;
             this.RegisterRoute(job);
         } else {
+            // 就地改（不重建）：重建会丢掉 lineCargo / endA / endB（2026-11-16）。
             local r = this._routes[job];
-            this._routes[job] <- {
-                vehicles = made, lead = made[0], depot = t.depot, retired = false,
-                applied = (r.rawin("applied") ? r.applied : -1),
-                stA = stA, stB = stB,
-                cargo = (r.rawin("cargo") ? r.cargo : -1), engine = engine,
-            };
+            r.vehicles = made;
+            r.lead = made[0];
+            r.depot = t.depot;
+            r.retired = false;
+            r.stA = stA;
+            r.stB = stB;
+            r.engine = engine;
         }
         this.Report({ kind = "exec", job = job, stage = "reeng",
                       note = "reeng" + made.len() + "e" + engine + "j" + job });

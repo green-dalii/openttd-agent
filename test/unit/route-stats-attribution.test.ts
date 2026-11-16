@@ -61,3 +61,29 @@ describe("GS 的 route-stats：逐线读数按该线自己的车队", () => {
 		expect(body).toMatch(/vehicles\s*=\s*vehIds\.len\(\)/);
 	});
 });
+
+/**
+ * 线路登记表**只允许一处重建**（2026-11-16）。
+ *
+ * 现象：每次车队变更/退役/改货/换车，代码都用 `this._routes[job] <- { … }`
+ * **重建**这张表，只写回自己关心的那几个键 ⇒ 表里**其它字段被丢掉**。
+ * 丢掉的 `lineCargo` 让**货运线没有 cargo 标签** ⇒ 逐 (货种, 收方产业) 的归因
+ * **永远归不出来** ⇒ 逐线交付量一直是 null（F4 的功能在真机上从未出过一个数）；
+ * 丢掉的 `endA/endB` 让诊断拿不到线路两端。
+ *
+ * 规则：**就地改字段**；只有"登记一条新线路"（RegisterRoute）可以重建整张表。
+ */
+describe("GS 的线路登记表只允许一处重建", () => {
+	const src = readFileSync(GS, "utf8");
+	const code = stripComments(src);
+	const rebuilds = code.match(/this\._routes\[job\]\s*<-/g) ?? [];
+
+	it("只有 RegisterRoute 一处重建（其余一律就地改字段）", () => {
+		expect(rebuilds).toHaveLength(1);
+	});
+
+	it("就地改字段的写法都在（vehicles / lineCargo 不再被重建丢掉）", () => {
+		expect(code).toMatch(/r\.vehicles\s*=/);
+		expect(code).toMatch(/rr\.vehicles\s*=/);
+	});
+});
