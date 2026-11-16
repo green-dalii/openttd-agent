@@ -11,13 +11,23 @@
 
 ### Changed
 
-- **The per-decision tool budget was cutting off the agent's actions.** The budget allowed 12 tool calls per
-  decision, chosen to cap a measured runaway - but a controlled experiment (2 arms x 2 seeds, same model, same
-  250-day horizon, all four runs reaching the horizon) showed it cut the model's **actions**, not its idling: the
-  blocked calls were `build_freight_route`, `build_bus_route` and `set_route_vehicles`. With 24 calls per decision
-  the blocked calls fell from 11 and 6 to 3 and 1, deliveries per game day rose from 2.19/0.86 to 5.14/1.75,
-  operating profit per game day rose from +4.57/+5.06 to **+48.27/+25.49**, and the tokens per delivered unit
-  **halved** - while the tokens per run did not rise. The default is now 24 (still a knob, still in the manifest).
+- **The per-decision tool budget was cutting off the agent's actions.** The budget allowed 12 tool calls per decision,
+  chosen to cap a measured runaway - but a controlled experiment (2 arms x 2 seeds, same model, same 250-day horizon,
+  all four runs reaching it) showed it cut the model's **actions**, not its idling: the blocked calls were
+  `build_freight_route`, `build_bus_route` and `set_route_vehicles`. With 24 calls per decision the blocked calls fell
+  from 11 and 6 to 3 and 1, deliveries per game day rose from 2.19/0.86 to 5.14/1.75, operating profit per game day rose
+  from +4.57/+5.06 to **+48.27/+25.49**, and the tokens per delivered unit **halved** - while the tokens per run did not
+  rise. The default is now 24 (still a knob, still in the manifest).
+
+### Fixed
+
+- **A route's own vehicles and profit are now counted on that route.** The game script counted the vehicles standing at
+  a route's two end stations - but that list holds the vehicles *serving* a station, so one route's fleet was counted
+  twice (10 vehicles reported as 20) and, at a shared station, another route's vehicles were counted as well (a route
+  that was never built reported 10 vehicles and 7076 profit belonging to someone else). The numbers reach the model's
+  context, so the model judged routes on untrue facts. They now come from the executor's registry - the route's own
+  fleet - and a route the registry does not know simply has no vehicles. After the fix a route's profit matches the
+  company fleet reading to the cent (-123 vs -41 x 3; -246 before).
 
 ### Added
 
@@ -49,14 +59,11 @@ demand, and the Run page's industry table has an **expand all** button. Sample a
   measures and the knob values are the **server's** wording, and the server keeps exactly one canonical wording of
   them. The front end now looks them up **by id** (`outcome.token_cap`, `problem.no_credential`) and falls back to the
   server's text when it has no translation. A test checks the table's coverage against the server's own lists.
-- **The Chinese interface now covers the text the scripts render too.** The hints, empty states, legends and labels
-  the pages draw at runtime - about 440 more strings - are translated.
-- **The language switch stopped working for anything rendered after the page loaded.** The translation of newly
-  rendered text was scheduled on `requestAnimationFrame`, which only runs while the page is painted - so in a
-  background tab the observer never fired again and everything drawn afterwards stayed English, silently.
-- **The interface now picks up the language before the first paint.** The framework starts in a
-  microtask, so it rendered before the language runtime had initialised - everything it drew looked
-  up in the default language. The runtime now initialises on the framework's start.
+- **The Chinese interface now covers the text the scripts render too**, and it keeps up with the language. The hints,
+  empty states, legends and labels the pages draw at runtime - about 440 more strings - are translated. Two timing faults
+  are gone: the translation of newly rendered text was scheduled on `requestAnimationFrame`, which only runs while the
+  page is painted (in a background tab everything drawn afterwards stayed English, silently), and the framework started
+  in a microtask - before the language runtime had initialised - so the first paint was in the default language.
 - **The dashboard's Chinese interface is now complete for its static copy.** Every visible
   sentence in the four pages (Run / Compare / History / Configure) has a Chinese translation -
   324 of them, where before 226 silently fell back to English. The pages also had Chinese text

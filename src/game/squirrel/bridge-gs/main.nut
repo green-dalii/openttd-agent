@@ -1684,8 +1684,11 @@ class BridgeV1 extends GSController {
     // mirror src/game/executor-status.ts decodeExecutorPhase (REFACTOR Phase A).
     _last_exec_key = "";
     // N2-1: routes this GS laid out (job -> tiles), so route economics can be
-    // attributed exactly. Attribution is by station orders (GSVehicleList_Station
-    // + GetOwner), NOT by guessing from positions.
+    // attributed exactly. Attribution is by the **executor's registry** (the
+    // route's own fleet), NOT by guessing from positions and NOT by scanning
+    // the two end stations - a station scan returns the vehicles *serving* it,
+    // so one route's fleet was counted twice and shared stations pulled in
+    // other routes' vehicles (2026-11-15, SPEC §10.129).
     _routes = null;
     // 诊断：每辆车**上一次的位置**与**上一次移动的 tick** ⇒ "车多久没动了"可测
     // （周期读数看不见这件事 ⇒ MEMORY D121）。**字段必须和用它的方法在同一个类里**：
@@ -1843,29 +1846,38 @@ class BridgeV1 extends GSController {
                 local tB = rec.rawget("tB");
                 local sa = this.StationNear(tA, 6);
                 local sb = this.StationNear(tB, 6);
+                // 逐线的车辆与利润：**按这条线自己的车队**（执行器注册表）算。
+                //
+                // 为什么不能按"停在两端站上的车"算（2026-11-15 真机证据，SPEC §10.129）：
+                //   ① `GSVehicleList_Station(s)` 返回的是**服务该站的车**（不是此刻停在
+                //      那儿的车）⇒ 一条线的车在**两个端点站**各出现一次 ⇒ 扫两个站
+                //      把同一批车**数了两遍**（真机 job 1：注册表 10 辆车，报成 20，
+                //      利润 7076 报成 14152）；
+                //   ② 站被**共用**时，**别条线的车**也会被算进来（真机 job 9：它自己
+                //      一辆车都没有，却报了别人的 10 辆车和 7076 利润）。
+                // 这两个数**进模型上下文**（模型据此判断哪条线赚钱）⇒ 错了就是让模型
+                // 按假事实决策。
+                //
+                // 注册表（`RouteVehicles`）不认识这条线 ⇒ 执行器还没建它 ⇒ 它**没有车**
+                // ⇒ 0 是**真的读数**，不是"没测到"（不许用 -1，那会被读成读数失败）。
                 local vehIds = [];
-                local vlist = [];
-                // 车辆 id 一并上报（2026-09-25）：仪表盘要把**跨线路**的车队数去重。
-                // 不去重就是拿 25 辆车报出 129 —— 一个车站服务多条线路时，站在站台上的
-                // 同一辆车会被每条用到该站的线路各数一次（真机：17 条线路 / 9 个站，
-                // 站点平均出现在 ~3.8 条线路上，25 × 5 ≈ 129，与实测一致）。
-                if (GSStation.IsValidStation(sa)) {
-                    foreach (v, _ in GSVehicleList_Station(sa)) {
-                        if (GSVehicle.GetOwner(v) == exec) { vlist.append(v); vehIds.append(v); }
-                    }
-                }
-                if (GSStation.IsValidStation(sb)) {
-                    foreach (v, _ in GSVehicleList_Station(sb)) {
-                        if (GSVehicle.GetOwner(v) == exec) { vlist.append(v); vehIds.append(v); }
-                    }
-                }
                 local profit = 0;
-                foreach (v in vlist) {
-                    // GetProfitThisYear returns -1 for a NON-primary vehicle
-                    // (wagons). Routes here are single road vehicles, always
-                    // primary, so a genuine -1 pound loss is not confused with
-                    // the sentinel.
-                    profit += GSVehicle.GetProfitThisYear(v);
+                local fleetIds = null;
+                if (this._core != null) fleetIds = this._core.RouteVehicles(job_str.tointeger());
+                if (fleetIds != null) {
+                    foreach (v in fleetIds) {
+                        // 卖掉的车会被注册表剪掉（ProcessFleetSells）；这里再挡一次，
+                        // 免得把失效 id 当成车。
+                        if (!GSVehicle.IsValidVehicle(v)) continue;
+                        vehIds.append(v);
+                        // GetProfitThisYear returns -1 for a NON-primary vehicle
+                        // (wagons). Routes here are single road vehicles, always
+                        // primary, so a genuine -1 pound loss is not confused with
+                        // the sentinel. 读不到（null）就不计 —— 不是 0。
+                        local p = GSVehicle.GetProfitThisYear(v);
+                        if (p == null) continue;
+                        profit += p;
+                    }
                 }
                 local waiting = 0;
                 // 逐站上报等待量（而不是只报两端之和）：harness 要按**站点去重**求和，
@@ -1885,18 +1897,17 @@ class BridgeV1 extends GSController {
                     if (GSStation.IsValidStation(sa)) { waitA = GSStation.GetCargoWaiting(sa, waitCargo); waiting += waitA; }
                     if (GSStation.IsValidStation(sb)) { waitB = GSStation.GetCargoWaiting(sb, waitCargo); waiting += waitB; }
                 }
-                // 车队真值（执行器注册表，引擎 id）：与 vehiclesIds（站点归属）是
-                // 两个事实。无核心/未登记 → 不带字段（未计量 ≠ 空车队，D60）。
-                local fleetIds = null;
+                // 车队真值（执行器注册表，引擎 id）。无核心/未登记 → 不带字段
+                // （未计量 ≠ 空车队，D60）。`vehiclesIds` 现在**就是**这条线自己的
+                // 车队（不再按站点归属）⇒ 仪表盘的跨线路去重不再需要。
                 local fleetApplied = null;
                 if (this._core != null) {
-                    fleetIds = this._core.RouteVehicles(job_str.tointeger());
                     fleetApplied = this._core.RouteApplied(job_str.tointeger());
                 }
                 local payload = {
                     kind = "route-stats",
                     job = job_str.tointeger(),
-                    vehicles = vlist.len(),
+                    vehicles = vehIds.len(),
                     vehiclesIds = vehIds,
                     endsA = sa,
                     endsB = sb,

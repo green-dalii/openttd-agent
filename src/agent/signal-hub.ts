@@ -595,9 +595,9 @@ export function makeSignalHub(refs: SignalHubRefs): SignalHub {
 								return Number.isFinite(n) ? n : undefined;
 							};
 							// 车辆 → 线路的归属（决策→结果台账的连接键）。
-							// **用 `fleetIds`（执行器注册表里这条线自己的车队），不用
-							// `vehiclesIds`**（那是"此刻站在两端站上的车"，共享车站时**别的线
-							// 的车也在里面** ⇒ 会把事件归到错的线上）。
+							// **用 `fleetIds`**（执行器注册表里这条线自己的车队）。
+							// 2026-11-15 起 `vehiclesIds` 也来自同一个注册表（之前它是站点归属，
+							// 共享车站时会把别条线的车算进来 ⇒ 事件会归到错的线上）。
 							if (Array.isArray(p.fleetIds)) {
 								refs.routeLedger.recordVehicleJobs(
 									job,

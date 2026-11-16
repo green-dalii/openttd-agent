@@ -863,43 +863,25 @@ W2 的目标是让"这局是在**世界冻住**时结束的"成为 run 记录里
 `delivered 377 ✓` · `window 447d` · `verdict horizon not reached` / `stopped (paused) — exclude` ·
 `save …/save/<id>.sav`（完整路径在 title，详情面板可复制）。
 
-### 10.105 车队数必须跨线路去重：同屏两个"车队"曾经互相矛盾（2026-09-25）
+### 10.105 跨线路重复计数：车归注册表，人归站号（2026-09-25 起因 / 2026-11-15 修正）
 
-**真机现场**（用户自有 5 年长局，17 条线路 / 9 个车站 / 25 辆车）：同一屏上出现
-`FLEET 25 veh`（公司口径）与 `VEHICLES ON ROUTES 129`（线路求和）——两个都是"真的读数"，
-但放在一页上就是**互相矛盾的数字**。
+**起因（真机现场）**：用户自有 5 年长局（17 线 / 9 站 / 25 辆车）同屏出现
+`FLEET 25 veh`（公司口径）与 `VEHICLES ON ROUTES 129`（线路求和）——两个都是"读数"，
+放一页上就是**互相矛盾的数字**。
 
-**机制**（算术可核对）：GS 的每条线路读数是"停在这条线**两端站**上的车 / 等在这两端的人"。
-一个车站服务多条线路 ⇒ 同一辆车、同一批乘客被**每条用到该站的线路各数一次**。
-17 条线分布在 9 个站上 ⇒ 站平均出现在 ~3.8 条线路上 ⇒ 25 × ~5 ≈ 125，与实测 129 同量级。
-等待人数同理（实测朴素求和 1 951）。
+**归属只有一个真值（2026-11-15 修正）**：
+- **车辆**按**执行器注册表**（这条线自己的车队）算 ⇒ **不跨线路重复**，**在途的车也算**
+  （旧读法"停在两端站上的车"两处都错，见 §10.129）。
+- **等待人数**按**站号**算（`waitA/waitB` 逐站上报）⇒ 共享车站时仍会跨线路重复
+  ⇒ **这层去重仍然必需**（`routesSummary()`：车辆按 id、等待按站号）。
+- `endsA/endsB`（`StationNear` 真正找到的**站号**，不是标牌格——执行器站点偏移时二者不同）
+  与 `waitA/waitB` 必须全程透传：⚠️ `joinRoutesWithLedger` 曾经**逐字段重建**对象，
+  这些字段在那里被静默丢掉——典型症状是"解析器有、wire 没有"，页面于是仍然重复计数。
+- 旧 GS 没有 id 时退回求和，并在界面上**明说没去重**，不假装已经修好。
 
-**改法**（有 id 才能去重，否则只能重复计数）：
-1. `EmitRouteStats` 额外上报 `vehiclesIds`（两端的车辆 id 列表）、`endsA/endsB`
-   （GS 用 `StationNear` 真正找到的**站号**，不是标牌格 —— 执行器站点偏移时二者不同）、
-   `waitA/waitB`（**逐站**等待，而不是只有两端之和）。
-2. `RouteStats` → `joinRoutesWithLedger` → `routeWireFacts` 全程透传。
-   ⚠️ `joinRoutesWithLedger` 曾经**逐字段重建**对象，这些字段在那里被静默丢掉 ——
-   典型症状是"解析器有、wire 没有"，页面于是仍然重复计数。
-3. `routesSummary()` 跨线路去重：车辆按 id、等待按**站号**（同一线路两端同站时只算一次）。
-   旧 GS 没有 id 时退回求和，并在界面上**明说没去重**，不假装已经修好。
-4. 口径写进界面：`Vehicles at route ends`（旧标题 `Vehicles on routes` 听上去像车队规模）
-   + `distinct vehicles standing at line ends · buses between stops are not counted here`。
-
-**真机验收**（新 GS，seed 21）：有车时刻的线路**朴素求和 = 12**，按 id **去重后 = 3**
-（同一 4× 膨胀，与 129-vs-25 同形）；页面显示 `Vehicles at route ends 3`，
-`Waiting passengers 4 · 2 distinct stops`。
-
-**顺带暴露的另一半（诚实地说明它没有被"修掉"）**：这个口径只数**停在端点**上的车，
-**在途的车两个口径都看不到** —— 一条正常运营的线路大多数采样时刻会显示 0。
-真正的每线路归属要由**执行器**报（它知道每条线自己配了几辆），那是新通道，
-列在 `ROADMAP.md`；本轮只做到"不再重复计数 + 口径说清"。
-
-**数据新鲜度**：用户报"Fleet Detail 不会自动更新"，白盒注入证明**响应式链没坏**
-（`vehicles 5 → 11` 会更新抽屉 DOM，快照流 25 s 内 history 35 → 107）。真正缺的是
-**用户无法区分"数字没变"与"数据没在流"**。现在页头有独立的 `Data` 项：
-`data now` / `data 42s ago`（warn）/ `no data for 90s`（bad）/ `no data frame yet`（未知 = dim）。
-连接状态与数据状态是两个不同的问题，页头必须分开说。
+**数据新鲜度**：页头把**连接状态**与**数据状态**分开说：`data now` / `data 42s ago`
+（warn）/ `no data for 90s`（bad）/ `no data frame yet`（未知 = dim）——
+用户分不清"数字没变"与"数据没在流"。
 
 ### 10.106 事实通道补全与 admin 握手竞态（2026-10-07 真机实测）
 
@@ -977,11 +959,22 @@ road seg1 d54 → … → road_stuck:ERR_AREA_NOT_CLEAR → done`——具名失
 - **退役**：`retire4C4` + 逐辆卖出（公司 5→4→3→2 递减，卖车跨 tick 是引擎语义）。
 每个相位带计数（want/cur/list/company），具名可核（D20）。
 
-**两个真值字段（P1-3 数据层）**：`route-stats` 现带 `fleetIds`（执行器注册表 =
-**归属**，稳定唯一）与 `fleetApplied`（目标规模）；与 `vehiclesIds`（站点归属 =
-**此刻站在两端站的车**，会重复计数）是两个事实。真机对照：`fleetIds:[4,5,6]`
-vs `vehiclesIds:[6,5,4,6,5,4]` vs 引擎 `company_stats.vehicles=3`——三个数字
-三个含义，页面去重只能靠 id（D60 语义：缺失 = 字段缺席，不折叠成 0）。
+**两个真值字段（P1-3 数据层）**：`route-stats` 带 `fleetIds`（执行器注册表 =
+**归属**，稳定唯一）与 `fleetApplied`（目标规模）。真机对照：`fleetIds:[4,5,6]`
+vs 引擎 `company_stats.vehicles=3`——同一个数。
+
+- **事实（2026-11-15）：逐线的车辆数与利润必须按**注册表**算**（不是按站点扫）。
+  `GSVehicleList_Station(s)` 返回的是**服务该站的车**，不是此刻停在那儿的车 ⇒
+  ① 同一批车在**两个端点站**各出现一次 ⇒ **被数两遍**；② 站被共用时**别条线的车**
+  也被算进来。**真机证据**（`/tmp/ottd-e1/b24-s11` 的 route-stats 事件）：
+  job 1 注册表 10 辆车 ⇒ 旧读数报 `vehicles=20`、`profit=14152`（=2×7076）；
+  job 9 注册表 **0** 辆（它根本没建成）⇒ 旧读数仍报 `vehicles=10`、`profit=7076`
+  ——**那是别人的车、别人的利润**。这两个数**进模型上下文**（模型据此判断哪条线赚钱）
+  ⇒ 错了就是让模型按假事实决策。**修法**：`vehicles`/`profit`/`vehiclesIds`
+  一律按 `RouteVehicles(job)`（执行器注册表）算；注册表不认识这条线 ⇒ 它没有车 ⇒
+  **0 是真的读数**（不是"没测到"）。**修后真机**：逐线 `profit=-123` 与公司车队读数
+  `-41×3=-123` **逐分对上**（旧读法会是 -246、车辆数 6）。
+  静态守卫：`test/unit/route-stats-attribution.test.ts`（GS 源码里不得再出现站点扫描）。
 
 **修复的两个真缺陷**（各带先红守卫）：
 1. **克隆车不进注册表**：`bus` 阶段克隆循环只登记头车 ⇒「引擎 3 辆、注册表 1 辆」。
@@ -1023,14 +1016,8 @@ IsBuildable + GetName + GetMaxSpeed，四个 API 均实测存在）——agent �
   `owned + unattributed === companyTotal`（跨线路按 id 去重）；`owned = onRoad + inDepot`（在途/在库，GS 报 `fleetDepot`）。
   任何一项不可得 = `null`（显示 `—`），**不是 0**（D60）；差额**具名**（"Unattributed — named gap, not dropped"）。
   （"Unattributed — named gap, not dropped"），不再有两个各自为政的车队数字。
-- **数据**：`route-stats` 增 `fleetDepot`（登记车辆中 `IsStoppedInDepot` 的 id）；分解在**服务端**算好下发（wire `fleet`），页面只渲染（`fleetAttributionRows`）。
-  分解在**服务端**算好下发（wire `fleet` 字段），页面只渲染（`fleetAttributionRows`，
-  永不为 null 的数组，D45 模板守卫）。
-- **真机页面实证**（demo seed 11，CDP 全级别控制台）：`Company total 3 · Owned by routes 3 · — on the road 3 · — in depot 0 · Unattributed 0`；恒等式 3+0=3 对上，0 控制台条目。**未做截图**（CDP captureScreenshot 在本机 headless 持续超时）——布局由 DOM 文本断言 + smoke 兜底，如实披露。
-  Company total 3 · Owned by routes 3 · — on the road 3 · — in depot 0 ·
-  Unattributed 0 (named gap, not dropped)
-  恒等式 3+0=3 对上；0 控制台条目。**未做截图**（CDP captureScreenshot 在本机
-  headless 持续超时）——布局正确性由 DOM 文本断言 + smoke 的元素检查兜底，如实披露。
+- **数据**：`route-stats` 增 `fleetDepot`（登记车辆中 `IsStoppedInDepot` 的 id）；分解在**服务端**算好下发（wire `fleet` 字段），页面只渲染（`fleetAttributionRows`，永不为 null 的数组，D45 模板守卫）。
+- **真机页面实证**（demo seed 11，CDP 全级别控制台）：`Company total 3 · Owned by routes 3 · — on the road 3 · — in depot 0 · Unattributed 0`；恒等式 3+0=3 对上，0 控制台条目。**未做截图**（CDP captureScreenshot 在本机 headless 持续超时）——布局正确性由 DOM 文本断言 + smoke 的元素检查兜底，如实披露。
 ### 10.112 P2-3：统计预登记（2026-10-08，跑前拒绝）
 
 **预登记条目**（P2 系列实验不得事后修改）：

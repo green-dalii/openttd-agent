@@ -792,9 +792,10 @@ describe("Squirrel 桥：产业/货种/公司口径上报", () => {
 /**
  * 线路读数必须带上**去重所需**的字段（2026-09-25 真机：25 辆车被报成 129）。
  *
- * 机制：GS 的每条线路读数是"停在这条线两端站上的车 / 等在这两端的人"，而一个车站服务
- * 多条线路 ⇒ 同一辆车、同一批乘客被每条用到该站的线路各数一次。没有车辆 id 与站号，
- * harness 只能重复计数，于是同屏出现两个互相矛盾的车队数（25 vs 129）。
+ * 机制：一个车站服务多条线路 ⇒ 同一批乘客被每条用到该站的线路各数一次；没有车辆 id
+ * 与站号，harness 只能重复计数，于是同屏出现两个互相矛盾的车队数（25 vs 129）。
+ * （车辆的归属 2026-11-15 起改为**执行器注册表**——这条线自己的车队；见
+ * `route-stats-attribution.test.ts`。站号与逐站等待量仍是站点口径。）
  */
 describe("线路读数带上 id 与站号（否则仪表盘只能重复计数）", () => {
 	const bridge = readFileSync(path.join(process.cwd(), "src/game/squirrel/bridge-gs/main.nut"), "utf8");
@@ -809,8 +810,10 @@ describe("线路读数带上 id 与站号（否则仪表盘只能重复计数）
 
 	it("车辆 id 真的被收集（不是发一个空数组）", () => {
 		expect(bridge).toMatch(/vehIds\.append\(v\)/);
-		// 两端都要收：一条线的车可能停在任一端
-		expect(bridge.match(/vehIds\.append\(v\)/g) ?? []).toHaveLength(2);
+		// **一处**收集点：逐线的车来自**执行器注册表**（这条线自己的车队），
+		// 不再扫两端站（那会把同一批车数两遍、并把别条线的车算进来，
+		// 2026-11-15 真机证据见 route-stats-attribution.test.ts）。
+		expect(bridge.match(/vehIds\.append\(v\)/g) ?? []).toHaveLength(1);
 	});
 });
 
