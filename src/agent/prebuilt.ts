@@ -24,6 +24,27 @@ export function isPrebuiltReady(s: PrebuiltSignals): boolean {
 	return s.stations >= 2 && s.vehicles >= 1;
 }
 
+/** The hard ceiling on the prebuilt wait (20 minutes). */
+const MAX_PREBUILT_WAIT_MS = 20 * 60_000;
+
+/**
+ * How long the prebuilt scenario may wait for an operable route.
+ *
+ * 为什么不能固定 20 分钟（2026-11-16，E2 矩阵）：蓝图**按 seed 确定性失败**时
+ * （铺路重试后放弃），等待会烧满 20 分钟 ⇒ 那一局的墙钟预算被烧光 ⇒ 既没有
+ * 测量窗口也没有跑满视界（E2 的 seed 22/55 两格如此）。⇒ 上限**不得越过本局的
+ * 墙钟预算**；没有预算时才用 20 分钟。
+ */
+export function prebuiltTimeoutMs(runSeconds: number | undefined, overrideMs?: number): number {
+	if (overrideMs !== undefined && Number.isFinite(overrideMs) && overrideMs > 0) {
+		return Math.min(overrideMs, MAX_PREBUILT_WAIT_MS);
+	}
+	if (runSeconds !== undefined && Number.isFinite(runSeconds) && runSeconds > 0) {
+		return Math.min(runSeconds * 1000, MAX_PREBUILT_WAIT_MS);
+	}
+	return MAX_PREBUILT_WAIT_MS;
+}
+
 export interface PrebuiltIo {
 	/** Ask the GS for the deterministic blueprint (returns false when refused). */
 	sendOrder(): boolean;

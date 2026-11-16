@@ -956,32 +956,24 @@ road seg1 d54 → … → road_stuck:ERR_AREA_NOT_CLEAR → done`——具名失
 （`retire4C4` + 逐辆卖出，公司 5→4→3→2，卖车跨 tick 是引擎语义）。每个相位带计数（want/cur/list/company），
 具名可核（D20）。
 
-**两个真值字段（P1-3 数据层）**：`route-stats` 带 `fleetIds`（执行器注册表 = **归属**，稳定唯一）
-与 `fleetApplied`（目标规模）。
+**两个真值字段（P1-3 数据层）**：`route-stats` 带 `fleetIds`（注册表 = **归属**，稳定唯一）与
+`fleetApplied`（目标规模）。
 
-- **事实（2026-11-15）：逐线的车辆数与利润必须按**注册表**算**（不是按站点扫）。
-  `GSVehicleList_Station(s)` 返回的是**服务该站的车**，不是此刻停在那儿的车 ⇒
-  ① 同一批车在**两个端点站**各出现一次 ⇒ **被数两遍**；② 站被共用时**别条线的车**
-  也被算进来。**真机证据**（`/tmp/ottd-e1/b24-s11` 的 route-stats 事件）：
-  job 1 注册表 10 辆车 ⇒ 旧读数报 `vehicles=20`、`profit=14152`（=2×7076）；
-  job 9 注册表 **0** 辆（它根本没建成）⇒ 旧读数仍报 `vehicles=10`、`profit=7076`
-  ——**那是别人的车、别人的利润**。这两个数**进模型上下文**（模型据此判断哪条线赚钱）
-  ⇒ 错了就是让模型按假事实决策。**修法**：`vehicles`/`profit`/`vehiclesIds`
-  一律按 `RouteVehicles(job)`（执行器注册表）算；注册表不认识这条线 ⇒ 它没有车 ⇒
-  **0 是真的读数**（不是"没测到"）。**修后真机**：逐线 `profit=-123` 与公司车队读数
-  `-41×3=-123` **逐分对上**（旧读法会是 -246、车辆数 6）。
-  静态守卫：`test/unit/route-stats-attribution.test.ts`（GS 源码里不得再出现站点扫描）。
-- 事实（2026-11-16，**决策余量必须封顶**：一次慢决策曾把整局的提问关掉）：余量取「**上一次
-  决策吃掉的游戏日**」，而**世界在模型思考时照跑** ⇒ prebuilt 里模型第一次决策（28 次工具
-  调用 ≈140 秒墙钟）吃掉 **90+ 个游戏日** ⇒ 余量(≈183 日) ≥ 视界剩余(182 日) ⇒ 循环**再也不
-  提问**，整局变成「1 次决策 + 空转到视界结束」（E2 真机：seed 11/33 各只有 **1** 次决策）
-  ⇒ **测的是脚手架，不是模型**。⇒ 余量**封顶 30 日**。
-- 事实（2026-11-16，**线路登记表被重建 ⇒ 字段静默丢失**）：执行器每次车队变更/退役/改货/换车都用
-  `this._routes[job] <- { … }` **重建**线路记录、只写回自己关心的键 ⇒ 其它字段被丢掉：`lineCargo`
-  （线路运的货）⇒ **货运线没有 cargo 标签** ⇒ 逐 (货种, 收方产业) 的归因**永远归不出来** ⇒ F4 的
-  **逐线交付量在真机上从未出过一个数**（E1 局：11 条线里 6 条货运线的 `cargoCarried` 缺席）；
-  `endA/endB` ⇒ 诊断拿不到两端。⇒ 修法：**就地改字段**，只有"登记一条新线路"（`RegisterRoute`）
-  可以重建整张表；静态守卫：GS 源码里 `this._routes[job] <-` **只允许出现一次**。
+- **事实（2026-11-15/16，四个静默测量缺陷，都在真机上被证伪过）**：
+  ① **逐线的车与利润必须按注册表算**（不是按站点扫）：`GSVehicleList_Station(s)` 返回的是**服务该站
+  的车** ⇒ 同一批车在两个端点站各出现一次（**数两遍**）、站被共用时**别条线的车**也被算进来（E1：
+  job 1 的 10 辆车报成 20 辆/14152；job 9 注册表 0 辆却报别人的 10 辆/7076）⇒ 这两个数**进模型上下文**
+  ⇒ 模型按假事实决策。修后真机：逐线 `profit=-123` 与公司车队 `-41×3` **逐分对上**。守卫：
+  `test/unit/route-stats-attribution.test.ts`。
+  ② **决策余量必须封顶 30 日**：余量取「上一次决策吃掉的游戏日」，而**世界在模型思考时照跑** ⇒
+  prebuilt 里第一次决策（28 次工具 ≈140 秒）吃掉 **90+ 游戏日** ⇒ 余量 ≥ 视界剩余 ⇒ 循环**再也不
+  提问**，整局 =「1 次决策 + 空转」（E2：seed 11/33 各只有 **1** 次决策）⇒ **测的是脚手架**。
+  ③ **线路登记表被重建 ⇒ 字段静默丢失**：`this._routes[job] <- {…}` 只写回自己关心的键 ⇒ 丢
+  `lineCargo`（⇒ 货运线没 cargo 标签 ⇒ 逐 (货种, 收方产业) 的归因**永远归不出来** ⇒ F4 的逐线交付量
+  **真机上从未出过一个数**）与 `endA/endB`。修法：**就地改字段**（守卫：GS 源码里该重建写法只许出现一次）。
+  ④ **测量窗口没打开的局不可比**：prebuilt 的蓝图**按 seed 确定性失败**（铺路 `rd retry1` 后放弃）
+  ⇒ 窗口从未打开（harness 自称 "NOT a valid measurement"）⇒ 修法：`metricExclusion` 排除并具名；
+  且**等待上限 = min(20 分钟, 本局墙钟预算)**（坏蓝图不再烧满 20 分钟）。
 
 **修复的两个真缺陷**（各带先红守卫）：① **克隆车不进注册表**（`bus` 阶段只登记头车 ⇒
 「引擎 3 辆、注册表 1 辆」）——现在每辆克隆车都 `append` 进 `_fleetOwned` 并重登记线路；
@@ -989,8 +981,8 @@ road seg1 d54 → … → road_stuck:ERR_AREA_NOT_CLEAR → done`——具名失
 `CheckAddVehicles/ProcessFleetSells/CheckRetireRequests` 永不执行 ⇒ done 后发出的车队/退役请求
 永远排队：有回执、无效果——「通路 ≠ 效果」的又一实例）——现在空队列分支照常做维护。
 
-**工具层的诚实拒绝也已实证**（observe-or-refuse）：公司统计未到/车为 0 时
-`set_route_vehicles` 明确拒绝并具名理由，不吞请求不假装成功。
+**工具层的诚实拒绝也已实证**（observe-or-refuse）：公司统计未到/车为 0 时 `set_route_vehicles`
+明确拒绝并具名理由，不吞请求不假装成功。
 
 ### 10.110 P1-2：动作面扩——选货 / 换车（2026-10-08 真机实证）
 
@@ -1289,11 +1281,11 @@ compaction 冲突）在 `docs/HARNESS-MIGRATION.md` §3（带坐标），此处�
 
 - 依据：`src/game/squirrel/bridge-gs/main.nut`（`own_delivered`）、`src/agent/route-ledger.ts`、`src/agent/route-facts.ts`、`src/evolution/scorecard.ts`、`src/evolution/bench-stats.ts`；教训 `MEMORY.md` D97/D98。
 - 事实（2026-11-15，**能力轴的归一化口径**）：能力轴量的是**总量**（`deliveredRun / 游戏日`），
-  而总量 = 数量 × 单位产出 ⇒ 方差由"建没建线/建了几条"主导（**建造策略**的方差，不是模型
-  能力的方差）⇒ 矩阵的能力轴 `not determinable`。新增**归一化读数**（`src/evolution/normalized.ts`）：
-  **每条线**与**每辆车**的交付量与运营利润。口径：分子用**公司级**读数（`deliveredRun` 整局
-  累计、`operatingProfit`），分母是**干净的计数**（GS 登记的线路数 `lines`、车辆数）；
-  **缺读数 ⇒ null**（不可判定，不是 0）；**"一条线都没建" ⇒ 该局在这条轴上不可比**（不参与
-  配对），不是"每线产出 0"。度量行新增 `lines`（0 是真的读数；缺席 = 没测到 ⇒ 老局不可用）。
-  新的可配对轴：`ability.deliveredPerLine` / `ability.operatingProfitPerLine` /
-  `ability.deliveredPerVehicle` / `ability.operatingProfitPerVehicle`。
+  而总量 = 数量 × 单位产出 ⇒ 方差由"建没建线/建了几条"主导（**建造策略**的方差，不是模型能力
+  的方差）⇒ 矩阵的能力轴 `not determinable`。新增**归一化读数**（`src/evolution/normalized.ts`）：
+  **每条线**与**每辆车**的交付量与运营利润。口径：分子用**公司级**读数（`deliveredRun` 整局累计、
+  `operatingProfit`），分母是**干净的计数**（GS 登记的线路数 `lines`、车辆数）；**缺读数 ⇒ null**
+  （不可判定，不是 0）；**"一条线都没建" ⇒ 该局在这条轴上不可比**（不参与配对），不是"每线产出 0"。
+  度量行新增 `lines`（0 是真的读数；缺席 = 没测到 ⇒ 老局不可用）。新的可配对轴：
+  `ability.deliveredPerLine` / `operatingProfitPerLine` / `deliveredPerVehicle` /
+  `operatingProfitPerVehicle`。

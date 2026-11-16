@@ -17,6 +17,7 @@ import {
 	setPauseTool,
 } from "../../src/agent/tools/index.js";
 import { auditState } from "../../src/agent/world-facts.js";
+import { prebuiltTimeoutMs } from "../../src/agent/prebuilt.js";
 import type { AgentDeps, CommandSink, StateReader } from "../../src/agent/types.js";
 import type { WorldSnapshot } from "../../src/game/world-state.js";
 
@@ -968,5 +969,32 @@ describe("diagnose_route —— 线路诊断（Issue #113）", () => {
 		const tool = createTools(deps).find((t) => t.name === "diagnose_route")!;
 		const res = await tool.execute("t", {});
 		expect(textOf(res)).toMatch(/nothing to diagnose/);
+	});
+});
+
+/**
+ * prebuilt 等待**不得越过本局的墙钟预算**（2026-11-16，E2 矩阵）。
+ *
+ * 现象：一局 `--demo-seconds 150` 的运行，prebuilt 等待却**等了 20 分钟**
+ * （默认上限）⇒ 一个**按 seed 确定性失败**的蓝图会把整局的墙钟预算烧光
+ * （E2 的 seed 22/55 两格如此），而矩阵按墙钟上限收场 ⇒ 那些格既没有测量窗口
+ * 也没有跑满视界。
+ */
+describe("prebuilt 等待的上限", () => {
+	it("有墙钟预算时用它（坏蓝图不许烧满 20 分钟）", () => {
+		expect(prebuiltTimeoutMs(150)).toBe(150_000);
+	});
+
+	it("没有墙钟预算时用 20 分钟", () => {
+		expect(prebuiltTimeoutMs(undefined)).toBe(20 * 60_000);
+	});
+
+	it("墙钟预算再大也封顶 20 分钟", () => {
+		expect(prebuiltTimeoutMs(3600)).toBe(20 * 60_000);
+	});
+
+	it("显式覆盖优先，但不得越过 20 分钟", () => {
+		expect(prebuiltTimeoutMs(150, 60_000)).toBe(60_000);
+		expect(prebuiltTimeoutMs(150, 60 * 60_000)).toBe(20 * 60_000);
 	});
 });

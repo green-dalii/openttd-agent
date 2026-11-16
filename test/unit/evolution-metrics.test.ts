@@ -29,6 +29,7 @@ import {
 	MIN_COMPARABLE_HORIZON_DAYS,
 	metricStat,
 	comparableMetrics,
+	metricExclusion,
 	type GameMetric,
 	requiredSampleSize,
 	powerVerdict,
@@ -995,5 +996,65 @@ describe("experienceOutcomes（M4b 观测性：哪条经验、成绩分布）", 
 		expect(rows[0]!.runs).toBe(1);
 		expect(rows[0]!.mean).toBeNull();
 		expect(rows[0]!.median).toBeNull();
+	});
+});
+
+/**
+ * **测量窗口没打开的局不可比**（2026-11-16，E2 矩阵）。
+ *
+ * 现象：prebuilt 场景的 6 格里 2 格在等"可运营线路"时**超时** ⇒ 测量窗口
+ * **从未打开**（`window=not open`）⇒ harness 自己的日志写着 "this run is NOT a
+ * valid measurement"，但 `metricExclusion` **没有排除它** ⇒ 矩阵把
+ * 「管理一条现成线路」与「从零自己建线」这两个**不同的问题**放在一张表里比。
+ *
+ * 规则：窗口没打开的局**不可比**，而且必须**具名**（不是静默丢掉）。
+ */
+describe("测量窗口没打开 ⇒ 不可比", () => {
+	const base = {
+		id: "r1",
+		seed: 11,
+		mode: "agent",
+		status: "completed",
+		startedAt: 0,
+		durationMs: 1,
+		appVersion: "t",
+		llmKind: "real",
+		llmModel: "m",
+		constructionDone: true,
+		money: 0,
+		income: 0,
+		netCashFlow: 0,
+		netCashFlowVerified: null,
+		profitPerDay: 0,
+		operatingProfit: 0,
+		operatingProfitPerDay: 0,
+		operatingProfitComplete: true,
+		delivered: 0,
+		deliveredRun: 0,
+		deliveredByCargo: null,
+		deliveredRunComplete: true,
+		gsErrors: 0,
+		toolBudgetBlocks: 0,
+		simulatedDays: 250,
+		horizonDays: 250,
+		reachedHorizon: true,
+		scenario: "prebuilt" as const,
+		scenarioReason: "timeout",
+		deliveredAtReady: null,
+		vehicles: 0,
+		stations: 2,
+		decisions: 3,
+		toolCalls: 5,
+		toolFailures: 0,
+		totalTokens: 100,
+		costTotal: 0,
+	};
+
+	it("prebuilt 超时（窗口没打开）的局被排除，并具名", () => {
+		expect(metricExclusion(base as never)).toBe("measurement window never opened");
+	});
+
+	it("正常就绪的局照常可比", () => {
+		expect(metricExclusion({ ...base, scenarioReason: "ready" } as never)).toBeNull();
 	});
 });

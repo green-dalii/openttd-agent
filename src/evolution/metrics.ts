@@ -880,6 +880,7 @@ export type MetricExclusion =
 	// the dashboard counts exclusion reasons separately (D56).
 	| "token cap reached"
 	| "cost cap reached"
+	| "measurement window never opened"
 	| "outcome not measured";
 
 export function metricExclusion(m: GameMetric | null | undefined): MetricExclusion | null {
@@ -897,6 +898,13 @@ export function metricExclusion(m: GameMetric | null | undefined): MetricExclusi
 		if (outcome === "token_cap") return "token cap reached";
 		if (outcome === "cost_cap") return "cost cap reached";
 		return "horizon not reached";
+	}
+	// **测量窗口没打开的局不可比**（2026-11-16，E2 矩阵）：prebuilt 等不到"可运营
+	// 线路"就超时 ⇒ 窗口从未打开 ⇒ harness 自己的日志写着 "this run is NOT a valid
+	// measurement"。不排除它，矩阵就会拿「管理一条现成线路」与「从零自己建线」这两个
+	// **不同的问题**放在一张表里比（E2：6 格里 2 格如此）。
+	if (m.scenario === "prebuilt" && m.scenarioReason === "timeout") {
+		return "measurement window never opened";
 	}
 	if (m.deliveredRun === null || m.deliveredRun === undefined) return "outcome not measured";
 	return null;

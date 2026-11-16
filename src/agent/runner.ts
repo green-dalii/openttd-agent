@@ -87,7 +87,7 @@ import { isLlmConfigured } from "../config.js";
 import { toWireSnapshot } from "../game/wire-snapshot.js";
 import { createEpisode } from "./episode.js";
 import { stringifyJson } from "../util/json.js";
-import { runPrebuiltScenario } from "./prebuilt.js";
+import { prebuiltTimeoutMs, runPrebuiltScenario } from "./prebuilt.js";
 
 /** Blueprint job id used by the prebuilt scenario (same one the v02 oracle uses). */
 export const PREBUILT_JOB = 101;
@@ -1037,7 +1037,8 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 				now: () => Date.now(),
 				log: (l) => console.log(l),
 			},
-			{ timeoutMs: opts.prebuiltTimeoutMs ?? 20 * 60_000 },
+			// 等待上限**不得越过本局的墙钟预算**（坏蓝图会烧满 20 分钟，2026-11-16）。
+			{ timeoutMs: prebuiltTimeoutMs(opts.seconds, opts.prebuiltTimeoutMs) },
 		);
 		prebuiltReason = r.reason;
 		if (r.ready) {

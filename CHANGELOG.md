@@ -11,11 +11,10 @@
 
 ### Added
 
-- **The benchmark can now answer "how much does one line deliver".** The result axis measured a **total**, and a total's
-  spread is decided by how many lines a run built - a building strategy, not the model's ability, which is why the matrix
-  could not separate the two models. Four normalised axes are now measured and paired: delivered and operating profit
-  **per line** and **per vehicle**. A run that built no line is **not comparable** on the per-line axis (it answers a
-  different question), so it is left out there rather than counted as zero; a missing reading stays "not measured".
+- **The benchmark can now answer "how much does one line deliver".** The result axis measured a **total**, and a total's spread is decided by how many
+lines a run built - a building strategy, not the model's ability, which is why the matrix could not separate the two models. Four normalised axes are now
+measured and paired: delivered and operating profit **per line** and **per vehicle**. A run that built no line is **not comparable** on the per-line axis
+(it answers a different question), so it is left out there rather than counted as zero; a missing reading stays "not measured".
 
 ### Changed
 
@@ -27,6 +26,12 @@ showed it cut the model's **actions**, not its idling: the blocked calls were `b
 **halved** - while the tokens per run did not rise. The default is now 24 (still a knob, still in the manifest).
 
 ### Fixed
+
+- **A run whose measurement window never opened is left out of comparisons.** The benchmark's prebuilt setup fails on some
+  maps - the blueprint's road gives up after a retry, so the route never becomes operable and the window never opens
+  (the harness already called that run "not a valid measurement"). Such runs are now excluded with a named reason.
+- **A broken blueprint no longer burns 20 minutes.** The prebuilt wait ignored the run's own wall-clock budget, so even a 150-second run waited
+the full 20 minutes for a route that could never become operable. The wait is now bounded by the run's budget.
 
 - **The agent is asked again after a slow decision.** The margin that keeps a question from starting too close to the end of the run was
 taken from the last decision's own cost in game days - and the world keeps moving while the model thinks. In the benchmark's prebuilt
@@ -40,10 +45,9 @@ silently dropped. Among them the cargo the line carries: **a freight line had no
 receiving industry) attribution could never match it and the per-line delivery figure stayed empty on a real machine (six of eleven
 routes in one run). The records are now updated in place, and a guard keeps the table from being rewritten wholesale anywhere else.
 
-- **The benchmark matrix can run a real provider.** Every cell gets its own data directory, and the provider
-  configuration (`llm.json`) was not copied into it - so every cell stopped at the start-up gate with "no
-  provider/model configured" and the whole matrix failed in seconds. The matrix now copies the settings file into each
-  cell (read-only to the repository, 0600 because it may carry a key) and checks it before the first cell runs.
+- **The benchmark matrix can run a real provider.** Every cell gets its own data directory, and the provider configuration (`llm.json`) was not copied into
+it - so every cell stopped at the start-up gate with "no provider/model configured" and the whole matrix failed in seconds. The matrix now copies the
+settings file into each cell (read-only to the repository, 0600 because it may carry a key) and checks it before the first cell runs.
 
 - **A route's own vehicles and profit are now counted on that route.** The game script counted the vehicles standing at a route's
 two end stations - but that list holds the vehicles *serving* a station, so one route's fleet was counted twice (10 vehicles
@@ -75,15 +79,13 @@ from the engine's own criteria (unloading end accepts this cargo, loading end's 
 and only the cargo types that had production - small, but the model cannot tell "no production" from "not measured".
 Two read-only tools (`get_industries`, `get_cargo`) now fetch the whole thing on demand, and the Run page's industry
 table has an **expand all** button. Sample and full list come from **one scan**.
-- **The server's own vocabulary is now translated too - by id.** The outcome classes, the problem codes, the delivery
-  measures and the knob values are the **server's** wording, and the server keeps exactly one canonical wording of
-  them. The front end now looks them up **by id** (`outcome.token_cap`, `problem.no_credential`) and falls back to the
-  server's text when it has no translation. A test checks the table's coverage against the server's own lists.
-- **The Chinese interface now covers the text the scripts render too**, and it keeps up with the language. The hints,
-  empty states, legends and labels the pages draw at runtime - about 440 more strings - are translated. Two timing faults
-  are gone: the translation of newly rendered text was scheduled on `requestAnimationFrame`, which only runs while the
-  page is painted (in a background tab everything drawn afterwards stayed English, silently), and the framework started
-  in a microtask - before the language runtime had initialised - so the first paint was in the default language.
+- **The server's own vocabulary is now translated too - by id.** The outcome classes, the problem codes, the delivery measures and the knob values are the
+**server's** wording, and the server keeps exactly one canonical wording of them. The front end now looks them up **by id** (`outcome.token_cap`,
+`problem.no_credential`) and falls back to the server's text when it has no translation. A test checks the table's coverage against the server's own lists.
+- **The Chinese interface now covers the text the scripts render too**, and it keeps up with the language. The hints, empty states, legends and labels the
+pages draw at runtime - about 440 more strings - are translated. Two timing faults are gone: the translation of newly rendered text was scheduled on
+`requestAnimationFrame`, which only runs while the page is painted (in a background tab everything drawn afterwards stayed English, silently), and the
+framework started in a microtask - before the language runtime had initialised - so the first paint was in the default language.
 - **The dashboard's Chinese interface is now complete for its static copy.** Every visible sentence in the four pages (Run /
 Compare / History / Configure) has a Chinese translation - 324 of them, where before 226 silently fell back to English. The
 pages also had Chinese text hard-coded in the markup, so the **English** interface showed half-Chinese captions.
@@ -262,10 +264,9 @@ Every raw counter now asks "missing?" first; world-frozen runs and unfinished ho
 - **The navigation now reaches every page.** A page URL was a hand-written table in the server's memory, so a page added
 after the server started was unreachable ("not found"). The routes are now **derived from the files** in `public/pages/`.
 
-- **The model can finally see the freight world.** A freight line is "which mine, which plant", and the model could
-  see neither: the GS now reports a **cargo catalogue** (which cargo is freight, which industries produce it, which
-  **accept** it - the engine's own answer), the **position and name of every industry**, and the cargo each road
-  engine carries. Real machine (seed 4242): the model planned to link "a producer industry to a consumer industry".
+- **The model can finally see the freight world.** A freight line is "which mine, which plant", and the model could see neither: the GS now reports a
+**cargo catalogue** (which cargo is freight, which industries produce it, which **accept** it - the engine's own answer), the **position and name of every
+industry**, and the cargo each road engine carries. Real machine (seed 4242): the model planned to link "a producer industry to a consumer industry".
 
 - **The cargo monitor was never missing - our own accumulator was broken.** On 2026-11-01 this project concluded that OpenTTD 15.3's Squirrel API has no cargo
   monitor; that conclusion was **wrong**. The API exists (`script_cargomonitor.hpp` carries `@api game`); the empty split was **our** bug: the accumulator wrote into a
@@ -352,10 +353,9 @@ Separately, the view, the save path, the startup gate and the runner now derive 
 so they cannot answer differently; the gate had been rejecting a run the runner could run, and the view now reports the
 model's own api/context/limits instead of whatever the settings file happened to carry.
 - **`get_industries` really filters by cargo now.** The tool promised a cargo filter and the game script ignored it, so the model asked for "only COAL" and got the whole map - a promise the world did not keep. The filter runs on the game side, and a cargo label that does not exist in this game is reported as "no such cargo" (with the labels that do exist), not as "0 industries".
-- **Several readings that disagreed with themselves**: deltas folded unread readings to zero ("no change" where nothing
-  had been measured), fleet counts disagreed (route table vs company stats), a partial game-script failure was silent
-  (one bad API call could kill a whole reply), and runs that were stopped could look like failures - pause attribution,
-  world-frozen runs and unfinished horizons are now named and excluded from comparisons.
+- **Several readings that disagreed with themselves**: deltas folded unread readings to zero ("no change" where nothing had been measured), fleet counts
+disagreed (route table vs company stats), a partial game-script failure was silent (one bad API call could kill a whole reply), and runs that were stopped
+could look like failures - pause attribution, world-frozen runs and unfinished horizons are now named and excluded from comparisons.
 
 - **Charts flickered and grew** (per-frame `devicePixelRatio` multiplication; width→height feedback loop) - fixed and guarded by a time-series smoke check at dpr=2. `--serve` also kept a stale `llm.json`, so Start after saving a provider still said "not configured", and **`test:live` was red on main** (it picked `events.jsonl` as the newest session) and left OpenTTD running when it failed, which disabled 13 preflight tests.
 
