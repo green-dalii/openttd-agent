@@ -58,6 +58,14 @@ interface CompareView {
 		max: number;
 		bars: { model: string; label: string; text: string; value: number | null; known: boolean; width: number }[];
 	}[];
+	normalizedRows(payload: unknown): {
+		model: string;
+		lines: { text: string; known: boolean };
+		deliveredPerLine: { mean: number | null; median: number | null; text: string; known: boolean };
+		operatingProfitPerLine: { mean: number | null; median: number | null; text: string; known: boolean };
+		deliveredPerVehicle: { mean: number | null; median: number | null; text: string; known: boolean };
+		operatingProfitPerVehicle: { mean: number | null; median: number | null; text: string; known: boolean };
+	}[];
 	planSummary(plan: unknown): { label: string; text: string; known: boolean }[];
 	planCells(plan: unknown): { model: string; seed: number; costKnown: boolean }[];
 	planProblems(payload: unknown): { code: string; message: string; hint: string }[];
@@ -557,5 +565,74 @@ describe("CompareView：配对判定按轴（Issue #87）", () => {
 		const v = load();
 		expect(v.comparisonRows({})).toEqual([]);
 		expect(v.comparisonRows(null)).toEqual([]);
+	});
+});
+
+/* ==========================================================================
+ * 归一化读数（阶段 D）：每条线 / 每辆车的交付量与运营利润。
+ *
+ * 为什么值得单测:
+ *   1. **分母不同 ⇒ 单位不同**：这四条轴与"交付量/游戏日"不是同一个量，
+ *      放在同一把尺子上就是撒谎（Compare 页自己的规矩）。
+ *   2. **"没建线"不是 0**：一条线都没建的局在这四条轴上**不可比** ⇒ 显示 "—"。
+ *   3. 页面只画服务端给的均值/中位数，不自己算。
+ * ====================================================================== */
+describe("compare-view: 归一化读数（每条线 / 每辆车）", () => {
+	const NORMALIZED_PAYLOAD = {
+		models: [
+			{
+				model: "MiniMax-M3.1-Flash",
+				runs: 3,
+				ability: {
+					normalized: {
+						lines: 8,
+						deliveredPerLine: { mean: 192.29, median: 85.55 },
+						operatingProfitPerLine: { mean: 4.56, median: 2.1 },
+						deliveredPerVehicle: { mean: 66.0, median: 30.2 },
+						operatingProfitPerVehicle: { mean: 1.55, median: 0.8 },
+					},
+				},
+			},
+			{
+				model: "MiniMax-M2.5",
+				runs: 2,
+				ability: {
+					normalized: {
+						lines: 7,
+						deliveredPerLine: { mean: null, median: null },
+						operatingProfitPerLine: { mean: null, median: null },
+						deliveredPerVehicle: { mean: 12.5, median: 12.5 },
+						operatingProfitPerVehicle: { mean: null, median: null },
+					},
+				},
+			},
+		],
+	};
+
+	it("给出每条线 / 每辆车的读数（均值 + 中位数）", () => {
+		const v = load();
+		const rows = v.normalizedRows(NORMALIZED_PAYLOAD);
+		expect(rows).toHaveLength(2);
+		expect(rows[0]!.model).toBe("MiniMax-M3.1-Flash");
+		expect(rows[0]!.lines.text).toBe("8.0");
+		expect(rows[0]!.deliveredPerLine.mean).toBeCloseTo(192.29, 2);
+		expect(rows[0]!.deliveredPerLine.median).toBeCloseTo(85.55, 2);
+		expect(rows[0]!.deliveredPerLine.known).toBe(true);
+	});
+
+	it("没测到的读数是 —,不是 0", () => {
+		const v = load();
+		const rows = v.normalizedRows(NORMALIZED_PAYLOAD);
+		const b = rows[1]!;
+		expect(b.deliveredPerLine.known).toBe(false);
+		expect(b.deliveredPerLine.mean).toBeNull();
+		expect(b.deliveredPerLine.text).toBe("—");
+		expect(b.operatingProfitPerVehicle.known).toBe(false);
+	});
+
+	it("服务端没给 normalized 块时页面不炸", () => {
+		const v = load();
+		expect(v.normalizedRows({ models: [{ model: "x" }] })).toHaveLength(1);
+		expect(v.normalizedRows({})).toEqual([]);
 	});
 });

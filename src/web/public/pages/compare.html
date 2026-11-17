@@ -233,6 +233,54 @@
       </div>
       <!-- The numbers come from the scorecard (server-side). A missing reading
            reads "not measured" — the page never turns it into a zero. -->
+      <!-- 归一化读数（阶段 D）：每条线 / 每辆车。
+           **单独一张表**：它们的单位（每条线 / 每辆车）与上面四轴（每游戏日）
+           不同 ⇒ 共用一把尺子就是撒谎。一条线都没建的局在这四条轴上**不可比**
+           ⇒ 显示 "—"，不是 0。 -->
+      <div class="dim cmp-sub" style="margin: 10px 0 4px">
+        Normalised readings — per line and per vehicle (different units from the four axes above, so they get their own table)
+      </div>
+      <div class="tbl-wrap">
+        <table class="kv cmp-table">
+          <thead>
+            <tr>
+              <th>Model</th><th>Runs</th><th>Lines/run</th>
+              <th>Delivered/line</th><th>Operating/line</th>
+              <th>Delivered/vehicle</th><th>Operating/vehicle</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="row in normalizedRows()" :key="'n-' + row.model">
+              <tr>
+                <td x-text="row.model"></td>
+                <td x-text="row.runs"></td>
+                <td x-text="row.lines.text"></td>
+                <td>
+                  <span x-text="row.deliveredPerLine.text"></span>
+                  <div class="dim cmp-sub" x-show="row.deliveredPerLine.known"
+                       x-text="row.deliveredPerLine.medianText"></div>
+                </td>
+                <td>
+                  <span x-text="row.operatingProfitPerLine.text"></span>
+                  <div class="dim cmp-sub" x-show="row.operatingProfitPerLine.known"
+                       x-text="row.operatingProfitPerLine.medianText"></div>
+                </td>
+                <td>
+                  <span x-text="row.deliveredPerVehicle.text"></span>
+                  <div class="dim cmp-sub" x-show="row.deliveredPerVehicle.known"
+                       x-text="row.deliveredPerVehicle.medianText"></div>
+                </td>
+                <td>
+                  <span x-text="row.operatingProfitPerVehicle.text"></span>
+                  <div class="dim cmp-sub" x-show="row.operatingProfitPerVehicle.known"
+                       x-text="row.operatingProfitPerVehicle.medianText"></div>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+
       <div class="tbl-wrap">
         <table class="kv cmp-table">
           <thead>

@@ -272,6 +272,12 @@
           return window.CompareView.exclusionRows(this.payload);
         },
 
+        /** The normalised readings (per line / per vehicle) — their own table. */
+        normalizedRows() {
+          void this.localeTick;
+          return window.CompareView.normalizedRows(this.payload);
+        },
+
         /** The server's paired verdict (null when none). */
         comparison() {
           return window.CompareView.comparison(this.payload);

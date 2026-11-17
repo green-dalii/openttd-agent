@@ -68,6 +68,8 @@ window.I18nTerms = {
 	"metric.ability.cargoDeliveredPerGameDay.unit": "每游戏日",
 	"metric.ability.operatingProfitPerGameDay.label": "运营利润（运货收入 − 运行成本）",
 	"metric.ability.operatingProfitPerGameDay.unit": "每游戏日",
+	/* 归一化读数的动态标签（均值下面那行）：中位数。 */
+	"metric.median.label": "中位数",
 	"metric.ability.deliveredPerLine.label": "货物 + 旅客交付量",
 	"metric.ability.deliveredPerLine.unit": "每条线路",
 	"metric.ability.operatingProfitPerLine.label": "运营利润（运货收入 − 运行成本）",

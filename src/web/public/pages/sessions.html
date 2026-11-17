@@ -425,11 +425,16 @@
         <span class="dim" x-text="gameRows().length + ' runs recorded'"></span>
       </div>
       <div class="chart-box"><div id="evo-chart" x-ref="evoChart" x-effect="drawCurve()"></div></div>
+      <!-- 运营利润/日：**闸的度量**（策略质量）。现金是"公司还剩多少钱"，
+           两者单位不同 ⇒ **各自一张图**（共用一把尺子就是撒谎）。 -->
+      <div class="chart-title dim">Operating profit per game day — the promotion gate's measure</div>
+      <div class="chart-box"><div id="evo-op-chart" x-ref="evoOpChart" x-effect="drawOperating()"></div></div>
       <div class="tbl-wrap">
         <table class="tbl">
           <thead><tr>
             <th>Session</th><th>Seed</th><th>LLM</th><th>Memory</th>
-            <th>Cash</th><th>Decisions</th><th>Tokens</th><th>Cost</th>
+            <th>Cash</th><th>Operating/day</th><th>Lines</th>
+            <th>Decisions</th><th>Tokens</th><th>Cost</th>
           </tr></thead>
           <tbody>
             <template x-for="r in gameRows()" :key="r.id">
@@ -439,6 +444,8 @@
                 <td x-text="r.llm"></td>
                 <td :class="r.hasMemory ? 'pos' : 'dim'" x-text="r.memory"></td>
                 <td x-text="r.money"></td>
+                <td x-text="r.operating"></td>
+                <td x-text="r.lines"></td>
                 <td x-text="r.decisions"></td>
                 <td x-text="r.tokens"></td>
                 <td x-text="r.cost"></td>
@@ -492,6 +499,7 @@
             <span class="mem-body">
               <span x-text="s.label"></span>
               <span class="dim" x-text="s.runs + ' game(s) · operating ' + s.operatingValue + '/game day (gate) · net cash flow ' + s.netCashFlowValue + '/game day'"></span>
+              <span class="dim" x-show="s.readings !== '—'" x-text="'readings ' + s.readings + ' per game day'"></span>
               <span class="dim" x-show="s.reason" x-text="s.reason"></span>
             </span>
             <label class="mem-toggle">

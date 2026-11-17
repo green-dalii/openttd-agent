@@ -236,6 +236,8 @@ details.evidence[open] > summary { margin-bottom: 6px; }
 canvas { width: 100%; display: block; background: var(--bg-sunken); border-radius: var(--r-sm); }
 canvas.kpi-spark { background: none; height: 26px; margin-top: 4px; }
 .chart-box { position: relative; }
+/* 多图面板的图标题：这张图量的是什么、单位是什么（单位不同 ⇒ 各自一张图）。 */
+.chart-title { margin: 14px 0 4px; }
 /* 滚动锚定必须关掉：图表/快照在运行期会不断增高变矮，而浏览器的 scroll anchoring
  * 会为了"保持你看到的那一行不动"而**代替用户滚动页面**——表现就是"页面自己在滚、
  * 我控制不住"。让内容长它的，别动用户的滚动位置。（2026-09-22 用户实测） */

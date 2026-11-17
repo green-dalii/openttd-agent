@@ -10,28 +10,27 @@
 ## [Unreleased]
 
 ### Added
-
+- **The dashboard now shows what the last experiments measured.** The History page lists each run's **operating profit per game
+day** (the promotion gate's own measure) and its **route count**, and draws the operating-profit trend on its own chart (separate
+from the cash chart - the units differ). Every strategy card now shows the **per-game readings** behind its average ("3 games: -1.3,
+16.4, 48.9 (mean 21.3)"), so a promotion's evidence is visible, not just its verdict. The Compare page gained the **normalised
+readings** table (delivered and operating profit per line and per vehicle, with medians).
 - **The benchmark can now answer "how much does one line deliver".** The result axis measured a **total**, and a total's spread is decided by how many
 lines a run built - a building strategy, not the model's ability, which is why the matrix could not separate the two models. Four normalised axes are now
-measured and paired: delivered and operating profit **per line** and **per vehicle**. A run that built no line is **not comparable** on the per-line axis
-(it answers a different question), so it is left out there rather than counted as zero; a missing reading stays "not measured".
+measured and paired: delivered and operating profit **per line** and **per vehicle**. A run that built no line is **not comparable** on the per-line axis, so
+it is left out there rather than counted as zero; a missing reading stays "not measured".
 
 ### Changed
-
-- **The per-decision tool budget was cutting off the agent's actions.** The budget allowed 12 tool calls per decision, chosen to cap
-a measured runaway - but a controlled experiment (2 arms x 2 seeds, same model, same 250-day horizon, all four runs reaching it)
-showed it cut the model's **actions**, not its idling: the blocked calls were `build_freight_route`, `build_bus_route` and
-`set_route_vehicles`. With 24 calls per decision the blocked calls fell from 11 and 6 to 3 and 1, deliveries per game day rose from
-2.19/0.86 to 5.14/1.75, operating profit per game day rose from +4.57/+5.06 to **+48.27/+25.49**, and the tokens per delivered unit
-**halved** - while the tokens per run did not rise. The default is now 24 (still a knob, still in the manifest).
+- **The per-decision tool budget was cutting off the agent's actions.** The budget allowed 12 tool calls per decision, chosen to cap a measured
+runaway - but a controlled experiment (2 arms x 2 seeds, same model, same horizon) showed it cut the model's **actions**, not its idling: the
+blocked calls were `build_freight_route`, `build_bus_route` and `set_route_vehicles`. With 24 calls the blocked calls fell from 11 and 6 to 3 and 1,
+operating profit per game day rose from +4.57/+5.06 to **+48.27/+25.49**, and the tokens per delivered unit **halved**. The default is now 24.
 
 ### Fixed
 
-- **A run whose measurement window never opened is left out of comparisons.** The benchmark's prebuilt setup fails on some
-  maps - the blueprint's road gives up after a retry, so the route never becomes operable and the window never opens
-  (the harness already called that run "not a valid measurement"). Such runs are now excluded with a named reason.
-- **A broken blueprint no longer burns 20 minutes.** The prebuilt wait ignored the run's own wall-clock budget, so even a 150-second run waited
-the full 20 minutes for a route that could never become operable. The wait is now bounded by the run's budget.
+- **A broken blueprint no longer wastes a run, and never burns 20 minutes.** On some maps the blueprint's road gives up after a retry, so the route
+never becomes operable and the measurement window never opens (the harness already called such a run "not a valid measurement"). Such runs are now
+excluded with a named reason, and the prebuilt wait is bounded by the run's own wall-clock budget instead of always waiting 20 minutes.
 
 - **The agent is asked again after a slow decision.** The margin that keeps a question from starting too close to the end of the run was
 taken from the last decision's own cost in game days - and the world keeps moving while the model thinks. In the benchmark's prebuilt
@@ -39,22 +38,22 @@ scenario the model's first decision used 28 tool calls, which ate more than 90 g
 run, so the agent was **never asked again** and the game measured one decision plus an empty wait (two of the six benchmark cells had
 exactly one decision). The margin is now capped at a month: one slow decision can delay the question, not cancel the rest of the run.
 
-- **A freight line now says which cargo it carries.** The game script rewrote the route's record whenever the fleet changed, a route
-was retired or its cargo or engine was changed, and each rewrite wrote back only the few keys that change touched - so the rest were
-silently dropped. Among them the cargo the line carries: **a freight line had no cargo label at all**, which meant the per (cargo,
-receiving industry) attribution could never match it and the per-line delivery figure stayed empty on a real machine (six of eleven
-routes in one run). The records are now updated in place, and a guard keeps the table from being rewritten wholesale anywhere else.
+- **A freight line now says which cargo it carries.** The game script rewrote the route's record whenever the fleet changed, a route was
+retired or its cargo or engine was changed, and each rewrite wrote back only the few keys that change touched - so the rest were silently
+dropped, among them the cargo the line carries: **a freight line had no cargo label at all**, so the per (cargo, receiving industry)
+attribution could never match it and the per-line delivery figure stayed empty on a real machine. The records are now updated in place,
+and a guard keeps the table from being rewritten wholesale anywhere else.
 
-- **The benchmark matrix can run a real provider.** Every cell gets its own data directory, and the provider configuration (`llm.json`) was not copied into
-it - so every cell stopped at the start-up gate with "no provider/model configured" and the whole matrix failed in seconds. The matrix now copies the
-settings file into each cell (read-only to the repository, 0600 because it may carry a key) and checks it before the first cell runs.
+- **The benchmark matrix can run a real provider.** Every cell gets its own data directory, and the provider configuration (`llm.json`) was not copied into it -
+so every cell stopped at the start-up gate with "no provider/model configured" and the matrix failed in seconds. The matrix now copies the settings file
+into each cell (0600, it may carry a key) and checks it before the first cell runs.
 
-- **A route's own vehicles and profit are now counted on that route.** The game script counted the vehicles standing at a route's
-two end stations - but that list holds the vehicles *serving* a station, so one route's fleet was counted twice (10 vehicles
-reported as 20) and, at a shared station, another route's vehicles were counted as well (a route that was never built reported 10
-vehicles and 7076 profit belonging to someone else). The numbers reach the model's context, so the model judged routes on untrue
-facts. They now come from the executor's registry - the route's own fleet - and a route the registry does not know simply has no
-vehicles. After the fix a route's profit matches the company fleet reading to the cent (-123 vs -41 x 3; -246 before).
+- **A route's own vehicles and profit are now counted on that route.** The game script counted the vehicles standing at a route's two end
+stations - but that list holds the vehicles *serving* a station, so one route's fleet was counted twice (10 vehicles reported as 20) and,
+at a shared station, another route's vehicles were counted as well (a route that was never built reported 10 vehicles and 7076 profit
+belonging to someone else). The numbers reach the model's context, so the model judged routes on untrue facts. They now come from the
+executor's registry - the route's own fleet - and an unknown route simply has no vehicles. A route's profit now matches the company
+fleet reading to the cent (-123 vs -41 x 3; -246 before).
 
 ### Added
 

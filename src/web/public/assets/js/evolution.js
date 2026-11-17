@@ -66,6 +66,29 @@
         },
 
         /** Cash per finished game. Reads synchronously so the effect can track it. */
+        /**
+         * 运营利润/日 的折线（独立的一张图）。
+         *
+         * 为什么不用现金那张图：单位不同（£/天 vs £）⇒ 共用一把尺子会让
+         * "哪条更高"变成单位换算的假象。缺读数是 null（图上是断点），不是 0。
+         */
+        drawOperating() {
+          const series = this.operatingSeries();
+          const labels = this.operatingLabels();
+          const el = this.$refs.evoOpChart;
+          if (!el) return;
+          this.$nextTick(() => {
+            if (!this.$refs.evoOpChart) return;
+            C.line(el, {
+              series,
+              labels,
+              format: U.fmtMoney,
+              area: false,
+              height: 200,
+            });
+          });
+        },
+
         drawCurve() {
           // Read the reactive data BEFORE the async boundary, or Alpine cannot see
           // the dependency and the effect never re-runs (MEMORY.md B3).

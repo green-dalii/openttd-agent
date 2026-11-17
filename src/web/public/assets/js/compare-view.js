@@ -148,6 +148,57 @@
     };
   }
 
+  /**
+   * The **normalised** readings: per line and per vehicle.
+   *
+   * Why they are their own table and not another column of the four axes:
+   * their unit is "per line" / "per vehicle", not "per game day" — one shared
+   * scale across different units is a lie (the same rule the axis charts
+   * follow). The server computed the means and medians; the page only lays
+   * them out.
+   *
+   * A run that built no line is **not comparable** on these axes (it answers a
+   * different question), so it is left out there rather than counted as zero.
+   * A missing reading reads "—", never 0.
+   */
+  function normalizedRows(payload) {
+    const models = payload && Array.isArray(payload.models) ? payload.models : [];
+    return models.map((m) => {
+      // The normalised readings live on the **ability** axis (`m.ability.normalized`):
+      // they are the ability axis' per-line / per-vehicle form, not a fifth axis.
+      const n = (m && m.ability && m.ability.normalized) || {};
+      /** One reading: mean + median, or "not measured". */
+      const oneReading = (r) => {
+        const mean = r && typeof r.mean === "number" && Number.isFinite(r.mean) ? r.mean : null;
+        const median = r && typeof r.median === "number" && Number.isFinite(r.median) ? r.median : null;
+        return {
+          mean,
+          median,
+          known: mean !== null,
+          text: mean === null ? "—" : mean.toFixed(1),
+          // The median line is **dynamic** text, so it cannot be translated by
+          // the DOM pass - the wording comes from the term table.
+          medianText:
+            median === null
+              ? ""
+              : `${term("metric.median.label", "median")} ${median.toFixed(1)}`,
+        };
+      };
+      const lines = typeof n.lines === "number" && Number.isFinite(n.lines) ? n.lines : null;
+      return {
+        model: String((m && m.model) || "unknown"),
+        runs: typeof (m && m.runs) === "number" ? m.runs : 0,
+        // The mean of a count is fractional (7.67 lines per run) - round it:
+        // "7.666666666666667" on a dashboard is noise, not information.
+        lines: { known: lines !== null, text: lines === null ? "—" : lines.toFixed(1) },
+        deliveredPerLine: oneReading(n.deliveredPerLine),
+        operatingProfitPerLine: oneReading(n.operatingProfitPerLine),
+        deliveredPerVehicle: oneReading(n.deliveredPerVehicle),
+        operatingProfitPerVehicle: oneReading(n.operatingProfitPerVehicle),
+      };
+    });
+  }
+
   /** The runs left out, counted by reason (the server's own reasons). */
   function exclusionRows(payload) {
     const list = payload && Array.isArray(payload.exclusions) ? payload.exclusions : [];
@@ -503,6 +554,7 @@
     planProblems,
     planQueueState,
     modelRows,
+    normalizedRows,
     deliverySplit,
     exclusionRows,
     comparison,

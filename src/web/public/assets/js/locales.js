@@ -99,6 +99,14 @@ window.I18nMessages = {
     "Backend": "后端",
     "Seed": "种子",
     "Delivered / day": "每日交付",
+    /* 归一化读数（阶段 D）：每条线 / 每辆车 —— 与上面四轴单位不同，故单独一张表。 */
+    "Lines/run": "线路数/局",
+    "Normalised readings — per line and per vehicle (different units from the four axes above, so they get their own table)":
+      "归一化读数 —— 每条线 / 每辆车（与上面四轴单位不同，故单独一张表）",
+    "Delivered/line": "交付量/每条线",
+    "Operating/line": "运营利润/每条线",
+    "Delivered/vehicle": "交付量/每辆车",
+    "Operating/vehicle": "运营利润/每辆车",
     "Status": "状态",
     "counted": "计入",
     "Loading…": "加载中…",
@@ -154,6 +162,12 @@ window.I18nMessages = {
     "Reasoning budget": "推理预算",
     "Tool budget": "工具预算",
     "thinking budget": "思考预算",
+
+    /* 阶段 D：运营利润/日（闸的度量）与线路数（归一化的分母）。 */
+    "Operating/day": "运营利润/日",
+    "Lines": "线路数",
+    "Operating profit per game day — the promotion gate's measure":
+      "每游戏日运营利润 —— 晋升闸的度量",
 
     /* ---- Configure 页 ---- */
     "Choose how the agent thinks": "选择 agent 怎么想",
