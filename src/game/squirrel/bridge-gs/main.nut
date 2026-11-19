@@ -1382,12 +1382,27 @@ class ExecCore {
         // 变量名**别用 r**：D44 的静态守卫按名字收集表键 ⇒ 同名会让别处的
         // `r.amount = ...` 被误判成"这张表没有 amount 键"（守卫本身是哑的教训）。
         local raw = {};
-        raw.rawset("job", this._job);
-        raw.rawset("slotA", (this._slotA.bp == null ? null : this._slotA.bp[0]));
-        raw.rawset("slotFrontA", (this._slotA.bp == null ? null : this._slotA.bp[1]));
-        raw.rawset("slotB", (this._slotB.bp == null ? null : this._slotB.bp[0]));
-        raw.rawset("slotFrontB", (this._slotB.bp == null ? null : this._slotB.bp[1]));
-        raw.rawset("depot", (this._slotD.bp == null ? null : this._slotD.bp[0]));
+        // **被问的那条线**（不是执行器当前正在做的那条）。
+        raw.rawset("job", job);
+        // 执行器**当前**的 job：问的是别的线时，这两件事不是一回事。
+        raw.rawset("currentJob", this._job);
+        local isCurrent = (job == this._job);
+        raw.rawset("isCurrentJob", isCurrent);
+        // 槽位读数（slotA/slotB/…）是**当前 job 的**：问别的线时报它们
+        // 就是**拿另一条线的地址冒充这一条** ⇒ 只有当前 job 才报。
+        if (isCurrent) {
+            raw.rawset("slotA", (this._slotA.bp == null ? null : this._slotA.bp[0]));
+            raw.rawset("slotFrontA", (this._slotA.bp == null ? null : this._slotA.bp[1]));
+            raw.rawset("slotB", (this._slotB.bp == null ? null : this._slotB.bp[0]));
+            raw.rawset("slotFrontB", (this._slotB.bp == null ? null : this._slotB.bp[1]));
+            raw.rawset("depot", (this._slotD.bp == null ? null : this._slotD.bp[0]));
+        } else {
+            raw.rawset("slotA", null);
+            raw.rawset("slotFrontA", null);
+            raw.rawset("slotB", null);
+            raw.rawset("slotFrontB", null);
+            raw.rawset("depot", null);
+        }
         raw.rawset("hasRecord", this._routes.rawin(job));
         raw.rawset("recordEndA", (this._routes.rawin(job) && this._routes[job].rawin("endA") ? this._routes[job].endA : null));
         raw.rawset("recordEndB", (this._routes.rawin(job) && this._routes[job].rawin("endB") ? this._routes[job].endB : null));
@@ -2233,6 +2248,14 @@ class BridgeV1 extends GSController {
             // capacity=0 而 refitCapacity>0 ⇒ **车没被改成这个货**（改装没生效）。
             capacity = GSVehicle.GetCapacity(vid, cargo);
             refitCapacity = GSVehicle.GetRefitCapacity(vid, cargo);
+            // `GetRefitCapacity` 只对**停在库里的车**答得出来（引擎前置条件：
+            // "you must own the vehicle; the vehicle must be stopped in the depot"）。
+            // 读不到时 OpenTTD 15.x 回 **4294967295**（UINT32_MAX）——那是
+            // `res.Succeeded() ? refit_capacity : -1` 的有符号/无符号转换的副产品
+            // （OpenTTD PR #15507）⇒ **失败哨兵，不是载量** ⇒ 写 -1（没测到）。
+            // 真机 2026-11-18：路上的车全部读成哨兵，服务端据此把一条**活着**
+            // 的线判成"车没被改装"（并把 4294967295 原样写进诊断文案）。
+            if (refitCapacity == 4294967295) refitCapacity = -1;
         }
         v.rawset("loaded", loaded);
         v.rawset("capacity", capacity);

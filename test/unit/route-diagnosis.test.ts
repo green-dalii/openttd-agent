@@ -206,6 +206,55 @@ describe("线路诊断：没测到 ≠ 没问题", () => {
 		expect(diagnoseRoute(r).reason).not.toBe("vehicle_not_refitted_to_cargo");
 		expect(diagnoseRoute(r).reason).not.toBe("engine_cannot_carry_cargo");
 	});
+
+	/**
+	 * 真机 2026-11-18 的坑：引擎的 `GetRefitCapacity` 只对**停在库里的车**答得出来，
+	 * 读不到时回 **4294967295**（UINT32_MAX，OpenTTD 15.x 有符号/无符号转换的副产品，
+	 * PR #15507）⇒ 那是**失败哨兵**，不是载量。
+	 *
+	 * 之前的代码把它当成载量 ⇒ 一条**活着**的线被判成"车没被改装"，
+	 * 而且把 4294967295 原样写进了诊断文案（用户可见的数字垃圾）。
+	 */
+	it("改装载量是引擎的失败哨兵（4294967295）⇒ 不能说\"车没被改装\"", () => {
+		const r = route();
+		r.vehicles = [vehicle({ capacity: 0, refitCapacity: 4294967295 })];
+		const d = diagnoseRoute(r);
+		expect(d.reason).not.toBe("vehicle_not_refitted_to_cargo");
+		expect(d.reason).not.toBe("engine_cannot_carry_cargo");
+		expect(d.detail).not.toContain("4294967295");
+	});
+
+	it("改装载量是哨兵 + 全线的车都不装这个货 ⇒ vehicles_do_not_carry_this_cargo（原因不可判定，如实说）", () => {
+		const r = route();
+		r.vehicles = [
+			vehicle({ id: 130, capacity: 0, refitCapacity: 4294967295 }),
+			vehicle({ id: 131, capacity: 0, refitCapacity: 4294967295 }),
+		];
+		const d = diagnoseRoute(r);
+		expect(d.reason).toBe("vehicles_do_not_carry_this_cargo");
+		expect(d.detail).not.toContain("4294967295");
+		expect(d.detail).toContain("COAL");
+	});
+
+	it("只有一辆车不装这个货（别的车装着）⇒ 不是那条线的原因，但要如实说出来", () => {
+		const r = route();
+		r.vehicles = [
+			vehicle({ id: 130, tile: 70000, loaded: 0, capacity: 0, refitCapacity: 4294967295 }),
+			vehicle({ id: 131, tile: 70001, loaded: 25, capacity: 25, refitCapacity: 4294967295 }),
+		];
+		const d = diagnoseRoute(r);
+		expect(d.reason).not.toBe("vehicles_do_not_carry_this_cargo");
+		expect(d.reason).toBe("no_fault_found");
+		// 事实要出现（否则人看不到"这辆车是辆客车"）。
+		expect(d.detail).toContain("130");
+		expect(d.detail).toContain("COAL");
+	});
+
+	it("没找到故障时不能断言\"车能装这个货\"（没测到的事不能说成好）", () => {
+		const r = route();
+		r.vehicles = [vehicle({ tile: 70000, loaded: 20, capacity: 25, refitCapacity: 4294967295 })];
+		expect(diagnoseRoute(r).detail).not.toContain("can carry");
+	});
 });
 
 describe("线路诊断：词表是封闭的", () => {
@@ -224,6 +273,15 @@ describe("线路诊断：词表是封闭的", () => {
 		const out = diagnoseRoutes([route({ job: 1000 }), route({ job: 1001, vehicles: [] })]);
 		expect(out.map((d) => d.job)).toEqual([1000, 1001]);
 		expect(out[1]?.reason).toBe("no_vehicles");
+	});
+
+	it("每个结论都带**规范措辞**（英文界面的标题不是 snake_case id）", () => {
+		for (const r of [route(), route({ vehicles: [] }), route({ roadConnected: false })]) {
+			const d = diagnoseRoute(r);
+			expect(d.label.length).toBeGreaterThan(0);
+			expect(d.label).not.toBe(d.reason);
+			expect(d.label).not.toContain("_");
+		}
 	});
 });
 
