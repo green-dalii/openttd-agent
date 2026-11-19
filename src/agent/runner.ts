@@ -1021,9 +1021,18 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 	if (scenario === "prebuilt") {
 		const r = await runPrebuiltScenario(
 			{
-				sendOrder: () => {
+				sendOrder: (towns) => {
 					try {
-						client.gameScript(stringifyJson({ cmd: "build_bus_route", company: 0, job: PREBUILT_JOB }));
+						client.gameScript(
+							stringifyJson({
+								cmd: "build_bus_route",
+								company: 0,
+								job: PREBUILT_JOB,
+								// 明确指定**最近**的城镇对：铺路时间随距离增长 ⇒ 近的对
+								// 才能在等待预算内建成（E2 seed 22 的真因）。
+								...(towns ? { townA: towns.a, townB: towns.b } : {}),
+							}),
+						);
 						return true;
 					} catch {
 						return false;
@@ -1033,6 +1042,7 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 					const c = deps.state.snapshot().companies.get(0);
 					return { stations: c?.stats?.stations ?? 0, vehicles: c?.stats?.vehicles ?? 0 };
 				},
+				towns: () => deps.state.snapshot().towns,
 				sleep: (ms) => sleep(ms),
 				now: () => Date.now(),
 				log: (l) => console.log(l),

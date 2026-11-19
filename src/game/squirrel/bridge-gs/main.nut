@@ -637,9 +637,15 @@ class ExecCore {
         local dx = 0; local dy = 0;
         if (gx > cx) dx = 1; else if (gx < cx) dx = -1;
         if (gy > cy) dy = 1; else if (gy < cy) dy = -1;
-        // walk outward up to len along the primary axis, then relax on failure
-        local tries = [ [dx,dy], [dx,0], [0,dy], [dx,-dy] ];
-        for (local t = 0; t < 4; t++) {
+        // Walk outward up to `len` along the primary axis, then relax on failure.
+        //
+        // **8 个方向**（2026-11-17，E2 seed 22）：原来只试 4 个（主轴 + 两个侧轴 +
+        // 一个反向斜轴）⇒ 目标被水/山挡住时**没有任何可达的探针** ⇒ 寻路返回 null
+        // ⇒ 铺路反复重试却永远走不通（真机：rd retry1/2/3 循环）。
+        // 侧向（甚至背向）绕行仍可能"离目标更近"，所以它们是**合法候选**——
+        // 下面的"必须更近"判据会挡掉真正走偏的探针。
+        local tries = [ [dx,dy], [dx,0], [0,dy], [dx,-dy], [0,-dy], [-dx,0], [-dx,-dy], [-dx,dy] ];
+        for (local t = 0; t < 8; t++) {
             local px = cx + tries[t][0] * len;
             local py = cy + tries[t][1] * len;
             // keep in bounds
@@ -704,7 +710,21 @@ class ExecCore {
             this._pfFrom = from;
             this._pfTo = to;
         }
-        return this._pf.FindPath(50); // node, false (more to do), or null
+        local res = this._pf.FindPath(50); // node, false (more to do), or null
+        // **搜索失败后必须丢弃缓存的寻路器**（2026-11-17，E2 seed 22 的真因之一）：
+        // AyStar 在"没找到路"时把 `_open` 清空（AyStar::FindPath 结尾）⇒ 同一个
+        // (from,to) 再查一次就会抛 "can't execute over an uninitialized path" ⇒
+        // 铺路不是"换个探针重试"，而是**带着异常放弃**（真机日志：连续
+        // "can't execute over an uninitialized path" ⇒ 线路永远建不成 ⇒
+        // 测量窗从未打开）。
+        //
+        // ⇒ 失败就把缓存丢掉：下一次调用会重新 InitializePath，探针换短后重试。
+        if (res == null) {
+            this._pf = null;
+            this._pfFrom = -1;
+            this._pfTo = -1;
+        }
+        return res;
     }
 
     /* Build road/bridge/tunnel along a path node chain. Returns count of
@@ -3754,6 +3774,8 @@ class BridgeV1 extends GSController {
         local townA = obj.rawin("townA") ? obj["townA"] : -1;
         local townB = obj.rawin("townB") ? obj["townB"] : -1;
         if (townA < 0 || townB < 0) {
+            // 显式指定优先（预置场景自己挑**最近**的一对：铺路时间随距离增长 ⇒
+            // 近的对才能在等待预算内建成，E2 seed 22 的真因）；没指定才按人口挑。
             local pair = this.PickTownPair();
             if (pair == null) {
                 GSAdmin.Send({ kind = "err", cmd = "build_bus_route", reason = "no town pair" });
@@ -4133,6 +4155,7 @@ class BridgeV1 extends GSController {
         // AyStar deadlock cap, so long pairs are now allowed. Prefer
         // moderate (25..140) but accept up to 260 to let the planner reach
         // farther, more profitable towns.
+        //
         foreach (lim in [140, 260]) {
             for (local i = 0; i < all.len(); i++) {
                 for (local j = i + 1; j < all.len(); j++) {

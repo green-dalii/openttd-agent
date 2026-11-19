@@ -832,3 +832,41 @@ describe("GS 源码的语法雷区（2026-10-31 真机踩到）", () => {
 		}
 	});
 });
+
+/* ==========================================================================
+ * 预置场景的**距离上限**（E2 seed 22 的真因，2026-11-17）。
+ *
+ * 事实：seed 22 那一局的路**最终建成了**，失败的是**等待超时**——蓝图按人口
+ * 挑到很远的城镇对 ⇒ 施工在等待上限内没完成 ⇒ 测量窗从未打开 ⇒ 那一局
+ * **不是有效测量**（D131）。
+ *
+ * ⇒ 修法：预置场景发一个距离上限，GS **先在能按时建完的距离里挑最好的**。
+ *
+ * 为什么要有静态守卫：这个修复横跨 **Squirrel（GS 挑城镇）** 与 **TS（harness
+ * 发上限）** 两边 ⇒ 两边必须**同时**在，否则上限会被静默丢掉（GS 忽略未知字段
+ * 不会报错 ⇒ 局照跑、窗口照不开 ⇒ 又一次"装置失败伪装成模型表现"）。
+ * ====================================================================== */
+describe("预置场景的蓝图线路（E2 seed 22 的真因）", () => {
+	it("harness 明确指定**最近**的城镇对（铺路时间随距离增长）", () => {
+		const src = readFileSync("src/agent/runner.ts", "utf8");
+		expect(src).toContain("townA: towns.a, townB: towns.b");
+		expect(src).toMatch(/pickBlueprintTowns|towns: \(\) => deps\.state\.snapshot\(\)\.towns/);
+	});
+
+	it("GS 的 build_bus_route 认 townA/townB（显式指定优先于自动挑）", () => {
+		const nut = readFileSync("src/game/squirrel/bridge-gs/main.nut", "utf8");
+		expect(nut).toMatch(/obj\.rawin\("townA"\)/);
+		expect(nut).toMatch(/obj\.rawin\("townB"\)/);
+	});
+
+	it("寻路失败后**丢弃缓存的寻路器**（否则重试抛 uninitialized path）", () => {
+		const nut = readFileSync("src/game/squirrel/bridge-gs/main.nut", "utf8");
+		expect(nut).toMatch(/if \(res == null\) \{\s*this\._pf = null;/);
+	});
+
+	it("探针试 8 个方向（原来 4 个 ⇒ 被水挡住时无解）", () => {
+		const nut = readFileSync("src/game/squirrel/bridge-gs/main.nut", "utf8");
+		expect(nut).toMatch(/local tries = \[ \[dx,dy\].*\[-dx,dy\] \];/);
+		expect(nut).toMatch(/for \(local t = 0; t < 8; t\+\+\)/);
+	});
+});
