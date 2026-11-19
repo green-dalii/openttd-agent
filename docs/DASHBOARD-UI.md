@@ -132,6 +132,10 @@ window.Charts = {
 [Result]          6 KPI（现金/年收入/估值/贷款/车队/车站；严格不含成本）
 [Just happened]   一行一决策：decision → tools → job/相位 → effect（B3）
 [Routes][Cargo & industry][Towns]  GS 读数；不可得写 "not readable"，绝不写 0
+[Route diagnosis] 每条线一个 **"why?"** 按钮 → 展开该线的**具名原因**与**两端事实**
+              理由由**服务端**算（与 agent 的 `diagnose_route` 同一份）⇒ 人与模型同词
+              两端分列（装货端 ≠ 卸货端）；**没测到是 "—"**，而 0（不收货/没相邻的路）
+              是**真读数**；两条线不可能同屏混用两把尺子
 [Progress]        阶段总结 + 阶段画面
 [Cost]            token / 成本（与 Result 分开）
 [Agent activity]  动作面 · 记忆注入 · Steps · 推理
@@ -141,6 +145,12 @@ window.Charts = {
 **空态的规则（审计 A1/A3）**：没有局、没有读数时，数据区整块不出现（不是画一屏 `—`），
 页面只显示引导；"world frozen" 这类颜色只在**有局却没在推进**时出现，且已知原因
 （暂停）用警告色而非告警色。
+
+**接线的铁律（2026-11-18 事故）**：每个页面的 Alpine 组件**统一展开**自己的 view model
+（`const model = XxxView.create(); return { ...model, ... }`），**不手写转发**——手写的那份
+会漏掉新加的方法，而 view module 的单测**覆盖不到组件层**（它直接调模块）⇒ 漏接线的
+页面"测试全绿、浏览器报错"。⇒ 静态守卫（`test/unit/alpine-wiring.test.ts`）检查模板用到的
+每个方法/状态字段在组件里、或它展开的 view module 里存在。
 
 ### 5.2 Configure（`/configure`；`/llm` 为兼容别名，`/providers` 302 重定向）
 
@@ -178,6 +188,9 @@ window.Charts = {
              运营利润/日 = **晋升闸的度量**（策略质量），与现金（公司健康）是两个量
              缺读数是 "—"，不是 £0（"没测到" ≠ "测到 0"）
 [②c 运营利润图] 独立的一张图（单位与现金不同 ⇒ 不共用一把尺子）；缺读数画成断点
+[②d 能力趋势图] **一次只画一个轴**（delivered / operating profit × 每条线 / 每辆车）：
+             四个按钮切换；**单位不同 ⇒ 不混画**；缺读数是 null ⇒ 画成断点
+             （数据来自 `/api/evolution` 的 `normalizedSeries`，服务端算好）
 [③ Runs]     紧凑行：状态/模式/结果徽标 + 结局类（账本闭集）+ 事实 chips
 [④ 复盘]     结论头（结局徽标 + 交付/游戏日/现金/车队/token/失败）
              然后才是**折叠**的证据：Outcome · Manifest · Token 构成 · 阶段总结 · 事件日志
@@ -197,6 +210,8 @@ window.Charts = {
 [③b 归一化表] 每条线 / 每辆车：交付量与运营利润（均值 + 中位数）
               单位与四轴（每游戏日）不同 ⇒ **单独一张表**，表头写明
               "一条线都没建"的局在这四条轴上不可比 ⇒ "—"，不是 0
+              **两种模式**（同一块地方）：`model means`（每个模型一行）与 `per run`
+              （**均值背后的每一局**）—— 两者都读服务端，不在页面重算
 [④ 结局][⑤ 局列表]
 ```
 
