@@ -51,6 +51,8 @@ export interface RunHooks {
 	 * "数据按需全量": 观测面只带取样（载荷不涨），要全量时按需问一次。
 	 */
 	fullData?: (kind: "industries" | "cargo") => Promise<unknown>;
+	/** The route diagnosis (Issue #113): why a route is not moving. */
+	routeDiagnosis?: (job?: number) => Promise<unknown>;
 }
 
 export interface SupervisorOptions {
@@ -130,6 +132,12 @@ export class RunSupervisor {
 	async fullData(kind: "industries" | "cargo"): Promise<unknown> {
 		if (!this.hooks.fullData) return null;
 		return this.hooks.fullData(kind);
+	}
+
+	/** The route diagnosis (Issue #113): why a route is not moving. */
+	async routeDiagnosis(job?: number): Promise<unknown> {
+		if (!this.hooks.routeDiagnosis) return null;
+		return this.hooks.routeDiagnosis(job);
 	}
 
 	/** Ask the run to stop. Completion is signalled via onStopped/markFinished. */

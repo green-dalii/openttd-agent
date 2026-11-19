@@ -429,6 +429,26 @@
            两者单位不同 ⇒ **各自一张图**（共用一把尺子就是撒谎）。 -->
       <div class="chart-title dim">Operating profit per game day — the promotion gate's measure</div>
       <div class="chart-box"><div id="evo-op-chart" x-ref="evoOpChart" x-effect="drawOperating()"></div></div>
+      <!-- 能力图：**一条线 / 一辆车**能运多少、能赚多少。
+           单位不同的两条轴**一次只画一条**（共用一把尺子就是撒谎）；
+           读数来自服务端（`normalizedSeries`）⇒ 页面不重算；
+           不可比的局（没建线 / 老局没记分母）画成断点，不是 0。 -->
+      <div class="chart-title dim">Capability — what one line (or one vehicle) delivered and earned</div>
+      <div class="group-by">
+        <span class="dim">metric</span>
+        <template x-for="m in ['delivered','operating']" :key="'cm-' + m">
+          <button type="button" class="btn sm" :class="{ primary: capabilityMetric === m }"
+                  @click="capabilityMetric = m"
+                  x-text="m === 'delivered' ? 'delivered' : 'operating profit'"></button>
+        </template>
+        <span class="dim">per</span>
+        <template x-for="d in ['line','vehicle']" :key="'cd-' + d">
+          <button type="button" class="btn sm" :class="{ primary: capabilityDenom === d }"
+                  @click="capabilityDenom = d"
+                  x-text="d === 'line' ? 'line' : 'vehicle'"></button>
+        </template>
+      </div>
+      <div class="chart-box"><div id="evo-cap-chart" x-ref="evoCapChart" x-effect="drawCapability()"></div></div>
       <div class="tbl-wrap">
         <table class="tbl">
           <thead><tr>

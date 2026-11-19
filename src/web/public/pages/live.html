@@ -423,12 +423,55 @@
                     x-text="r.income"></td>
                 <td class="num" :class="r.profitHint ? 'dim' : ''" :title="r.profitHint || 'profit since the game year began'"
                     x-text="r.profit"></td>
+                <td>
+                  <button type="button" class="btn sm" :disabled="diagBusy === r.job"
+                          @click="diagnoseRoute(r.job)"
+                          :title="'why is this line not moving? (route ' + r.job + ')'"
+                          x-text="diagBusy === r.job ? '…' : 'why?'"></button>
+                </td>
               </tr>
             </template>
           </tbody>
         </table>
       </div>
       <p class="hint" x-show="!routesNote()">Idle rows are built but have no vehicles on them yet.</p>
+
+      <!-- 线路诊断（Issue #113）：为什么这条线不发货。
+           理由是**服务端的封闭词表**；事实按**两端**分列（装货端 ≠ 卸货端）。
+           缺读数是 "—"，不是 0。 -->
+      <div class="diag" x-show="diagData || diagError">
+        <div class="panel-head"><h3>Why is this line not moving?</h3></div>
+        <p class="empty" x-show="diagError" x-text="diagError"></p>
+        <template x-for="d in diagnosisRows(diagData)" :key="'d-' + d.job">
+          <div class="diag-row">
+            <div class="diag-head">
+              <span class="mono" x-text="'#' + d.job"></span>
+              <strong x-text="d.reasonLabel"></strong>
+            </div>
+            <div class="dim" x-text="d.detail"></div>
+            <table class="tbl">
+              <thead><tr><th>End</th><th>Waiting</th><th>Waiting via this line</th>
+                <th>Acceptance</th><th>Cargo rating</th><th>Neighbour roads</th>
+                <th>Road station</th><th>Drive-through</th></tr></thead>
+              <tbody>
+                <template x-for="e in d.ends" :key="'e-' + d.job + '-' + e.role">
+                  <tr>
+                    <td x-text="e.role"></td>
+                    <td x-text="e.waiting"></td>
+                    <td x-text="e.waitingVia"></td>
+                    <td x-text="e.acceptance"></td>
+                    <td x-text="e.cargoRating"></td>
+                    <td x-text="e.neighbourRoads"></td>
+                    <td x-text="e.isRoadStation"></td>
+                    <td x-text="e.isDriveThrough"></td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+            <p class="dim" x-show="d.errors.length" x-text="'the game could not read: ' + d.errors.join('; ')"></p>
+          </div>
+        </template>
+      </div>
     </section>
 
     <!-- ======================= ③c CARGO & INDUSTRY =======================

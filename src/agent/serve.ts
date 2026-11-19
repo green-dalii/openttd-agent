@@ -501,11 +501,13 @@ export async function runServe(cfg: Config, opts: ServeOptions = {}): Promise<Se
 						pause: () => void;
 						resume: () => void;
 						fullData?: (kind: "industries" | "cargo") => Promise<unknown>;
+					routeDiagnosis?: (job?: number) => Promise<unknown>;
 					}) => {
 						hooks.stop = h.stop;
 						hooks.pause = h.pause;
 						hooks.resume = h.resume;
 						hooks.fullData = h.fullData;
+						hooks.routeDiagnosis = h.routeDiagnosis;
 					},
 					// agent 自己按暂停 → **supervisor 是 run 状态的唯一写者**。
 					// pause("agent") 会调 hooks.pause（= scheduler.pause + rcon，与页面同路径）
@@ -571,6 +573,8 @@ export async function runServe(cfg: Config, opts: ServeOptions = {}): Promise<Se
 			resume: () => supervisor.resume(),
 			// 按需全量（页面"展开全部"）：问正在跑的游戏要**完整**的列表。
 			fullData: (kind) => supervisor.fullData(kind),
+			// 线路诊断（Issue #113）：页面与 agent 工具看同一份理由。
+			routeDiagnosis: (job) => supervisor.routeDiagnosis(job),
 		},
 	});
 	await web.start();

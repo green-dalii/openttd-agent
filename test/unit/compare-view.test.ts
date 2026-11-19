@@ -66,6 +66,16 @@ interface CompareView {
 		deliveredPerVehicle: { mean: number | null; median: number | null; text: string; known: boolean };
 		operatingProfitPerVehicle: { mean: number | null; median: number | null; text: string; known: boolean };
 	}[];
+	normalizedRunRows(payload: unknown): {
+		id: string;
+		model: string;
+		seed: number;
+		lines: { text: string; known: boolean };
+		deliveredPerLine: { mean: number | null; median: number | null; text: string; known: boolean };
+		operatingProfitPerLine: { mean: number | null; median: number | null; text: string; known: boolean };
+		deliveredPerVehicle: { mean: number | null; median: number | null; text: string; known: boolean };
+		operatingProfitPerVehicle: { mean: number | null; median: number | null; text: string; known: boolean };
+	}[];
 	planSummary(plan: unknown): { label: string; text: string; known: boolean }[];
 	planCells(plan: unknown): { model: string; seed: number; costKnown: boolean }[];
 	planProblems(payload: unknown): { code: string; message: string; hint: string }[];
@@ -634,5 +644,55 @@ describe("compare-view: 归一化读数（每条线 / 每辆车）", () => {
 		const v = load();
 		expect(v.normalizedRows({ models: [{ model: "x" }] })).toHaveLength(1);
 		expect(v.normalizedRows({})).toEqual([]);
+	});
+});
+
+/* ==========================================================================
+ * Compare 页归一化表的**逐局模式**：均值背后的每一局是什么。
+ *
+ * 为什么值得单测:
+ *   1. 均值只说"平均每条线运多少"，读者要核对的是**每一局** ⇒ 两种模式共用
+ *      一张表，不新开一张（表格宽度是稀缺资源）。
+ *   2. 不可比的局（没建线 / 老局没记分母）是 "—"，不是 0。
+ * ====================================================================== */
+describe("compare-view: 归一化表的逐局模式", () => {
+	it("逐局行带着它自己的读数（缺读数是 —）", () => {
+		const v = load();
+		const rows = v.normalizedRunRows({
+			runs: [
+				{
+					id: "run-1",
+					model: "model-a",
+					seed: 11,
+					lines: 4,
+					deliveredPerLine: 100,
+					operatingProfitPerLine: 300,
+					deliveredPerVehicle: 50,
+					operatingProfitPerVehicle: 150,
+				},
+				{
+					id: "run-2",
+					model: "model-a",
+					seed: 22,
+					lines: 0,
+					deliveredPerLine: null,
+					operatingProfitPerLine: null,
+					deliveredPerVehicle: null,
+					operatingProfitPerVehicle: null,
+				},
+			],
+		});
+		expect(rows).toHaveLength(2);
+		expect(rows[0]!.id).toBe("run-1");
+		expect(rows[0]!.deliveredPerLine.text).toBe("100.0");
+		expect(rows[0]!.deliveredPerLine.known).toBe(true);
+		expect(rows[1]!.deliveredPerLine.text).toBe("—");
+		expect(rows[1]!.deliveredPerLine.known).toBe(false);
+		expect(rows[1]!.lines.text).toBe("0");
+	});
+
+	it("没有逐局读数的载荷 ⇒ 空表（不炸）", () => {
+		const v = load();
+		expect(v.normalizedRunRows({})).toEqual([]);
 	});
 });

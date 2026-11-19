@@ -101,6 +101,21 @@ window.I18nMessages = {
     "Delivered / day": "每日交付",
     /* 归一化读数（阶段 D）：每条线 / 每辆车 —— 与上面四轴单位不同，故单独一张表。 */
     "Lines/run": "线路数/局",
+    "rows": "行",
+    /* 线路诊断面板（Issue #113） */
+    "Why is this line not moving?": "这条线为什么不发货？",
+    "End": "端",
+    "Waiting via this line": "经由这条线在等的货",
+    "Acceptance": "收货额度",
+    "Cargo rating": "车站评分",
+    "Neighbour roads": "相邻道路数",
+    "Road station": "公路车站",
+    "Drive-through": "穿行式停靠",
+    "the game could not read: ": "游戏读不到：",
+    "Capability — what one line (or one vehicle) delivered and earned":
+      "能力 —— 一条线（或一辆车）运了多少、赚了多少",
+    "metric": "度量",
+    "per": "每",
     "Normalised readings — per line and per vehicle (different units from the four axes above, so they get their own table)":
       "归一化读数 —— 每条线 / 每辆车（与上面四轴单位不同，故单独一张表）",
     "Delivered/line": "交付量/每条线",

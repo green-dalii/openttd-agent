@@ -28,6 +28,8 @@ interface EvModel {
 	verdictOk(): boolean;
 	gameRows(): { id: string; memory: string; hasMemory: boolean; operating: string; lines: string }[];
 	operatingSeries(): { name: string; data: (number | null)[] }[];
+	capabilitySeries(metric: string, denom: string): { name: string; data: (number | null)[] }[];
+	capabilityLabels(): string[];
 	operatingLabels(): string[];
 	moneySeries(): { data: number[] }[];
 	moneyLabels(): string[];
@@ -444,5 +446,40 @@ describe("evolution-view: 阶段 D 的新读数（运营利润/日、线路数�
 			],
 		});
 		expect(m.strategyRows()[0]!.readings).toBe("—");
+	});
+});
+
+/* ==========================================================================
+ * 能力图：每条线 / 每辆车 能运多少、能赚多少（阶段 D）。
+ *
+ * 为什么值得单测:
+ *   1. **口径在服务端**（`normalizedSeries`）⇒ 页面不重算，只挑轴。
+ *   2. **一次只画一条轴**：两条单位不同的轴共用一把尺子就是撒谎（页自己的规矩）。
+ *   3. **不可比 = 断点**（null），不是 0。
+ * ====================================================================== */
+describe("evolution-view: 能力图（每条线 / 每辆车）", () => {
+	const SERIES = [
+		{ id: "a", lines: 4, vehicles: 8, deliveredPerLine: 100, operatingProfitPerLine: 300, deliveredPerVehicle: 50, operatingProfitPerVehicle: 150 },
+		{ id: "b", lines: 0, vehicles: 0, deliveredPerLine: null, operatingProfitPerLine: null, deliveredPerVehicle: null, operatingProfitPerVehicle: null },
+		{ id: "c", lines: 2, vehicles: 4, deliveredPerLine: 50, operatingProfitPerLine: 100, deliveredPerVehicle: 25, operatingProfitPerVehicle: 50 },
+	];
+
+	it("默认：交付量 / 每条线", () => {
+		const m = withData({ metrics: [], normalizedSeries: SERIES });
+		const s = m.capabilitySeries("delivered", "line");
+		expect(s).toHaveLength(1);
+		expect(s[0]!.data).toEqual([100, null, 50]);
+		expect(m.capabilityLabels()).toEqual(["a", "b", "c"]);
+	});
+
+	it("切到运营利润 / 每辆车 ⇒ 换轴，不是换单位混画", () => {
+		const m = withData({ metrics: [], normalizedSeries: SERIES });
+		const s = m.capabilitySeries("operating", "vehicle");
+		expect(s[0]!.data).toEqual([150, null, 50]);
+	});
+
+	it("没给序列时是空序列（页面不炸）", () => {
+		const m = withData({ metrics: [] });
+		expect(m.capabilitySeries("delivered", "line")).toEqual([{ name: expect.any(String), data: [] }]);
 	});
 });

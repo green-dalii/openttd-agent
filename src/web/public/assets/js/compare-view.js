@@ -199,6 +199,39 @@
     });
   }
 
+  /**
+   * The **per-run** normalised readings: the same table, one row per run.
+   *
+   * Why the same table: a mean says "on average one line carried N"; what a
+   * reader wants to check is *each* run behind it. Two modes, one table (table
+   * width is a scarce resource).
+   *
+   * The readings come from the server's per-run rows; the page does not
+   * recompute them. A run with no line (or a legacy run with no denominator)
+   * reads "—" - not 0.
+   */
+  function normalizedRunRows(payload) {
+    const runs = payload && Array.isArray(payload.runs) ? payload.runs : [];
+    const oneReading = (r) => {
+      const v = typeof r === "number" && Number.isFinite(r) ? r : null;
+      return { mean: v, median: null, known: v !== null, text: v === null ? "—" : v.toFixed(1) };
+    };
+    return runs.map((run) => {
+      const lines = run && typeof run.lines === "number" && Number.isFinite(run.lines) ? run.lines : null;
+      return {
+        id: String((run && run.id) || ""),
+        model: String((run && run.model) || "unknown"),
+        seed: Number((run && run.seed) || 0),
+        excluded: String((run && run.excluded) || "") || null,
+        lines: { known: lines !== null, text: lines === null ? "—" : String(lines) },
+        deliveredPerLine: oneReading(run && run.deliveredPerLine),
+        operatingProfitPerLine: oneReading(run && run.operatingProfitPerLine),
+        deliveredPerVehicle: oneReading(run && run.deliveredPerVehicle),
+        operatingProfitPerVehicle: oneReading(run && run.operatingProfitPerVehicle),
+      };
+    });
+  }
+
   /** The runs left out, counted by reason (the server's own reasons). */
   function exclusionRows(payload) {
     const list = payload && Array.isArray(payload.exclusions) ? payload.exclusions : [];
@@ -548,13 +581,81 @@
     };
   }
 
+  /**
+   * The component's model: the same pure functions, bound to `this.payload`.
+   *
+   * 为什么要有它（2026-11-17）：其它三个页面（evolution/live/providers）都用
+   * "组件展开 view model" 的写法 ⇒ **模板里用到的方法一定在组件作用域里**。
+   * Compare 页原来是**手写转发** ⇒ 模板加了新方法而组件忘了加 ⇒
+   * 真实浏览器里表达式求值失败，而 view module 的单测**全绿**
+   * （单测直接调 `window.CompareView.xxx`，绕过了组件这一层）。
+   *
+   * ⇒ 统一成展开写法：模板要什么方法，先在这里有。
+   */
+  function create() {
+    return {
+      /** The server's answer (the whole payload). */
+      payload: null,
+
+      /* --------------------------- the payload --------------------------- */
+      questionGroups() {
+        return questionGroups(this.payload);
+      },
+      outsideGroupCount() {
+        return outsideGroupCount(this.payload);
+      },
+      // 读一次 localeTick：切语言时 Alpine 会重新算这些属性 ⇒
+      // **服务端词汇（结局类、度量口径）按 id 翻的那一层也跟着重算**。
+      modelRows() {
+        void this.localeTick;
+        return modelRows(this.payload);
+      },
+      normalizedRows() {
+        void this.localeTick;
+        return normalizedRows(this.payload);
+      },
+      normalizedRunRows() {
+        void this.localeTick;
+        return normalizedRunRows(this.payload);
+      },
+      exclusionRows() {
+        return exclusionRows(this.payload);
+      },
+      comparison() {
+        void this.localeTick;
+        return comparison(this.payload);
+      },
+      comparisonRows() {
+        void this.localeTick;
+        return comparisonRows(this.payload);
+      },
+      runRows() {
+        return runRows(this.payload);
+      },
+      modelNames() {
+        return modelNames(this.payload);
+      },
+      axisCharts() {
+        return axisCharts(this.payload);
+      },
+      surfaceDiff() {
+        return surfaceDiff(this.payload);
+      },
+      collisionRows() {
+        return collisionRows(this.payload);
+      },
+    };
+  }
+
   window.CompareView = {
+    create,
     planSummary,
     planCells,
     planProblems,
     planQueueState,
     modelRows,
     normalizedRows,
+    normalizedRunRows,
     deliverySplit,
     exclusionRows,
     comparison,

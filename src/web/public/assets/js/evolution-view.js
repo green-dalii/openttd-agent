@@ -143,6 +143,55 @@ window.EvolutionView = (function () {
           .map((m) => String(m.id || "").slice(-8));
       },
 
+      /**
+       * The **capability** series: what one line (or one vehicle) delivered and
+       * earned.
+       *
+       * Why one axis at a time: the two metrics have different units (a count
+       * and a money rate) and the two denominators differ too - one shared
+       * scale across different units is a lie (the same rule the Compare page's
+       * axis charts follow).
+       *
+       * The numbers come from the **server** (`normalizedSeries`) - the page
+       * only picks the axis, so there is no second definition of "per line"
+       * drifting next to the server's one (MEMORY D132).
+       *
+       * null = **not comparable** (no line built, or the denominator was never
+       * measured) ⇒ a gap in the chart, not a zero.
+       */
+      capabilitySeries(metric, denom) {
+        const list = Array.isArray(this.data && this.data.normalizedSeries) ? this.data.normalizedSeries : [];
+        const key =
+          metric === "operating"
+            ? denom === "vehicle"
+              ? "operatingProfitPerVehicle"
+              : "operatingProfitPerLine"
+            : denom === "vehicle"
+              ? "deliveredPerVehicle"
+              : "deliveredPerLine";
+        const name =
+          metric === "operating"
+            ? denom === "vehicle"
+              ? "Operating profit / vehicle"
+              : "Operating profit / line"
+            : denom === "vehicle"
+              ? "Delivered / vehicle"
+              : "Delivered / line";
+        return [
+          {
+            name,
+            data: list.map((p) => {
+              const v = p ? p[key] : null;
+              return typeof v === "number" && Number.isFinite(v) ? v : null;
+            }),
+          },
+        ];
+      },
+      capabilityLabels() {
+        const list = Array.isArray(this.data && this.data.normalizedSeries) ? this.data.normalizedSeries : [];
+        return list.map((p) => String((p && p.id) || "").slice(-8));
+      },
+
       /** Money per finished game, oldest first — the trend line. */
       moneySeries() {
         const rows = this.metrics().slice().sort((a, b) => (a.startedAt || 0) - (b.startedAt || 0));

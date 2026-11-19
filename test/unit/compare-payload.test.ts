@@ -253,3 +253,39 @@ describe("buildCompareView：配对判定按轴给（Issue #87）", () => {
 		expect(payload.comparison).toBeNull();
 	});
 });
+
+/* ==========================================================================
+ * 逐局的归一化读数（阶段 D）：Compare 页的"每条线 / 每辆车"要能看到**每一局**，
+ * 不只是模型均值（均值背后的每一局是什么，是读者要自己核对的事）。
+ *
+ * 派生在**服务端**做（`normalizeRun` 是唯一口径）⇒ 页面不重算。
+ * ====================================================================== */
+describe("compare payload: 逐局的归一化读数", () => {
+	it("每一局带着它自己的每线 / 每车读数", () => {
+		const view = buildCompareView([
+			row({ id: "run-1", lines: 4, deliveredRun: 400, vehicles: 8, operatingProfit: 1200 }),
+		]);
+		const run = view.runs[0]!;
+		expect(run.lines).toBe(4);
+		expect(run.deliveredPerLine).toBeCloseTo(100, 6);
+		expect(run.operatingProfitPerLine).toBeCloseTo(300, 6);
+		expect(run.deliveredPerVehicle).toBeCloseTo(50, 6);
+		expect(run.operatingProfitPerVehicle).toBeCloseTo(150, 6);
+	});
+
+	it("没建线的局在这四条轴上不可比（null），不是 0", () => {
+		const view = buildCompareView([row({ id: "run-1", lines: 0, deliveredRun: 0, vehicles: 0 })]);
+		const run = view.runs[0]!;
+		expect(run.lines).toBe(0);
+		expect(run.deliveredPerLine).toBeNull();
+		expect(run.deliveredPerVehicle).toBeNull();
+	});
+
+	it("老局没有 lines 读数 ⇒ 每线读数不可判定（null），不折零", () => {
+		const view = buildCompareView([row({ id: "old", deliveredRun: 50, vehicles: 3 })]);
+		const run = view.runs[0]!;
+		expect(run.lines).toBeNull();
+		expect(run.deliveredPerLine).toBeNull();
+		expect(run.deliveredPerVehicle).toBeCloseTo(50 / 3, 6);
+	});
+});

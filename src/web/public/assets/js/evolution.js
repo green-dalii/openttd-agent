@@ -19,6 +19,10 @@
       return {
         ...model,
 
+        /** Which axis the capability chart draws (one at a time). */
+        capabilityMetric: "delivered",
+        capabilityDenom: "line",
+
         init() {
           U.renderChrome();
           this.load();
@@ -83,6 +87,32 @@
               series,
               labels,
               format: U.fmtMoney,
+              area: false,
+              height: 200,
+            });
+          });
+        },
+
+        /**
+         * The capability chart: what one line (or one vehicle) delivered and
+         * earned.
+         *
+         * The state (`capabilityMetric` / `capabilityDenom`) lives here so the
+         * template's buttons can change it; `x-effect` re-runs the draw when
+         * they change. One axis at a time - the units differ.
+         */
+        drawCapability() {
+          const series = this.capabilitySeries(this.capabilityMetric, this.capabilityDenom);
+          const labels = this.capabilityLabels();
+          const el = this.$refs.evoCapChart;
+          if (!el) return;
+          this.$nextTick(() => {
+            if (!this.$refs.evoCapChart) return;
+            C.line(el, {
+              series,
+              labels,
+              // A count and a money rate are different units ⇒ different format.
+              format: this.capabilityMetric === "operating" ? U.fmtMoney : U.fmtInt,
               area: false,
               height: 200,
             });

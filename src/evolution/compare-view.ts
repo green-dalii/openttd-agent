@@ -18,6 +18,7 @@
 import { createHash } from "node:crypto";
 import { metricExclusion, type GameMetric } from "./metrics.js";
 import { buildScorecard, type BenchConditions, type ModelCard } from "./scorecard.js";
+import { normalizeRun } from "./normalized.js";
 import type { LedgerCollision } from "./store.js";
 import { pairedComparison, pairedComparisons, type PairedComparison } from "./bench-stats.js";
 
@@ -38,6 +39,21 @@ export interface CompareRun {
 	deliveredPerGameDay: number | null;
 	deliveredRun: number | null;
 	simulatedDays: number | null;
+	/**
+	 * 这一局的**归一化读数**（每条线 / 每辆车）。
+	 *
+	 * 为什么逐局都要带：模型均值只说"平均每条线运多少"，读者要核对的是
+	 * "均值背后的**每一局**是什么" ⇒ 归一化在**服务端**算（`normalizeRun` 是
+	 * 唯一口径），页面不重算。
+	 *
+	 * null = **不可比**（没建线 ⇒ 分母为 0；老局没记 lines ⇒ 分母没测到），
+	 * 不是 0。
+	 */
+	lines: number | null;
+	deliveredPerLine: number | null;
+	operatingProfitPerLine: number | null;
+	deliveredPerVehicle: number | null;
+	operatingProfitPerVehicle: number | null;
 	totalTokens: number;
 	/** Whether the cost was measurable (false = no price table). */
 	costKnown: boolean | null;
@@ -299,7 +315,10 @@ export function buildCompareView(
 		selected.length === 2 ? pairedComparisons(scoped, selected[0]!, selected[1]!) : [];
 
 	const runs: CompareRun[] = scoped
-		.map((m) => ({
+		.map((m) => {
+			// 归一化在**服务端**算（`normalizeRun` 是唯一口径）：页面不重算。
+			const normalized = normalizeRun(m);
+			return {
 			id: String(m.id ?? ""),
 			model: servedModel(m),
 			requestedModel: String(m.llmModel ?? ""),
@@ -310,11 +329,17 @@ export function buildCompareView(
 			deliveredPerGameDay: perDay(m),
 			deliveredRun: typeof m.deliveredRun === "number" ? m.deliveredRun : null,
 			simulatedDays: typeof m.simulatedDays === "number" ? m.simulatedDays : null,
+			lines: normalized.lines,
+			deliveredPerLine: normalized.deliveredPerLine,
+			operatingProfitPerLine: normalized.operatingProfitPerLine,
+			deliveredPerVehicle: normalized.deliveredPerVehicle,
+			operatingProfitPerVehicle: normalized.operatingProfitPerVehicle,
 			totalTokens: Number(m.totalTokens ?? 0),
 			costKnown: typeof m.costKnown === "boolean" ? m.costKnown : null,
 			costTotal: typeof m.costTotal === "number" ? m.costTotal : null,
 			startedAt: Number(m.startedAt ?? 0),
-		}))
+			};
+		})
 		.sort((a, b) => b.startedAt - a.startedAt);
 
 	const distinct = (pick: (m: GameMetric) => unknown): string[] => {
