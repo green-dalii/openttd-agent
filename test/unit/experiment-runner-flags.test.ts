@@ -63,4 +63,28 @@ describe("实验 runner 的诚实旗标", () => {
 		expect(out).toContain("claims NO effect");
 		expect(out).not.toContain("Refusing to start");
 	});
+
+	it("披露交付量的**口径**（run = 整局累计 / raw = admin 当季计数，跨局不可比）", () => {
+		const dir = dirWithProvider();
+		const r = spawnSync(
+			"pnpm",
+			[
+				"exec",
+				"tsx",
+				"scripts/run-experiment.ts",
+				"--dir",
+				dir,
+				"--n",
+				"0",
+				"--game-days",
+				"200",
+				"--measure-only",
+			],
+			{ cwd: process.cwd(), encoding: "utf8", timeout: 20000 },
+		);
+		const out = r.stdout + r.stderr;
+		// D126：两个口径都在时，比较会自动回落；不披露 ⇒ 读者会把季度计数当交付量。
+		expect(out).toContain("delivered source:");
+		expect(out).toMatch(/run \(whole-run total|raw \(admin quarterly counter/);
+	});
 });

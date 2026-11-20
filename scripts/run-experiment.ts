@@ -63,6 +63,8 @@ function parseArgs(argv: string[]): Args {
 		const i = argv.indexOf(flag);
 		return i >= 0 ? argv[i + 1] : undefined;
 	};
+	/** **布尔**旗标：看 argv 里**有没有**它（不能用 `get`：它后面没有值 ⇒ get 返回 undefined）。 */
+	const has = (flag: string): boolean => argv.includes(flag);
 	const dir = get("--dir");
 	if (!dir) {
 		console.error(
@@ -102,7 +104,7 @@ function parseArgs(argv: string[]): Args {
 		const plannedN = Number(get("--n") ?? 3);
 		const v = powerVerdict({ declaredEffect: effect, observedCv: cv, actualN: plannedN });
 		if (v.detectable === false) {
-			if (get("--measure-only") !== undefined) {
+			if (has("--measure-only")) {
 				// **显式的测量轮**：不声称任何效应，但必须把"要多少对才测得出"写出来。
 				console.log(`measure-only: ${v.message}`);
 				console.log("  This run reports intervals and spread; it claims NO effect.");
@@ -131,7 +133,7 @@ function parseArgs(argv: string[]): Args {
 		...(get("--cv") !== undefined ? { cv: Number(get("--cv")) } : {}),
 		mode: (get("--mode") ?? "ab") as "ab" | "sequential",
 		...(get("--sessions") !== undefined ? { sessions: Number(get("--sessions")) } : {}),
-		measureOnly: get("--measure-only") !== undefined,
+		measureOnly: has("--measure-only"),
 		armOrder: (get("--arm-order") ?? "ctl-first") as "ctl-first" | "trt-first",
 	};
 }
@@ -315,6 +317,12 @@ const armLabel = args.vary === "freeze" ? ["frozen", "not frozen"] : ["with less
 const fmtRate = (v: number | null) => (v === null ? "—" : `${(v * 100).toFixed(0)}%`);
 fmt(armLabel[0]!, view.arms.withLessons);
 fmt(armLabel[1]!, view.arms.withoutLessons);
+// **口径必须披露**（D126）：`delivered` 有两个口径——`run`（整局累计，**跨局可比**）
+// 与 `raw`（admin 的**当季**计数，跨局不可比）。样本太小（新行没有 `deliveredRun`）
+// 时比较会**自动回落到 raw** ⇒ 不披露的话，读者会把两局的季度计数当成交付量来比。
+console.log(
+	`delivered source: ${view.arms.deliveredSource === "run" ? "run (whole-run total - comparable across runs)" : "raw (admin quarterly counter - NOT comparable across runs; the sample was too small for the run total)"}`,
+);
 if (view.arms.treatmentWithoutInjection > 0) {
 	console.log(
 		`WARNING: ${view.arms.treatmentWithoutInjection} treatment run(s) received NO memory at all` +
