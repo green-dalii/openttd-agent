@@ -870,3 +870,43 @@ describe("预置场景的蓝图线路（E2 seed 22 的真因）", () => {
 		expect(nut).toMatch(/for \(local t = 0; t < 8; t\+\+\)/);
 	});
 });
+
+/* ==========================================================================
+ * GS 的**登记表读法**（2026-11-18 真机踩到）。
+ *
+ * 事实：agent 退役**还在施工**的线路 1014 ⇒ GS 抛
+ * `the index '1014' does not exist`（Squirrel 的表是严格的：读不存在的键会抛）
+ * ⇒ 退役**没有发生**，而模型读到的是一句看不懂的“引擎错误”。
+ *
+ * ⇒ 规则：写回登记表的出口**一律走 `RouteRecord(job)`**（没登记 ⇒ null ⇒ 具名
+ * 失败），不许直接 `this._routes[job]`。
+ * ====================================================================== */
+describe("GS 的登记表读法（未登记 ⇒ 不抛）", () => {
+	const nut = readFileSync("src/game/squirrel/bridge-gs/main.nut", "utf8");
+	const bodyOf = (fn: string): string => {
+		const i = nut.indexOf(`function ${fn}(`);
+		expect(i, `找不到 ${fn}`).toBeGreaterThan(-1);
+		return nut.slice(i, nut.indexOf("\n    function ", i + 10));
+	};
+
+	it("有 RouteRecord（唯一的安全取法）", () => {
+		expect(nut).toMatch(/function RouteRecord\(job\)/);
+		expect(nut).toMatch(/this\._routes\.rawin\(job\) \? this\._routes\[job\] : null/);
+	});
+
+	it("写回登记表的出口都走 RouteRecord，不直接读表", () => {
+		for (const fn of ["SaveFleetTarget", "RetireRoute", "SaveRouteCargo"]) {
+			const body = bodyOf(fn);
+			expect(body, `${fn} 必须用 RouteRecord`).toMatch(/RouteRecord\(/);
+			expect(body, `${fn} 不许直接读登记表`).not.toMatch(/this\._routes\[job\]/);
+		}
+	});
+
+	it("没登记 ⇒ 具名失败（不抛），且理由说清是“还在施工”还是“不认识”", () => {
+		expect(nut).toMatch(/retire_building/);
+		expect(nut).toMatch(/retire_unknown/);
+		expect(nut).toMatch(/fleet_target_unregistered/);
+		expect(nut).toMatch(/cargo_unregistered/);
+		expect(nut).toMatch(/reeng_unregistered/);
+	});
+});

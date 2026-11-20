@@ -1207,6 +1207,18 @@ class ExecCore {
         return out;
     }
 
+    /* 登记表里某条线的记录（**没登记 ⇒ null**，**不抛**）。
+     *
+     * 为什么不能直接读：Squirrel 的表是**严格**的——读不存在的键会抛
+     * `the index '1014' does not exist` ⇒ 那条错误会**进模型上下文**，模型会
+     * 把它当成“引擎坏了”，而真实原因常常只是“这条线还没建完”。
+     * 真机 2026-11-18：agent 退役**还在施工**的线路 1014 ⇒ 抛异常 ⇒ 退役没发生，
+     * 而模型读到的是一句看不懂的引擎错误（D44 的同款纪律：读之前先问登记了没有）。
+     */
+    function RouteRecord(job) {
+        return this._routes.rawin(job) ? this._routes[job] : null;
+    }
+
     /* 一个 job 的车队目标状态：当前 job 用活字段，旧 job 用登记表。 */
     function FleetTarget(job) {
         if (job == this._job) {
@@ -1242,7 +1254,9 @@ class ExecCore {
         // `endA/endB`（⇒ 诊断用的两端格）每次车队变更后**都没了**。
         // 后果不是"少几个字段"：货运线因此**没有 cargo 标签** ⇒ 逐 (货种, 收方产业)
         // 的归因**永远归不出来** ⇒ F4 的逐线交付量一直是 null。
-        local r = this._routes[job];
+        // 未登记 ⇒ 具名失败（不抛）：见 RouteRecord 的注释。
+        local r = this.RouteRecord(job);
+        if (r == null) { this.Ph("fleet_target_unregistered" + job); return; }
         r.vehicles = vehicles;
         r.applied = applied;
     }
@@ -1475,8 +1489,15 @@ class ExecCore {
                 queued++;
             }
         }
-        // 就地改（不重建）：重建会丢掉 lineCargo / endA / endB（2026-11-16）。
-        local rr = this._routes[job];
+        // **没登记的 job 不许硬读**（Squirrel 的表是严格的 ⇒ 见 RouteRecord 的注释）。
+        // 真机 2026-11-18：退役**还在施工**的线路 ⇒ 抛 "the index '1014' does not
+        // exist" ⇒ 退役没发生，而模型读到的是一句看不懂的引擎错误。
+        // ⇒ 具名拒绝：当前 job = “还在施工”，别的 = “不认识的线路”。
+        local rr = this.RouteRecord(job);
+        if (rr == null) {
+            this.Ph((job == this._job) ? "retire_building" + job : "retire_unknown" + job);
+            return;
+        }
         rr.vehicles = list;
         rr.lead = (job == this._job ? this._vehicle : rr.lead);
         rr.depot = (job == this._job ? (this._slotD.bp == null ? -1 : this._slotD.bp[0]) : rr.depot);
@@ -1565,8 +1586,9 @@ class ExecCore {
     /* 把一条线的「改装到的货物」写进登记表（当前 job 用活字段，旧 job 用登记表）。 */
     function SaveRouteCargo(job, cid) {
         if (job == this._job) { this._routeCargo = cid; return; }
-        // 就地改（不重建）：重建会丢掉 lineCargo / endA / endB（2026-11-16）。
-        local r = this._routes[job];
+        // 未登记 ⇒ 具名失败（不抛）：见 RouteRecord 的注释。
+        local r = this.RouteRecord(job);
+        if (r == null) { this.Ph("cargo_unregistered" + job); return; }
         r.cargo = cid;
     }
 
@@ -1621,8 +1643,9 @@ class ExecCore {
             this._routeEngine = engine;
             this.RegisterRoute(job);
         } else {
-            // 就地改（不重建）：重建会丢掉 lineCargo / endA / endB（2026-11-16）。
-            local r = this._routes[job];
+            // 未登记 ⇒ 具名失败（不抛）：见 RouteRecord 的注释。
+            local r = this.RouteRecord(job);
+            if (r == null) { this.Ph("reeng_unregistered" + job); return; }
             r.vehicles = made;
             r.lead = made[0];
             r.depot = t.depot;

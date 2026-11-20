@@ -957,7 +957,7 @@ road seg1 d54 → … → road_stuck:ERR_AREA_NOT_CLEAR → done`——具名失
 具名可核（D20）。
 
 **两个真值字段（P1-3 数据层）**：`route-stats` 带 `fleetIds`（注册表 = **归属**，稳定唯一）与
-`fleetApplied`（目标规模）。
+`fleetApplied`（目标规模）。⇒ **事实（2026-11-18 真机）**：退役一条**还在施工**的线路 ⇒ GS 读登记表时抛 `the index '1014' does not exist`（Squirrel 的表是严格的：读不存在的键会抛，MEMORY D95）⇒ 退役**没有发生**，而模型读到的是一句看不懂的“引擎错误”。⇒ 写回登记表的出口一律先问“登记了没有”（`RouteRecord(job)`：没登记 ⇒ null ⇒ **具名失败**：退役施工中的线路 = `retire_building`、不认识 = `retire_unknown`；其余写回同理 `fleet_target_unregistered` / `cargo_unregistered` / `reeng_unregistered`）⇒ **引擎前置不满足 ⇒ 具名拒绝，不抛异常**（D20 的同款纪律）。
 
 - **事实（2026-11-15/16，四个静默测量缺陷，都在真机上被证伪过）**：
   ① **逐线的车与利润必须按注册表算**（不是按站点扫）：`GSVehicleList_Station(s)` 返回的是**服务该站

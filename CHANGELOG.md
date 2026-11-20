@@ -29,6 +29,13 @@ operating profit per game day rose from +4.57/+5.06 to **+48.27/+25.49**, and th
 
 ### Fixed
 
+- **Retiring a line that is still being built no longer throws an engine error.** The game script read its route registry without
+asking whether the job was registered - and Squirrel's tables are strict: reading a key that does not exist throws
+`the index '1014' does not exist`. On a real run the agent retired a line that was still under construction, so the
+retirement never happened and the model read a meaningless "engine error" instead of the truth. Every write back to the
+registry now asks first ("not registered" -> a **named** failure: `retire_building` for a line still under construction,
+`retire_unknown` for one that does not exist, and the same for the fleet, cargo and engine writes).
+
 - **A line that works is no longer diagnosed as broken.** The route diagnosis asked the game what a vehicle would carry if it were
 refitted to the line's cargo - but the game only answers that for a vehicle **stopped in a depot**, and when it cannot answer it returns
 4294967295 (the unsigned/signed conversion in OpenTTD's `res.Succeeded() ? refit_capacity : -1`, PR #15507). Every vehicle on the road
