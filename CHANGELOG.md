@@ -27,7 +27,9 @@ round that asks "how big would the effect have to be?" explicit instead of shrin
 power gate (the gate still reports how many runs that effect would need, and the output says in as many words that no effect
 is claimed). `--arm-order trt-first` alternates which arm runs first: the control arm always ran first, so the second run of a
 pair enjoyed the warm start while the first one paid the provider's rate limit - a positive result could have been an order
-effect. The arm summary now also names the **delivery figure** it used: the run total (comparable across runs) or the admin's
+effect. **But** with one data dir per pair the treatment arm's memory comes from the *previous* run in that dir, so it has
+to run second: alternating voids the intervention instead of cancelling the bias (the first memory A/B lost two of its five
+pairs to exactly this). Alternating only makes sense when every pair has its own base run. The arm summary now also names the **delivery figure** it used: the run total (comparable across runs) or the admin's
 quarterly counter (not comparable - the comparison falls back to it when the sample is too small for the run total).
 - **The per-decision tool budget was cutting off the agent's actions.** The budget allowed 12 tool calls per decision, chosen to cap a measured
 runaway - but a controlled experiment (2 arms x 2 seeds, same model, same horizon) showed it cut the model's **actions**, not its idling: the
