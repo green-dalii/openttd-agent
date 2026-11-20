@@ -22,6 +22,13 @@ measured and paired: delivered and operating profit **per line** and **per vehic
 it is left out there rather than counted as zero; a missing reading stays "not measured".
 
 ### Changed
+- **The experiment runner can run a measurement, and it now says which delivery figure it used.** `--measure-only` makes a
+round that asks "how big would the effect have to be?" explicit instead of shrinking the declared effect to slip past the
+power gate (the gate still reports how many runs that effect would need, and the output says in as many words that no effect
+is claimed). `--arm-order trt-first` alternates which arm runs first: the control arm always ran first, so the second run of a
+pair enjoyed the warm start while the first one paid the provider's rate limit - a positive result could have been an order
+effect. The arm summary now also names the **delivery figure** it used: the run total (comparable across runs) or the admin's
+quarterly counter (not comparable - the comparison falls back to it when the sample is too small for the run total).
 - **The per-decision tool budget was cutting off the agent's actions.** The budget allowed 12 tool calls per decision, chosen to cap a measured
 runaway - but a controlled experiment (2 arms x 2 seeds, same model, same horizon) showed it cut the model's **actions**, not its idling: the
 blocked calls were `build_freight_route`, `build_bus_route` and `set_route_vehicles`. With 24 calls the blocked calls fell from 11 and 6 to 3 and 1,
