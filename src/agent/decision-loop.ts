@@ -151,7 +151,21 @@ export function createDecisionLoop(ctx: DecisionLoopCtx): DecisionLoop {
 	 * horizon finished 20 days past it (measured: horizon 40 -> 60).
 	 */
 	let lastDecisionDays = 0;
-	const decisionMarginDays = () => Math.max(lastDecisionDays, 1);
+	/**
+	 * The margin is an **estimate** of "how many game days one decision takes",
+	 * so it must be **capped** (2026-11-16, E2 matrix).
+	 *
+	 * 事故：prebuilt 场景里模型的第一次决策用了 28 次工具调用（≈140 秒墙钟），
+	 * 而**世界在模型思考时照跑** ⇒ 那次决策吃掉 **90+ 个游戏日**；余量取的是
+	 * 「上一次决策的耗时」⇒ 余量(≈183 日) ≥ 视界剩余(182 日) ⇒ 循环**再也不提问**，
+	 * 整局变成「1 次决策 + 空转到视界结束」⇒ **测的是脚手架，不是模型**
+	 * （真机：E2 的 seed 11/33 各只有 1 次决策，违反 AGENTS §5.1 的硬要求）。
+	 *
+	 * ⇒ 余量**封顶**（一个月 = 决策的周期节拍）：一次慢决策最多只能推迟
+	 * 一个月，不能把剩下的视界全部关掉。
+	 */
+	const MAX_DECISION_MARGIN_DAYS = 30;
+	const decisionMarginDays = () => Math.min(Math.max(lastDecisionDays, 1), MAX_DECISION_MARGIN_DAYS);
 	const decisionTickMs = ctx.opts.decisionTickMs ?? 1_000;
 	const maxDecisions = ctx.opts.maxDecisions ?? 0; // 0 = bounded only by run length
 

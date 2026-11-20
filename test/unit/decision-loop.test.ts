@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createDecisionLoop, type DecisionLoopCtx } from "../../src/agent/decision-loop.js";
+import { createEpisode } from "../../src/agent/episode.js";
 
 /**
  * B-4b TDD: 决策循环体的单元契约。
@@ -197,5 +198,46 @@ describe("decision-loop —— B-4b 单元契约", () => {
 		// run() 内部只消费 scheduler —— 这里直接验证 handlePhase 的行为已覆盖。
 		loop.handlePhase("EX done stN2 r75 bus j100");
 		expect(ctx.schedulerFake.request).toHaveBeenCalledWith("wait_until");
+	});
+});
+/**
+ * 决策余量**必须有上限**（2026-11-16，真机事故）。
+ *
+ * 现象（E2 矩阵真机，prebuilt）：模型第一次决策用了 28 次工具调用（≈140 秒墙钟），
+ * 而**世界在模型思考时照跑** ⇒ 那次决策**吃掉 90+ 个游戏日**；决策余量取的是
+ * 「上一次决策的耗时」⇒ 余量(≈183 日) ≥ 视界剩余(182 日) ⇒ 循环**再也不提问**，
+ * 整局变成「1 次决策 + 空转到视界结束」⇒ **测的是脚手架，不是模型**。
+ *
+ * 规则：余量是「一次决策大概要多少游戏日」的**估计**，**必须封顶**；
+ * 否则**一次**慢决策就能把剩下的视界全部关掉。
+ */
+describe("决策余量封顶（一次慢决策不能关掉整局的提问）", () => {
+	it("一次吃掉 183 个游戏日的决策之后，循环仍然会再提问", async () => {
+		let day = 10;
+		const ctx = makeCtx({
+			opts: {
+				decisionTickMs: 1,
+				// 视界 250 日（与基准矩阵同）：决策的余量必须相对**剩余视界**判断。
+				episode: createEpisode({ horizonDays: 250, capMs: null, startedAtMs: Date.now(), startGameDay: 0 }),
+			},
+			gameDay: () => day,
+		});
+		// 第一次决策期间世界跑掉 183 天（模型思考时世界照跑）。
+		ctx.runDecisionFake.mockImplementation(async () => {
+			day += 183;
+			return { plan: null };
+		});
+		let calls = 0;
+		ctx.schedulerFake.take.mockImplementation(() => (calls++ < 2 ? { trigger: "start" as const } : null));
+		const loop = createDecisionLoop(ctx);
+		let spins = 0;
+		const stopper = setInterval(() => {
+			spins++;
+			if (spins > 6) ctx.isStopRequested = () => true;
+		}, 5);
+		await loop.run();
+		clearInterval(stopper);
+		// 关键：第二次决策**发生了**（余量没有把剩余视界关掉）。
+		expect(ctx.runDecisionFake.mock.calls.length).toBeGreaterThanOrEqual(2);
 	});
 });

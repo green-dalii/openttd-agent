@@ -97,6 +97,15 @@ window.EvolutionView = (function () {
               status: m.status,
               llm: m.llmKind === "real" ? "real" : m.llmKind || "—",
               money: U.fmtMoney(m.money),
+              // 运营利润/日 = **晋升闸的度量**（策略质量）；缺读数是 "—"，不是 £0
+              // （"没测到" ≠ "测到 0"，D60）。
+              operating:
+                typeof m.operatingProfitPerDay === "number" && Number.isFinite(m.operatingProfitPerDay)
+                  ? U.fmtMoney(m.operatingProfitPerDay)
+                  : "—",
+              // 线路数 = 归一化读数的**分母**（每条线能运多少）。
+              lines:
+                typeof m.lines === "number" && Number.isFinite(m.lines) ? U.fmtInt(m.lines) : "—",
               decisions: U.fmtInt(m.decisions),
               tokens: U.fmtTok(m.totalTokens),
               cost: U.fmtCostKnown(m.costTotal, m.costKnown),
@@ -106,6 +115,81 @@ window.EvolutionView = (function () {
               hasMemory: Boolean(mem.lessonsInjected),
             };
           });
+      },
+
+      /**
+       * 运营利润/日 的时间序列（最旧 → 最新）。
+       *
+       * **缺读数是 null（图上是断点），不是 0**：把"没测到"画成 0 会把一条
+       * 没有读数的局说成"这局没赚钱"（D60）。uPlot 用 null 画断点。
+       */
+      operatingSeries() {
+        const rows = this.metrics().slice().sort((a, b) => (a.startedAt || 0) - (b.startedAt || 0));
+        return [
+          {
+            name: "Operating profit / game day",
+            data: rows.map((m) =>
+              typeof m.operatingProfitPerDay === "number" && Number.isFinite(m.operatingProfitPerDay)
+                ? m.operatingProfitPerDay
+                : null,
+            ),
+          },
+        ];
+      },
+      operatingLabels() {
+        return this.metrics()
+          .slice()
+          .sort((a, b) => (a.startedAt || 0) - (b.startedAt || 0))
+          .map((m) => String(m.id || "").slice(-8));
+      },
+
+      /**
+       * The **capability** series: what one line (or one vehicle) delivered and
+       * earned.
+       *
+       * Why one axis at a time: the two metrics have different units (a count
+       * and a money rate) and the two denominators differ too - one shared
+       * scale across different units is a lie (the same rule the Compare page's
+       * axis charts follow).
+       *
+       * The numbers come from the **server** (`normalizedSeries`) - the page
+       * only picks the axis, so there is no second definition of "per line"
+       * drifting next to the server's one (MEMORY D132).
+       *
+       * null = **not comparable** (no line built, or the denominator was never
+       * measured) ⇒ a gap in the chart, not a zero.
+       */
+      capabilitySeries(metric, denom) {
+        const list = Array.isArray(this.data && this.data.normalizedSeries) ? this.data.normalizedSeries : [];
+        const key =
+          metric === "operating"
+            ? denom === "vehicle"
+              ? "operatingProfitPerVehicle"
+              : "operatingProfitPerLine"
+            : denom === "vehicle"
+              ? "deliveredPerVehicle"
+              : "deliveredPerLine";
+        const name =
+          metric === "operating"
+            ? denom === "vehicle"
+              ? "Operating profit / vehicle"
+              : "Operating profit / line"
+            : denom === "vehicle"
+              ? "Delivered / vehicle"
+              : "Delivered / line";
+        return [
+          {
+            name,
+            data: list.map((p) => {
+              const v = p ? p[key] : null;
+              return typeof v === "number" && Number.isFinite(v) ? v : null;
+            }),
+          },
+        ];
+      },
+      capabilityLabels() {
+        const list = Array.isArray(this.data && this.data.normalizedSeries) ? this.data.normalizedSeries : [];
+        return list.map((p) => String((p && p.id) || "").slice(-8));
       },
 
       /** Money per finished game, oldest first — the trend line. */
@@ -149,15 +233,42 @@ window.EvolutionView = (function () {
           .slice()
           .sort((a, b) => ((b.promotion && b.promotion.value) || 0) - ((a.promotion && a.promotion.value) || 0))
           .map((c) => {
-            const p = c.promotion || { promoted: false, value: 0, runs: 0, reason: "" };
+            // The fallback must NOT carry `value: 0`: a missing promotion block
+            // means "not measured", and 0 would render as a real measurement.
+            const p = c.promotion || { promoted: false, runs: 0, reason: "" };
             const params = Object.entries(c.params || {})
               .map(([k, v]) => `${k}=${v}`)
               .join(", ");
+            // Two measures, both shown (2026-11-14, 方案 C):
+            //   - **operating profit/day** is what the gate reads (strategy quality);
+            //   - **net cash flow/day** is company health (it contains building,
+            //     vehicles and interest, so it is negative while a run builds).
+            // Showing only one would make the page do the very substitution that
+            // made the gate unopenable. A missing reading shows "—", never 0.
+            // A **missing** reading must read "—", not "£0": "no measurement" and
+            // "measured zero" are different facts (D60).
+            const hasOperating = typeof p.value === "number" && Number.isFinite(p.value);
+            const operating = hasOperating ? U.fmtMoney(p.value) : "—";
+            // 闸的**证据**：逐局的运营利润读数（"平均 +21.3" 来自哪三局？）。
+            // 没有读数的旧卡是 "—"，不是 "0 局"（"没测到" ≠ "测到 0"）。
+            const readings = Array.isArray(c.operatingProfitPerDayPerRun)
+              ? c.operatingProfitPerDayPerRun.filter((v) => typeof v === "number" && Number.isFinite(v))
+              : [];
+            const cash = p.netCashFlowPerDay;
+            const netCashFlowValue =
+              cash === null || cash === undefined || !Number.isFinite(Number(cash)) ? "—" : U.fmtMoney(cash);
             return {
               id: c.id,
               label: params ? `${c.action} (${params})` : String(c.action),
               runs: U.fmtInt(p.runs),
               value: U.fmtMoney(p.value),
+              operatingValue: operating,
+              netCashFlowValue,
+              readings: readings.length
+                ? `${readings.length} games: ${readings.map((v) => v.toFixed(1)).join(", ")} (mean ${(
+                    readings.reduce((a, b) => a + b, 0) / readings.length
+                  ).toFixed(1)})`
+                : "—",
               // Two independent gates; the page must not collapse them into one
               // "enabled" bit, or a reviewer cannot tell which is missing.
               promoted: Boolean(p.promoted),

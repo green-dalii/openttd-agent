@@ -1022,6 +1022,8 @@ export function diagnoseRouteTool(deps: AgentDeps): AgentTool<typeof DiagnoseRou
 			return toResult({
 				ok: true,
 				summary:
+					// 摘要里给**稳定的 id**（模型/审计能 grep），规范措辞在
+					// `data.diagnoses[].label` 里（页面按它显示英文标题）。
 					diagnoses.map((d) => `route ${d.job}: ${d.reason} - ${d.detail}`).join("; ") +
 					(diagErrors.length > 0 ? ` (the game could not read: ${diagErrors.join("; ")})` : ""),
 				data: { available: true, diagnoses, facts, errors: diagErrors },

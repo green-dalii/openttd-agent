@@ -34,6 +34,9 @@ function sample(over: Partial<StrategySample> = {}): StrategySample {
 		action: "build_bus_route",
 		params: { cargo: "LVST", townA: 4, townB: 8 },
 		profitPerDay: MIN_STRATEGY_PROFIT_PER_DAY + 10,
+		// The gate reads **operating profit** (2026-11-14); net cash flow is
+		// reported but does not gate (it contains building/vehicles).
+		operatingProfitPerDay: MIN_STRATEGY_PROFIT_PER_DAY + 10,
 		evidence: ["money +18000 in 1951"],
 		sessionId: "s1",
 		createdAt: NOW,
@@ -191,6 +194,7 @@ describe("strategies: evaluatePromotion(SPEC §5.3 双重门槛)", () => {
 		action: "build_bus_route",
 		params: { a: 1 },
 		profitPerDayPerRun: [],
+		operatingProfitPerDayPerRun: [],
 		evidence: ["e1"],
 		sourceSessionIds: ["s1", "s2"],
 		createdAt: NOW,
@@ -198,37 +202,39 @@ describe("strategies: evaluatePromotion(SPEC §5.3 双重门槛)", () => {
 	});
 
 	it("价值不够高 -> 拒绝(即使已验证多局)", () => {
-		const r = evaluatePromotion(card({ profitPerDayPerRun: [1, 2, 3] }));
+		const r = evaluatePromotion(card({ operatingProfitPerDayPerRun: [1, 2, 3] }));
 		expect(r.promoted).toBe(false);
 		expect(r.reason).toMatch(/profit|阈值/i);
 	});
 
 	it("验证局数不足 -> 拒绝(即使单局价值很高)", () => {
-		const r = evaluatePromotion(card({ profitPerDayPerRun: [MIN_STRATEGY_PROFIT_PER_DAY * 10] }));
+		const r = evaluatePromotion(card({ operatingProfitPerDayPerRun: [MIN_STRATEGY_PROFIT_PER_DAY * 10] }));
 		expect(r.promoted).toBe(false);
 		expect(r.reason).toMatch(/verified|run|局/i);
 	});
 
 	it("价值过阈值 且 已验证>=2局 -> 通过", () => {
-		const r = evaluatePromotion(card({ profitPerDayPerRun: [MIN_STRATEGY_PROFIT_PER_DAY + 1, MIN_STRATEGY_PROFIT_PER_DAY + 2] }));
+		const r = evaluatePromotion(
+			card({ operatingProfitPerDayPerRun: [MIN_STRATEGY_PROFIT_PER_DAY + 1, MIN_STRATEGY_PROFIT_PER_DAY + 2] }),
+		);
 		expect(r.promoted).toBe(true);
 		expect(r.value).toBeGreaterThan(MIN_STRATEGY_PROFIT_PER_DAY);
 	});
 
 	it("门槛可覆盖(便于实验)", () => {
-		const r = evaluatePromotion(card({ profitPerDayPerRun: [100] }), { minValue: 50, minRuns: 1 });
+		const r = evaluatePromotion(card({ operatingProfitPerDayPerRun: [100] }), { minValue: 50, minRuns: 1 });
 		expect(r.promoted).toBe(true);
 	});
 
 	it("空样本 -> 拒绝且不抛异常", () => {
-		const r = evaluatePromotion(card({ profitPerDayPerRun: [] }));
+		const r = evaluatePromotion(card({ operatingProfitPerDayPerRun: [] }));
 		expect(r.promoted).toBe(false);
 		expect(r.value).toBe(0);
 	});
 
 	it("非有限样本被忽略,不污染均值", () => {
 		const r = evaluatePromotion(
-			card({ profitPerDayPerRun: [MIN_STRATEGY_PROFIT_PER_DAY + 1000, Number.NaN, MIN_STRATEGY_PROFIT_PER_DAY + 2000] }),
+			card({ operatingProfitPerDayPerRun: [MIN_STRATEGY_PROFIT_PER_DAY + 1000, Number.NaN, MIN_STRATEGY_PROFIT_PER_DAY + 2000] }),
 		);
 		expect(r.promoted).toBe(true);
 		expect(Number.isFinite(r.value)).toBe(true);
@@ -237,7 +243,7 @@ describe("strategies: evaluatePromotion(SPEC §5.3 双重门槛)", () => {
 	it("一局里的多条高值采样过不了闸（SPEC §5.3 要两个独立局）", () => {
 		// 真机发现（2026-11-10）：单局三条采样被算成三局 ⇒ 闸形同虚设。
 		const r = evaluatePromotion(
-			card({ profitPerDayPerRun: [100, 100, 100], sourceSessionIds: ["s1"] }),
+			card({ operatingProfitPerDayPerRun: [100, 100, 100], sourceSessionIds: ["s1"] }),
 		);
 		expect(r.promoted).toBe(false);
 		expect(r.runs).toBe(1);
@@ -274,6 +280,8 @@ describe("strategies: selectStrategies(注入前的 guardrail)", () => {
 		action: "build_bus_route",
 		params: {},
 		profitPerDayPerRun: [MIN_STRATEGY_PROFIT_PER_DAY + 1, MIN_STRATEGY_PROFIT_PER_DAY + 2],
+		// 闸读运营利润（2026-11-14）。
+		operatingProfitPerDayPerRun: [MIN_STRATEGY_PROFIT_PER_DAY + 1, MIN_STRATEGY_PROFIT_PER_DAY + 2],
 		evidence: ["e"],
 		// 一局一个读数：两个读数 ⇒ 两个独立局（真机发现 2026-11-10）。
 		sourceSessionIds: ["s1", "s2"],
@@ -291,8 +299,8 @@ describe("strategies: selectStrategies(注入前的 guardrail)", () => {
 	});
 
 	it("限量,且按价值降序", () => {
-		const low: StrategyCard = { ...mk("low", true), profitPerDayPerRun: [MIN_STRATEGY_PROFIT_PER_DAY + 1, MIN_STRATEGY_PROFIT_PER_DAY + 2] };
-		const high: StrategyCard = { ...mk("high", true), profitPerDayPerRun: [MIN_STRATEGY_PROFIT_PER_DAY * 9, MIN_STRATEGY_PROFIT_PER_DAY * 9] };
+		const low: StrategyCard = { ...mk("low", true), operatingProfitPerDayPerRun: [MIN_STRATEGY_PROFIT_PER_DAY + 1, MIN_STRATEGY_PROFIT_PER_DAY + 2] };
+		const high: StrategyCard = { ...mk("high", true), operatingProfitPerDayPerRun: [MIN_STRATEGY_PROFIT_PER_DAY * 9, MIN_STRATEGY_PROFIT_PER_DAY * 9] };
 		const out = selectStrategies([low, high], { limit: 1 });
 		expect(out.map((c) => c.id)).toEqual(["high"]);
 	});

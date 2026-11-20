@@ -12,6 +12,7 @@
  */
 
 import { learningCurve, metricExclusion, type GameMetric } from "./metrics.js";
+import { normalizeRun } from "./normalized.js";
 import { classifyOutcome, describeOutcome, type OutcomeClass, type OutcomeClassCount } from "./outcome.js";
 
 export interface BenchConditions {
@@ -72,6 +73,30 @@ export interface AbilityAxis {
 	/** Mean stations / vehicles at the end (capacity built). */
 	stations: number | null;
 	vehicles: number | null;
+	/**
+	 * 归一化读数（ROADMAP 待办 #4）：把"建了几条线/几辆车"这个**建造策略**的方差
+	 * 除掉，回答"模型建的**一条线**能运多少、能赚多少"。
+	 *
+	 * 每个读数都有 mean/median；null = 不可判定（缺读数，或"一条线都没建"——
+	 * 那类局在每线轴上**不可比**，不是"每线产出 0"）。
+	 */
+	normalized: NormalizedAxis;
+}
+
+/** 一个归一化读数的跨局统计（mean/median，null = 没有可用的读数）。 */
+export interface NormalizedReading {
+	mean: number | null;
+	median: number | null;
+}
+
+/** 能力轴的归一化部分（每条线 / 每辆车）。 */
+export interface NormalizedAxis {
+	/** 每局的线路数（均值）：归一化的分母本身。 */
+	lines: number | null;
+	deliveredPerLine: NormalizedReading;
+	operatingProfitPerLine: NormalizedReading;
+	deliveredPerVehicle: NormalizedReading;
+	operatingProfitPerVehicle: NormalizedReading;
 }
 
 export interface EfficiencyAxis {
@@ -229,6 +254,28 @@ export function buildScorecard(
 
 		// 按货种的拆分（monitor 口径）：货物与客运分列；**没拆分到就是 null**。
 		const split = splitByCargo(used);
+		// 归一化（ROADMAP 待办 #4）：每局的归一化读数 → 跨局 mean/median。
+		// 缺读数的局**不参与**（不被当成 0 拉低均值）。
+		const normalizedRuns = used.map((m) => normalizeRun(m));
+		const normalized: NormalizedAxis = {
+			lines: mean(normalizedRuns.map((n) => n.lines)),
+			deliveredPerLine: {
+				mean: mean(normalizedRuns.map((n) => n.deliveredPerLine)),
+				median: median(normalizedRuns.map((n) => n.deliveredPerLine)),
+			},
+			operatingProfitPerLine: {
+				mean: mean(normalizedRuns.map((n) => n.operatingProfitPerLine)),
+				median: median(normalizedRuns.map((n) => n.operatingProfitPerLine)),
+			},
+			deliveredPerVehicle: {
+				mean: mean(normalizedRuns.map((n) => n.deliveredPerVehicle)),
+				median: median(normalizedRuns.map((n) => n.deliveredPerVehicle)),
+			},
+			operatingProfitPerVehicle: {
+				mean: mean(normalizedRuns.map((n) => n.operatingProfitPerVehicle)),
+				median: median(normalizedRuns.map((n) => n.operatingProfitPerVehicle)),
+			},
+		};
 		const ability: AbilityAxis = {
 			runs: used.length,
 			measure: DELIVERED_MEASURE,
@@ -241,6 +288,7 @@ export function buildScorecard(
 			median: median(days),
 			stations: mean(used.map((m) => (typeof m.stations === "number" ? m.stations : null))),
 			vehicles: mean(used.map((m) => (typeof m.vehicles === "number" ? m.vehicles : null))),
+			normalized,
 		};
 
 		const efficiency: EfficiencyAxis = {

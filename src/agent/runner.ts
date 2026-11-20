@@ -24,6 +24,7 @@ import {
 } from "../game/squirrel-deploy.js";
 import type { Config } from "../config.js";
 import { createAgent, SYSTEM_PROMPT, DEFAULT_MAX_TOOL_CALLS_PER_DECISION } from "./runtime.js";
+import { diagnoseRoutes, type RouteDiagRoute } from "./route-diagnosis.js";
 import { agentDecisionAgent, laneDecisionAgent } from "./decision-agent.js";
 import { readGameVersion } from "../game/version.js";
 
@@ -87,10 +88,11 @@ import { isLlmConfigured } from "../config.js";
 import { toWireSnapshot } from "../game/wire-snapshot.js";
 import { createEpisode } from "./episode.js";
 import { stringifyJson } from "../util/json.js";
-import { runPrebuiltScenario } from "./prebuilt.js";
+import { prebuiltTimeoutMs, runPrebuiltScenario } from "./prebuilt.js";
 
 /** Blueprint job id used by the prebuilt scenario (same one the v02 oracle uses). */
 export const PREBUILT_JOB = 101;
+
 
 export interface AgentRunOptions {
 	/** Seconds to observe construction after the decision(s). 0 = until Ctrl-C. */
@@ -160,6 +162,14 @@ export interface AgentRunOptions {
 			 * 要全量时**按需问一次**（页面与 agent 工具都走这里）。
 			 */
 			fullData?: (kind: "industries" | "cargo") => Promise<unknown>;
+			/**
+			 * Ask the game **why a route is not moving** (Issue #113).
+			 *
+			 * 同一套诊断（`diagnoseRoutes`）与 agent 的 `diagnose_route` 工具
+			 * 共用 ⇒ 页面上看到的理由与模型看到的是**同一份**，不会各说各话。
+			 * 按需问（不逐帧扫全图）。
+			 */
+			routeDiagnosis?: (job?: number) => Promise<unknown>;
 		}) => void;
 		/**
 		 * agent **自己**改了暂停状态（`set_pause`）。serve 用它把归因写进 supervisor
@@ -662,9 +672,35 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 		return data;
 	};
 
+	// 线路诊断（Issue #113）：问 GS 要事实，在**服务端**算出理由 ⇒ 页面与 agent
+	// 工具看到的是同一份结论。
+	const routeDiagnosis = async (job?: number): Promise<unknown> => {
+		const cmd: Record<string, unknown> = { cmd: "route_diag" };
+		if (typeof job === "number") cmd.job = job;
+		const answer = await client?.gameScriptAwait?.(JSON.stringify(cmd), 5000);
+		if (answer === undefined || answer === null) return { available: false, reason: "no game channel" };
+		if (answer.ok !== true) {
+			return { available: false, reason: String(answer.reason ?? "the game could not diagnose the routes") };
+		}
+		const data = (answer.data ?? {}) as Record<string, unknown>;
+		const errors = Array.isArray(data.errors) ? (data.errors as string[]) : [];
+		const rows = Array.isArray(data.routes) ? (data.routes as unknown[]) : [];
+		const facts = rows
+			.map((r) => r as RouteDiagRoute)
+			.filter((r) => typeof r.job === "number")
+			.filter((r) => typeof job !== "number" || r.job === job);
+		return {
+			available: true,
+			diagnoses: diagnoseRoutes(facts),
+			facts,
+			errors,
+		};
+	};
+
 	opts.control?.onReady?.({
 		stop: requestStop,
 		fullData,
+		routeDiagnosis,
 		pause: () => {
 			// W2：页面按钮与 supervisor.pause("agent") 都走这里（同一funnel），
 			// 所以这一处就能覆盖 serve 模式下**所有**人为暂停的来源。
@@ -1021,9 +1057,18 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 	if (scenario === "prebuilt") {
 		const r = await runPrebuiltScenario(
 			{
-				sendOrder: () => {
+				sendOrder: (towns) => {
 					try {
-						client.gameScript(stringifyJson({ cmd: "build_bus_route", company: 0, job: PREBUILT_JOB }));
+						client.gameScript(
+							stringifyJson({
+								cmd: "build_bus_route",
+								company: 0,
+								job: PREBUILT_JOB,
+								// 明确指定**最近**的城镇对：铺路时间随距离增长 ⇒ 近的对
+								// 才能在等待预算内建成（E2 seed 22 的真因）。
+								...(towns ? { townA: towns.a, townB: towns.b } : {}),
+							}),
+						);
 						return true;
 					} catch {
 						return false;
@@ -1033,11 +1078,13 @@ export async function runAgent(cfg: Config, opts: AgentRunOptions = {}): Promise
 					const c = deps.state.snapshot().companies.get(0);
 					return { stations: c?.stats?.stations ?? 0, vehicles: c?.stats?.vehicles ?? 0 };
 				},
+				towns: () => deps.state.snapshot().towns,
 				sleep: (ms) => sleep(ms),
 				now: () => Date.now(),
 				log: (l) => console.log(l),
 			},
-			{ timeoutMs: opts.prebuiltTimeoutMs ?? 20 * 60_000 },
+			// 等待上限**不得越过本局的墙钟预算**（坏蓝图会烧满 20 分钟，2026-11-16）。
+			{ timeoutMs: prebuiltTimeoutMs(opts.seconds, opts.prebuiltTimeoutMs) },
 		);
 		prebuiltReason = r.reason;
 		if (r.ready) {

@@ -134,6 +134,23 @@ interface LiveModel {
 	routeSortKey: "income" | "job" | "vehicles" | "waiting" | "profit";
 	routeSortDir: "asc" | "desc";
 	routeRows(): RouteRow[];
+	diagnosisRows(payload: unknown): {
+		job: number;
+		reasonId: string;
+		reasonLabel: string;
+		detail: string;
+		ends: {
+			role: string;
+			waiting: string;
+			waitingVia: string;
+			acceptance: string;
+			cargoRating: string;
+			neighbourRoads: string;
+			isRoadStation: string;
+			isDriveThrough: string;
+		}[];
+		errors: string[];
+	}[];
 	routesSorted(): RouteRow[];
 	routesSummary(): {
 		available: boolean;
@@ -2137,5 +2154,62 @@ describe("elapsed: the server's start time, not a field nobody writes", () => {
 		const { model } = load();
 		model.run = { state: "running", startedAt: NOW + 5_000 };
 		expect(model.elapsedText(NOW)).toBe(`${0}ms`);
+	});
+});
+
+/* ==========================================================================
+ * 线路诊断（Issue #113）：**为什么这条线不发货**。
+ *
+ * 为什么值得单测:
+ *   1. 诊断的**理由是服务端的封闭词表** ⇒ 页面按 id 翻，不自己发明措辞。
+ *   2. **诊断事实要分端展示**：装货端与卸货端的读数不是一回事（"货在等"
+ *      ≠ "这条线能运走它"；"车到了却没卸" ≠ "货没送到"）。
+ *   3. 没测到的读数是 "—"，不是 0。
+ * ====================================================================== */
+describe("diagnosisRows: 线路诊断的理由与事实（Issue #113）", () => {
+	it("给出具名理由（按 id 翻）与两端的事实", () => {
+		const { model: v } = load();
+		const rows = v.diagnosisRows({
+			available: true,
+			diagnoses: [
+				{
+					job: 1002,
+					reason: "cargo_not_planned_via_this_line",
+					detail: "route 1002: the waiting coal is not routed via this line",
+				},
+			],
+			facts: [
+				{
+					job: 1002,
+					cargo: "COAL",
+					ends: [
+						{ role: "load", waiting: 120, waitingVia: 0, acceptanceAroundTile: 8, cargoRating: 3, stationNeighbourRoads: 2, stationIsRoadStation: true, stationIsDriveThrough: false },
+						{ role: "unload", waiting: -1, waitingVia: -1, acceptanceAroundTile: 0, cargoRating: -1, stationNeighbourRoads: 1, stationIsRoadStation: true, stationIsDriveThrough: false },
+					],
+				},
+			],
+			errors: ["the game could not read one route"],
+		});
+		expect(rows).toHaveLength(1);
+		const row = rows[0]!;
+		expect(row.job).toBe(1002);
+		expect(row.reasonId).toBe("cargo_not_planned_via_this_line");
+		expect(row.reasonLabel.length).toBeGreaterThan(0);
+		expect(row.detail).toContain("coal");
+		// 两端分别列事实；缺读数是 "—"
+		expect(row.ends.length).toBe(2);
+		const loadEnd = row.ends.find((e) => e.role === "load")!;
+		expect(loadEnd.waiting).toBe("120");
+		expect(loadEnd.acceptance).toBe("8");
+		const unload = row.ends.find((e) => e.role === "unload")!;
+		expect(unload.acceptance).toBe("0");
+		expect(unload.cargoRating).toBe("—");
+		expect(row.errors).toEqual(["the game could not read one route"]);
+	});
+
+	it("没有诊断时是空表（页面不炸）", () => {
+		const { model: v } = load();
+		expect(v.diagnosisRows(null)).toEqual([]);
+		expect(v.diagnosisRows({ available: true })).toEqual([]);
 	});
 });

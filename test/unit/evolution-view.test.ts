@@ -26,7 +26,11 @@ interface EvModel {
 	armCards(): { label: string; runs: string; money: string }[];
 	verdictText(): string;
 	verdictOk(): boolean;
-	gameRows(): { id: string; memory: string; hasMemory: boolean }[];
+	gameRows(): { id: string; memory: string; hasMemory: boolean; operating: string; lines: string }[];
+	operatingSeries(): { name: string; data: (number | null)[] }[];
+	capabilitySeries(metric: string, denom: string): { name: string; data: (number | null)[] }[];
+	capabilityLabels(): string[];
+	operatingLabels(): string[];
 	moneySeries(): { data: number[] }[];
 	moneyLabels(): string[];
 	lessonRows(): { text: string; kindLabel: string; superseded: boolean; evidence: string }[];
@@ -37,6 +41,12 @@ interface EvModel {
 		enabled: boolean;
 		injectable: boolean;
 		reason: string;
+		/** The gate's measure: operating profit per game day. */
+		operatingValue: string;
+		/** Company health: net cash flow per game day ("—" when not measured). */
+		netCashFlowValue: string;
+		/** The gate's evidence: the per-game operating profit readings. */
+		readings: string;
 	}[];
 	injectableCount(): number;
 	empty(): boolean;
@@ -288,6 +298,46 @@ describe("evolution-view: 策略候选池", () => {
 		expect(withData({ strategies: [] }).strategyRows()).toEqual([]);
 		expect(withData({ strategies: "nope" }).strategyRows()).toEqual([]);
 	});
+
+	// 方案 C（2026-11-14）：两个口径**都**要显示 ——
+	// 运营利润（闸的度量，策略质量）与净现金流（公司健康）。
+	// 只显示一个，看板就会开始替读者做那个我们刚发现的错误换算。
+	it("两个口径都显示：运营利润（闸的度量）与净现金流（公司健康）", () => {
+		const m = withData({
+			strategies: [
+				strategy({
+					promotion: {
+						promoted: true,
+						value: 17.07,
+						runs: 2,
+						netCashFlowPerDay: -1499.28,
+						reason: "+17.1 operating profit/game day across 2 games",
+					},
+				}),
+			],
+		});
+		const row = m.strategyRows()[0]!;
+		expect(row.operatingValue).toContain("17");
+		// The stub's formatter has no thousands separator; assert the magnitude.
+		expect(row.netCashFlowValue).toContain("1499");
+	});
+
+	it("净现金流没测到时显示「—」（没测到 ≠ 0）", () => {
+		const m = withData({
+			strategies: [
+				strategy({
+					promotion: { promoted: true, value: 17.07, runs: 2, netCashFlowPerDay: null, reason: "" },
+				}),
+			],
+		});
+		expect(m.strategyRows()[0]!.netCashFlowValue).toBe("—");
+	});
+
+	it("没有 promotion 字段时两个口径都不编数", () => {
+		const row = withData({ strategies: [{ id: "x", action: "a", params: {}, enabled: true }] }).strategyRows()[0]!;
+		expect(row.operatingValue).toBe("—");
+		expect(row.netCashFlowValue).toBe("—");
+	});
 });
 
 describe("evolution-view: 空态", () => {
@@ -308,5 +358,128 @@ describe("evolution-view: 空态", () => {
 
 	it("有 metrics 就不算空", () => {
 		expect(withData({ metrics: [METRIC()], lessons: [] }).empty()).toBe(false);
+	});
+});
+
+/* ==========================================================================
+ * 阶段 D 的新读数：运营利润/日（**闸的度量**）、线路数（归一化的分母）、
+ * 以及卡片的**逐局读数**（闸打开的证据）。
+ *
+ * 为什么值得单测:这些读数是 E1/E2/E3 唯一可信的产出,但如果页面不呈现它们,
+ * 操作者看到的就是"一堆曲线 + 一个结论",无法核对结论从哪来。
+ * ====================================================================== */
+describe("evolution-view: 阶段 D 的新读数（运营利润/日、线路数、逐局读数）", () => {
+	it("局列表给出运营利润/日与线路数,缺读数是 — 而不是 £0", () => {
+		const m = withData({
+			metrics: [
+				METRIC({
+					id: "20261117-092829-seed11",
+					operatingProfitPerDay: 21.34,
+					lines: 8,
+					deliveredRun: 1942,
+				}),
+				METRIC({ id: "20261117-093806-seed11" }),
+			],
+		});
+		const rows = m.gameRows();
+		const measured = rows.find((r) => r.id === "20261117-092829-seed11")!;
+		expect(measured.operating).toBe("£21");
+		expect(measured.lines).toBe("8");
+		const missing = rows.find((r) => r.id === "20261117-093806-seed11")!;
+		// "没测到" ≠ "测到 0"（D60）：缺读数是破折号。
+		expect(missing.operating).toBe("—");
+		expect(missing.lines).toBe("—");
+	});
+
+	it("运营利润序列按时间排序,缺失的局是 null（图上是断点,不是 0）", () => {
+		const m = withData({
+			metrics: [
+				METRIC({ id: "b", startedAt: 2000, operatingProfitPerDay: 16.36 }),
+				METRIC({ id: "a", startedAt: 1000, operatingProfitPerDay: -1.26 }),
+				METRIC({ id: "c", startedAt: 3000 }),
+			],
+		});
+		const series = m.operatingSeries();
+		expect(series).toHaveLength(1);
+		expect(series[0]!.data).toEqual([-1.26, 16.36, null]);
+		expect(m.operatingLabels()).toEqual(["a", "b", "c"]);
+	});
+
+	it("策略卡给出逐局运营利润读数（闸打开的证据）", () => {
+		const m = withData({
+			metrics: [],
+			strategies: [
+				{
+					id: "s_1mafqzk",
+					action: "build_freight_line",
+					params: { from: 18, to: 38 },
+					enabled: false,
+					operatingProfitPerDayPerRun: [-1.2619, 16.36, 48.92],
+					operatingProfitSessionIds: ["s1", "s2", "s3"],
+					promotion: {
+						promoted: true,
+						value: 21.34,
+						runs: 3,
+						reason: "+21.3 operating profit/game day across 3 games",
+					},
+				},
+			],
+		});
+		const row = m.strategyRows()[0]!;
+		expect(row.readings).toMatch(/3 games/);
+		expect(row.readings).toMatch(/-1\.3/);
+		expect(row.readings).toMatch(/48\.9/);
+		expect(row.readings).toMatch(/21\.3/);
+	});
+
+	it("没有逐局读数的旧卡显示 —,不显示 0 局", () => {
+		const m = withData({
+			metrics: [],
+			strategies: [
+				{
+					id: "s_old",
+					action: "build_freight_line",
+					params: {},
+					enabled: false,
+					promotion: { promoted: false, value: 0, runs: 0, reason: "no measured profit yet" },
+				},
+			],
+		});
+		expect(m.strategyRows()[0]!.readings).toBe("—");
+	});
+});
+
+/* ==========================================================================
+ * 能力图：每条线 / 每辆车 能运多少、能赚多少（阶段 D）。
+ *
+ * 为什么值得单测:
+ *   1. **口径在服务端**（`normalizedSeries`）⇒ 页面不重算，只挑轴。
+ *   2. **一次只画一条轴**：两条单位不同的轴共用一把尺子就是撒谎（页自己的规矩）。
+ *   3. **不可比 = 断点**（null），不是 0。
+ * ====================================================================== */
+describe("evolution-view: 能力图（每条线 / 每辆车）", () => {
+	const SERIES = [
+		{ id: "a", lines: 4, vehicles: 8, deliveredPerLine: 100, operatingProfitPerLine: 300, deliveredPerVehicle: 50, operatingProfitPerVehicle: 150 },
+		{ id: "b", lines: 0, vehicles: 0, deliveredPerLine: null, operatingProfitPerLine: null, deliveredPerVehicle: null, operatingProfitPerVehicle: null },
+		{ id: "c", lines: 2, vehicles: 4, deliveredPerLine: 50, operatingProfitPerLine: 100, deliveredPerVehicle: 25, operatingProfitPerVehicle: 50 },
+	];
+
+	it("默认：交付量 / 每条线", () => {
+		const m = withData({ metrics: [], normalizedSeries: SERIES });
+		const s = m.capabilitySeries("delivered", "line");
+		expect(s).toHaveLength(1);
+		expect(s[0]!.data).toEqual([100, null, 50]);
+		expect(m.capabilityLabels()).toEqual(["a", "b", "c"]);
+	});
+
+	it("切到运营利润 / 每辆车 ⇒ 换轴，不是换单位混画", () => {
+		const m = withData({ metrics: [], normalizedSeries: SERIES });
+		const s = m.capabilitySeries("operating", "vehicle");
+		expect(s[0]!.data).toEqual([150, null, 50]);
+	});
+
+	it("没给序列时是空序列（页面不炸）", () => {
+		const m = withData({ metrics: [] });
+		expect(m.capabilitySeries("delivered", "line")).toEqual([{ name: expect.any(String), data: [] }]);
 	});
 });

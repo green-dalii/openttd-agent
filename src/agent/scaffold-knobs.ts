@@ -9,13 +9,21 @@
  * 事实来源: docs/SCAFFOLD-CONTRACT.md §4 的 S6；SPEC.md §10.120。
  * 禁止: 在此读取文件或环境以外的状态；禁止把"请求值"当成"生效值"。
  */
+import { DEFAULT_MAX_TOOL_CALLS_PER_DECISION } from "./tool-budget.js";
 
 /** Thinking levels the agent runtime accepts. */
 export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 export type ThinkingLevelName = (typeof THINKING_LEVELS)[number];
 
-/** Default per-decision tool-call budget (unchanged behaviour). */
-export const DEFAULT_TOOL_BUDGET = 12;
+/**
+ * Default per-decision tool-call budget.
+ *
+ * **Single source**: the number lives in `tool-budget.ts` (where the counter
+ * is implemented); this is only the knob's default. Two copies of a default
+ * drift apart silently — and the drift shows up as "the CLI says one number,
+ * the runtime uses another".
+ */
+export const DEFAULT_TOOL_BUDGET = DEFAULT_MAX_TOOL_CALLS_PER_DECISION;
 
 export interface ScaffoldKnobs {
 	thinkingLevel: ThinkingLevelName;

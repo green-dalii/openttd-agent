@@ -91,6 +91,14 @@ export interface EvolutionHooks {
 	strategies: () => unknown[];
 	/** Arm comparison (SPEC §5.2 #3). Computed server-side so it is defined once. */
 	arms?: () => unknown;
+	/**
+	 * The per-run normalised readings (oldest → newest) — the History
+	 * capability chart's data.
+	 *
+	 * Additive: absent => the page shows no capability trend (it must not
+	 * invent one, and it must not draw zeros for runs with no line).
+	 */
+	normalizedSeries?: () => unknown[];
 	/** Flip the human confirmation flag on one strategy card (SPEC §5.3 guardrail). */
 	setStrategyEnabled?: (id: string, enabled: boolean) => boolean;
 	/**
@@ -145,6 +153,15 @@ export interface RunHooks {
 	 * Absent => the endpoint answers 404 (no run, no channel ⇒ say so).
 	 */
 	fullData?: (kind: "industries" | "cargo") => Promise<unknown>;
+	/**
+	 * The **route diagnosis** (Issue #113): why a route is not moving.
+	 *
+	 * Absent => the endpoint answers 404 (a feature that is not wired is not
+	 * silently "nothing to find"). The reasons are computed **server-side** by
+	 * the same code the agent's `diagnose_route` tool uses ⇒ the operator and
+	 * the model read the same verdict.
+	 */
+	routeDiagnosis?: (job?: number) => Promise<unknown>;
 }
 
 /**
@@ -644,6 +661,23 @@ export class WebServer {
 					}
 					return json(200, data);
 				}
+				if (action === "diagnose" && req.method === "GET") {
+					// 线路诊断（Issue #113）：**按需**问正在跑的游戏"这条线为什么不发货"。
+					// 理由在服务端算（与 agent 工具同一份）⇒ 页面与模型不会各说各话。
+					if (!this.runHooks.routeDiagnosis) {
+						return json(404, { error: "the route diagnosis is not available" });
+					}
+					const jobRaw = url.searchParams.get("job");
+					const job = jobRaw === null ? undefined : Number(jobRaw);
+					if (job !== undefined && !Number.isFinite(job)) {
+						return json(400, { error: "job must be a number" });
+					}
+					const data = await this.runHooks.routeDiagnosis(job);
+					if (!data) {
+						return json(503, { error: "the game did not answer with a diagnosis" });
+					}
+					return json(200, data);
+				}
 				if (action === "stop" && req.method === "POST") {
 					try {
 						await this.runHooks.stop();
@@ -797,6 +831,11 @@ export class WebServer {
 					lessons: this.evolutionHooks.lessons(),
 					strategies: this.evolutionHooks.strategies(),
 					arms: this.evolutionHooks.arms ? this.evolutionHooks.arms() : null,
+					// The per-run normalised readings (the capability chart's data).
+					// Additive: a page that ignores it behaves as before.
+					normalizedSeries: this.evolutionHooks.normalizedSeries
+						? this.evolutionHooks.normalizedSeries()
+						: [],
 				});
 			}
 

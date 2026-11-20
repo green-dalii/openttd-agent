@@ -81,12 +81,24 @@ export interface StrategySample {
 	action: string;
 	params: Record<string, number | string>;
 	/**
-	 * 这一局的**利润增量速率**（每游戏日，正数=赚钱）。
+	 * 这一局的**净现金流速率**（每游戏日，正数=公司账上多钱）。
 	 *
-	 * 由代码从这一局的记录里盖上（`reflect-run.ts`：income/365），模型不能自带
-	 * 一个数字——它只能提供模式与证据。缺这个读数 ⇒ 这条采样不可用于晋升。
+	 * 由代码从这一局的记录里盖上，模型不能自带一个数字——它只能提供模式与证据。
+	 * 缺这个读数 ⇒ 这条采样不可用于晋升。
+	 *
+	 * 口径：**净现金流**（含基建/购车/利息）。它是**公司健康**，不是"策略赚不赚钱"
+	 * ⇒ 晋升闸不用它（见 `operatingProfitPerDay`），但它要被**报出来**。
 	 */
 	profitPerDay?: number;
+	/**
+	 * 这一局的**运营利润速率**（每游戏日，正数=这条模式在赚钱）。
+	 *
+	 * 运营利润 = 运货收入 − 运行成本，**不含**基建/购车/利息 ⇒ 它才是"这条策略
+	 * 赚不赚钱"的答案 ⇒ **晋升闸用它**（2026-11-14；方案 C：双口径并存）。
+	 *
+	 * 由代码盖上（同上）；模型不能自带。缺读数 ⇒ 不可判定（不是 0）。
+	 */
+	operatingProfitPerDay?: number;
 	/** Game facts backing it; empty evidence means the sample is dropped. */
 	evidence: string[];
 	sessionId: string;
@@ -159,16 +171,43 @@ function isValidSample(s: unknown): s is StrategySample {
  * 都追加进 `profitPerDayPerRun`，而闸把数组长度当成「验证局数」⇒ **单局三条
  * 高值采样就能过闸**，SPEC §5.3 的「已验证局≥2」形同虚设。
  * 配不上的旧卡（两个数组长度不等）只按能配上的前缀算局数（偏保守）。
+ *
+ * @param pick 读哪个口径（闸用**运营利润**；净现金流用于报出公司健康）。
  */
-function verifiedReadings(card: StrategyCard): { sessionId: string; value: number }[] {
-	const values = (Array.isArray(card.profitPerDayPerRun) ? card.profitPerDayPerRun : []).filter((v) =>
-		Number.isFinite(Number(v)),
-	);
-	const sessions = Array.isArray(card.sourceSessionIds) ? card.sourceSessionIds : [];
+function verifiedReadings(
+	card: StrategyCard,
+	pick: (c: StrategyCard) => { values: number[] | undefined; sessions: string[] | undefined },
+): { sessionId: string; value: number }[] {
+	const { values: raw, sessions: rawSessions } = pick(card);
+	const values = (raw ?? []).filter((v) => Number.isFinite(Number(v)));
+	const sessions = Array.isArray(rawSessions) ? rawSessions : [];
 	const n = Math.min(values.length, sessions.length);
 	const bySession = new Map<string, number>();
 	for (let i = 0; i < n; i++) bySession.set(String(sessions[i]), Number(values[i]));
 	return [...bySession.entries()].map(([sessionId, value]) => ({ sessionId, value }));
+}
+
+/** The net-cash-flow readings (company health) — paired with `sourceSessionIds`. */
+function cashFlowReadings(card: StrategyCard): { sessionId: string; value: number }[] {
+	return verifiedReadings(card, (c) => ({
+		values: c.profitPerDayPerRun,
+		sessions: c.sourceSessionIds,
+	}));
+}
+
+/**
+ * The operating-profit readings (the gate's measure).
+ *
+ * They carry **their own** session list: a run may have a net cash flow reading
+ * but no operating profit reading (not measured ≠ 0) ⇒ the two arrays can cover
+ * different games. Pairing them by index against `sourceSessionIds` would
+ * attribute a reading to the wrong game — a silent lie in a promotion gate.
+ */
+function operatingReadings(card: StrategyCard): { sessionId: string; value: number }[] {
+	return verifiedReadings(card, (c) => ({
+		values: c.operatingProfitPerDayPerRun,
+		sessions: c.operatingProfitSessionIds ?? c.sourceSessionIds,
+	}));
 }
 
 /**
@@ -185,8 +224,14 @@ export function mergeStrategySamples(
 	now = Date.now(),
 ): StrategyCard[] {
 	const byId = new Map<string, StrategyCard>();
-	/** 每个卡片的 (局 → 读数)：同一局只留一个读数（见 `verifiedReadings`）。 */
+	/**
+	 * 每个卡片的 (局 → 读数)：同一局只留一个读数（见 `verifiedReadings`）。
+	 *
+	 * 两个口径各自一张表：净现金流（公司健康）与运营利润（**闸的度量**）。
+	 * 分开是因为一个局可能只测到其中一个（“没测到” ≠ 0）。
+	 */
 	const readings = new Map<string, Map<string, number>>();
+	const operatingById = new Map<string, Map<string, number>>();
 
 	const readingsOf = (id: string): Map<string, number> => {
 		let m = readings.get(id);
@@ -196,12 +241,22 @@ export function mergeStrategySamples(
 		}
 		return m;
 	};
+	const operatingOf = (id: string): Map<string, number> => {
+		let m = operatingById.get(id);
+		if (!m) {
+			m = new Map();
+			operatingById.set(id, m);
+		}
+		return m;
+	};
 
 	for (const card of Array.isArray(existing) ? existing : []) {
 		if (card && typeof card.id === "string" && card.id) {
 			byId.set(card.id, { ...card });
 			const m = readingsOf(card.id);
-			for (const r of verifiedReadings(card)) m.set(r.sessionId, r.value);
+			for (const r of cashFlowReadings(card)) m.set(r.sessionId, r.value);
+			const om = operatingOf(card.id);
+			for (const r of operatingReadings(card)) om.set(r.sessionId, r.value);
 		}
 	}
 
@@ -228,6 +283,10 @@ export function mergeStrategySamples(
 		const evidence = cleanList(s.evidence);
 		// 同一局再记一次同一模式 ⇒ 覆盖该局的读数，不新增一局。
 		readingsOf(id).set(s.sessionId, Number(s.profitPerDay));
+		// 运营利润读数**缺失就不写**（不是 0）：“没测到”不能变成“测到 0”。
+		if (Number.isFinite(Number(s.operatingProfitPerDay))) {
+			operatingOf(id).set(s.sessionId, Number(s.operatingProfitPerDay));
+		}
 		if (!prev) {
 			byId.set(id, {
 				id,
@@ -254,12 +313,27 @@ export function mergeStrategySamples(
 	}
 
 	// 读数与来源局保持一一对应（按局 id 排序 ⇒ 两个数组同序）。
+	//
+	// 两个口径**各自**与 sourceSessionIds 对齐：运营利润那张表可能比净现金流短
+	// （某些局没测到运营利润）⇒ 它的数组只覆盖**测到的那几局**，因此
+	// `verifiedReadings` 取 min(长度, 局数) 的保守做法仍然成立。
 	for (const [id, card] of byId) {
 		const m = readings.get(id);
 		if (!m || m.size === 0) continue;
 		const sessions = [...m.keys()].sort();
 		card.sourceSessionIds = sessions;
 		card.profitPerDayPerRun = sessions.map((s) => m.get(s)!);
+
+		const om = operatingById.get(id);
+		if (om && om.size > 0) {
+			const opSessions = [...om.keys()].sort();
+			card.operatingProfitPerDayPerRun = opSessions.map((s) => om.get(s)!);
+			// **它自己的局列表**：两个口径可能覆盖不同的局（“没测到” ≠ 0）。
+			card.operatingProfitSessionIds = opSessions;
+		} else {
+			delete card.operatingProfitPerDayPerRun;
+			delete card.operatingProfitSessionIds;
+		}
 	}
 
 	return [...byId.values()].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
@@ -267,10 +341,25 @@ export function mergeStrategySamples(
 
 export interface PromotionResult {
 	promoted: boolean;
-	/** Mean **profit per game day** across verified games (0 when there are no usable samples). */
+	/**
+	 * The **gate's** measure: mean **operating profit per game day** across the
+	 * verified games (0 when there are no usable samples).
+	 *
+	 * Why operating profit and not net cash flow (2026-11-14): the gate asks
+	 * "does this strategy pay". Net cash flow answers "did the company overspend",
+	 * and it is negative by construction while a run is still building - so the
+	 * gate could never open for any strategy that includes building (real run:
+	 * net -1499.28/day vs operating +14.13/day). The two measures stay on the
+	 * card; only this one gates.
+	 */
 	value: number;
-	/** How many games verified it. */
+	/** How many games verified it (counted on the gate's measure). */
 	runs: number;
+	/**
+	 * Mean **net cash flow per game day** over the same verified games — the
+	 * company-health reading. `null` = not measured (never folded into 0).
+	 */
+	netCashFlowPerDay: number | null;
 	/** Human-readable reason, surfaced in the UI. */
 	reason: string;
 }
@@ -284,6 +373,12 @@ export interface PromotionOptions {
  * SPEC §5.3: a strategy is only stored when value > threshold **and** it has been
  * verified in at least 2 games. Both conditions are required — a high single-game
  * payoff is exactly the noise this gate exists to reject.
+ *
+ * **The measure (2026-11-14, 方案 C)**: the gate reads **operating profit per
+ * game day** ("does this strategy pay"). Net cash flow stays on the card and is
+ * **reported** (company health) but does not gate: it contains building, vehicles
+ * and interest, so while a run is still building it is negative by construction and
+ * the gate could never open for a strategy that includes building.
  */
 export function evaluatePromotion(
 	card: StrategyCard,
@@ -297,19 +392,37 @@ export function evaluatePromotion(
 	// 旧卡（2026-11-01 之前）只有模型自报的 `valuePerRun`：**没有**利润读数 ⇒ 不可晋升。
 	// 那是"没测到"，不是"测到 0"——所以不给它们一个值。
 	// 「已验证局数」= **独立局数**，不是读数个数（真机发现 2026-11-10）。
-	const readings = verifiedReadings(card);
-	const runs = readings.length;
-	const value = runs ? readings.reduce((a, r) => a + r.value, 0) / runs : 0;
+	//
+	// 闸的度量 = **运营利润**（策略质量）；净现金流只报出（公司健康）。
+	const operating = operatingReadings(card);
+	const runs = operating.length;
+	const value = runs ? operating.reduce((a, r) => a + r.value, 0) / runs : 0;
 
+	// 净现金流：**同一批已验证局**上的均值；没测到 ⇒ null（不是 0）。
+	const cashFlow = cashFlowReadings(card);
+	const netCashFlowPerDay = cashFlow.length
+		? cashFlow.reduce((a, r) => a + r.value, 0) / cashFlow.length
+		: null;
+
+	if (runs === 0) {
+		return {
+			promoted: false,
+			value,
+			runs,
+			netCashFlowPerDay,
+			reason:
+				netCashFlowPerDay === null
+					? `no measured profit yet (needs ${minRuns} games with a profit reading)`
+					: `no operating profit reading yet (net cash flow is ${netCashFlowPerDay.toFixed(1)}/game day, but the gate reads operating profit - needs ${minRuns} games with an operating profit reading)`,
+		};
+	}
 	if (runs < minRuns) {
 		return {
 			promoted: false,
 			value,
 			runs,
-			reason:
-				runs === 0
-					? `no measured profit yet (needs ${minRuns} games with a profit reading)`
-					: `verified in ${runs} game(s) with a profit reading, needs >= ${minRuns}`,
+			netCashFlowPerDay,
+			reason: `verified in ${runs} game(s) with an operating profit reading, needs >= ${minRuns}`,
 		};
 	}
 	if (!(value > minValue)) {
@@ -317,14 +430,16 @@ export function evaluatePromotion(
 			promoted: false,
 			value,
 			runs,
-			reason: `profit ${value.toFixed(1)}/game day does not exceed ${minValue.toFixed(1)}/day`,
+			netCashFlowPerDay,
+			reason: `operating profit ${value.toFixed(1)}/game day does not exceed ${minValue.toFixed(1)}/day`,
 		};
 	}
 	return {
 		promoted: true,
 		value,
 		runs,
-		reason: `+${value.toFixed(1)} profit/game day across ${runs} games`,
+		netCashFlowPerDay,
+		reason: `+${value.toFixed(1)} operating profit/game day across ${runs} games`,
 	};
 }
 

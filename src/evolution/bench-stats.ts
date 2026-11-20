@@ -16,6 +16,7 @@
 
 import type { GameMetric } from "./metrics.js";
 import { metricExclusion } from "./metrics.js";
+import { normalizeRun } from "./normalized.js";
 import { DELIVERED_MEASURE, PASSENGER_CARGO_LABEL } from "./scorecard.js";
 
 /** The axes a **per-run scalar** can live on. Growth is not one of them. */
@@ -92,6 +93,14 @@ function cargoPerGameDay(m: GameMetric): number | null {
 }
 
 /**
+ * 归一化读数的取值（ROADMAP 待办 #4）：分子是公司级读数，分母是干净的计数。
+ * "一条线都没建"的局在每线轴上**不可比** ⇒ null（不参与配对），不是 0。
+ */
+function normalizedValue(m: GameMetric, pick: (n: ReturnType<typeof normalizeRun>) => number | null): number | null {
+	return pick(normalizeRun(m));
+}
+
+/**
  * The registry — the single place that knows which metrics can be paired and
  * what they are called.
  *
@@ -150,6 +159,54 @@ export const PAIRED_METRICS: PairedMetric[] = [
 		unit: "per game day",
 		betterWhen: "higher",
 		value: (m) => finite(m.operatingProfitPerDay),
+	},
+	{
+		/**
+		 * **每条线的交付量**（归一化，ROADMAP 待办 #4）：整局累计交付 ÷ 线路数。
+		 *
+		 * 为什么要有它：主轴量的是**总量**，而总量的方差由"建了几条线"主导
+		 * （这是**建造策略**的方差，不是模型能力的方差）⇒ 矩阵的能力轴
+		 * "not determinable"。归一化把数量除掉，回答"模型建的**一条线**能运多少"。
+		 *
+		 * "一条线都没建"的局在这条轴上**不可比** ⇒ null（不参与配对），不是 0。
+		 */
+		id: "ability.deliveredPerLine",
+		axis: "ability",
+		axisLabel: "Result",
+		label: DELIVERED_MEASURE,
+		unit: "per line",
+		betterWhen: "higher",
+		value: (m) => normalizedValue(m, (n) => n.deliveredPerLine),
+	},
+	{
+		/** 每条线的**运营利润**（归一化）：运营利润 ÷ 线路数。 */
+		id: "ability.operatingProfitPerLine",
+		axis: "ability",
+		axisLabel: "Result",
+		label: "operating profit",
+		unit: "per line",
+		betterWhen: "higher",
+		value: (m) => normalizedValue(m, (n) => n.operatingProfitPerLine),
+	},
+	{
+		/** 每辆车的交付量（归一化）：整局累计交付 ÷ 车辆数。 */
+		id: "ability.deliveredPerVehicle",
+		axis: "ability",
+		axisLabel: "Result",
+		label: DELIVERED_MEASURE,
+		unit: "per vehicle",
+		betterWhen: "higher",
+		value: (m) => normalizedValue(m, (n) => n.deliveredPerVehicle),
+	},
+	{
+		/** 每辆车的**运营利润**（归一化）：运营利润 ÷ 车辆数。 */
+		id: "ability.operatingProfitPerVehicle",
+		axis: "ability",
+		axisLabel: "Result",
+		label: "operating profit",
+		unit: "per vehicle",
+		betterWhen: "higher",
+		value: (m) => normalizedValue(m, (n) => n.operatingProfitPerVehicle),
 	},
 	{
 		id: "efficiency.deliveredPerMillionTokens",

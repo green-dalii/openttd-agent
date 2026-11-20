@@ -34,6 +34,10 @@
         /* ------------------------------ state ------------------------------ */
         linkOk: false,
         evPaused: false,
+        /** The route diagnosis (Issue #113): the answer for the asked route. */
+        diagData: null,
+        diagBusy: null,
+        diagError: null,
         /** The causal timeline's page (rows + total + load state). */
         timeline: { rows: [], total: 0, offset: 0, loading: false, error: "" },
         /** The decision count the current timeline page was loaded for. */
@@ -122,6 +126,34 @@
             this.actionCatalog = body;
           } catch {
             /* offline or hook disabled — leave actionCatalog null, panel hidden */
+          }
+        },
+
+        /* --------------------------- diagnosis ---------------------------- */
+        /**
+         * Ask the game **why a route is not moving** (Issue #113).
+         *
+         * On demand (never per frame): the answer comes from the same server-side
+         * diagnosis the agent's `diagnose_route` tool uses ⇒ the operator and the
+         * model read the same verdict, and the reasons are a closed vocabulary.
+         */
+        async diagnoseRoute(job) {
+          this.diagBusy = job;
+          this.diagError = null;
+          try {
+            const r = await fetch(`/api/run/diagnose?job=${encodeURIComponent(String(job))}`);
+            if (!r.ok) {
+              const body = await r.json().catch(() => ({}));
+              this.diagError = String(body.error || `HTTP ${r.status}`);
+              this.diagData = null;
+              return;
+            }
+            this.diagData = await r.json();
+          } catch (e) {
+            this.diagError = e instanceof Error ? e.message : String(e);
+            this.diagData = null;
+          } finally {
+            this.diagBusy = null;
           }
         },
 

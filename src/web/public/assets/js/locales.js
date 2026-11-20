@@ -99,6 +99,29 @@ window.I18nMessages = {
     "Backend": "后端",
     "Seed": "种子",
     "Delivered / day": "每日交付",
+    /* 归一化读数（阶段 D）：每条线 / 每辆车 —— 与上面四轴单位不同，故单独一张表。 */
+    "Lines/run": "线路数/局",
+    "rows": "行",
+    /* 线路诊断面板（Issue #113） */
+    "Why is this line not moving?": "这条线为什么不发货？",
+    "End": "端",
+    "Waiting via this line": "经由这条线在等的货",
+    "Acceptance": "收货额度",
+    "Cargo rating": "车站评分",
+    "Neighbour roads": "相邻道路数",
+    "Road station": "公路车站",
+    "Drive-through": "穿行式停靠",
+    "the game could not read: ": "游戏读不到：",
+    "Capability — what one line (or one vehicle) delivered and earned":
+      "能力 —— 一条线（或一辆车）运了多少、赚了多少",
+    "metric": "度量",
+    "per": "每",
+    "Normalised readings — per line and per vehicle (different units from the four axes above, so they get their own table)":
+      "归一化读数 —— 每条线 / 每辆车（与上面四轴单位不同，故单独一张表）",
+    "Delivered/line": "交付量/每条线",
+    "Operating/line": "运营利润/每条线",
+    "Delivered/vehicle": "交付量/每辆车",
+    "Operating/vehicle": "运营利润/每辆车",
     "Status": "状态",
     "counted": "计入",
     "Loading…": "加载中…",
@@ -154,6 +177,12 @@ window.I18nMessages = {
     "Reasoning budget": "推理预算",
     "Tool budget": "工具预算",
     "thinking budget": "思考预算",
+
+    /* 阶段 D：运营利润/日（闸的度量）与线路数（归一化的分母）。 */
+    "Operating/day": "运营利润/日",
+    "Lines": "线路数",
+    "Operating profit per game day — the promotion gate's measure":
+      "每游戏日运营利润 —— 晋升闸的度量",
 
     /* ---- Configure 页 ---- */
     "Choose how the agent thinks": "选择 agent 怎么想",
@@ -430,8 +459,10 @@ window.I18nMessages = {
     "environment variables always win over both files.": "环境变量永远优先于这两个文件。",
     "every": "每一条",
     "Both": "两道",
-    "gates must pass: the evidence gate (measured profit above threshold, in ≥ 2 games) and human confirmation. The profit reading comes from each run's record — never from the model's own claim. The engine only advises — nothing takes effect until you tick it.":
-      "闸都要过：证据闸（实测利润高于阈值，且至少 2 局都测到）和人工确认。利润读数来自每一局自己的记录 —— 绝不采信模型自己的说法。引擎只给建议 —— 你不打勾，什么都不会生效。",
+    "gates must pass: the evidence gate (measured": "闸都要过：证据闸（实测",
+    "operating profit": "运营利润",
+    "above threshold, in ≥ 2 games) and human confirmation. The reading comes from each run's record — never from the model's own claim. Operating profit is the gate's measure because it asks \"does this strategy pay\"; net cash flow (shown next to it) is the company's health and contains building, vehicles and interest. The engine only advises — nothing takes effect until you tick it.":
+      "高于阈值，且至少 2 局都测到）和人工确认。读数来自每一局自己的记录 —— 绝不采信模型自己的说法。闸用运营利润，因为它问的是「这条策略赚不赚钱」；旁边的净现金流是公司的健康度，它含基建、购车与利息。引擎只给建议 —— 你不打勾，什么都不会生效。",
     "{0} summaries recorded": "已记录 {0} 条总结",
     "{0} images captured": "已截 {0} 张图",
     "{0} runs recorded": "已记录 {0} 局",

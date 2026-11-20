@@ -11,7 +11,13 @@
 
   document.addEventListener("alpine:init", function () {
     window.Alpine.data("compare", function () {
+      // The view model is spread in (same pattern as evolution/live/providers):
+      // every method the template calls is therefore in the component's scope.
+      const model = window.CompareView.create();
+
       return {
+        ...model,
+
         /* ------------------------------ state ------------------------------ */
         /** The server's answer (the whole payload). */
         payload: null,
@@ -24,17 +30,19 @@
          * Empty = the server's default (the group with the most runs).
          */
         pickedGroup: "",
+        /**
+         * Which normalised table is on screen: "means" (one row per model) or
+         * "runs" (one row per run — the evidence behind the means).
+         *
+         * 页面**不判断**口径：两条路都读服务端给的读数（均值表与逐局表）。
+         */
+        normalizedMode: "means",
 
         /* ------------------------- the question groups ---------------------- */
 
         /** The groups the server found (runs that answered the same question). */
         groups() {
           return window.CompareView.questionGroups(this.payload);
-        },
-
-        /** How many runs are in another group (not in any number below). */
-        outsideGroupCount() {
-          return window.CompareView.outsideGroupCount(this.payload);
         },
 
         /** Show one group's runs. */
@@ -259,54 +267,8 @@
         },
 
         /* ------------------------------ view ------------------------------- */
-        /** The model rows (four axes each). */
-        modelRows() {
-          // 读一次 localeTick：切语言时 Alpine 会重新算这个属性 ⇒
-          // **服务端词汇（结局类、度量口径）按 id 翻的那一层也跟着重算**。
-          void this.localeTick;
-          return window.CompareView.modelRows(this.payload);
-        },
-
-        /** The exclusion counts by reason. */
-        exclusionRows() {
-          return window.CompareView.exclusionRows(this.payload);
-        },
-
-        /** The server's paired verdict (null when none). */
-        comparison() {
-          return window.CompareView.comparison(this.payload);
-        },
-
-        /** The server's paired verdicts, one row per axis (Issue #87). */
-        comparisonRows() {
-          void this.localeTick; // 逐轴指标的措辞按 id 翻（切语言要重算）
-          return window.CompareView.comparisonRows(this.payload);
-        },
-
-        /** The runs (the drill-down list). */
-        runRows() {
-          return window.CompareView.runRows(this.payload);
-        },
-
-        /** The models the user may pick from. */
-        modelNames() {
-          return window.CompareView.modelNames(this.payload);
-        },
-
-        /** The four axes as charts (one per axis, one bar per model). */
-        axisCharts() {
-          return window.CompareView.axisCharts(this.payload);
-        },
-
-        /** Different scaffold / observation surface among the compared runs. */
-        surfaceDiff() {
-          return window.CompareView.surfaceDiff(this.payload);
-        },
-
-        /** The ledger collisions the server reported (rows it had to drop). */
-        collisionRows() {
-          return window.CompareView.collisionRows(this.payload);
-        },
+        /* 视图方法来自展开的 view model（`window.CompareView.create()`）——
+           模板要用什么方法，先在 view module 里存在。 */
 
         /** Is there anything to compare? */
         hasRuns() {

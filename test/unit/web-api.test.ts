@@ -10,6 +10,8 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { WebSocket } from "ws";
 import { PAGE_ALIASES, PAGE_REDIRECTS, PUBLIC_DIR, WebServer, pageRoutes } from "../../src/web/server.js";
+import { evolutionView } from "../../src/evolution/web-view.js";
+import { appendMetric } from "../../src/evolution/store.js";
 import { createTools } from "../../src/agent/tools/index.js";
 import { sessionHooks } from "../../src/agent/session-store.js";
 import type { AgentDeps } from "../../src/agent/types.js";
@@ -83,6 +85,18 @@ describe("WebServer REST", () => {
 			evolution: {
 				metrics: () => [{ id: "g1", memory: { lessonsInjected: 2, strategiesInjected: 0 } }],
 				lessons: () => [{ id: "l1", text: "build near towns", kind: "do", evidence: ["money +1"] }],
+				// The per-run normalised readings (the capability chart's data).
+				normalizedSeries: () => [
+					{
+						id: "g1",
+						runId: "g1",
+						lines: 2,
+						deliveredPerLine: 10,
+						operatingProfitPerLine: 5,
+						deliveredPerVehicle: 3,
+						operatingProfitPerVehicle: 1.5,
+					},
+				],
 				strategies: () => [
 					{ id: "s1", action: "build_bus_route", valuePerRun: [9000, 12000], enabled: false },
 				],
@@ -711,6 +725,21 @@ describe("WebServer REST", () => {
 		expect(JSON.stringify(body.metrics)).toContain("lessonsInjected");
 	});
 
+	it("serves the per-run normalised series (the History capability chart's data)", async () => {
+		await start();
+		const r = await req("GET", "/api/evolution");
+		expect(r.status).toBe(200);
+		const body = r.body as { normalizedSeries?: unknown[] };
+		// 能力趋势图的数据**必须**在 /api/evolution 里（否则页面画的是空图，
+		// 而且看起来"正常"——空态通过 = 没验证，AGENTS §5.2）。
+		const series = body.normalizedSeries ?? [];
+		expect(Array.isArray(body.normalizedSeries)).toBe(true);
+		expect(series).toHaveLength(1);
+		const point = series[0] as Record<string, unknown>;
+		expect(point).toHaveProperty("deliveredPerLine");
+		expect(point).toHaveProperty("operatingProfitPerVehicle");
+	});
+
 	it("404s /api/evolution when the hooks are absent", async () => {
 		await start({ evolution: undefined });
 		expect((await req("GET", "/api/evolution")).status).toBe(404);
@@ -926,5 +955,95 @@ describe("WebServer stage images", () => {
 		port = server.actualPort;
 		const r = await get("/api/sessions/s1/stages/001.png");
 		expect(r.status).toBe(404);
+	});
+});
+
+/* ==========================================================================
+ * `/api/evolution` 的**逐局归一化序列**（阶段 D）。
+ *
+ * 为什么要有这个序列：History 页要画"每条线能运多少"的趋势，而归一化的口径
+ * 只有一处定义（`normalizeRun`）⇒ **服务端算好给页面**，页面不重算
+ * （页面重算 = 第二份口径 ⇒ 必然漂移）。
+ * ====================================================================== */
+/** 往账本里写几行（只写这次测试用到的字段）。 */
+function appendMetrics(dir: string, rows: Record<string, unknown>[]): void {
+	for (const row of rows) {
+		appendMetric(dir, {
+			id: String(row.id),
+			seed: 11,
+			mode: "agent",
+			status: "completed",
+			startedAt: Number(row.startedAt ?? 0),
+			durationMs: 1000,
+			appVersion: "test",
+			llmKind: "real",
+			llmModel: "model-a",
+			constructionDone: true,
+			money: 1000,
+			income: 100,
+			delivered: 50,
+			deliveredRun: 50,
+			deliveredRunComplete: true,
+			gsErrors: 0,
+			toolBudgetBlocks: 0,
+			worldFrozenMs: null,
+			simulatedDays: 10,
+			horizonDays: 10,
+			reachedHorizon: true,
+			scenario: "freeform",
+			stations: 2,
+			vehicles: 3,
+			decisions: 4,
+			toolCalls: 8,
+			toolFailures: 1,
+			totalTokens: 1000,
+			costTotal: 0.5,
+			costKnown: true,
+			// 结局里的读数（账本行的 outcome 段）
+			outcome: {
+				lines: 3,
+				vehicles: 3,
+				deliveredRun: 50,
+				operatingProfit: 600,
+				operatingProfitPerDay: 60,
+				...(row as Record<string, never>),
+			},
+		} as never);
+	}
+}
+
+describe("/api/evolution: 逐局归一化序列", () => {
+	it("每一局带着它自己的每线 / 每车读数（最旧 → 最新）", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "evo-series-"));
+		try {
+			appendMetrics(dir, [
+				{ id: "run-1", startedAt: 1000, lines: 4, deliveredRun: 400, vehicles: 8, operatingProfit: 1200 },
+				{ id: "run-2", startedAt: 2000, lines: 2, deliveredRun: 100, vehicles: 2, operatingProfit: 100 },
+			]);
+			const view = evolutionView(dir);
+			const series = view.normalizedSeries;
+			expect(series).toHaveLength(2);
+			expect(series[0]!.id).toBe("run-1");
+			expect(series[0]!.deliveredPerLine).toBeCloseTo(100, 6);
+			expect(series[0]!.operatingProfitPerLine).toBeCloseTo(300, 6);
+			expect(series[0]!.deliveredPerVehicle).toBeCloseTo(50, 6);
+			expect(series[1]!.id).toBe("run-2");
+			expect(series[1]!.deliveredPerLine).toBeCloseTo(50, 6);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("没建线的局：分母 0 ⇒ 读数不可判定（null），不是 0", () => {
+		const dir = mkdtempSync(join(tmpdir(), "evo-series-"));
+		try {
+			appendMetrics(dir, [{ id: "run-1", startedAt: 1000, lines: 0, deliveredRun: 0, vehicles: 0 }]);
+			const series = evolutionView(dir).normalizedSeries;
+			expect(series[0]!.lines).toBe(0);
+			expect(series[0]!.deliveredPerLine).toBeNull();
+			expect(series[0]!.deliveredPerVehicle).toBeNull();
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 });

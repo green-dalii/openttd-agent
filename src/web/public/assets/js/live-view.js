@@ -690,6 +690,80 @@
         });
       },
 
+      /* --------------------------- diagnosis ----------------------------- */
+
+      /**
+       * The route diagnosis (Issue #113): **why this line is not moving**.
+       *
+       * The reason comes from the server's **closed vocabulary** ⇒ the page
+       * localises it by id and never invents a wording of its own.
+       *
+       * The facts are listed **per end** (load / unload): "cargo is waiting" and
+       * "this line can carry it away" are different facts, and "the vehicle
+       * arrived but did not unload" and "the cargo never arrived" are different
+       * too. A missing reading reads "—", never 0.
+       */
+      diagnosisRows(payload) {
+        const p = payload && typeof payload === "object" ? payload : null;
+        if (!p || p.available === false) return [];
+        const diagnoses = Array.isArray(p.diagnoses) ? p.diagnoses : [];
+        const facts = Array.isArray(p.facts) ? p.facts : [];
+        const errors = Array.isArray(p.errors) ? p.errors.map((e) => String(e)) : [];
+        /**
+         * One reading: "—" when it was not measured.
+         *
+         * Two conventions, and they differ:
+         *   - some fields use **-1** for "not measured" (waiting, waitingVia,
+         *     cargoRating) ⇒ -1 becomes "—";
+         *   - others use **null**, and **0 is a real reading** (a station that
+         *     accepts nothing, a station with no road next to it) ⇒ 0 stays "0".
+         */
+        const numReading = (v) => {
+          if (v === null || v === undefined) return "—";
+          if (typeof v === "number") {
+            if (!Number.isFinite(v)) return "—";
+            return v === -1 ? "—" : String(v);
+          }
+          return String(v);
+        };
+        /** 0 是真的读数（"不收货" / "没有相邻的路"）⇒ 只有 null/undefined 是缺。 */
+        const zeroIsReal = (v) => {
+          if (v === null || v === undefined) return "—";
+          if (typeof v === "number") return Number.isFinite(v) ? String(v) : "—";
+          if (typeof v === "boolean") return v ? "yes" : "no";
+          return String(v);
+        };
+        return diagnoses.map((d) => {
+          const job = Number(d && d.job);
+          const fact = facts.find((f) => Number(f && f.job) === job) || null;
+          const ends = fact && Array.isArray(fact.ends) ? fact.ends : [];
+          return {
+            job,
+            reasonId: String((d && d.reason) || ""),
+            // 英文用**服务端给的规范措辞**（B5：一个 code 只有一份措辞），
+            // 中文按 id 翻 ⇒ 没翻的 id 回落到服务端的原文（不是空白、不是 id）。
+            reasonLabel: U.term
+              ? U.term(
+                  `diagnosis.${String((d && d.reason) || "")}`,
+                  String((d && d.label) || (d && d.reason) || "unknown"),
+                )
+              : String((d && d.label) || (d && d.reason) || "unknown"),
+            detail: String((d && d.detail) || ""),
+            ends: ends.map((e) => ({
+              role: String((e && e.role) || ""),
+              waiting: numReading(e && e.waiting),
+              waitingVia: numReading(e && e.waitingVia),
+              acceptance: zeroIsReal(e && e.acceptanceAroundTile),
+              cargoRating: numReading(e && e.cargoRating),
+              neighbourRoads: zeroIsReal(e && e.stationNeighbourRoads),
+              isRoadStation: zeroIsReal(e && e.stationIsRoadStation),
+              isDriveThrough: zeroIsReal(e && e.stationIsDriveThrough),
+            })),
+            errors,
+          };
+        });
+      },
+
       /* ------------------------------ routes ------------------------------ */
 
       /**

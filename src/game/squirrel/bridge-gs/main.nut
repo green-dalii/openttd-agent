@@ -637,9 +637,15 @@ class ExecCore {
         local dx = 0; local dy = 0;
         if (gx > cx) dx = 1; else if (gx < cx) dx = -1;
         if (gy > cy) dy = 1; else if (gy < cy) dy = -1;
-        // walk outward up to len along the primary axis, then relax on failure
-        local tries = [ [dx,dy], [dx,0], [0,dy], [dx,-dy] ];
-        for (local t = 0; t < 4; t++) {
+        // Walk outward up to `len` along the primary axis, then relax on failure.
+        //
+        // **8 个方向**（2026-11-17，E2 seed 22）：原来只试 4 个（主轴 + 两个侧轴 +
+        // 一个反向斜轴）⇒ 目标被水/山挡住时**没有任何可达的探针** ⇒ 寻路返回 null
+        // ⇒ 铺路反复重试却永远走不通（真机：rd retry1/2/3 循环）。
+        // 侧向（甚至背向）绕行仍可能"离目标更近"，所以它们是**合法候选**——
+        // 下面的"必须更近"判据会挡掉真正走偏的探针。
+        local tries = [ [dx,dy], [dx,0], [0,dy], [dx,-dy], [0,-dy], [-dx,0], [-dx,-dy], [-dx,dy] ];
+        for (local t = 0; t < 8; t++) {
             local px = cx + tries[t][0] * len;
             local py = cy + tries[t][1] * len;
             // keep in bounds
@@ -704,7 +710,21 @@ class ExecCore {
             this._pfFrom = from;
             this._pfTo = to;
         }
-        return this._pf.FindPath(50); // node, false (more to do), or null
+        local res = this._pf.FindPath(50); // node, false (more to do), or null
+        // **搜索失败后必须丢弃缓存的寻路器**（2026-11-17，E2 seed 22 的真因之一）：
+        // AyStar 在"没找到路"时把 `_open` 清空（AyStar::FindPath 结尾）⇒ 同一个
+        // (from,to) 再查一次就会抛 "can't execute over an uninitialized path" ⇒
+        // 铺路不是"换个探针重试"，而是**带着异常放弃**（真机日志：连续
+        // "can't execute over an uninitialized path" ⇒ 线路永远建不成 ⇒
+        // 测量窗从未打开）。
+        //
+        // ⇒ 失败就把缓存丢掉：下一次调用会重新 InitializePath，探针换短后重试。
+        if (res == null) {
+            this._pf = null;
+            this._pfFrom = -1;
+            this._pfTo = -1;
+        }
+        return res;
     }
 
     /* Build road/bridge/tunnel along a path node chain. Returns count of
@@ -1187,6 +1207,18 @@ class ExecCore {
         return out;
     }
 
+    /* 登记表里某条线的记录（**没登记 ⇒ null**，**不抛**）。
+     *
+     * 为什么不能直接读：Squirrel 的表是**严格**的——读不存在的键会抛
+     * `the index '1014' does not exist` ⇒ 那条错误会**进模型上下文**，模型会
+     * 把它当成“引擎坏了”，而真实原因常常只是“这条线还没建完”。
+     * 真机 2026-11-18：agent 退役**还在施工**的线路 1014 ⇒ 抛异常 ⇒ 退役没发生，
+     * 而模型读到的是一句看不懂的引擎错误（D44 的同款纪律：读之前先问登记了没有）。
+     */
+    function RouteRecord(job) {
+        return this._routes.rawin(job) ? this._routes[job] : null;
+    }
+
     /* 一个 job 的车队目标状态：当前 job 用活字段，旧 job 用登记表。 */
     function FleetTarget(job) {
         if (job == this._job) {
@@ -1217,14 +1249,16 @@ class ExecCore {
             this._fleetApplied = applied;
             return;
         }
-        local r = this._routes[job];
-        this._routes[job] <- {
-            vehicles = vehicles,
-            lead = r.lead,
-            depot = r.depot,
-            retired = (r.retired == true),
-            applied = applied,
-        };
+        // **就地改字段，不要重建这张表**（2026-11-16）：重建会把表里**其它字段丢掉**
+        // ——之前这里只写回 5 个键，于是 `lineCargo`（⇒ 线路运的货）、`stA/stB`、
+        // `endA/endB`（⇒ 诊断用的两端格）每次车队变更后**都没了**。
+        // 后果不是"少几个字段"：货运线因此**没有 cargo 标签** ⇒ 逐 (货种, 收方产业)
+        // 的归因**永远归不出来** ⇒ F4 的逐线交付量一直是 null。
+        // 未登记 ⇒ 具名失败（不抛）：见 RouteRecord 的注释。
+        local r = this.RouteRecord(job);
+        if (r == null) { this.Ph("fleet_target_unregistered" + job); return; }
+        r.vehicles = vehicles;
+        r.applied = applied;
     }
 
     function CheckAddVehicles() {
@@ -1323,13 +1357,8 @@ class ExecCore {
                 foreach (vid in r.vehicles) {
                     if (GSVehicle.IsValidVehicle(vid)) live2.append(vid);
                 }
-                this._routes[job] <- {
-                    vehicles = live2,
-                    lead = r.lead,
-                    depot = r.depot,
-                    retired = (r.retired == true),
-                    applied = (r.rawin("applied") ? r.applied : -1),
-                };
+                // 就地改（不重建）：理由同 SaveFleetTarget（重建会丢 lineCargo 等字段）。
+                r.vehicles = live2;
             }
         }
         if (sold > 0 || gone > 0 || (blocked > 0 && this._fleetSell.len() == 0)) {
@@ -1367,12 +1396,27 @@ class ExecCore {
         // 变量名**别用 r**：D44 的静态守卫按名字收集表键 ⇒ 同名会让别处的
         // `r.amount = ...` 被误判成"这张表没有 amount 键"（守卫本身是哑的教训）。
         local raw = {};
-        raw.rawset("job", this._job);
-        raw.rawset("slotA", (this._slotA.bp == null ? null : this._slotA.bp[0]));
-        raw.rawset("slotFrontA", (this._slotA.bp == null ? null : this._slotA.bp[1]));
-        raw.rawset("slotB", (this._slotB.bp == null ? null : this._slotB.bp[0]));
-        raw.rawset("slotFrontB", (this._slotB.bp == null ? null : this._slotB.bp[1]));
-        raw.rawset("depot", (this._slotD.bp == null ? null : this._slotD.bp[0]));
+        // **被问的那条线**（不是执行器当前正在做的那条）。
+        raw.rawset("job", job);
+        // 执行器**当前**的 job：问的是别的线时，这两件事不是一回事。
+        raw.rawset("currentJob", this._job);
+        local isCurrent = (job == this._job);
+        raw.rawset("isCurrentJob", isCurrent);
+        // 槽位读数（slotA/slotB/…）是**当前 job 的**：问别的线时报它们
+        // 就是**拿另一条线的地址冒充这一条** ⇒ 只有当前 job 才报。
+        if (isCurrent) {
+            raw.rawset("slotA", (this._slotA.bp == null ? null : this._slotA.bp[0]));
+            raw.rawset("slotFrontA", (this._slotA.bp == null ? null : this._slotA.bp[1]));
+            raw.rawset("slotB", (this._slotB.bp == null ? null : this._slotB.bp[0]));
+            raw.rawset("slotFrontB", (this._slotB.bp == null ? null : this._slotB.bp[1]));
+            raw.rawset("depot", (this._slotD.bp == null ? null : this._slotD.bp[0]));
+        } else {
+            raw.rawset("slotA", null);
+            raw.rawset("slotFrontA", null);
+            raw.rawset("slotB", null);
+            raw.rawset("slotFrontB", null);
+            raw.rawset("depot", null);
+        }
         raw.rawset("hasRecord", this._routes.rawin(job));
         raw.rawset("recordEndA", (this._routes.rawin(job) && this._routes[job].rawin("endA") ? this._routes[job].endA : null));
         raw.rawset("recordEndB", (this._routes.rawin(job) && this._routes[job].rawin("endB") ? this._routes[job].endB : null));
@@ -1445,12 +1489,19 @@ class ExecCore {
                 queued++;
             }
         }
-        this._routes[job] <- {
-            vehicles = list,
-            lead = (job == this._job ? this._vehicle : this._routes[job].lead),
-            depot = (job == this._job ? (this._slotD.bp == null ? -1 : this._slotD.bp[0]) : this._routes[job].depot),
-            retired = true,
-        };
+        // **没登记的 job 不许硬读**（Squirrel 的表是严格的 ⇒ 见 RouteRecord 的注释）。
+        // 真机 2026-11-18：退役**还在施工**的线路 ⇒ 抛 "the index '1014' does not
+        // exist" ⇒ 退役没发生，而模型读到的是一句看不懂的引擎错误。
+        // ⇒ 具名拒绝：当前 job = “还在施工”，别的 = “不认识的线路”。
+        local rr = this.RouteRecord(job);
+        if (rr == null) {
+            this.Ph((job == this._job) ? "retire_building" + job : "retire_unknown" + job);
+            return;
+        }
+        rr.vehicles = list;
+        rr.lead = (job == this._job ? this._vehicle : rr.lead);
+        rr.depot = (job == this._job ? (this._slotD.bp == null ? -1 : this._slotD.bp[0]) : rr.depot);
+        rr.retired = true;
         // table 集合：`in` 判断存在、`<-` 新建槽位（array 没有 rawin，用错就是运行时异常）
         if (!(job in this._retiredJobs)) this._retiredJobs[job] <- true;
         this.Ph("retire" + queued + "C" + this.CountOwnVehicles());
@@ -1535,14 +1586,10 @@ class ExecCore {
     /* 把一条线的「改装到的货物」写进登记表（当前 job 用活字段，旧 job 用登记表）。 */
     function SaveRouteCargo(job, cid) {
         if (job == this._job) { this._routeCargo = cid; return; }
-        local r = this._routes[job];
-        this._routes[job] <- {
-            vehicles = r.vehicles, lead = r.lead, depot = r.depot,
-            retired = (r.retired == true),
-            applied = (r.rawin("applied") ? r.applied : -1),
-            stA = (r.rawin("stA") ? r.stA : -1), stB = (r.rawin("stB") ? r.stB : -1),
-            cargo = cid, engine = (r.rawin("engine") ? r.engine : -1),
-        };
+        // 未登记 ⇒ 具名失败（不抛）：见 RouteRecord 的注释。
+        local r = this.RouteRecord(job);
+        if (r == null) { this.Ph("cargo_unregistered" + job); return; }
+        r.cargo = cid;
     }
 
     /* 换车（P1-2）：把一条线的车队换成**指定车型**。
@@ -1596,13 +1643,16 @@ class ExecCore {
             this._routeEngine = engine;
             this.RegisterRoute(job);
         } else {
-            local r = this._routes[job];
-            this._routes[job] <- {
-                vehicles = made, lead = made[0], depot = t.depot, retired = false,
-                applied = (r.rawin("applied") ? r.applied : -1),
-                stA = stA, stB = stB,
-                cargo = (r.rawin("cargo") ? r.cargo : -1), engine = engine,
-            };
+            // 未登记 ⇒ 具名失败（不抛）：见 RouteRecord 的注释。
+            local r = this.RouteRecord(job);
+            if (r == null) { this.Ph("reeng_unregistered" + job); return; }
+            r.vehicles = made;
+            r.lead = made[0];
+            r.depot = t.depot;
+            r.retired = false;
+            r.stA = stA;
+            r.stB = stB;
+            r.engine = engine;
         }
         this.Report({ kind = "exec", job = job, stage = "reeng",
                       note = "reeng" + made.len() + "e" + engine + "j" + job });
@@ -1684,8 +1734,11 @@ class BridgeV1 extends GSController {
     // mirror src/game/executor-status.ts decodeExecutorPhase (REFACTOR Phase A).
     _last_exec_key = "";
     // N2-1: routes this GS laid out (job -> tiles), so route economics can be
-    // attributed exactly. Attribution is by station orders (GSVehicleList_Station
-    // + GetOwner), NOT by guessing from positions.
+    // attributed exactly. Attribution is by the **executor's registry** (the
+    // route's own fleet), NOT by guessing from positions and NOT by scanning
+    // the two end stations - a station scan returns the vehicles *serving* it,
+    // so one route's fleet was counted twice and shared stations pulled in
+    // other routes' vehicles (2026-11-15, SPEC §10.129).
     _routes = null;
     // 诊断：每辆车**上一次的位置**与**上一次移动的 tick** ⇒ "车多久没动了"可测
     // （周期读数看不见这件事 ⇒ MEMORY D121）。**字段必须和用它的方法在同一个类里**：
@@ -1843,29 +1896,38 @@ class BridgeV1 extends GSController {
                 local tB = rec.rawget("tB");
                 local sa = this.StationNear(tA, 6);
                 local sb = this.StationNear(tB, 6);
+                // 逐线的车辆与利润：**按这条线自己的车队**（执行器注册表）算。
+                //
+                // 为什么不能按"停在两端站上的车"算（2026-11-15 真机证据，SPEC §10.129）：
+                //   ① `GSVehicleList_Station(s)` 返回的是**服务该站的车**（不是此刻停在
+                //      那儿的车）⇒ 一条线的车在**两个端点站**各出现一次 ⇒ 扫两个站
+                //      把同一批车**数了两遍**（真机 job 1：注册表 10 辆车，报成 20，
+                //      利润 7076 报成 14152）；
+                //   ② 站被**共用**时，**别条线的车**也会被算进来（真机 job 9：它自己
+                //      一辆车都没有，却报了别人的 10 辆车和 7076 利润）。
+                // 这两个数**进模型上下文**（模型据此判断哪条线赚钱）⇒ 错了就是让模型
+                // 按假事实决策。
+                //
+                // 注册表（`RouteVehicles`）不认识这条线 ⇒ 执行器还没建它 ⇒ 它**没有车**
+                // ⇒ 0 是**真的读数**，不是"没测到"（不许用 -1，那会被读成读数失败）。
                 local vehIds = [];
-                local vlist = [];
-                // 车辆 id 一并上报（2026-09-25）：仪表盘要把**跨线路**的车队数去重。
-                // 不去重就是拿 25 辆车报出 129 —— 一个车站服务多条线路时，站在站台上的
-                // 同一辆车会被每条用到该站的线路各数一次（真机：17 条线路 / 9 个站，
-                // 站点平均出现在 ~3.8 条线路上，25 × 5 ≈ 129，与实测一致）。
-                if (GSStation.IsValidStation(sa)) {
-                    foreach (v, _ in GSVehicleList_Station(sa)) {
-                        if (GSVehicle.GetOwner(v) == exec) { vlist.append(v); vehIds.append(v); }
-                    }
-                }
-                if (GSStation.IsValidStation(sb)) {
-                    foreach (v, _ in GSVehicleList_Station(sb)) {
-                        if (GSVehicle.GetOwner(v) == exec) { vlist.append(v); vehIds.append(v); }
-                    }
-                }
                 local profit = 0;
-                foreach (v in vlist) {
-                    // GetProfitThisYear returns -1 for a NON-primary vehicle
-                    // (wagons). Routes here are single road vehicles, always
-                    // primary, so a genuine -1 pound loss is not confused with
-                    // the sentinel.
-                    profit += GSVehicle.GetProfitThisYear(v);
+                local fleetIds = null;
+                if (this._core != null) fleetIds = this._core.RouteVehicles(job_str.tointeger());
+                if (fleetIds != null) {
+                    foreach (v in fleetIds) {
+                        // 卖掉的车会被注册表剪掉（ProcessFleetSells）；这里再挡一次，
+                        // 免得把失效 id 当成车。
+                        if (!GSVehicle.IsValidVehicle(v)) continue;
+                        vehIds.append(v);
+                        // GetProfitThisYear returns -1 for a NON-primary vehicle
+                        // (wagons). Routes here are single road vehicles, always
+                        // primary, so a genuine -1 pound loss is not confused with
+                        // the sentinel. 读不到（null）就不计 —— 不是 0。
+                        local p = GSVehicle.GetProfitThisYear(v);
+                        if (p == null) continue;
+                        profit += p;
+                    }
                 }
                 local waiting = 0;
                 // 逐站上报等待量（而不是只报两端之和）：harness 要按**站点去重**求和，
@@ -1885,18 +1947,17 @@ class BridgeV1 extends GSController {
                     if (GSStation.IsValidStation(sa)) { waitA = GSStation.GetCargoWaiting(sa, waitCargo); waiting += waitA; }
                     if (GSStation.IsValidStation(sb)) { waitB = GSStation.GetCargoWaiting(sb, waitCargo); waiting += waitB; }
                 }
-                // 车队真值（执行器注册表，引擎 id）：与 vehiclesIds（站点归属）是
-                // 两个事实。无核心/未登记 → 不带字段（未计量 ≠ 空车队，D60）。
-                local fleetIds = null;
+                // 车队真值（执行器注册表，引擎 id）。无核心/未登记 → 不带字段
+                // （未计量 ≠ 空车队，D60）。`vehiclesIds` 现在**就是**这条线自己的
+                // 车队（不再按站点归属）⇒ 仪表盘的跨线路去重不再需要。
                 local fleetApplied = null;
                 if (this._core != null) {
-                    fleetIds = this._core.RouteVehicles(job_str.tointeger());
                     fleetApplied = this._core.RouteApplied(job_str.tointeger());
                 }
                 local payload = {
                     kind = "route-stats",
                     job = job_str.tointeger(),
-                    vehicles = vlist.len(),
+                    vehicles = vehIds.len(),
                     vehiclesIds = vehIds,
                     endsA = sa,
                     endsB = sb,
@@ -2076,6 +2137,63 @@ class BridgeV1 extends GSController {
         }
         e.rawset("waitingViaSelf", viaSelf);
         e.rawset("waitingViaNone", viaNone);
+        // **引擎自己怎么看这个停靠点**（Issue #113 的决定性事实）。
+        //
+        // 为什么需要：车“开过站不停”有三种可能（引擎判据不同）：
+        //   ① 站牌格**没有路** ⇒ 车根本开不上去；
+        //   ② 停靠点是**穿行式**（drive-through）⇒ 停靠规则完全不同；
+        //   ③ **入口方向**与车来的方向相反 ⇒ 车开过去也不会停
+        //      （引擎的 `entrance_dir` = 从 front tile 指向站牌格的方向）。
+        // 这三条都是**事实**，由引擎回答；具名原因由服务端算（不在 GS 里下判断）。
+        local isRoad = null;
+        local isStationTile = null;
+        local isDriveThrough = null;
+        local hasRoadType = null;
+        local neighbourRoads = null;
+        local engineFront = null;
+        try {
+            if (tile != null && tile >= 0 && GSMap.IsValidTile(tile)) {
+                isRoad = GSRoad.IsRoadTile(tile);
+                isStationTile = GSRoad.IsRoadStationTile(tile);
+                isDriveThrough = GSRoad.IsDriveThroughRoadStationTile(tile);
+                hasRoadType = GSRoad.HasRoadType(tile, GSRoad.ROADTYPE_ROAD);
+                neighbourRoads = GSRoad.GetNeighbourRoadCount(tile);
+                // 引擎自己的**入口格**（bay stop 的停靠方向）：车要从这个方向
+                // 开过来才会停 ⇒ 入口方向与车来的方向相反 ⇒ 车只会开过去。
+                engineFront = GSRoad.GetRoadStationFrontTile(tile);
+            }
+        } catch (errStop) {
+            isRoad = null;
+        }
+        e.rawset("stationIsRoad", isRoad);
+        e.rawset("stationIsRoadStation", isStationTile);
+        e.rawset("stationIsDriveThrough", isDriveThrough);
+        e.rawset("stationHasRoadType", hasRoadType);
+        e.rawset("stationNeighbourRoads", neighbourRoads);
+        e.rawset("engineFrontTile", (engineFront == null ? -1 : engineFront));
+        // **这一端收不收这个货**（引擎按 catchment 算）。
+        //
+        // 为什么关键：卸货时引擎先看车站**是否收货**
+        // （`station_cmd.cpp`：`GoodsEntry::State::Acceptance`，未收货就把货**留在车上**）
+        // ⇒ “车到了卸货站却没卸” 与 “货没送到” 是两件事。
+        // 收货额度来自**产业的近期产量**（`Industry::GetAcceptance`）⇒ 会随时间波动 ⇒
+        // 建站时够（>= 8）不代表卸货时还够 ⇒ 这两个读数必须**随时间**看。
+        local acceptAround = null;
+        local rating = null;
+        try {
+            if (tile != null && tile >= 0 && GSMap.IsValidTile(tile) && cargo != null && cargo >= 0) {
+                local rad = GSStation.GetCoverageRadius(GSStation.STATION_TRUCK_STOP);
+                if (rad <= 0) rad = 3;
+                acceptAround = GSTile.GetCargoAcceptance(tile, cargo, 1, 1, rad);
+            }
+            if (st != null && st >= 0 && GSStation.IsValidStation(st) && cargo != null && cargo >= 0) {
+                rating = GSStation.GetCargoRating(st, cargo);
+            }
+        } catch (errAcc) {
+            acceptAround = null;
+        }
+        e.rawset("acceptanceAroundTile", acceptAround);
+        e.rawset("cargoRating", rating);
         return e;
     }
 
@@ -2153,6 +2271,14 @@ class BridgeV1 extends GSController {
             // capacity=0 而 refitCapacity>0 ⇒ **车没被改成这个货**（改装没生效）。
             capacity = GSVehicle.GetCapacity(vid, cargo);
             refitCapacity = GSVehicle.GetRefitCapacity(vid, cargo);
+            // `GetRefitCapacity` 只对**停在库里的车**答得出来（引擎前置条件：
+            // "you must own the vehicle; the vehicle must be stopped in the depot"）。
+            // 读不到时 OpenTTD 15.x 回 **4294967295**（UINT32_MAX）——那是
+            // `res.Succeeded() ? refit_capacity : -1` 的有符号/无符号转换的副产品
+            // （OpenTTD PR #15507）⇒ **失败哨兵，不是载量** ⇒ 写 -1（没测到）。
+            // 真机 2026-11-18：路上的车全部读成哨兵，服务端据此把一条**活着**
+            // 的线判成"车没被改装"（并把 4294967295 原样写进诊断文案）。
+            if (refitCapacity == 4294967295) refitCapacity = -1;
         }
         v.rawset("loaded", loaded);
         v.rawset("capacity", capacity);
@@ -3694,6 +3820,8 @@ class BridgeV1 extends GSController {
         local townA = obj.rawin("townA") ? obj["townA"] : -1;
         local townB = obj.rawin("townB") ? obj["townB"] : -1;
         if (townA < 0 || townB < 0) {
+            // 显式指定优先（预置场景自己挑**最近**的一对：铺路时间随距离增长 ⇒
+            // 近的对才能在等待预算内建成，E2 seed 22 的真因）；没指定才按人口挑。
             local pair = this.PickTownPair();
             if (pair == null) {
                 GSAdmin.Send({ kind = "err", cmd = "build_bus_route", reason = "no town pair" });
@@ -4073,6 +4201,7 @@ class BridgeV1 extends GSController {
         // AyStar deadlock cap, so long pairs are now allowed. Prefer
         // moderate (25..140) but accept up to 260 to let the planner reach
         // farther, more profitable towns.
+        //
         foreach (lim in [140, 260]) {
             for (local i = 0; i < all.len(); i++) {
                 for (local j = i + 1; j < all.len(); j++) {

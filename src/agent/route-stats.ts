@@ -13,7 +13,12 @@ import { dayOfYear as calendarDayOfYear } from "../game/calendar.js";
 /** GS 上报的一条线路经济读数（原始事实）。 */
 export interface RouteStats {
 	job: number;
-	/** 当前挂在这条线的车辆数（GS 按站点订单归属统计）。 */
+	/**
+	 * 这条线**自己的**车辆数（2026-11-15 起：按执行器注册表统计，引擎真值）。
+	 *
+	 * 之前是"停在两端站上的车"（站点归属）⇒ 同一批车被**数两遍**（两端各一次），
+	 * 且站被共用时**别条线的车**也被算进来。修法与证据见 SPEC §10.129。
+	 */
 	vehicles: number;
 	/** 当年累计利润（Money）；-1 = GS 无法读取该车（非主车）。 */
 	profit: number;
@@ -36,9 +41,9 @@ export interface RouteStats {
 	/**
 	 * **执行器注册表**里的车辆 id（引擎真值：这条线施工时买下、登记在这条线名下）。
 	 *
-	 * 与 `vehiclesIds` 是两个不同的事实：那个是"此刻停在两端站上的车"（站点归属，
-	 * 会随车离站而变、会被多条线重复计数），这个是"这条线拥有哪些车"（登记归属，
-	 * 唯一、稳定、到退役为止）。车队双向/退役的验证就看它（P1-3）。
+	 * 2026-11-15 起，**逐线的车辆数与利润都按这个注册表算**（`vehicles` /
+	 * `profit` 与 `fleetIds` 同源）—— 见 `RouteStats.vehicles` 的说明。
+	 * 车队双向/退役的验证就看它（P1-3）。
 	 */
 	fleetIds?: number[];
 	/** 这条线的**目标**车队规模（`set_route_vehicles` 的生效值）；owned = fleetIds.length。 */
@@ -67,11 +72,12 @@ export interface RouteStats {
 	/** P1-3：这条线登记车辆中**此刻停在库里**的 id（IsStoppedInDepot，引擎读数）；缺席 = 未计量。 */
 	fleetDepot?: number[];
 	/**
-	 * 停在这条线两端的**车辆 id**。
+	 * 这条线**自己的**车辆 id（2026-11-15 起与 `fleetIds` 同源：执行器注册表）。
 	 *
-	 * 存在的唯一理由是**跨线路去重**：一个车站服务多条线路时，站在站台上的同一辆车会被
-	 * 每条用到该站的线路各数一次（真机 17 线 / 9 站 ⇒ 25 辆车被报成 129）。
-	 * 有 id 才能在 harness 侧去重；没有它就只能重复计数。
+	 * 之前它是"停在两端站上的车"（站点归属），而 `GSVehicleList_Station` 返回的是
+	 * **服务该站的车** ⇒ 一条线的车在两个端点站各出现一次（同一批车被数两遍），
+	 * 且站被共用时**别条线的车**也会被算进来（真机：一条没建成的线报了别人的
+	 * 10 辆车和 7076 利润）。⇒ 归属真值只有一个：执行器注册表。
 	 */
 	vehiclesIds?: number[];
 }
@@ -195,7 +201,7 @@ export interface RouteWireFact {
 	job: number;
 	vehicles: number;
 	waiting: number;
-	/** 去重所需（见 RouteStats.vehiclesIds / endsA / endsB / waitA / waitB）。 */
+	/** 这条线自己的车（见 RouteStats.vehiclesIds）。 */
 	vehiclesIds?: number[];
 	endsA?: number;
 	endsB?: number;

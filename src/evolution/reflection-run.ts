@@ -234,9 +234,24 @@ export async function runReflection(opts: RunReflectionOptions): Promise<Reflect
 	const profitPerDay = typeof opts.facts.summary.profitPerDay === "number" && Number.isFinite(opts.facts.summary.profitPerDay)
 		? opts.facts.summary.profitPerDay
 		: null;
-	const samples = profitPerDay === null
-		? sink.strategies
-		: sink.strategies.map((s) => ({ ...s, profitPerDay }));
+	/**
+	 * 闸的度量：**运营利润速率**（2026-11-14，方案 C：双口径并存）。
+	 *
+	 * 为什么闸不再只用净现金流：闸问的是"这条策略赚不赚钱"，而净现金流含
+	 * 基建/购车/利息 ⇒ 只要这一局还在建线，它按构造为负 ⇒ 闸对**任何含建线的
+	 * 策略**永远打不开（真机：净现金流 -1499.28/日 vs 运营利润 +14.13/日）。
+	 * 两个口径都盖上（模型不能自带），闸用运营利润，净现金流仍被报出。
+	 */
+	const operatingProfitPerDay =
+		typeof opts.facts.summary.operatingProfitPerDay === "number" &&
+		Number.isFinite(opts.facts.summary.operatingProfitPerDay)
+			? opts.facts.summary.operatingProfitPerDay
+			: null;
+	const samples = sink.strategies.map((s) => ({
+		...s,
+		...(profitPerDay === null ? {} : { profitPerDay }),
+		...(operatingProfitPerDay === null ? {} : { operatingProfitPerDay }),
+	}));
 
 	let lessonsSaved = 0;
 	let lessonsSuperseded = 0;

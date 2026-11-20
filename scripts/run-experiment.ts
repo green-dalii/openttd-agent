@@ -15,6 +15,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, openSync } from "node:fs";
 import { join } from "node:path";
+import { cleanupGame } from "./lib/game-cleanup.js";
 import { evolutionView } from "../src/evolution/web-view.js";
 import { degradationStats, deliveredOutcome, formatMetricStat, horizonIsComparable, MIN_COMPARABLE_HORIZON_DAYS , powerVerdict, learningCurve } from "../src/evolution/metrics.js";
 import { reflectionStats } from "../src/evolution/reflection-stats.js";
@@ -38,13 +39,32 @@ interface Args {
 	mode: "ab" | "sequential";
 	/** sequential 模式的局数（M5 预登记上限 10）。 */
 	sessions?: number;
+	/**
+	 * **只测量，不下结论**（N1 的预登记用）。
+	 *
+	 * 为什么需要：功效闸会在 n 不足以检出**声明的效应**时拒绝开跑——那是给
+	 * “比较”用的。可有些轮次问的**不是**“有没有效应”，而是“效应得有多大才
+	 * 测得出来”（⇒ 报区间与离散度）。⇒ 这时必须**显式声明**本轮不声称任何
+	 * 效应，而不是把声明的效应改小来绕过闸（那就是自欺）。
+	 */
+	measureOnly: boolean;
+	/**
+	 * 臂的顺序：`ctl-first`（默认，历史行为）/ `trt-first`。
+	 *
+	 * 为什么要有：控制臂总是先跑 ⇒ 第二局会吃到"热启动/限流"的便宜 ⇒ 不交替
+	 * 的话，**正**结果可能只是"第二局更好"。⇒ 按 seed 交替 ⇒ 顺序效应在均值里抵消。
+	 */
+	armOrder: "ctl-first" | "trt-first";
 }
+
 
 function parseArgs(argv: string[]): Args {
 	const get = (flag: string): string | undefined => {
 		const i = argv.indexOf(flag);
 		return i >= 0 ? argv[i + 1] : undefined;
 	};
+	/** **布尔**旗标：看 argv 里**有没有**它（不能用 `get`：它后面没有值 ⇒ get 返回 undefined）。 */
+	const has = (flag: string): boolean => argv.includes(flag);
 	const dir = get("--dir");
 	if (!dir) {
 		console.error(
@@ -84,9 +104,15 @@ function parseArgs(argv: string[]): Args {
 		const plannedN = Number(get("--n") ?? 3);
 		const v = powerVerdict({ declaredEffect: effect, observedCv: cv, actualN: plannedN });
 		if (v.detectable === false) {
-			console.error(v.message);
-			console.error("  Refusing to start: this experiment cannot detect its declared effect.");
-			process.exit(1);
+			if (has("--measure-only")) {
+				// **显式的测量轮**：不声称任何效应，但必须把"要多少对才测得出"写出来。
+				console.log(`measure-only: ${v.message}`);
+				console.log("  This run reports intervals and spread; it claims NO effect.");
+			} else {
+				console.error(v.message);
+				console.error("  Refusing to start: this experiment cannot detect its declared effect.");
+				process.exit(1);
+			}
 		}
 	}
 	return {
@@ -107,6 +133,8 @@ function parseArgs(argv: string[]): Args {
 		...(get("--cv") !== undefined ? { cv: Number(get("--cv")) } : {}),
 		mode: (get("--mode") ?? "ab") as "ab" | "sequential",
 		...(get("--sessions") !== undefined ? { sessions: Number(get("--sessions")) } : {}),
+		measureOnly: has("--measure-only"),
+		armOrder: (get("--arm-order") ?? "ctl-first") as "ctl-first" | "trt-first",
 	};
 }
 
@@ -162,11 +190,11 @@ if (args.mode === "sequential") {
 	const sessions = Math.min(args.sessions ?? args.n, 10);
 	const seqCodes: number[] = [];
 	for (let i = 1; i <= sessions; i++) {
-		spawnSync("pkill", ["-f", "OpenTTD.app/Contents/MacOS/openttd"]);
+		cleanupGame(args.dir);
 		spawnSync("sleep", ["2"]);
 		seqCodes.push(runOne(`seq${i}`, args.dir, args.seed, args.seconds, args.gameDays, args.scenario, []));
 	}
-	spawnSync("pkill", ["-f", "OpenTTD.app/Contents/MacOS/openttd"]);
+	cleanupGame(args.dir);
 	const view = evolutionView(args.dir, "memory");
 	const ordered = [...view.metrics]
 		.filter((m) => Number.isFinite(Number(m.deliveredRun)) && m.blockedByPause !== true)
@@ -184,27 +212,28 @@ if (args.mode === "sequential") {
 }
 
 for (let i = 1; i <= args.n; i++) {
-	// cleanup between runs: the game must die or the next one can't bind the port
-	spawnSync("pkill", ["-f", "OpenTTD.app/Contents/MacOS/openttd"]);
-	spawnSync("sleep", ["2"]);
-	codes.control.push(
-		runOne(`ctl${i}`, args.dir, args.seed, args.seconds, args.gameDays, args.scenario, controlFlags(args.vary)),
-	);
-	spawnSync("pkill", ["-f", "OpenTTD.app/Contents/MacOS/openttd"]);
-	spawnSync("sleep", ["2"]);
-	codes.treatment.push(
-		runOne(
-			`trt${i}`,
+	// 臂的顺序：**交替**（--arm-order trt-first）⇒ 顺序效应（第二局吃到热启动/
+	// 限流的便宜）在均值里抵消。臂的**身份**由记忆注入与否决定（compareArms 按
+	// “有没有收到记忆”分组）⇒ 换顺序不会把两臂弄混。
+	const order: Array<"control" | "treatment"> =
+		args.armOrder === "trt-first" ? ["treatment", "control"] : ["control", "treatment"];
+	for (const arm of order) {
+		cleanupGame(args.dir);
+		spawnSync("sleep", ["2"]);
+		const code = runOne(
+			arm === "control" ? `ctl${i}` : `trt${i}`,
 			args.dir,
 			args.seed,
 			args.seconds,
 			args.gameDays,
 			args.scenario,
-			treatmentFlags(args.vary),
-		),
-	);
+			arm === "control" ? controlFlags(args.vary) : treatmentFlags(args.vary),
+		);
+		if (arm === "control") codes.control.push(code);
+		else codes.treatment.push(code);
+	}
 }
-spawnSync("pkill", ["-f", "OpenTTD.app/Contents/MacOS/openttd"]);
+cleanupGame(args.dir);
 
 const view = evolutionView(args.dir, args.vary);
 console.log("");
@@ -262,6 +291,15 @@ console.log(
 		}
 	}
 }
+if (args.measureOnly) {
+	// **测量轮的头部**：不声称任何效应（不绕过功效闸，而是显式声明本轮不判胜负）。
+	console.log("");
+	console.log("=== MEASUREMENT (no verdict claimed) ===");
+	console.log(
+		"  This run reports intervals and spread only. It does NOT claim an effect, and a CI " +
+			"that excludes 0 here is not a verdict: the sample is too small for the pre-registered effect.",
+	);
+}
 console.log(`runs: ${view.metrics.length}  conclusive: ${view.arms.conclusive}`);
 console.log(`note: ${view.arms.note || "(none)"}`);
 const fmt = (label: string, a: typeof view.arms.withLessons) =>
@@ -279,6 +317,12 @@ const armLabel = args.vary === "freeze" ? ["frozen", "not frozen"] : ["with less
 const fmtRate = (v: number | null) => (v === null ? "—" : `${(v * 100).toFixed(0)}%`);
 fmt(armLabel[0]!, view.arms.withLessons);
 fmt(armLabel[1]!, view.arms.withoutLessons);
+// **口径必须披露**（D126）：`delivered` 有两个口径——`run`（整局累计，**跨局可比**）
+// 与 `raw`（admin 的**当季**计数，跨局不可比）。样本太小（新行没有 `deliveredRun`）
+// 时比较会**自动回落到 raw** ⇒ 不披露的话，读者会把两局的季度计数当成交付量来比。
+console.log(
+	`delivered source: ${view.arms.deliveredSource === "run" ? "run (whole-run total - comparable across runs)" : "raw (admin quarterly counter - NOT comparable across runs; the sample was too small for the run total)"}`,
+);
 if (view.arms.treatmentWithoutInjection > 0) {
 	console.log(
 		`WARNING: ${view.arms.treatmentWithoutInjection} treatment run(s) received NO memory at all` +

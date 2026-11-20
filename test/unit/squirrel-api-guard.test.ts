@@ -792,9 +792,10 @@ describe("Squirrel 桥：产业/货种/公司口径上报", () => {
 /**
  * 线路读数必须带上**去重所需**的字段（2026-09-25 真机：25 辆车被报成 129）。
  *
- * 机制：GS 的每条线路读数是"停在这条线两端站上的车 / 等在这两端的人"，而一个车站服务
- * 多条线路 ⇒ 同一辆车、同一批乘客被每条用到该站的线路各数一次。没有车辆 id 与站号，
- * harness 只能重复计数，于是同屏出现两个互相矛盾的车队数（25 vs 129）。
+ * 机制：一个车站服务多条线路 ⇒ 同一批乘客被每条用到该站的线路各数一次；没有车辆 id
+ * 与站号，harness 只能重复计数，于是同屏出现两个互相矛盾的车队数（25 vs 129）。
+ * （车辆的归属 2026-11-15 起改为**执行器注册表**——这条线自己的车队；见
+ * `route-stats-attribution.test.ts`。站号与逐站等待量仍是站点口径。）
  */
 describe("线路读数带上 id 与站号（否则仪表盘只能重复计数）", () => {
 	const bridge = readFileSync(path.join(process.cwd(), "src/game/squirrel/bridge-gs/main.nut"), "utf8");
@@ -809,8 +810,10 @@ describe("线路读数带上 id 与站号（否则仪表盘只能重复计数）
 
 	it("车辆 id 真的被收集（不是发一个空数组）", () => {
 		expect(bridge).toMatch(/vehIds\.append\(v\)/);
-		// 两端都要收：一条线的车可能停在任一端
-		expect(bridge.match(/vehIds\.append\(v\)/g) ?? []).toHaveLength(2);
+		// **一处**收集点：逐线的车来自**执行器注册表**（这条线自己的车队），
+		// 不再扫两端站（那会把同一批车数两遍、并把别条线的车算进来，
+		// 2026-11-15 真机证据见 route-stats-attribution.test.ts）。
+		expect(bridge.match(/vehIds\.append\(v\)/g) ?? []).toHaveLength(1);
 	});
 });
 
@@ -827,5 +830,83 @@ describe("GS 源码的语法雷区（2026-10-31 真机踩到）", () => {
 				.join("\n");
 			expect(code.includes("??"), file).toBe(false);
 		}
+	});
+});
+
+/* ==========================================================================
+ * 预置场景的**距离上限**（E2 seed 22 的真因，2026-11-17）。
+ *
+ * 事实：seed 22 那一局的路**最终建成了**，失败的是**等待超时**——蓝图按人口
+ * 挑到很远的城镇对 ⇒ 施工在等待上限内没完成 ⇒ 测量窗从未打开 ⇒ 那一局
+ * **不是有效测量**（D131）。
+ *
+ * ⇒ 修法：预置场景发一个距离上限，GS **先在能按时建完的距离里挑最好的**。
+ *
+ * 为什么要有静态守卫：这个修复横跨 **Squirrel（GS 挑城镇）** 与 **TS（harness
+ * 发上限）** 两边 ⇒ 两边必须**同时**在，否则上限会被静默丢掉（GS 忽略未知字段
+ * 不会报错 ⇒ 局照跑、窗口照不开 ⇒ 又一次"装置失败伪装成模型表现"）。
+ * ====================================================================== */
+describe("预置场景的蓝图线路（E2 seed 22 的真因）", () => {
+	it("harness 明确指定**最近**的城镇对（铺路时间随距离增长）", () => {
+		const src = readFileSync("src/agent/runner.ts", "utf8");
+		expect(src).toContain("townA: towns.a, townB: towns.b");
+		expect(src).toMatch(/pickBlueprintTowns|towns: \(\) => deps\.state\.snapshot\(\)\.towns/);
+	});
+
+	it("GS 的 build_bus_route 认 townA/townB（显式指定优先于自动挑）", () => {
+		const nut = readFileSync("src/game/squirrel/bridge-gs/main.nut", "utf8");
+		expect(nut).toMatch(/obj\.rawin\("townA"\)/);
+		expect(nut).toMatch(/obj\.rawin\("townB"\)/);
+	});
+
+	it("寻路失败后**丢弃缓存的寻路器**（否则重试抛 uninitialized path）", () => {
+		const nut = readFileSync("src/game/squirrel/bridge-gs/main.nut", "utf8");
+		expect(nut).toMatch(/if \(res == null\) \{\s*this\._pf = null;/);
+	});
+
+	it("探针试 8 个方向（原来 4 个 ⇒ 被水挡住时无解）", () => {
+		const nut = readFileSync("src/game/squirrel/bridge-gs/main.nut", "utf8");
+		expect(nut).toMatch(/local tries = \[ \[dx,dy\].*\[-dx,dy\] \];/);
+		expect(nut).toMatch(/for \(local t = 0; t < 8; t\+\+\)/);
+	});
+});
+
+/* ==========================================================================
+ * GS 的**登记表读法**（2026-11-18 真机踩到）。
+ *
+ * 事实：agent 退役**还在施工**的线路 1014 ⇒ GS 抛
+ * `the index '1014' does not exist`（Squirrel 的表是严格的：读不存在的键会抛）
+ * ⇒ 退役**没有发生**，而模型读到的是一句看不懂的“引擎错误”。
+ *
+ * ⇒ 规则：写回登记表的出口**一律走 `RouteRecord(job)`**（没登记 ⇒ null ⇒ 具名
+ * 失败），不许直接 `this._routes[job]`。
+ * ====================================================================== */
+describe("GS 的登记表读法（未登记 ⇒ 不抛）", () => {
+	const nut = readFileSync("src/game/squirrel/bridge-gs/main.nut", "utf8");
+	const bodyOf = (fn: string): string => {
+		const i = nut.indexOf(`function ${fn}(`);
+		expect(i, `找不到 ${fn}`).toBeGreaterThan(-1);
+		return nut.slice(i, nut.indexOf("\n    function ", i + 10));
+	};
+
+	it("有 RouteRecord（唯一的安全取法）", () => {
+		expect(nut).toMatch(/function RouteRecord\(job\)/);
+		expect(nut).toMatch(/this\._routes\.rawin\(job\) \? this\._routes\[job\] : null/);
+	});
+
+	it("写回登记表的出口都走 RouteRecord，不直接读表", () => {
+		for (const fn of ["SaveFleetTarget", "RetireRoute", "SaveRouteCargo"]) {
+			const body = bodyOf(fn);
+			expect(body, `${fn} 必须用 RouteRecord`).toMatch(/RouteRecord\(/);
+			expect(body, `${fn} 不许直接读登记表`).not.toMatch(/this\._routes\[job\]/);
+		}
+	});
+
+	it("没登记 ⇒ 具名失败（不抛），且理由说清是“还在施工”还是“不认识”", () => {
+		expect(nut).toMatch(/retire_building/);
+		expect(nut).toMatch(/retire_unknown/);
+		expect(nut).toMatch(/fleet_target_unregistered/);
+		expect(nut).toMatch(/cargo_unregistered/);
+		expect(nut).toMatch(/reeng_unregistered/);
 	});
 });

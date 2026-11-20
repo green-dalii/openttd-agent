@@ -13,6 +13,7 @@
  */
 
 import { classifyOutcome } from "./outcome.js";
+import { normalizeRun } from "./normalized.js";
 import { type CompareBy, compareArms, metricExclusion, type GameMetric} from "./metrics.js";
 import { buildCompareView } from "./compare-view.js";
 import { historyGroups, type GroupBy } from "./history-groups.js";
@@ -25,10 +26,35 @@ export interface AnnotatedStrategy extends StrategyCard {
 	promotion: { promoted: boolean; value: number; runs: number; reason: string };
 }
 
+/**
+ * 一局的归一化读数（给页面画趋势用）。
+ *
+ * 为什么服务端算：归一化的口径只有一处定义（`normalizeRun`）⇒ 页面重算就是
+ * 第二份口径，必然漂移（MEMORY D132 的同一类问题）。
+ */
+export interface NormalizedSeriesPoint {
+	id: string;
+	/** 这一局建了几条线（分母本身）。 */
+	lines: number | null;
+	/** 这一局有几辆车（另一个分母）。 */
+	vehicles: number | null;
+	deliveredPerLine: number | null;
+	operatingProfitPerLine: number | null;
+	deliveredPerVehicle: number | null;
+	operatingProfitPerVehicle: number | null;
+}
+
 export interface EvolutionView {
 	metrics: GameMetric[];
 	lessons: unknown[];
 	strategies: AnnotatedStrategy[];
+	/**
+	 * 逐局的归一化读数（最旧 → 最新）。
+	 *
+	 * null = **不可比**（没建线 ⇒ 分母为 0；老局没记读数 ⇒ 分母没测到），
+	 * 不是 0 ⇒ 页面画成断点，而不是"这一局什么都没运"。
+	 */
+	normalizedSeries: NormalizedSeriesPoint[];
 	/** Arm comparison for the M3 acceptance ("with vs without lessons"). */
 	/** 对照结果（`compareArms` 的返回）——判据的单一事实源，不再留 unknown。 */
 	arms: ArmComparison;
@@ -60,7 +86,23 @@ export function evolutionView(dataDir: string, by: CompareBy = "memory"): Evolut
 	// D3b/S8: derive the outcome class for every row. Derived, never stored -
 	// so it can never disagree with the facts it is computed from.
 	const withClass = metrics.map((m) => ({ ...m, outcomeClass: classifyOutcome(m) }));
-	return { metrics: withClass, lessons, strategies, arms: compareArms(metrics, by) };
+	// 归一化序列（最旧 → 最新）：页面的"每条线能运多少"趋势直接用这份数据。
+	const normalizedSeries: NormalizedSeriesPoint[] = metrics
+		.slice()
+		.sort((a, b) => Number(a.startedAt ?? 0) - Number(b.startedAt ?? 0))
+		.map((m) => {
+			const n = normalizeRun(m);
+			return {
+				id: String(m.id ?? ""),
+				lines: n.lines,
+				vehicles: typeof m.vehicles === "number" && Number.isFinite(m.vehicles) ? m.vehicles : null,
+				deliveredPerLine: n.deliveredPerLine,
+				operatingProfitPerLine: n.operatingProfitPerLine,
+				deliveredPerVehicle: n.deliveredPerVehicle,
+				operatingProfitPerVehicle: n.operatingProfitPerVehicle,
+			};
+		});
+	return { metrics: withClass, lessons, strategies, arms: compareArms(metrics, by), normalizedSeries };
 }
 
 export { setStrategyEnabled };
@@ -88,6 +130,15 @@ export function evolutionHooks(dataDir: string): {
 	strategies: () => unknown[];
 	arms: () => unknown;
 	setStrategyEnabled: (id: string, enabled: boolean) => boolean;
+	/**
+	 * The per-run normalised readings (oldest → newest) — the History
+	 * capability chart's data.
+	 *
+	 * 为什么必须走这个 hook：`evolutionView()` 已经在算它了，但页面只拿到
+	 * metrics/lessons/strategies/arms ⇒ **能力趋势图会画出一张空图**，而
+	 * 空图看起来"正常"（AGENTS §5.2：空态通过 = 没验证）。
+	 */
+	normalizedSeries: () => unknown[];
 	compare: (opts: { models?: string[]; seed?: number; backend?: string; group?: string }) => unknown;
 	groups: (by: GroupBy) => unknown;
 } {
@@ -103,6 +154,7 @@ export function evolutionHooks(dataDir: string): {
 		lessons: () => evolutionView(dataDir).lessons,
 		strategies: () => evolutionView(dataDir).strategies,
 		arms: () => evolutionView(dataDir).arms,
+		normalizedSeries: () => evolutionView(dataDir).normalizedSeries,
 		setStrategyEnabled: (id: string, enabled: boolean) => setStrategyEnabled(dataDir, id, enabled),
 		compare: (opts) => {
 			// The ledger reports the ids that collided (Issue #58): a dropped row

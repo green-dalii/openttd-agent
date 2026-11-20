@@ -66,6 +66,33 @@ export function renderReportMarkdown(
 	}
 	lines.push("");
 
+	// ---- normalised readings (ROADMAP todo #4) ----
+	//
+	// The totals above are "how much did this run deliver"; these are "how much
+	// does ONE line (or ONE vehicle) deliver". The difference matters because the
+	// totals' variance is dominated by how many lines a run built - a building
+	// strategy, not the model's ability.
+	lines.push("## Normalised readings (per line / per vehicle)");
+	lines.push("");
+	lines.push(
+		"| model | lines/run | delivered per line (mean) | (median) | operating profit per line (mean) | delivered per vehicle | operating profit per vehicle |",
+	);
+	lines.push("|---|---|---|---|---|---|---|");
+	for (const m of card.models) {
+		const n = m.ability.normalized;
+		lines.push(
+			`| ${m.model} | ${num(n.lines, 1)} | ${num(n.deliveredPerLine.mean)} | ${num(n.deliveredPerLine.median)} | ` +
+				`${num(n.operatingProfitPerLine.mean)} | ${num(n.deliveredPerVehicle.mean)} | ` +
+				`${num(n.operatingProfitPerVehicle.mean)} |`,
+		);
+	}
+	lines.push("");
+	lines.push(
+		"A run that built no line is **not comparable** on the per-line axis (it answers a different question), " +
+			"so it is left out there rather than counted as zero. Missing readings stay \"not measured\".",
+	);
+	lines.push("");
+
 	// ---- stability ----
 	lines.push("## Stability");
 	lines.push("");
